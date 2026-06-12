@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+Software/node_modules/
+Software/frontend/node_modules/
+
+# Build output
+dist/
+build/
+Software/frontend/dist/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.local
+Software/.env
+Software/frontend/.env.production.local
+
+# Logs and runtime files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Uploads and generated runtime data
+uploads/
+Software/uploads/
+
+# Database backups and imported data files
+*.bak
+*.bacpac
+*.xlsx
+*.xls
+backups/
+customerdata.csv
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local assistant/tool state
+.codex/
+.agents/
+.claude/settings.local.json
