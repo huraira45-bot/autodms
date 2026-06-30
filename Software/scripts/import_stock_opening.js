@@ -179,7 +179,7 @@ async function main() {
         for (const name of newCats) {
             const ins = await new sql.Request(tx)
                 .input('n', sql.NVarChar(200), name)
-                .query("INSERT INTO InventCategory (CategoryName, Status) OUTPUT INSERTED.CategoryID VALUES (@n, 1)");
+                .query("INSERT INTO InventCategory (CategoryName, CompanyID) OUTPUT INSERTED.CategoryID VALUES (@n, 1)");
             catByName.set(name, ins.recordset[0].CategoryID);
         }
         console.log(`Created ${newCats.length} categories.`);
