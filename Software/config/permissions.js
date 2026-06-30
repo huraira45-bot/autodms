@@ -63,6 +63,7 @@ const SECTIONS = [
             { key: 'cro_workspace',       label: 'CRO Workspace',           kind: 'workflow' },
             { key: 'cro_admin',           label: 'CRO Admin',               kind: 'workflow' },
             { key: 'cro_dept_responder',  label: 'CRO Department Responder', kind: 'workflow' },
+            { key: 'cro_reports',         label: 'CRO Reports (read-only)', kind: 'workflow' },
         ],
     },
     {
@@ -76,6 +77,7 @@ const SECTIONS = [
             { key: 'sales_master_settlement', label: 'Master Invoice Posting',               kind: 'workflow' },
             { key: 'sales_recovery',          label: 'Recovery Officer',                     kind: 'workflow' },
             { key: 'sales_hierarchy',         label: 'Hierarchy & Targets (HR-side)',        kind: 'workflow' },
+            { key: 'sales_reports',           label: 'Sales Reports (read-only)',            kind: 'workflow' },
         ],
     },
     {
