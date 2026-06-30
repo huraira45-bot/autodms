@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Save, ShoppingCart, Percent, DollarSign, User, Truck, CreditCard, Printer, FileText, Search, Unlock } from 'lucide-react';
+import { Plus, Trash2, Save, ShoppingCart, Percent, DollarSign, User, Truck, CreditCard, Printer, FileText, Search, Unlock, CheckCircle2, Circle } from 'lucide-react';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
 import { useCan, useAuth } from '../context/AuthContext';
@@ -172,26 +172,33 @@ export default function StoreSale() {
     if (!currentItem.ItemID || currentItem.Qty <= 0) return;
     const part = parts.find(p => p.ItemId == currentItem.ItemID);
 
-    // GST is forced on. Use the live configured rate, not whatever ended up
-    // in currentItem (defensive — older edits could have left a stale value).
-    const subtotal = Number(currentItem.Qty) * Number(currentItem.SaleRate);
-    const taxAmt = subtotal * (Number(gstRate) / 100);
-    
-    let discAmt = Number(currentItem.Discount);
-    if (currentItem.DiscType === 'Percent') {
-      discAmt = subtotal * (Number(currentItem.Discount) / 100);
-    }
+    const qty       = Number(currentItem.Qty) || 0;
+    const rate      = Number(currentItem.SaleRate) || 0;
+    const subtotal  = qty * rate;
+
+    // GST is per-line now. When IsGST is on, charge the configured rate on
+    // the line subtotal; when off (Non-GST), no tax.
+    const isGST   = !!currentItem.IsGST;
+    const taxPct  = isGST ? Number(gstRate) : 0;
+    const taxAmt  = isGST ? (subtotal * taxPct / 100) : 0;
+
+    // Discount: when typed as Amount, it's PER UNIT (so it covers all qty).
+    // When typed as Percent, it's a % of the full line subtotal.
+    const discInput = Number(currentItem.Discount) || 0;
+    const discAmt   = currentItem.DiscType === 'Percent'
+      ? (subtotal * discInput / 100)
+      : (discInput * qty);
 
     const netAmt = subtotal + taxAmt - discAmt;
 
     const newItem = {
       ...currentItem,
-      ItenName: part?.ItenName,
-      IsGST: true,
-      TaxPercent: gstRate,
-      TaxAmt: taxAmt,
-      DiscAmt: discAmt,
-      NetAmt: netAmt
+      ItenName:   part?.ItenName,
+      IsGST:      isGST,
+      TaxPercent: taxPct,
+      TaxAmt:     taxAmt,
+      DiscAmt:    discAmt,
+      NetAmt:     netAmt,
     };
 
     setLineItems([...lineItems, newItem]);
@@ -510,22 +517,33 @@ export default function StoreSale() {
             <div className="form-group" style={{ flex: 1 }}><label>Qty</label><input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({...currentItem, Qty: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}><label>Price</label><input type="number" value={currentItem.SaleRate} onChange={e => setCurrentItem({...currentItem, SaleRate: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}>
-              <label>GST ({gstRate}%)</label>
-              <div className="input-with-icon disabled" title="GST is mandatory on store sales — rate is set in Inventory Settings.">
-                <input type="number" disabled value={gstRate} readOnly />
+              <label>{currentItem.IsGST ? `GST (${gstRate}%)` : 'GST (off)'}</label>
+              <div className={`input-with-icon ${!currentItem.IsGST ? 'disabled' : ''}`} title="GST rate is set in Inventory Settings. Toggle the button below to opt out for non-GST items.">
+                <input type="number" disabled value={currentItem.IsGST ? gstRate : 0} readOnly />
                 <Percent size={14} />
               </div>
             </div>
           </div>
           <div className="entry-row" style={{ marginTop: '12px' }}>
             <div className="form-group" style={{ flex: 1.5 }}>
-              <label>Discount</label>
+              <label>Discount{currentItem.DiscType === 'Amount' ? ' (per unit × qty)' : ''}</label>
               <div className="input-with-toggle">
                 <input type="number" value={currentItem.Discount} onChange={e => setCurrentItem({...currentItem, Discount: e.target.value})} />
-                <button type="button" onClick={() => setCurrentItem({...currentItem, DiscType: currentItem.DiscType === 'Amount' ? 'Percent' : 'Amount'})}>
+                <button type="button" onClick={() => setCurrentItem({...currentItem, DiscType: currentItem.DiscType === 'Amount' ? 'Percent' : 'Amount'})}
+                        title={currentItem.DiscType === 'Amount' ? 'Switch to %' : 'Switch to per-unit amount'}>
                   {currentItem.DiscType === 'Amount' ? <DollarSign size={14} /> : <Percent size={14} />}
                 </button>
               </div>
+            </div>
+            <div className="form-group" style={{ flex: 1.2 }}>
+              <label>Tax</label>
+              <button type="button"
+                      className={`toggle-btn ${currentItem.IsGST ? 'active' : ''}`}
+                      onClick={() => setCurrentItem({ ...currentItem, IsGST: !currentItem.IsGST })}
+                      title="Toggle 18% GST on this line">
+                {currentItem.IsGST ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                {currentItem.IsGST ? 'GST 18%' : 'Non-GST'}
+              </button>
             </div>
             <div className="form-group" style={{ flex: 2 }}>
               <label>Issue From</label>
