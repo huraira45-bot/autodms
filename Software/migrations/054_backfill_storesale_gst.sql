@@ -23,11 +23,15 @@
 SET QUOTED_IDENTIFIER ON;
 GO
 
+-- Read the currently-effective GST rate from dms_TaxRates (the source the
+-- UI reads via /api/tax-rates). Fall back to 18 if no GST row is configured.
 DECLARE @rate DECIMAL(5,2);
-SELECT TOP 1 @rate = TRY_CAST(TaxValue AS DECIMAL(5,2))
-FROM gen_TaxInfo
-WHERE TaxName = 'GST' AND ISNULL(IsActive, 1) = 1
-ORDER BY TaxID DESC;
+SELECT TOP 1 @rate = Rate
+FROM dms_TaxRates
+WHERE TaxType = 'GST'
+  AND EffectiveFrom <= GETDATE()
+  AND (EffectiveTo IS NULL OR EffectiveTo > GETDATE())
+ORDER BY EffectiveFrom DESC;
 IF @rate IS NULL SET @rate = 18.00;
 
 PRINT 'Backfilling Store Sale GST at rate = ' + CAST(@rate AS NVARCHAR(10)) + '%';
