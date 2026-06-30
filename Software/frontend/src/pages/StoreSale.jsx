@@ -70,13 +70,20 @@ export default function StoreSale() {
 
   const startNew = () => {
     setEditingId(null); setInvoiceNo(''); setIsFinalizedEdit(false);
-    setHeader({
+    // Preserve the warehouse selected during fetchData — wiping it to '' caused
+    // a "warehouse error" on the second save in a row (header.WHID became empty,
+    // and the user usually doesn't reselect it). Fall back to the first active
+    // warehouse if for some reason WHID wasn't loaded yet.
+    const defaultWhid = warehouses[0]?.WHID || '';
+    setHeader(h => ({
       SaleDate: new Date().toISOString().split('T')[0],
       PartyID: '', CustomerName: '', VehicleName: '', Variant: '',
       PaymentMode: 'Cash', PaymentBankID: '',
       NICNo: '', NTNNo: '', MobileNo: '', SODONO: '', Remarks: '',
-      City: 'MULTAN', FBRInvoiceNo: '0000000000', WHID: '', DeliveryExpense: 0,
-    });
+      City: 'MULTAN', FBRInvoiceNo: '0000000000',
+      WHID: h.WHID || defaultWhid,
+      DeliveryExpense: 0,
+    }));
     setLineItems([]); setReceivedAmount(0); setSuccess('');
   };
 

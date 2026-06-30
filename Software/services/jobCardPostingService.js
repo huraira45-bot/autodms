@@ -224,12 +224,12 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
         depreciationTotal,
     });
 
-    // Refuse to finalize an empty Job Card. Previously this silently returned null,
-    // which left IsFinalized=1 with no SI voucher / no party ledger entry — making
-    // the JC invisible to Receive Payment and Trial Balance. Force the caller to
-    // either add lines or delete the JC.
+    // Empty Job Cards (no labour / sublet / parts) — owner decision: allow them
+    // to close. We just skip the voucher posting and return null; the caller's
+    // UPDATE has already set IsFinalized=1. Use case: a vehicle was brought in
+    // but the work was waived / cancelled before any billable activity.
     if (built.lines.length === 0) {
-        throw new Error(`Job Card ${jobCard.JobCardNo} has no labour, sublet, or parts lines — nothing to invoice. Add lines or delete the Job Card.`);
+        return null;
     }
 
     // 4. Get the SI voucher type ID

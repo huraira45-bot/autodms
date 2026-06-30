@@ -126,6 +126,12 @@ export default function WorkOrderPrint() {
                         <td className="voc-cell" style={{ verticalAlign: 'top' }}>
                             <div className="sec-head"><b>Jobs Requested / Voice Of Customer</b></div>
                             <div className="voc">{jc.VOCRemarks || jc.Remarks || ''}</div>
+                            {jc.WACResults && (
+                                <>
+                                    <div className="sec-head" style={{ marginTop: 6 }}><b>VOC Results</b></div>
+                                    <div className="voc">{jc.WACResults}</div>
+                                </>
+                            )}
                         </td>
                         <td className="auth-cell" style={{ width: 280, verticalAlign: 'top' }}>
                             <div style={{ fontSize: 9, padding: 4 }}>

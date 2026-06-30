@@ -1056,8 +1056,8 @@ export default function JobCardForm() {
                           </svg>
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: '#1a3a6a', marginBottom: 3 }}>WAC Results</div>
-                          <textarea style={{ ...S.input, height: 60, resize: 'vertical', fontSize: 10 }} value={form.WACResults || ''} onChange={e => f('WACResults', e.target.value)} placeholder="Inspection notes..." />
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#1a3a6a', marginBottom: 3 }}>VOC Results</div>
+                          <textarea style={{ ...S.input, height: 60, resize: 'vertical', fontSize: 10 }} value={form.WACResults || ''} onChange={e => f('WACResults', e.target.value)} placeholder="VOC inspection notes..." />
                           {damageMarks.length > 0 && (
                             <div style={{ marginTop: 4 }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', marginBottom: 2 }}>Damage Points</div>
