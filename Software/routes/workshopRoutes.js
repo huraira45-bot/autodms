@@ -14,14 +14,16 @@ router.post(  '/customers/:id/vehicles',    requirePerm('workshop_customers', 'i
 router.get(   '/parties',                   requireAnyAccess('workshop_jobs:view', 'crm_parties:view'), wc.getParties);
 
 // ── Job Types (workshop_settings) ──────────────────────────────────────────
-router.get(   '/job-types',                 requirePerm('workshop_settings', 'view'),    wc.getJobCardTypes);
+// GET is also needed by JobCardForm (Business Unit dropdown) — allow workshop_jobs:view too.
+router.get(   '/job-types',                 requireAnyAccess('workshop_settings:view', 'workshop_jobs:view'), wc.getJobCardTypes);
 router.post(  '/job-types',                 requirePerm('workshop_settings', 'insert'),  wc.saveJobCardType);
 router.delete('/job-types/:id',             requirePerm('workshop_settings', 'delete'),  wc.deleteJobCardType);
 router.patch( '/job-types/:id/manager',     requirePerm('workshop_settings', 'edit'),    wc.setJobCardTypeManager);
 router.patch( '/job-types/:id/gl',          requirePerm('workshop_settings', 'edit'),    wc.setJobCardTypeGL);
 
 // ── Order Types (under workshop_settings) ──────────────────────────────────
-router.get(   '/order-types',               requirePerm('workshop_settings', 'view'),    wc.getOrderTypes);
+// GET is also needed by JobCardForm (Order Type dropdown).
+router.get(   '/order-types',               requireAnyAccess('workshop_settings:view', 'workshop_jobs:view'), wc.getOrderTypes);
 router.post(  '/order-types',               requirePerm('workshop_settings', 'insert'),  wc.saveOrderType);
 router.delete('/order-types/:id',           requirePerm('workshop_settings', 'delete'),  wc.deleteOrderType);
 
