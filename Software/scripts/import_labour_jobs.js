@@ -23,7 +23,10 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const fs = require('fs');
 const { sql, getPool } = require('../config/db');
 
-const SOURCE        = 'c:/Users/ServerDeskop/Desktop/db1/jobs.csv';
+// Looks for jobs.csv next to the project root (one level above the Software/
+// folder) so the script works on dev (C:\...\db1\jobs.csv) and live
+// (D:\saher 2.0\autodms\jobs.csv) without code changes.
+const SOURCE        = require('path').join(__dirname, '..', '..', 'jobs.csv');
 const DEFAULT_JOB_TYPE = 1;  // GR
 const DEFAULT_UOM      = 1;
 
