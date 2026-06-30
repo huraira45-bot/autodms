@@ -31,7 +31,7 @@ git pull --ff-only
 if errorlevel 1 (
     echo.
     echo ERROR: git pull failed. Resolve conflicts and re-run.
-    exit /b 1
+    pause & exit /b 1
 )
 
 REM ── 2. Backend deps (only re-installs if package.json changed) ──
@@ -41,7 +41,7 @@ call npm ci --omit=dev
 if errorlevel 1 (
     echo.
     echo ERROR: npm ci failed.
-    exit /b 1
+    pause & exit /b 1
 )
 
 REM ── 3. Frontend build ──────────────────────────────────────────
@@ -51,13 +51,13 @@ cd frontend
 call npm ci
 if errorlevel 1 (
     echo ERROR: frontend npm ci failed.
-    exit /b 1
+    pause & exit /b 1
 )
 set "NODE_OPTIONS=--max-old-space-size=2048"
 call npm run build
 if errorlevel 1 (
     echo ERROR: frontend build failed.
-    exit /b 1
+    pause & exit /b 1
 )
 cd ..
 
@@ -68,7 +68,7 @@ node scripts/run-pending-migrations.js
 if errorlevel 1 (
     echo.
     echo ERROR: migration runner failed. Backend NOT reloaded.
-    exit /b 1
+    pause & exit /b 1
 )
 
 REM ── 5. Reload Node backend through PM2 ─────────────────────────
@@ -90,3 +90,4 @@ echo.
 echo === Deploy complete at %DATE% %TIME% ===
 echo.
 endlocal
+pause
