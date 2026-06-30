@@ -16,7 +16,8 @@ exports.createItem = async (req, res) => {
     const {
       CategoryID, ItemNumber, ItenName, UOMId, ItemBrandId,
       ItemSalesPrice, ItemPurchasePrice, ItemPurchaseGL, ItemSalesGL,
-      WHID, ItemType, Make, ItemModel, Range, SerialNo, CompanyID, Remarks, DepartmentID
+      WHID, ItemType, Make, ItemModel, Range, SerialNo, CompanyID, Remarks, DepartmentID,
+      BinLocation,
     } = req.body;
 
     const pool = await getPool();
@@ -40,14 +41,17 @@ exports.createItem = async (req, res) => {
       .input('Remarks', sql.NVarChar(sql.MAX), Remarks || null)
       .execute('sp_InsertItem');
 
-    // SP doesn't support DepartmentID/JobTypeID — set via follow-up UPDATE
-    const newId = result.recordset?.[0]?.ItemId;
-    if (newId && (DepartmentID || req.body.JobTypeID)) {
+    // SP doesn't support DepartmentID / JobTypeID / BinLocation — set via follow-up UPDATE
+    const newId = result.recordset?.[0]?.NewItemId || result.recordset?.[0]?.ItemId;
+    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation)) {
       await pool.request()
         .input('id', sql.Int, newId)
         .input('deptId', sql.Int, DepartmentID || null)
         .input('jobTypeId', sql.Int, req.body.JobTypeID || null)
-        .query('UPDATE InventItems SET DepartmentID=@deptId, JobTypeID=@jobTypeId WHERE ItemId=@id');
+        .input('bin', sql.NVarChar(50), BinLocation || null)
+        .query(`UPDATE InventItems
+                SET DepartmentID=@deptId, JobTypeID=@jobTypeId, BinLocation=@bin
+                WHERE ItemId=@id`);
     }
 
     res.status(201).json({ message: 'Item Created Successfully', data: result.recordset });
@@ -59,15 +63,45 @@ exports.createItem = async (req, res) => {
 
 exports.updateItem = async (req, res) => {
   try {
-    const { ItenName, ItemSalesPrice, DepartmentID, JobTypeID } = req.body;
+    const { ItenName, ItemSalesPrice, ItemPurchasePrice, DepartmentID, JobTypeID,
+            CategoryID, BinLocation, UOMId, ItemBrandId, ItemNumber } = req.body;
     const pool = await getPool();
-    await pool.request()
+    // Build dynamic SET so callers can omit fields they don't want to touch.
+    // Sale price flows from InventItems.ItemSalesPrice -> Store Sale + Parts
+    // Issue pickers automatically (they read the same view), so updating here
+    // is enough to keep prices consistent across the app.
+    const sets = ['ItenName=@name', 'ItemSalesPrice=@price'];
+    const r = pool.request()
       .input('id', sql.Int, req.params.id)
       .input('name', sql.NVarChar(200), ItenName)
-      .input('price', sql.Decimal(18,2), ItemSalesPrice || 0)
-      .input('deptId', sql.Int, DepartmentID || null)
-      .input('jobTypeId', sql.Int, JobTypeID || null)
-      .query('UPDATE InventItems SET ItenName=@name, ItemSalesPrice=@price, DepartmentID=@deptId, JobTypeID=@jobTypeId WHERE ItemId=@id');
+      .input('price', sql.Decimal(18,2), ItemSalesPrice || 0);
+    if (ItemPurchasePrice !== undefined) {
+      sets.push('ItemPurchasePrice=@purPrice');
+      r.input('purPrice', sql.Decimal(18,2), ItemPurchasePrice || 0);
+    }
+    if (CategoryID !== undefined && CategoryID !== '') {
+      sets.push('CategoryID=@catId');
+      r.input('catId', sql.Int, parseInt(CategoryID));
+    }
+    if (UOMId !== undefined && UOMId !== '') {
+      sets.push('UOMId=@uomId');
+      r.input('uomId', sql.Int, parseInt(UOMId));
+    }
+    if (ItemBrandId !== undefined && ItemBrandId !== '') {
+      sets.push('ItemBrandId=@brandId');
+      r.input('brandId', sql.Int, parseInt(ItemBrandId));
+    }
+    if (ItemNumber !== undefined) {
+      sets.push('ItemNumber=@itemNo');
+      r.input('itemNo', sql.BigInt, ItemNumber || null);
+    }
+    sets.push('BinLocation=@bin');
+    r.input('bin', sql.NVarChar(50), BinLocation || null);
+    sets.push('DepartmentID=@deptId', 'JobTypeID=@jobTypeId');
+    r.input('deptId', sql.Int, DepartmentID || null);
+    r.input('jobTypeId', sql.Int, JobTypeID || null);
+
+    await r.query(`UPDATE InventItems SET ${sets.join(', ')} WHERE ItemId=@id`);
     res.json({ message: 'Item updated' });
   } catch (err) {
     console.error(err);
