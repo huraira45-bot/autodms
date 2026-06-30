@@ -132,22 +132,25 @@ export default function StoreSale() {
   const [lastSale, setLastSale] = useState(null);  // { saleId, gross, invoiceNo }
 
   const fetchData = async () => {
-    try {
-      const [pRes, wRes, itRes, bRes] = await Promise.all([
-        axios.get(`${API_BASE}/parties?business=SALES`),
-        axios.get(`${API_BASE}/inventory-config/warehouses`),
-        axios.get(`${API_BASE}/items`),
-        axios.get(`${API_BASE}/accounts/banks`).catch(() => ({ data: [] }))
-      ]);
-      setParties(pRes.data);
-      setWarehouses(wRes.data);
-      setParts(itRes.data.filter(i => i.ItemType?.trim().toLowerCase() === 'part'));
-      setBanks(bRes.data);
-      if (wRes.data.length > 0) {
-        setHeader(h => ({ ...h, WHID: wRes.data[0].WHID }));
-        setCurrentItem(c => ({ ...c, WHID: wRes.data[0].WHID }));
-      }
-    } catch (err) { console.error(err); }
+    // Each fetch gets its own .catch so one 403 doesn't blank the whole form.
+    // Before: any one failure (e.g. role can't read /parties) made Promise.all
+    // reject and warehouses stayed empty, then the sale posted with WHID=null
+    // and sp_SaveStoreSale crashed with "Cannot insert NULL into WHID".
+    const empty = { data: [] };
+    const [pRes, wRes, itRes, bRes] = await Promise.all([
+      axios.get(`${API_BASE}/parties?business=SALES`).catch(() => empty),
+      axios.get(`${API_BASE}/inventory-config/warehouses`).catch(() => empty),
+      axios.get(`${API_BASE}/items`).catch(() => empty),
+      axios.get(`${API_BASE}/accounts/banks`).catch(() => empty),
+    ]);
+    setParties(pRes.data);
+    setWarehouses(wRes.data);
+    setParts((itRes.data || []).filter(i => i.ItemType?.trim().toLowerCase() === 'part'));
+    setBanks(bRes.data);
+    if (wRes.data.length > 0) {
+      setHeader(h => ({ ...h, WHID: wRes.data[0].WHID }));
+      setCurrentItem(c => ({ ...c, WHID: wRes.data[0].WHID }));
+    }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -197,6 +200,21 @@ export default function StoreSale() {
     }
     if (header.PaymentMode === 'Bank Transfer' && !header.PaymentBankID) {
       notify({ type: 'warning', title: 'Bank account required', message: 'Select a bank account for bank transfer payment.' });
+      return;
+    }
+    if (!header.WHID) {
+      notify({
+        type: 'warning',
+        title: 'Warehouse required',
+        message: warehouses.length === 0
+          ? 'No warehouses available — ask admin to make sure your role has access (parts_spare or sales_store view).'
+          : 'Pick a warehouse before saving.',
+      });
+      return;
+    }
+    const missingLineWH = lineItems.find(l => !l.WHID);
+    if (missingLineWH) {
+      notify({ type: 'warning', title: 'Line warehouse missing', message: 'Each line must have a warehouse.' });
       return;
     }
     const isEdit = !!editingId;
