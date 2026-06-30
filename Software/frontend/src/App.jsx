@@ -110,8 +110,12 @@ function ProtectedRoute({ moduleKey, action = 'view', children }) {
     if (!user) return <Navigate to="/login" replace />;
     if (moduleKey) {
         // Try the granular permission first; fall back to legacy module check
-        // for workflow/report keys that have no action suffix.
-        const allowed = action ? hasPermission(moduleKey, action) || hasPermission(moduleKey) : hasModule(moduleKey);
+        // for workflow/report keys that have no action suffix. The final
+        // hasModule() fallback covers bundle-style keys like 'reports' that
+        // are derived from any report:* grant (see derivedModulesFromPermissions).
+        const allowed = action
+            ? hasPermission(moduleKey, action) || hasPermission(moduleKey) || hasModule(moduleKey)
+            : hasModule(moduleKey);
         if (!allowed) {
             return (
                 <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
