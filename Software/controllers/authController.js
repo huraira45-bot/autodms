@@ -1,6 +1,7 @@
 const { sql, getPool } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { derivedModulesFromPermissions } = require('../config/permissions');
 
 exports.login = async (req, res) => {
     try {
@@ -41,11 +42,12 @@ exports.login = async (req, res) => {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
 
-        const modulesResult = await pool.request()
+        const permsResult = await pool.request()
             .input('groupId', sql.Int, user.GroupID)
-            .query('SELECT ModuleKey FROM dms_ModulePermissions WHERE GroupID = @groupId');
+            .query('SELECT PermissionKey FROM dms_ModulePermissions WHERE GroupID = @groupId');
 
-        const modules = modulesResult.recordset.map(r => r.ModuleKey);
+        const permissions = permsResult.recordset.map(r => r.PermissionKey);
+        const modules = derivedModulesFromPermissions(permissions);
 
         const payload = {
             userId: user.Userid,
@@ -54,6 +56,7 @@ exports.login = async (req, res) => {
             groupTitle: user.GroupTitle,
             employeeId: user.LinkedEmployeeID || null,
             employeeName: user.LinkedEmployeeName || null,
+            permissions,
             modules,
         };
 
@@ -68,12 +71,13 @@ exports.login = async (req, res) => {
 exports.me = async (req, res) => {
     try {
         const pool = await getPool();
-        const modulesResult = await pool.request()
+        const permsResult = await pool.request()
             .input('groupId', sql.Int, req.user.groupId)
-            .query('SELECT ModuleKey FROM dms_ModulePermissions WHERE GroupID = @groupId');
+            .query('SELECT PermissionKey FROM dms_ModulePermissions WHERE GroupID = @groupId');
 
-        const modules = modulesResult.recordset.map(r => r.ModuleKey);
-        res.json({ ...req.user, modules });
+        const permissions = permsResult.recordset.map(r => r.PermissionKey);
+        const modules = derivedModulesFromPermissions(permissions);
+        res.json({ ...req.user, permissions, modules });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }

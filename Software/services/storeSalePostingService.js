@@ -6,24 +6,28 @@ const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildStoreSaleJournalLines } = require('../utils/storeSaleJournalBuilder');
 
-async function resolveStoreSaleAccounts(transaction) {
+async function resolveStoreSaleAccounts(/* transaction */) {
+    // Credit-customer A/R uses the party's own PartyGLID — not a system role —
+    // mirroring the JC posting path.
     const roles = ['CASH_BOOK', 'GENERAL_CUSTOMER', 'GST_PAYABLE', 'POS_CLEARING',
-                   'DEFAULT_DISCOUNT_GIVEN', 'CHEQUES_ON_HAND'];
+                   'DEFAULT_DISCOUNT_GIVEN', 'CHEQUES_ON_HAND',
+                   'PARTS_REVENUE', 'COGS_PARTS', 'INVENTORY_PARTS'];
     const out = {};
     for (const r of roles) out[r] = { GLCAID: await resolveRole(r) };
-
-    const byCode = async (code) => {
-        const r = await new sql.Request(transaction)
-            .input('c', sql.NVarChar(50), code)
-            .query('SELECT GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND Status=1');
-        if (!r.recordset.length) throw new Error(`COA account ${code} not found.`);
-        return { GLCAID: r.recordset[0].GLCAID };
-    };
-    out.TRADE_DEBTORS    = await byCode('101005');
-    out.PARTS_REVENUE    = await byCode('401002');
-    out.COGS_PARTS       = await byCode('501001');
-    out.INVENTORY_PARTS  = await byCode('101004');
     return out;
+}
+
+// Load the credit customer's chosen A/R leaf. Returns null for walk-in /
+// cash sales (no PartyID); the builder then routes to GENERAL_CUSTOMER.
+async function loadPartyGL(partyId, transaction) {
+    if (!partyId) return null;
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, partyId)
+        .query('SELECT PartyName, PartyGLID FROM gen_PartiesInfo WHERE PartyID=@id');
+    if (!r.recordset.length) throw new Error(`Customer party #${partyId} not found.`);
+    const p = r.recordset[0];
+    if (!p.PartyGLID) throw new Error(`Customer "${p.PartyName}" has no GL account linked. Edit the party and pick one before finalizing.`);
+    return { GLCAID: p.PartyGLID };
 }
 
 async function loadStoreSaleData(saleId, transaction) {
@@ -41,6 +45,26 @@ async function loadStoreSaleData(saleId, transaction) {
     return { storeSale: hdr.recordset[0], lines: lines.recordset };
 }
 
+/**
+ * Load the active campaign attached to this Store Sale (Phase 3).
+ */
+async function loadCampaignApplication(saleId, transaction) {
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, saleId)
+        .query(`
+            SELECT TOP 1 a.ApplicationID, a.CampaignID, a.BenefitAmount,
+                   c.CampaignName, c.BorneBy, c.GLAccountID
+            FROM dms_ServiceCampaignApplications a
+            JOIN dms_ServiceCampaigns c ON a.CampaignID = c.CampaignID
+            WHERE a.SaleID = @id AND a.Status = 'Active'`);
+    if (!r.recordset.length) return null;
+    const camp = r.recordset[0];
+    if (!camp.GLAccountID) {
+        throw new Error(`Campaign "${camp.CampaignName}" has no GL account set — cannot finalize.`);
+    }
+    return camp;
+}
+
 async function resolvePaymentBank(storeSale, transaction) {
     if (storeSale.PaymentMode !== 'Bank Transfer' || !storeSale.PaymentBankID) return null;
     const r = await new sql.Request(transaction)
@@ -52,9 +76,11 @@ async function resolvePaymentBank(storeSale, transaction) {
 
 async function postStoreSaleVoucher(saleId, userInfo, transaction) {
     const { storeSale, lines } = await loadStoreSaleData(saleId, transaction);
+    const campaign = await loadCampaignApplication(saleId, transaction);
     const accounts = await resolveStoreSaleAccounts(transaction);
     const paymentBank = await resolvePaymentBank(storeSale, transaction);
-    const built = buildStoreSaleJournalLines({ storeSale, lines, accounts, paymentBank });
+    const partyGL = await loadPartyGL(storeSale.PartyID, transaction);
+    const built = buildStoreSaleJournalLines({ storeSale, lines, accounts, paymentBank, campaign, partyGL });
 
     if (built.lines.length === 0) return null;
 
@@ -63,7 +89,7 @@ async function postStoreSaleVoucher(saleId, userInfo, transaction) {
     const voucherTypeId = vt.recordset[0].Voucherid;
 
     const seqRes = await new sql.Request(transaction).query(
-        "SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo"
+        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
     );
     const voucherNo = `SS-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 
@@ -120,7 +146,107 @@ async function postStoreSaleVoucher(saleId, userInfo, transaction) {
                 SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
                 WHERE VoucherID=@vid`);
 
+    // Link the campaign application to this voucher (so reports can audit it)
+    if (campaign && built.appliedCampaignID) {
+        await new sql.Request(transaction)
+            .input('aid', sql.Int, built.appliedCampaignID)
+            .input('vid', sql.Int, voucherId)
+            .query(`UPDATE dms_ServiceCampaignApplications
+                    SET AccountVoucherID = @vid
+                    WHERE ApplicationID = @aid`);
+    }
+
+    // POS auto-settle. Mirror of the Job Card path — when the customer paid by
+    // POS at the counter, post the receipt CRV in this same transaction so the
+    // customer A/R closes immediately. The POS Settlement module handles the
+    // later POS_CLEARING → Bank reconciliation when the acquirer pays out.
+    if ((storeSale.PaymentMode || '').toUpperCase() === 'POS' && built.customerARDr) {
+        await postPOSAutoSettleForStoreSale({
+            transaction, ssVoucherId: voucherId, storeSale, userInfo,
+            ar: built.customerARDr, posClearingGL: accounts.POS_CLEARING.GLCAID,
+        });
+    }
+
     return voucherId;
+}
+
+async function postPOSAutoSettleForStoreSale({ transaction, ssVoucherId, storeSale, userInfo, ar, posClearingGL }) {
+    const ref = storeSale.InvoiceNo || `SS-${storeSale.SaleID}`;
+
+    const vt = await new sql.Request(transaction).query(
+        "SELECT TOP 1 Voucherid FROM GLVoucherType WHERE Title='CRV' ORDER BY Voucherid");
+    if (!vt.recordset.length) throw new Error('CRV voucher type missing.');
+    const crvTypeId = vt.recordset[0].Voucherid;
+
+    const seq = await new sql.Request(transaction).query(
+        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo");
+    const crvNo = `CRV-${String(seq.recordset[0].nextNo).padStart(4, '0')}`;
+
+    const narration = `POS receipt at finalize — ${ref}`;
+    const hdr = await new sql.Request(transaction)
+        .input('vd',    sql.DateTime,     new Date())
+        .input('vno',   sql.NVarChar(50), crvNo)
+        .input('vtId',  sql.Int,          crvTypeId)
+        .input('rem',   sql.NVarChar(sql.MAX), narration)
+        .input('tot',   sql.Decimal(18,2), ar.Amount)
+        .input('src',   sql.NVarChar(20), 'STORE_SALE')
+        .input('srcId', sql.Int,          storeSale.SaleID)
+        .input('cby',   sql.Int,          userInfo?.userId || null)
+        .input('cbyN',  sql.NVarChar(100),userInfo?.userName || null)
+        .query(`INSERT INTO data_FinanceVoucherInfo
+                    (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
+                     Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
+                OUTPUT INSERTED.VoucherID
+                VALUES (@vd, @vno, @vtId, @rem, @tot,
+                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+    const crvId = hdr.recordset[0].VoucherID;
+
+    // Dr POS_CLEARING
+    await new sql.Request(transaction)
+        .input('vid',  sql.Int,           crvId)
+        .input('gl',   sql.Int,           posClearingGL)
+        .input('nar',  sql.NVarChar(sql.MAX), `POS swipe — ${ref}`)
+        .input('dr',   sql.Decimal(18,2), ar.Amount)
+        .input('cr',   sql.Decimal(18,2), 0)
+        .query(`INSERT INTO data_FinanceVoucherDetail
+                    (VoucherID, GLCAID, Narration, Debit, Credit)
+                VALUES (@vid, @gl, @nar, @dr, @cr)`);
+
+    // Cr customer subsidiary — allocated to the SS we just posted
+    await new sql.Request(transaction)
+        .input('vid',   sql.Int,           crvId)
+        .input('gl',    sql.Int,           ar.GLCAID)
+        .input('nar',   sql.NVarChar(sql.MAX), `Settled by POS — ${ref}`)
+        .input('dr',    sql.Decimal(18,2), 0)
+        .input('cr',    sql.Decimal(18,2), ar.Amount)
+        .input('pid',   sql.Int,           ar.PartyID || null)
+        .input('alloc', sql.Int,           ssVoucherId)
+        .query(`INSERT INTO data_FinanceVoucherDetail
+                    (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, AllocatedToVoucherID)
+                VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @alloc)`);
+
+    // Subsidiary-ledger Cr only for named-party sales (walk-in store sales have
+    // no PartyID/JobCardID tag — CK_PartyLedger_Tag would reject the row).
+    if (ar.PartyID) {
+        await new sql.Request(transaction)
+            .input('pid',   sql.Int,           ar.PartyID)
+            .input('vid',   sql.Int,           crvId)
+            .input('gl',    sql.Int,           ar.GLCAID)
+            .input('dr',    sql.Decimal(18,2), 0)
+            .input('cr',    sql.Decimal(18,2), ar.Amount)
+            .input('nar',   sql.NVarChar(500), `Settled by POS — ${ref}`)
+            .input('alloc', sql.Int,           ssVoucherId)
+            .query(`INSERT INTO dms_PartyLedger
+                        (PartyID, VoucherID, GLCAID, Debit, Credit, Narration, AllocatedToVoucherID)
+                    VALUES (@pid, @vid, @gl, @dr, @cr, @nar, @alloc)`);
+    }
+
+    await new sql.Request(transaction)
+        .input('vid', sql.Int, crvId)
+        .input('pby', sql.Int, userInfo?.userId || null)
+        .query(`UPDATE data_FinanceVoucherInfo
+                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
+                WHERE VoucherID=@vid`);
 }
 
 module.exports = { postStoreSaleVoucher };

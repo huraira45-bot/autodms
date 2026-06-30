@@ -22,9 +22,11 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 
+// Agency model (migration 045): Master invoices the customer directly, not us.
+// We never own the vehicle, so this step posts NO inventory/payable legs.
+// The only GL effect is the Master incentive accrual.
 async function resolveAccounts() {
-    const need = ['VEHICLE_INVENTORY', 'MASTER_VEHICLE_PAYABLE',
-                  'MASTER_INCENTIVE_RECEIVABLE', 'MASTER_INCENTIVE_INCOME'];
+    const need = ['MASTER_INCENTIVE_RECEIVABLE', 'MASTER_INCENTIVE_INCOME'];
     const out = {};
     for (const r of need) out[r] = { GLCAID: await resolveRole(r) };
     return out;
@@ -33,7 +35,7 @@ async function resolveAccounts() {
 async function loadBooking(bookingId, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, bookingId)
-        .query(`SELECT b.BookingID, b.BookingNo, b.PartyID
+        .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.AllocatedVehicleID
                 FROM dms_SalesBookings b
                 WHERE b.BookingID = @id`);
     if (!r.recordset.length) throw new Error(`Booking ${bookingId} not found.`);
@@ -56,24 +58,26 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
     const b = await loadBooking(bookingId, transaction);
     b.MasterInvoiceNo = invoice.invoiceNo;
     b.MasterInvoiceDate = invoice.invoiceDate;
-    const wholesale = Number(invoice.wholesalePrice || 0);
     const stdIncentive = Number(invoice.stdIncentive || 0);
-    if (wholesale <= 0) throw new Error(`Booking ${b.BookingNo} has no WholesalePrice — cannot post Master invoice voucher.`);
+    if (stdIncentive <= 0) {
+        // No incentive accrual to record. Master invoice arrival is just a
+        // memo on the booking — caller (controller) handles the stamp.
+        return null;
+    }
 
     const acc = await resolveAccounts();
 
-    const vt = await new sql.Request(transaction).query("SELECT Voucherid FROM GLVoucherType WHERE Title='PV'");
-    if (!vt.recordset.length) throw new Error('PV voucher type missing');
+    // Use JV voucher type — agency model has no purchase to record
+    const vt = await new sql.Request(transaction).query("SELECT Voucherid FROM GLVoucherType WHERE Title='JV'");
+    if (!vt.recordset.length) throw new Error('JV voucher type missing');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
     const seqRes = await new sql.Request(transaction).query(
-        `SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo`);
-    const voucherNo = `PV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
+    const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 
-    // Total = wholesale + std incentive (gross movement on the voucher)
-    const totalAmount = wholesale + (stdIncentive > 0 ? stdIncentive : 0);
-    const narration = `Master invoice ${b.MasterInvoiceNo || '(no#)'} for booking ${b.BookingNo}`
-        + (stdIncentive > 0 ? ` (incl. Master incentive PKR ${stdIncentive.toLocaleString('en-PK')})` : '');
+    const totalAmount = stdIncentive;
+    const narration = `Master incentive accrued on Master invoice ${b.MasterInvoiceNo || '(no#)'} for booking ${b.BookingNo} (PKR ${stdIncentive.toLocaleString('en-PK')})`;
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     b.MasterInvoiceDate || new Date())
@@ -106,12 +110,8 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
                     VALUES (@vid, @gl, @nar, @dr, @cr, @bid)`);
     };
 
-    // Leg 1: inventory + payable
-    await insertLine(acc.VEHICLE_INVENTORY.GLCAID, wholesale, 0, `Vehicle inventory ↑ for ${b.BookingNo}`);
-    await insertLine(acc.MASTER_VEHICLE_PAYABLE.GLCAID, 0, wholesale, `Payable to Master for ${b.BookingNo}`);
-
-    // Leg 2: Master incentive receivable + income (only if there is std incentive)
-    if (stdIncentive > 0) {
+    // Agency model: only the incentive accrual is posted here.
+    {
         await insertLine(acc.MASTER_INCENTIVE_RECEIVABLE.GLCAID, stdIncentive, 0, `Master incentive receivable on ${b.BookingNo}`);
         await insertLine(acc.MASTER_INCENTIVE_INCOME.GLCAID, 0, stdIncentive, `Master incentive earned on ${b.BookingNo}`);
     }
@@ -123,11 +123,29 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
                 SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
                 WHERE VoucherID=@vid`);
 
-    // Stamp voucher back onto booking
+    // Stamp voucher back onto the vehicle (per migration 018: MasterInvoiceVoucherID
+    // lives on dms_Vehicle, not dms_SalesBookings).
+    if (b.AllocatedVehicleID) {
+        await new sql.Request(transaction)
+            .input('vehid', sql.Int, b.AllocatedVehicleID)
+            .input('vid',   sql.Int, voucherId)
+            .query(`UPDATE dms_Vehicle SET MasterInvoiceVoucherID=@vid, UpdatedAt=GETDATE()
+                    WHERE VehicleID=@vehid`);
+    }
+
+    // Write the matching accrual row so the Master Incentive page can drive
+    // an MRV receipt against it. Per migration 023's accrual schema.
     await new sql.Request(transaction)
-        .input('bid', sql.Int, bookingId)
-        .input('vid', sql.Int, voucherId)
-        .query(`UPDATE dms_SalesBookings SET MasterInvoiceVoucherID=@vid WHERE BookingID=@bid`);
+        .input('bid',   sql.Int,           b.BookingID)
+        .input('vehid', sql.Int,           b.AllocatedVehicleID || null)
+        .input('amt',   sql.Decimal(18,2), stdIncentive)
+        .input('vid',   sql.Int,           voucherId)
+        .input('vno',   sql.NVarChar(20),  voucherNo)
+        .query(`INSERT INTO dms_SalesIncentiveAccruals
+                    (BookingID, VehicleID, EarnerType, IncentiveCategory,
+                     AmountAccrued, AccrualVoucherID, AccrualVoucherNo, Status)
+                VALUES (@bid, @vehid, 'Master', 'Standard',
+                        @amt, @vid, @vno, 'Accrued')`);
 
     return voucherId;
 }

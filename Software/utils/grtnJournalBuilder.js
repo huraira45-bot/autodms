@@ -16,7 +16,8 @@
  * Inputs:
  *   grtn      — { PurchaseReturnID, PurchaseReturnNo, PartyID (supplier), PurchaseID (parent GRN) }
  *   lines     — [{ Quantity, ItemRate, TaxRate, TaxAmount, UnitLandedCost }]
- *   accounts  — { INVENTORY_PARTS, INPUT_GST, TRADE_CREDITORS, PURCHASE_RETURN_VARIANCE } each { GLCAID }
+ *   accounts  — { INVENTORY_PARTS, INPUT_GST, PURCHASE_RETURN_VARIANCE } each { GLCAID }
+ *   supplierGL — { GLCAID } — the supplier's own PartyGLID leaf (required)
  *
  * Output:
  *   { header, lines, subsidiaryWrites, totals }
@@ -24,10 +25,13 @@
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildGRTNJournalLines({ grtn, lines = [], accounts }) {
+function buildGRTNJournalLines({ grtn, lines = [], accounts, supplierGL = null }) {
     if (!accounts) throw new Error('accounts map required');
     if (!grtn) throw new Error('grtn header required');
     if (!grtn.PartyID) throw new Error('Supplier PartyID is required for GRTN voucher posting.');
+    if (!supplierGL?.GLCAID) {
+        throw new Error('Supplier has no GL account set (PartyGLID is null). Edit the supplier party and assign one.');
+    }
 
     // Aggregate from snapshot columns
     let inventoryCredit = 0;          // sum of (qty × UnitLandedCost) — our carrying cost
@@ -70,15 +74,15 @@ function buildGRTNJournalLines({ grtn, lines = [], accounts }) {
     const subsidiaryWrites = [];
     const narrationRef = grtn.PurchaseReturnNo || `GRTN-${grtn.PurchaseReturnID}`;
 
-    // (1) Dr Trade Creditors (reduce what we owe the supplier)
+    // (1) Dr supplier A/P leaf (reduce what we owe this supplier)
     journalLines.push({
-        GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+        GLCAID: supplierGL.GLCAID,
         Debit: supplierDebit, Credit: 0,
         Narration: `Supplier credit note — ${narrationRef}`,
         PartyID: grtn.PartyID, JobCardID: null,
     });
     subsidiaryWrites.push({
-        GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+        GLCAID: supplierGL.GLCAID,
         Debit: supplierDebit, Credit: 0,
         PartyID: grtn.PartyID, JobCardID: null,
         Narration: `Supplier credit note — ${narrationRef}`,

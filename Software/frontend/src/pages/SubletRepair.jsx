@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { ExternalLink, Search, Plus, Trash2, Save, Loader2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit2, Lock } from 'lucide-react';
+import { ExternalLink, Search, Plus, Trash2, Save, Loader2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit2, Lock, Printer } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api/workshop';
 
 export default function SubletRepair() {
+  const { notify, confirm } = useFeedback();
   const [allSublets, setAllSublets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -12,12 +14,18 @@ export default function SubletRepair() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ Remarks: '', InvoiceAmount: 0, PayableAmount: 0, SubletJobDate: new Date().toISOString().slice(0, 10), JobCardId: '' });
+  const [form, setForm] = useState({ Remarks: '', InvoiceAmount: 0, PayableAmount: 0, SubletJobDate: new Date().toISOString().slice(0, 10), JobCardId: '', VendorID: '', PaymentType: 'Cash' });
 
   // Job card search for "Add New" modal
   const [jobSearch, setJobSearch] = useState('');
   const [jobResults, setJobResults] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
+
+  // Sublet-allowed vendors (parties with SUBLET business access)
+  const [subletVendors, setSubletVendors] = useState([]);
+  useEffect(() => {
+    axios.get('/api/parties?business=SUBLET').then(r => setSubletVendors(r.data || [])).catch(() => {});
+  }, []);
 
   const loadAll = async () => {
     setLoading(true);
@@ -72,7 +80,7 @@ export default function SubletRepair() {
     setSelectedJob(null);
     setJobSearch('');
     setJobResults([]);
-    setForm({ Remarks: '', InvoiceAmount: 0, PayableAmount: 0, SubletJobDate: new Date().toISOString().slice(0, 10), JobCardId: '' });
+    setForm({ Remarks: '', InvoiceAmount: 0, PayableAmount: 0, SubletJobDate: new Date().toISOString().slice(0, 10), JobCardId: '', VendorID: '', PaymentType: 'Cash' });
     setShowForm(true);
   };
 
@@ -86,43 +94,71 @@ export default function SubletRepair() {
       InvoiceAmount: s.InvoiceAmount || 0,
       PayableAmount: s.PayableAmount || 0,
       SubletJobDate: s.SubletJobDate ? new Date(s.SubletJobDate).toISOString().slice(0, 10) : '',
-      JobCardId: s.JobCardId
+      JobCardId: s.JobCardId,
+      VendorID: s.VendorID || '',
+      PaymentType: s.PaymentType || 'Cash'
     });
     setShowForm(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.JobCardId) { alert('Please select a Job Card.'); return; }
+    if (!form.JobCardId) {
+      notify({ type: 'warning', title: 'Select a job card', message: 'A sublet repair must be linked to a job card.' });
+      return;
+    }
     setSaving(true);
     try {
       await axios.post(`${API}/sublets`, { ...form, SubletJobDetailID: editing });
+      notify({ type: 'success', title: editing ? 'Sublet updated' : 'Sublet added', message: form.Remarks || 'Sublet repair saved.' });
       setShowForm(false);
       await loadAll();
       setCursor(0); // jump to most recent after save
-    } catch (err) { alert('Error: ' + (err.response?.data?.error || err.message)); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not save sublet', message: err.response?.data?.error || err.message });
+    }
     setSaving(false);
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this sublet entry?')) return;
+    const ok = await confirm({
+      title: 'Delete sublet entry?',
+      message: 'This removes the outsourced repair entry from the job record.',
+      confirmLabel: 'Delete',
+      tone: 'danger'
+    });
+    if (!ok) return;
     try {
       await axios.delete(`${API}/sublets/${id}`);
+      notify({ type: 'success', title: 'Sublet deleted' });
       await loadAll();
       setCursor(c => Math.min(c, filtered.length - 2));
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not delete sublet', message: err.response?.data?.error || err.message });
+    }
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div className="print-only print-header">
+        <h1>Sublet Repairs</h1>
+        <div className="meta">
+          <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        </div>
+      </div>
       <div className="card-header">
         <div>
           <h1 className="page-title">Sublet Repairs</h1>
           <p className="page-subtitle">Outsourced repair work sent to external vendors.</p>
         </div>
-        <button onClick={openNew} className="btn" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Plus size={16} /> Add Sublet
-        </button>
+        <div className="no-print" style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => window.print()} className="btn" style={{ background: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Printer size={16} /> Print
+          </button>
+          <button onClick={openNew} className="btn" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Plus size={16} /> Add Sublet
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -265,6 +301,36 @@ export default function SubletRepair() {
                 <div className="form-group"><label>Invoice Amount (PKR)</label><input type="number" value={form.InvoiceAmount} onChange={e => setForm({ ...form, InvoiceAmount: e.target.value })} /></div>
                 <div className="form-group"><label>Payable Amount (PKR)</label><input type="number" value={form.PayableAmount} onChange={e => setForm({ ...form, PayableAmount: e.target.value })} /></div>
               </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label>Payment Type *</label>
+                  <select value={form.PaymentType}
+                    onChange={e => setForm({ ...form, PaymentType: e.target.value, VendorID: e.target.value === 'Cash' ? '' : form.VendorID })}
+                    style={{ width: '100%' }}>
+                    <option value="Cash">Cash (walk-in vendor)</option>
+                    <option value="Credit">Credit (vendor party)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Vendor Party {form.PaymentType === 'Credit' ? '*' : '(optional)'}</label>
+                  <select value={form.VendorID || ''}
+                    onChange={e => setForm({ ...form, VendorID: e.target.value })}
+                    required={form.PaymentType === 'Credit'}
+                    style={{ width: '100%' }}>
+                    <option value="">— Select vendor —</option>
+                    {subletVendors.map(v => (
+                      <option key={v.PartyID} value={v.PartyID}>{v.PartyName}{v.PhoneOne ? ` (${v.PhoneOne})` : ''}</option>
+                    ))}
+                  </select>
+                  {form.PaymentType === 'Credit' && subletVendors.length === 0 && (
+                    <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>
+                      No vendors are mapped to "Sublet" business yet. Go to <strong>Parties ▸ Party Business Access</strong> to grant access.
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="form-group"><label>Date</label><input type="date" value={form.SubletJobDate} onChange={e => setForm({ ...form, SubletJobDate: e.target.value })} /></div>
 
               <button type="submit" className="btn" disabled={saving} style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
@@ -275,10 +341,6 @@ export default function SubletRepair() {
         </div>
       )}
 
-      <style>{`
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        .animate-spin { animation: spin 1s linear infinite; }
-      `}</style>
     </div>
   );
 }

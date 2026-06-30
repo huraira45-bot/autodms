@@ -14,10 +14,26 @@ exports.getPending = async (req, res) => {
                 WITH PosDebits AS (
                     SELECT vi.VoucherID, vi.VoucherNo, vi.VoucherDate, vi.SourceDocType, vi.SourceDocID,
                            vi.TotalAmount, SUM(vd.Debit) AS DebitAmount,
-                           -- pull a human-readable doc reference if available
+                           -- Human-readable doc reference. For a receive-payment BRV/CRV the
+                           -- POS-Clearing line carries AllocatedToVoucherID pointing at the
+                           -- original invoice voucher; chase that to surface the JC / SO number.
                            COALESCE(
-                               (SELECT JobCardNo FROM Addata_JobCardInfo WHERE JobCardId = vi.SourceDocID AND vi.SourceDocType = 'JOBCARD'),
-                               (SELECT InvoiceNo FROM data_StoreSaleInfo WHERE SaleID = vi.SourceDocID AND vi.SourceDocType = 'STORE_SALE'),
+                               (SELECT TOP 1 jc.JobCardNo
+                                  FROM data_FinanceVoucherDetail ad
+                                  JOIN data_FinanceVoucherInfo  av ON av.VoucherID = ad.AllocatedToVoucherID
+                                  JOIN Addata_JobCardInfo       jc ON jc.JobCardId = av.SourceDocID
+                                  WHERE ad.VoucherID = vi.VoucherID
+                                    AND ad.AllocatedToVoucherID IS NOT NULL
+                                    AND av.SourceDocType = 'JOBCARD'),
+                               (SELECT TOP 1 CAST(ss.InvoiceNo AS NVARCHAR(50))
+                                  FROM data_FinanceVoucherDetail ad
+                                  JOIN data_FinanceVoucherInfo  av ON av.VoucherID = ad.AllocatedToVoucherID
+                                  JOIN data_StoreSaleInfo       ss ON ss.SaleID = av.SourceDocID
+                                  WHERE ad.VoucherID = vi.VoucherID
+                                    AND ad.AllocatedToVoucherID IS NOT NULL
+                                    AND av.SourceDocType = 'STORE_SALE'),
+                               (SELECT CAST(JobCardNo AS NVARCHAR(50)) FROM Addata_JobCardInfo WHERE JobCardId = vi.SourceDocID AND vi.SourceDocType = 'JOBCARD'),
+                               (SELECT CAST(InvoiceNo AS NVARCHAR(50)) FROM data_StoreSaleInfo WHERE SaleID = vi.SourceDocID AND vi.SourceDocType = 'STORE_SALE'),
                                vi.VoucherNo
                            ) AS SourceRef
                     FROM data_FinanceVoucherDetail vd
@@ -146,7 +162,7 @@ exports.postSettlement = async (req, res) => {
         await transaction.begin();
         try {
             const seqRes = await new sql.Request(transaction).query(
-                "SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo"
+                "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
             );
             const voucherNo = `BRV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
-import { ListChecks, Loader2, RefreshCw, Search, ArrowLeft } from 'lucide-react';
+import { ListChecks, Loader2, RefreshCw, Search, ArrowLeft, Printer } from 'lucide-react';
+import { PrintHeader } from './reports/ReportShell';
 
 const API_BASE = '/api';
 
@@ -124,9 +125,13 @@ export default function GLDetail() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <PrintHeader title="General Ledger Detail"
+                subtitle={data?.account ? `${data.account.GLCode} — ${data.account.GLTitle}` : null}
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
+                filterSummary={`Period: ${from} → ${to}`} />
             <div className="card-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Link to="/reports/trial-balance" style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
+                    <Link to="/reports/trial-balance" className="no-print" style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
                         <ArrowLeft size={16} /> Trial Balance
                     </Link>
                     <div>
@@ -134,7 +139,7 @@ export default function GLDetail() {
                         <p className="page-subtitle">All posted lines on the chosen account, with running balance.</p>
                     </div>
                 </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                     <AccountPicker onSelect={pickAccount} />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
                         From:
@@ -149,6 +154,10 @@ export default function GLDetail() {
                     <button className="btn" onClick={load} disabled={loading || !glcaid}>
                         {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         Refresh
+                    </button>
+                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
+                        style={{ background: '#0f766e' }}>
+                        <Printer size={16} /> Print
                     </button>
                 </div>
             </div>

@@ -3,7 +3,7 @@
  * either a JC or a complaint yet. Routes to department by category.
  * Convertable to a complaint or linkable to a JC.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -11,6 +11,7 @@ import {
     CheckCircle2, ArrowRight, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -33,6 +34,7 @@ const STATUS_STYLE = {
 
 export default function InquiriesAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [statusFilter, setStatusFilter] = useState('Open');
@@ -65,7 +67,13 @@ export default function InquiriesAdmin() {
     };
 
     const remove = async (id) => {
-        if (!window.confirm('Delete this inquiry permanently?')) return;
+        const ok = await confirmAction({
+            title: 'Delete inquiry?',
+            message: 'This permanently removes the inquiry record.',
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/cro/inquiries/${id}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };

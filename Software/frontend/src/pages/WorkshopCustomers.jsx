@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { UserPlus, Edit, Search, Save, X, Loader2, Car, Plus } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api/workshop';
 
 export default function WorkshopCustomers() {
+  const { notify } = useFeedback();
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -55,9 +57,12 @@ export default function WorkshopCustomers() {
       const payload = { ...form };
       if (editing) payload.ProfileID = editing;
       await axios.post(`${API}/customers`, payload);
+      notify({ type: 'success', title: editing ? 'Customer updated' : 'Customer saved', message: form.CustomerName });
       setShowForm(false);
       fetchCustomers();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not save customer', message: err.response?.data?.error || err.message });
+    }
     setSaving(false);
   };
 
@@ -65,13 +70,17 @@ export default function WorkshopCustomers() {
     e.preventDefault();
     setSaving(true);
     try {
+      const regNo = vehicleForm.RegistrationNo;
       await axios.post(`${API}/customers/${editing}/vehicles`, vehicleForm);
       setShowVehicleForm(false);
       setVehicleForm({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '' });
       // Refresh vehicles
       const res = await axios.get(`${API}/customers/${editing}/vehicles`);
       setCustomerVehicles(res.data);
-    } catch (err) { alert('Error: ' + err.message); }
+      notify({ type: 'success', title: 'Vehicle added', message: regNo });
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not add vehicle', message: err.response?.data?.error || err.message });
+    }
     setSaving(false);
   };
 
@@ -181,10 +190,6 @@ export default function WorkshopCustomers() {
         </div>
       )}
 
-      <style>{`
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        .animate-spin { animation: spin 1s linear infinite; }
-      `}</style>
     </div>
   );
 }

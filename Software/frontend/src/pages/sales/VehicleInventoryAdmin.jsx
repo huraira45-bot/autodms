@@ -6,10 +6,11 @@
  *
  * Open-allocation vehicles auto-create their memo ledger row at creation time.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Truck, Plus, RefreshCw, Loader2, Search, Pencil, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useFeedback } from '../../context/FeedbackContext';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -30,6 +31,7 @@ const STATUSES = ['AtMaster', 'InTransit', 'AtDealer', 'Allocated', 'Delivered',
 
 export default function VehicleInventoryAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const canCreate = hasModule('sales_admin_settings') || hasModule('sales_master_settlement');
     const canUpdate = canCreate;
     const canDelete = hasModule('sales_admin_settings');
@@ -67,7 +69,13 @@ export default function VehicleInventoryAdmin() {
     useEffect(() => { load(); }, [load]);
 
     const remove = async (v) => {
-        if (!window.confirm(`Delete chassis ${v.ChasisNo}? Only allowed if not linked to a booking.`)) return;
+        const ok = await confirmAction({
+            title: 'Delete chassis record?',
+            message: `Delete chassis ${v.ChasisNo}? This only works when it is not linked to a booking.`,
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/sales/vehicles/${v.VehicleID}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };

@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Plus, Trash2, Save, FileText, Calculator, Lock, Unlock, RefreshCw, Loader2, AlertTriangle, Edit3 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { Plus, Trash2, Save, FileText, Calculator, Lock, Unlock, RefreshCw, Loader2, AlertTriangle, Edit3, Printer } from 'lucide-react';
+import { useAuth, useCan } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
@@ -28,6 +30,8 @@ function Badge({ status }) {
 
 export default function VoucherEntry({ forceTypeCode, title }) {
     const { hasModule } = useAuth();
+    const { canInsert, canEdit, canDelete } = useCan('finance_vouchers');
+    const { notify, confirm } = useFeedback();
     const [params, setParams] = useSearchParams();
     const initialId = params.get('id');
 
@@ -36,11 +40,32 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const [drafts, setDrafts] = useState([]);
     const [showDrafts, setShowDrafts] = useState(false);
 
+    // Voucher-type behavior flags. Cash vouchers lock row 0 to the Cash Book
+    // account; bank vouchers lock row 0 to an active bank GL. The locked side
+    // (Dr vs Cr) is determined by the voucher direction.
+    //   CPV: cash leaves → row 0 is Cash Book on Credit
+    //   CRV: cash arrives → row 0 is Cash Book on Debit
+    //   BPV: bank leaves → row 0 is a bank, on Credit
+    //   BRV: bank arrives → row 0 is a bank, on Debit
+    const isCPV = forceTypeCode === 'CPV';
+    const isCRV = forceTypeCode === 'CRV';
+    const isBPV = forceTypeCode === 'BPV';
+    const isBRV = forceTypeCode === 'BRV';
+    const isFixedCash = isCPV || isCRV;
+    const isFixedBank = isBPV || isBRV;
+    const fixedLockedSide = (isCPV || isBPV) ? 'Debit' : (isCRV || isBRV) ? 'Credit' : null;
+
+    const [banks, setBanks] = useState([]);
+    const [cashBookGLCAID, setCashBookGLCAID] = useState('');
+
     const [mode, setMode] = useState(initialId ? 'view' : 'new'); // 'new' | 'view'
     const [active, setActive] = useState(null); // loaded voucher when mode === 'view'
 
+    // Policy: vouchers are always posted with today's date — no backdate, no future date.
+    // (Enforced server-side too in accountController.checkVoucherDateIsToday.)
+    const todayStr = new Date().toISOString().split('T')[0];
     const [header, setHeader] = useState({
-        VoucherDate: new Date().toISOString().split('T')[0],
+        VoucherDate: todayStr,
         VoucherTypeID: '',
         Remarks: ''
     });
@@ -97,10 +122,51 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         if (initialId) loadVoucher(initialId);
     }, [initialId, loadVoucher]);
 
+    // Load supporting data for fixed-side vouchers
+    useEffect(() => {
+        if (isFixedBank) {
+            axios.get(`${API_BASE}/accounts/banks`).then(r => setBanks(r.data || [])).catch(() => {});
+        }
+        if (isFixedCash) {
+            axios.get(`${API_BASE}/system-accounts`).then(r => {
+                const cb = (r.data || []).find(x => x.key === 'CASH_BOOK');
+                if (cb?.assigned?.GLCAID) setCashBookGLCAID(cb.assigned.GLCAID);
+            }).catch(() => {});
+        }
+    }, [isFixedBank, isFixedCash]);
+
+    // Pre-seed row 0 with the locked cash account when it loads (new voucher only).
+    useEffect(() => {
+        if (mode !== 'new' || !isFixedCash || !cashBookGLCAID) return;
+        setItems(prev => {
+            if (prev[0]?.GLCAID) return prev;
+            const next = [...prev];
+            next[0] = { ...next[0], GLCAID: cashBookGLCAID };
+            return next;
+        });
+    }, [mode, isFixedCash, cashBookGLCAID]);
+
+    // Auto-print when navigated with ?print=1 (e.g. from ReceivePayment / MakePayment).
+    // Opens the bare /vouchers/:id/print page so the print layout is half-A4 with
+    // business header + signatories — see VoucherPrint.jsx.
+    useEffect(() => {
+        if (mode === 'view' && active && params.get('print') === '1') {
+            const t = setTimeout(() => window.open(`/vouchers/${active.VoucherID}/print`, '_blank'), 200);
+            return () => clearTimeout(t);
+        }
+    }, [mode, active, params]);
+
     // ---------- New-voucher state mgmt ----------
     const addItem = () => setItems([...items, { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }]);
     const removeItem = (i) => setItems(items.filter((_, j) => j !== i));
     const updateItem = (i, k, v) => {
+        // Row 0 is locked for CPV/CRV/BPV/BRV: the wrong-side Dr/Cr input and
+        // the account dropdown are read-only. Silently ignore any attempt to
+        // mutate those fields so a stale value can't sneak through.
+        if (i === 0 && (isFixedCash || isFixedBank)) {
+            if (k === 'GLCAID' && isFixedCash) return;          // Cash Book locked
+            if (k === fixedLockedSide)        return;            // wrong-side input locked
+        }
         const next = [...items]; next[i][k] = v; setItems(next);
     };
     const totals = {
@@ -110,8 +176,14 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const balanced = Math.abs(totals.debit - totals.credit) < 0.01;
 
     const handleSave = async () => {
-        if (!balanced) return alert('Voucher is not balanced. Debit must equal Credit.');
-        if (totals.debit === 0) return alert('Voucher cannot be empty.');
+        if (!balanced) {
+            notify({ type: 'warning', title: 'Voucher is not balanced', message: 'Debit must equal Credit before saving.' });
+            return;
+        }
+        if (totals.debit === 0) {
+            notify({ type: 'warning', title: 'Voucher cannot be empty', message: 'Add at least one debit and credit line.' });
+            return;
+        }
         setBusy(true); setMsg(null);
         try {
             let resultId, resultNo;
@@ -120,17 +192,21 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                 resultId = editingId;
                 setEditingId(null);
                 setMsg({ kind: 'ok', text: `Draft updated.` });
+                notify({ type: 'success', title: 'Draft updated', message: 'Voucher changes were saved.' });
             } else {
                 const res = await axios.post(`${API_BASE}/accounts/vouchers`, { ...header, Items: items });
                 resultId = res.data.VoucherID;
                 resultNo = res.data.VoucherNo;
                 setMsg({ kind: 'ok', text: `Voucher ${resultNo} saved as Draft.` });
+                notify({ type: 'success', title: 'Voucher saved as draft', message: resultNo });
             }
             await loadVoucher(resultId);
             setParams({ id: String(resultId) });
             fetchDrafts();
         } catch (err) {
-            setMsg({ kind: 'err', text: err.response?.data?.details || err.response?.data?.error || err.message });
+            const text = err.response?.data?.details || err.response?.data?.error || err.message;
+            setMsg({ kind: 'err', text });
+            notify({ type: 'error', title: 'Voucher save failed', message: text });
         }
         setBusy(false);
     };
@@ -138,7 +214,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const startNew = () => {
         setMode('new');
         setActive(null);
-        setItems([{ GLCAID: '', Narration: '', Debit: 0, Credit: 0 }, { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }]);
+        const row0 = isFixedCash
+            ? { GLCAID: cashBookGLCAID, Narration: '', Debit: 0, Credit: 0 }
+            : { GLCAID: '', Narration: '', Debit: 0, Credit: 0 };
+        setItems([row0, { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }]);
         setHeader(h => ({ ...h, Remarks: '' }));
         setMsg(null);
         params.delete('id'); setParams(params);
@@ -152,7 +231,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const startEditDraft = () => {
         if (!active || active.Status !== 'Draft') return;
         setHeader({
-            VoucherDate: active.VoucherDate ? active.VoucherDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
+            // Policy: even when editing an existing Draft, post date is forced to today.
+            VoucherDate: todayStr,
             VoucherTypeID: active.VoucherTypeID,
             Remarks: active.Remarks || ''
         });
@@ -170,15 +250,25 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     // ---------- Delete Draft ----------
     const handleDeleteDraft = async () => {
         if (!active || active.Status !== 'Draft') return;
-        if (!window.confirm(`Delete Draft voucher ${active.VoucherNo}? This cannot be undone (Drafts have no GL impact).`)) return;
+        const ok = await confirm({
+            title: `Delete draft ${active.VoucherNo}?`,
+            message: 'This removes the draft voucher from the system.',
+            details: 'Draft vouchers have no GL impact, but this deletion cannot be undone.',
+            confirmLabel: 'Delete draft',
+            tone: 'danger',
+        });
+        if (!ok) return;
         setBusy(true); setMsg(null);
         try {
             await axios.delete(`${API_BASE}/accounts/vouchers/${active.VoucherID}`);
             setMsg({ kind: 'ok', text: `Draft ${active.VoucherNo} deleted.` });
+            notify({ type: 'success', title: 'Draft deleted', message: active.VoucherNo });
             await fetchDrafts();
             setTimeout(() => startNew(), 800);
         } catch (err) {
-            setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
+            const text = err.response?.data?.error || err.message;
+            setMsg({ kind: 'err', text });
+            notify({ type: 'error', title: 'Delete failed', message: text });
         }
         setBusy(false);
     };
@@ -186,15 +276,25 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     // ---------- Finalize ----------
     const handleFinalize = async () => {
         if (!active) return;
-        if (!window.confirm(`Post voucher ${active.VoucherNo}? This commits it to the GL and is reversible only via the unfinalize approval chain.`)) return;
+        const ok = await confirm({
+            title: `Post voucher ${active.VoucherNo}?`,
+            message: 'This commits the voucher to the general ledger.',
+            details: 'After posting, changes require the unfinalize approval chain and a reversal voucher.',
+            confirmLabel: 'Post to GL',
+            tone: 'warning',
+        });
+        if (!ok) return;
         setBusy(true); setMsg(null);
         try {
             await axios.post(`${API_BASE}/finalize/VOUCHER/${active.VoucherID}`);
             setMsg({ kind: 'ok', text: `Voucher ${active.VoucherNo} posted to GL.` });
+            notify({ type: 'success', title: 'Voucher posted', message: `${active.VoucherNo} was posted to GL.` });
             await loadVoucher(active.VoucherID);
             fetchDrafts();
         } catch (err) {
-            setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
+            const text = err.response?.data?.error || err.message;
+            setMsg({ kind: 'err', text });
+            notify({ type: 'error', title: 'Posting failed', message: text });
         }
         setBusy(false);
     };
@@ -216,7 +316,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     };
 
     const handleRequestUnfinalize = async () => {
-        if (!unfinalizeReason.trim()) return alert('Please provide a reason.');
+        if (!unfinalizeReason.trim()) {
+            notify({ type: 'warning', title: 'Reason required', message: 'Explain why this voucher needs to be reversed.' });
+            return;
+        }
         setBusy(true); setMsg(null);
         try {
             await axios.post(`${API_BASE}/finalize/VOUCHER/${active.VoucherID}/request-unfinalize`, {
@@ -226,13 +329,16 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             setShowUnfinalize(false);
             setUnfinalizeReason('');
             setBlockers(null);
+            notify({ type: 'success', title: 'Request submitted', message: `Unfinalize request sent for ${active.VoucherNo}.` });
         } catch (err) {
             const e = err.response?.data;
             if (e?.blockers?.length) {
                 setBlockers(e.blockers);
                 setMsg({ kind: 'err', text: 'Cannot request: downstream references exist (refresh below).' });
+                notify({ type: 'error', title: 'Request blocked', message: 'Downstream references exist.' });
             } else {
                 setMsg({ kind: 'err', text: e?.error || err.message });
+                notify({ type: 'error', title: 'Request failed', message: e?.error || err.message });
             }
         }
         setBusy(false);
@@ -252,13 +358,25 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         <h1 className="page-title">{title || 'Finance Voucher'}</h1>
                         <p className="page-subtitle">Viewing existing voucher.</p>
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className="no-print" style={{ display: 'flex', gap: 8 }}>
                         <button className="btn-sm" onClick={() => loadVoucher(active.VoucherID)} disabled={busy}>
                             <RefreshCw size={14} /> Refresh
                         </button>
-                        <button className="btn" onClick={startNew}>
-                            <Plus size={16} /> New Voucher
+                        <button className="btn" onClick={() => window.open(`/vouchers/${active.VoucherID}/print`, '_blank')} style={{ background: '#0f766e' }}>
+                            <Printer size={16} /> Print
                         </button>
+                        {canInsert && <button className="btn" onClick={startNew}>
+                            <Plus size={16} /> New Voucher
+                        </button>}
+                    </div>
+                </div>
+
+                {/* Print-only header strip */}
+                <div className="print-only print-header">
+                    <h1>{active.VoucherTypeName || 'Voucher'} — {active.VoucherNo}</h1>
+                    <div className="meta">
+                        <span>Status: {status}  •  Date: {new Date(active.VoucherDate).toLocaleDateString()}</span>
+                        <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
                     </div>
                 </div>
 
@@ -288,12 +406,12 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             {status === 'Draft' && (
                                 <>
-                                    <button className="btn" onClick={startEditDraft} disabled={busy} style={{ background: '#0891b2' }}>
+                                    {canEdit && <button className="btn" onClick={startEditDraft} disabled={busy} style={{ background: '#0891b2' }}>
                                         <Edit3 size={16} /> Edit Draft
-                                    </button>
-                                    <button className="btn" onClick={handleDeleteDraft} disabled={busy} style={{ background: '#dc2626' }}>
+                                    </button>}
+                                    {canDelete && <button className="btn" onClick={handleDeleteDraft} disabled={busy} style={{ background: '#dc2626' }}>
                                         <Trash2 size={16} /> Delete
-                                    </button>
+                                    </button>}
                                 </>
                             )}
                             {canFinalize && (
@@ -445,10 +563,12 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                             Cancel Edit
                         </button>
                     )}
-                    <button className="btn" onClick={handleSave} disabled={busy}>
-                        {busy ? <Loader2 size={16} className="animate-spin" /> : <Save size={18} />}
-                        {editingId ? 'Update Draft' : 'Save as Draft'}
-                    </button>
+                    {(editingId ? canEdit : canInsert) && (
+                        <button className="btn" onClick={handleSave} disabled={busy}>
+                            {busy ? <Loader2 size={16} className="animate-spin" /> : <Save size={18} />}
+                            {editingId ? 'Update Draft' : 'Save as Draft'}
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -508,7 +628,11 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     <FileText size={20} /><strong>Voucher Header</strong>
                 </div>
                 <div className="grid-3">
-                    <div className="form-group"><label>Date</label><input type="date" value={header.VoucherDate} onChange={e => setHeader({...header, VoucherDate: e.target.value})} /></div>
+                    <div className="form-group">
+                        <label>Date <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>(today only)</span></label>
+                        <input type="date" value={todayStr} min={todayStr} max={todayStr} readOnly disabled
+                               title="Policy: vouchers are always posted with today's date — backdate / future-date are blocked." />
+                    </div>
                     <div className="form-group">
                         <label>Voucher Type</label>
                         <select value={header.VoucherTypeID} onChange={e => setHeader({...header, VoucherTypeID: e.target.value})} disabled={!!forceTypeCode}>
@@ -531,20 +655,40 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                             <tr><th style={{ width: '30%' }}>Account</th><th>Narration</th><th style={{ width: '15%' }}>Debit</th><th style={{ width: '15%' }}>Credit</th><th></th></tr>
                         </thead>
                         <tbody>
-                            {items.map((item, idx) => (
+                            {items.map((item, idx) => {
+                                const isLockedRow0 = idx === 0 && (isFixedCash || isFixedBank);
+                                const drLocked = isLockedRow0 && fixedLockedSide === 'Debit';
+                                const crLocked = isLockedRow0 && fixedLockedSide === 'Credit';
+                                return (
                                 <tr key={idx}>
                                     <td>
-                                        <select value={item.GLCAID} onChange={e => updateItem(idx, 'GLCAID', e.target.value)}>
-                                            <option value="">Select Account...</option>
-                                            {coa.map(a => <option key={a.GLCAID} value={a.GLCAID}>{a.GLCode} - {a.GLTitle}</option>)}
-                                        </select>
+                                        {isLockedRow0 && isFixedCash ? (
+                                            <select value={item.GLCAID} disabled style={{ background: '#f1f5f9' }}>
+                                                <option value={cashBookGLCAID}>Cash Book {coa.find(a => a.GLCAID == cashBookGLCAID) ? `(${coa.find(a => a.GLCAID == cashBookGLCAID).GLCode})` : ''}</option>
+                                            </select>
+                                        ) : isLockedRow0 && isFixedBank ? (
+                                            <SearchableSelect
+                                                value={item.GLCAID}
+                                                onChange={(id) => updateItem(idx, 'GLCAID', id)}
+                                                placeholder="Search bank by code or name…"
+                                                options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                                            />
+                                        ) : (
+                                            <SearchableSelect
+                                                value={item.GLCAID}
+                                                onChange={(id) => updateItem(idx, 'GLCAID', id)}
+                                                placeholder="Search account by code or name…"
+                                                options={coa.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode }))}
+                                            />
+                                        )}
                                     </td>
                                     <td><input type="text" value={item.Narration} onChange={e => updateItem(idx, 'Narration', e.target.value)} placeholder="Line narration..." /></td>
-                                    <td><input type="number" value={item.Debit}  onChange={e => updateItem(idx, 'Debit',  e.target.value)} style={{ textAlign: 'right' }} /></td>
-                                    <td><input type="number" value={item.Credit} onChange={e => updateItem(idx, 'Credit', e.target.value)} style={{ textAlign: 'right' }} /></td>
-                                    <td><button onClick={() => removeItem(idx)} style={{ color: '#ef4444' }}><Trash2 size={18} /></button></td>
+                                    <td><input type="number" value={item.Debit}  onChange={e => updateItem(idx, 'Debit',  e.target.value)} disabled={drLocked} style={{ textAlign: 'right', background: drLocked ? '#f1f5f9' : 'white' }} /></td>
+                                    <td><input type="number" value={item.Credit} onChange={e => updateItem(idx, 'Credit', e.target.value)} disabled={crLocked} style={{ textAlign: 'right', background: crLocked ? '#f1f5f9' : 'white' }} /></td>
+                                    <td>{isLockedRow0 ? <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span> : <button onClick={() => removeItem(idx)} style={{ color: '#ef4444' }}><Trash2 size={18} /></button>}</td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>

@@ -4,21 +4,32 @@ const { buildPaymentJournalLines } = require('../utils/paymentJournalBuilder');
 
 // ----- account resolution -----
 async function resolveAccounts() {
-    const roles = ['CASH_BOOK', 'POS_CLEARING', 'CHEQUES_ON_HAND',
-                   'CUSTOMER_ADVANCE_RECEIVED', 'SUPPLIER_ADVANCE_PAID'];
+    // Trade Debtors / Trade Creditors are no longer system roles — each party's
+    // own PartyGLID is used as the subsidiary leaf for named-party settlements.
+    // For walk-in JC invoice settlements (no party), we mirror the JC builder
+    // and credit GENERAL_CUSTOMER, tagged by JobCardID.
+    const roles = ['CASH_BOOK', 'POS_CLEARING', 'CHEQUES_ON_HAND', 'CHEQUES_ISSUED_UNCLEARED',
+                   'CUSTOMER_ADVANCE_RECEIVED', 'SUPPLIER_ADVANCE_PAID',
+                   'GENERAL_CUSTOMER'];
     const out = {};
     for (const r of roles) out[r] = { GLCAID: await resolveRole(r) };
-    const pool = await getPool();
-    const byCode = async (code) => {
-        const r = await pool.request()
-            .input('c', sql.NVarChar(50), code)
-            .query('SELECT GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND Status=1');
-        if (!r.recordset.length) throw new Error(`COA account ${code} not found.`);
-        return { GLCAID: r.recordset[0].GLCAID };
-    };
-    out.TRADE_DEBTORS    = await byCode('101005');
-    out.TRADE_CREDITORS  = await byCode('201001');
     return out;
+}
+
+// Look up the chosen GL leaf for a party. Returns { GLCAID } or null when
+// the party has no PartyGLID configured. Walk-in (no party) returns null.
+async function loadPartyGL(partyId) {
+    if (!partyId) return null;
+    const pool = await getPool();
+    const r = await pool.request()
+        .input('id', sql.Int, parseInt(partyId))
+        .query('SELECT PartyGLID, PartyName FROM gen_PartiesInfo WHERE PartyID=@id');
+    if (!r.recordset.length) throw new Error(`Party #${partyId} not found.`);
+    const p = r.recordset[0];
+    if (!p.PartyGLID) {
+        throw new Error(`Party "${p.PartyName}" has no GL account set. Edit the party and assign one.`);
+    }
+    return { GLCAID: p.PartyGLID };
 }
 
 // GET /api/payments/outstanding/:direction/:partyId
@@ -35,10 +46,14 @@ exports.getOutstanding = async (req, res) => {
             return res.status(400).json({ error: "direction must be 'receive' or 'make'." });
         }
 
-        // For receive: invoice voucher Status=Posted, SourceDocType in (JOBCARD, STORE_SALE), has Trade Debtors line with this PartyID
-        // For make: voucher Status=Posted, SourceDocType in (GRN), has Trade Creditors line with this PartyID
+        // For receive: invoice voucher Status=Posted, SourceDocType in (JOBCARD, STORE_SALE), has any line with this PartyID + Dr>0.
+        // For make:   voucher Status=Posted, SourceDocType in (GRN, GRTN),     has any line with this PartyID + Cr>0.
+        //
+        // We intentionally do NOT filter by a fixed Trade-Debtors / Trade-Creditors GLCode, because the
+        // posting services now tag the customer-receivable / supplier-payable leg with the party's own
+        // PartyGLID (a leaf account picked by the user at party creation). The PartyID column itself is
+        // the authoritative subsidiary marker - any positive-side row carrying it is part of the A/R or A/P.
         const sourceTypes = isReceive ? "('JOBCARD','STORE_SALE')" : "('GRN','GRTN')";
-        const subsidiaryGLCode = isReceive ? '101005' : '201001';
 
         const result = await pool.request()
             .input('pid', sql.Int, partyId)
@@ -49,11 +64,10 @@ exports.getOutstanding = async (req, res) => {
                                     THEN ${isReceive ? 'vd.Debit' : 'vd.Credit'} ELSE 0 END) AS PartyShare
                     FROM data_FinanceVoucherInfo vi
                     INNER JOIN data_FinanceVoucherDetail vd ON vd.VoucherID = vi.VoucherID
-                    INNER JOIN GLChartOFAccount c ON c.GLCAID = vd.GLCAID
                     WHERE vi.Status = 'Posted'
                       AND vi.SourceDocType IN ${sourceTypes}
                       AND vi.ReversesVoucherID IS NULL
-                      AND c.GLCode = '${subsidiaryGLCode}'
+                      AND vd.PartyID = @pid
                     GROUP BY vi.VoucherID, vi.VoucherNo, vi.VoucherDate, vi.TotalAmount, vi.SourceDocType, vi.SourceDocID
                     HAVING SUM(CASE WHEN vd.PartyID = @pid AND ${isReceive ? 'vd.Debit > 0' : 'vd.Credit > 0'}
                                     THEN ${isReceive ? 'vd.Debit' : 'vd.Credit'} ELSE 0 END) > 0
@@ -192,9 +206,12 @@ exports.getJobCardBalance = async (req, res) => {
         if (voucher) {
             const allocRes = await pool.request()
                 .input('vid', sql.Int, voucher.VoucherID)
-                .query(`SELECT ISNULL(SUM(CASE WHEN Credit > 0 THEN Credit ELSE 0 END), 0) AS Allocated
-                        FROM data_FinanceVoucherDetail
-                        WHERE AllocatedToVoucherID=@vid`);
+                .query(`SELECT ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Allocated
+                        FROM data_FinanceVoucherDetail d
+                        INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                        WHERE d.AllocatedToVoucherID=@vid
+                          AND v.Status='Posted'
+                          AND v.ReversesVoucherID IS NULL`);
             allocated = parseFloat(allocRes.recordset[0].Allocated) || 0;
         }
 
@@ -225,6 +242,63 @@ exports.getJobCardBalance = async (req, res) => {
         });
     } catch (err) {
         console.error('getJobCardBalance error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// GET /api/payments/storesale-balance/:saleId
+// Mirrors getJobCardBalance for walk-in Store Sales. Used by the Receive
+// Payment "Walk-in deposit against Store Sale" tab.
+exports.getStoreSaleBalance = async (req, res) => {
+    try {
+        const saleId = parseInt(req.params.saleId);
+        if (!saleId) return res.status(400).json({ error: 'Valid saleId required.' });
+        const pool = await getPool();
+
+        const saleRes = await pool.request()
+            .input('id', sql.Int, saleId)
+            .query(`SELECT SaleID, InvoiceNo, IsFinalized, PaymentMode, PartyID, NetPayable
+                    FROM data_StoreSaleInfo WHERE SaleID=@id`);
+        if (!saleRes.recordset.length) return res.status(404).json({ error: 'Store Sale not found.' });
+        const sale = saleRes.recordset[0];
+
+        const voucherRes = await pool.request()
+            .input('id', sql.Int, saleId)
+            .query(`SELECT TOP 1 VoucherID, VoucherNo, TotalAmount
+                    FROM data_FinanceVoucherInfo
+                    WHERE SourceDocType='STORE_SALE' AND SourceDocID=@id AND Status='Posted' AND ReversesVoucherID IS NULL
+                    ORDER BY VoucherID DESC`);
+        const voucher = voucherRes.recordset[0] || null;
+
+        const invoiceTotal = voucher ? parseFloat(voucher.TotalAmount) : parseFloat(sale.NetPayable);
+
+        let allocated = 0;
+        if (voucher) {
+            const allocRes = await pool.request()
+                .input('vid', sql.Int, voucher.VoucherID)
+                .query(`SELECT ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Allocated
+                        FROM data_FinanceVoucherDetail d
+                        INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                        WHERE d.AllocatedToVoucherID=@vid
+                          AND v.Status='Posted'
+                          AND v.ReversesVoucherID IS NULL`);
+            allocated = parseFloat(allocRes.recordset[0].Allocated) || 0;
+        }
+
+        const paid = allocated;
+        const outstanding = Math.max(0, +(invoiceTotal - paid).toFixed(2));
+
+        res.json({
+            sale,
+            invoiceTotal: +invoiceTotal.toFixed(2),
+            voucher,
+            hasInvoiceVoucher: !!voucher,
+            allocated: +allocated.toFixed(2),
+            paid: +paid.toFixed(2),
+            outstanding,
+        });
+    } catch (err) {
+        console.error('getStoreSaleBalance error:', err);
         res.status(500).json({ error: err.message });
     }
 };
@@ -282,29 +356,61 @@ exports.makePayment = async (req, res) => {
     return postPayment(req, res, 'make');
 };
 
+// Withholding-tax / write-off accounts the customer can deduct on their behalf
+// when settling an invoice. Resolved by GLCode (not system-account role) per the
+// codes the user dictated 2026-06-20.
+const ADJUSTMENT_CODES = {
+    Salvage: { GLCode: '502002038', Label: 'Salvage Expense' },
+    WHTL:    { GLCode: '102005005', Label: 'Advance Tax on Service (WHT-Labour)' },
+    WHTP:    { GLCode: '102005006', Label: 'Advance Tax on Goods (WHT-Parts)' },
+    STWH:    { GLCode: '102005007', Label: 'Sales Tax Withheld' },
+    Short:   { GLCode: '502002039', Label: 'Shortage in RO (Service)' },
+};
+
+async function resolveAdjustmentGL(pool, code) {
+    const r = await pool.request().input('c', sql.NVarChar(40), code)
+        .query('SELECT TOP 1 GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND isParent=0');
+    if (!r.recordset.length) throw new Error(`GL leaf ${code} not found (or is a parent).`);
+    return r.recordset[0].GLCAID;
+}
+
 async function postPayment(req, res, direction) {
     try {
-        const { partyId, walkInJobCardID, paymentLines, allocations, narration } = req.body;
-        if (!Array.isArray(paymentLines) || paymentLines.length === 0) {
-            return res.status(400).json({ error: 'At least one payment line is required.' });
+        const { partyId, walkInJobCardID, walkInSaleID, paymentLines, allocations, adjustments, narration } = req.body;
+        if (!Array.isArray(paymentLines)) {
+            return res.status(400).json({ error: 'paymentLines must be an array.' });
         }
         if (!Array.isArray(allocations)) {
             return res.status(400).json({ error: 'allocations must be an array (use [] for full advance).' });
+        }
+        // Adjustments are an object keyed by type: { Salvage, WHTL, WHTP, STWH, Short }
+        const adj = adjustments && typeof adjustments === 'object' ? adjustments : {};
+        const adjTotal = Object.values(adj).reduce((s, v) => s + (Number(v) || 0), 0);
+        // Either cash OR adjustments must be present
+        if (paymentLines.length === 0 && adjTotal <= 0) {
+            return res.status(400).json({ error: 'At least one payment line or tax adjustment is required.' });
         }
 
         const party = partyId ? { PartyID: parseInt(partyId) } : null;
 
         const pool = await getPool();
         const accounts = await resolveAccounts();
+        const partyGL = await loadPartyGL(party?.PartyID);
 
-        // Validate any Bank Transfer lines have a valid BankGLCAID belonging to dms_BankAccounts
+        // Validate any Bank Transfer / Cheque lines have a valid BankGLCAID belonging to dms_BankAccounts.
+        // Cheque lines also need a cheque #, cheque date, and (only on receive) end up in dms_PendingCheques
+        // for the Cheque Clearance flow.
         for (const p of paymentLines) {
-            if (p.Mode === 'Bank Transfer') {
-                if (!p.BankGLCAID) return res.status(400).json({ error: 'Bank Transfer line missing BankGLCAID.' });
+            if (p.Mode === 'Bank Transfer' || p.Mode === 'Cheque') {
+                if (!p.BankGLCAID) return res.status(400).json({ error: `${p.Mode} line missing BankGLCAID.` });
                 const bk = await pool.request()
                     .input('id', sql.Int, parseInt(p.BankGLCAID))
                     .query('SELECT GLCAID FROM dms_BankAccounts WHERE GLCAID=@id AND IsActive=1');
                 if (!bk.recordset.length) return res.status(400).json({ error: 'Bank account not active.' });
+            }
+            if (p.Mode === 'Cheque') {
+                if (!p.Reference)   return res.status(400).json({ error: 'Cheque line missing Cheque # (Reference).' });
+                if (!p.ChequeDate)  return res.status(400).json({ error: 'Cheque line missing Cheque Date.' });
             }
         }
 
@@ -318,15 +424,21 @@ async function postPayment(req, res, direction) {
             }
             const roleKey = direction === 'receive' ? 'CUSTOMER_ADVANCE_RECEIVED' : 'SUPPLIER_ADVANCE_PAID';
             const advGL = accounts[roleKey].GLCAID;
-            // For receive: advance balance = Cr - Dr on CUSTOMER_ADVANCE_RECEIVED (it's a liability)
-            // For make:    balance = Dr - Cr on SUPPLIER_ADVANCE_PAID                (it's an asset)
-            const balExpr = direction === 'receive' ? 'Credit - Debit' : 'Debit - Credit';
-            const balRes = await pool.request()
-                .input('pid', sql.Int, party.PartyID)
-                .input('gl',  sql.Int, advGL)
-                .query(`SELECT ISNULL(SUM(${balExpr}), 0) AS Bal
-                        FROM dms_PartyLedger
-                        WHERE PartyID = @pid AND GLCAID = @gl`);
+            // Two fully-parameterized paths instead of an interpolated SQL fragment.
+            // Receive: advance balance = Cr - Dr (liability). Make: Dr - Cr (prepaid asset).
+            const balRes = direction === 'receive'
+                ? await pool.request()
+                    .input('pid', sql.Int, party.PartyID)
+                    .input('gl',  sql.Int, advGL)
+                    .query(`SELECT ISNULL(SUM(Credit) - SUM(Debit), 0) AS Bal
+                            FROM dms_PartyLedger
+                            WHERE PartyID = @pid AND GLCAID = @gl`)
+                : await pool.request()
+                    .input('pid', sql.Int, party.PartyID)
+                    .input('gl',  sql.Int, advGL)
+                    .query(`SELECT ISNULL(SUM(Debit) - SUM(Credit), 0) AS Bal
+                            FROM dms_PartyLedger
+                            WHERE PartyID = @pid AND GLCAID = @gl`);
             const available = Number(balRes.recordset[0].Bal) || 0;
             if (totalAdvance > available + 0.005) {
                 return res.status(400).json({
@@ -335,10 +447,29 @@ async function postPayment(req, res, direction) {
             }
         }
 
+        // Resolve and shape adjustment lines (WHT, salvage, shortage). Only positive
+        // amounts make it through. GL leaves are looked up by hard-coded code.
+        const adjustmentLines = [];
+        for (const [type, def] of Object.entries(ADJUSTMENT_CODES)) {
+            const amount = Number(adj[type]) || 0;
+            if (amount <= 0) continue;
+            if (direction !== 'receive') {
+                return res.status(400).json({ error: 'Adjustments are only supported on Receive Payment.' });
+            }
+            const glcaid = await resolveAdjustmentGL(pool, def.GLCode);
+            adjustmentLines.push({
+                Type: type,
+                GLCAID: glcaid,
+                Amount: amount,
+                Narration: `${def.Label} — withheld by customer on settlement`,
+            });
+        }
+
         const built = buildPaymentJournalLines({
             direction, party,
             walkInJobCardID: walkInJobCardID ? parseInt(walkInJobCardID) : null,
-            paymentLines, allocations, accounts,
+            walkInSaleID:    walkInSaleID    ? parseInt(walkInSaleID)    : null,
+            paymentLines, allocations, adjustments: adjustmentLines, accounts, partyGL,
             refNo: narration,
         });
 
@@ -360,7 +491,7 @@ async function postPayment(req, res, direction) {
         await transaction.begin();
         try {
             const seqRes = await new sql.Request(transaction).query(
-                "SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo"
+                "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
             );
             const voucherNo = `${voucherTypeTitle}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 
@@ -418,6 +549,57 @@ async function postPayment(req, res, direction) {
                 .query(`UPDATE data_FinanceVoucherInfo
                         SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
                         WHERE VoucherID=@vid`);
+
+            // Record each Cheque-mode payment line in dms_PendingCheques so the
+            // Cheque Clearance screen can later move it between the holding
+            // account and the chosen bank (or reverse it if it bounces).
+            //   - direction='receive' → Direction='Received', Dr CHEQUES_ON_HAND
+            //   - direction='make'    → Direction='Issued',  Cr CHEQUES_ISSUED_UNCLEARED
+            const chequeInputs = paymentLines.filter(p => p.Mode === 'Cheque' && parseFloat(p.Amount) > 0);
+            if (chequeInputs.length > 0) {
+                const holdingGL = direction === 'receive'
+                    ? accounts.CHEQUES_ON_HAND.GLCAID
+                    : accounts.CHEQUES_ISSUED_UNCLEARED.GLCAID;
+                const dirCol = direction === 'receive' ? 'Debit' : 'Credit';
+                const detailRows = await new sql.Request(transaction)
+                    .input('vid', sql.Int, voucherId)
+                    .input('gl',  sql.Int, holdingGL)
+                    .query(`SELECT VoucherDetailID
+                            FROM data_FinanceVoucherDetail
+                            WHERE VoucherID=@vid AND GLCAID=@gl AND ${dirCol} > 0
+                            ORDER BY VoucherDetailID ASC`);
+                if (detailRows.recordset.length !== chequeInputs.length) {
+                    throw new Error(`Cheque line count mismatch (input=${chequeInputs.length}, voucher=${detailRows.recordset.length}).`);
+                }
+                const walkinJC = walkInJobCardID ? parseInt(walkInJobCardID) : null;
+                const chequeDirection = direction === 'receive' ? 'Received' : 'Issued';
+                for (let i = 0; i < chequeInputs.length; i++) {
+                    const c = chequeInputs[i];
+                    const detailId = detailRows.recordset[i].VoucherDetailID;
+                    await new sql.Request(transaction)
+                        .input('vid',  sql.Int,            voucherId)
+                        .input('did',  sql.Int,            detailId)
+                        .input('dir',  sql.NVarChar(20),   chequeDirection)
+                        .input('no',   sql.NVarChar(50),   c.Reference)
+                        .input('dt',   sql.Date,           c.ChequeDate)
+                        .input('amt',  sql.Decimal(18,2),  parseFloat(c.Amount))
+                        .input('db',   sql.NVarChar(150),  c.DrawerBank || null)
+                        .input('dbg',  sql.Int,            parseInt(c.BankGLCAID))
+                        .input('pid',  sql.Int,            party?.PartyID || null)
+                        .input('jcid', sql.Int,            walkinJC)
+                        .input('cby',  sql.Int,            req.user?.userId || null)
+                        .input('cbyN', sql.NVarChar(100),  req.user?.userName || null)
+                        .query(`INSERT INTO dms_PendingCheques
+                                    (ReceiptVoucherID, ReceiptDetailID, Direction,
+                                     ChequeNo, ChequeDate, Amount,
+                                     DrawerBank, DepositBankGLCAID, PartyID, JobCardID,
+                                     CreatedBy, CreatedByName)
+                                VALUES (@vid, @did, @dir,
+                                        @no, @dt, @amt,
+                                        @db, @dbg, @pid, @jcid,
+                                        @cby, @cbyN)`);
+                }
+            }
 
             await transaction.commit();
             res.status(201).json({

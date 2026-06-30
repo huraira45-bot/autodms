@@ -4,10 +4,11 @@
  * Per decision #1: each Variant has its own standard price, wholesale price,
  * standard Master incentive, and tax treatment (decision #26).
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Layers, Plus, RefreshCw, Loader2, Search, Pencil, Trash2, Power } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useFeedback } from '../../context/FeedbackContext';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -19,6 +20,7 @@ const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
 
 export default function VehicleVariantsAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const canEdit = hasModule('sales_admin_settings');
     const [rows, setRows] = useState([]);
     const [models, setModels] = useState([]);
@@ -55,7 +57,13 @@ export default function VehicleVariantsAdmin() {
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
     const remove = async (v) => {
-        if (!window.confirm(`Delete variant "${v.VariantName}"? Only allowed if no vehicles exist.`)) return;
+        const ok = await confirmAction({
+            title: 'Delete vehicle variant?',
+            message: `Delete "${v.VariantName}"? This only works when no vehicle records exist for the variant.`,
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/sales/variants/${v.VariantID}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };

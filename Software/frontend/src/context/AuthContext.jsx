@@ -33,13 +33,46 @@ export function AuthProvider({ children }) {
         setUser(null);
     };
 
+    // Legacy binary check — true if the role has ANY action on the module.
     const hasModule = (key) => user?.modules?.includes(key) ?? false;
 
+    /**
+     * Granular check. Accepts:
+     *   hasPermission('workshop_jobs:view')   – full permission key
+     *   hasPermission('workshop_jobs', 'view') – module + action
+     *   hasPermission('finalize')              – workflow/report keys (no action)
+     * Admin (groupId=1) is always allowed.
+     */
+    const hasPermission = (keyOrModule, action) => {
+        if (!user) return false;
+        if (user.groupId === 1) return true;
+        const key = action ? `${keyOrModule}:${action}` : keyOrModule;
+        return user.permissions?.includes(key) ?? false;
+    };
+
     return (
-        <AuthContext.Provider value={{ user, loading, login, logout, hasModule }}>
+        <AuthContext.Provider value={{ user, loading, login, logout, hasModule, hasPermission }}>
             {children}
         </AuthContext.Provider>
     );
 }
 
 export const useAuth = () => useContext(AuthContext);
+
+/**
+ * Convenience hook — returns booleans for the four standard actions on a
+ * given module key. Use this in pages that gate multiple buttons against the
+ * same module:
+ *   const { canView, canInsert, canEdit, canDelete } = useCan('procurement_grn');
+ */
+export function useCan(moduleKey) {
+    const { user, hasPermission } = useContext(AuthContext) || {};
+    if (!user) return { canView: false, canInsert: false, canEdit: false, canDelete: false };
+    if (user.groupId === 1) return { canView: true, canInsert: true, canEdit: true, canDelete: true };
+    return {
+        canView:   hasPermission(moduleKey, 'view'),
+        canInsert: hasPermission(moduleKey, 'insert'),
+        canEdit:   hasPermission(moduleKey, 'edit'),
+        canDelete: hasPermission(moduleKey, 'delete'),
+    };
+}

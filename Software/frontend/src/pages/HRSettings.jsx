@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Plus, Save, Loader2 } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import { PageHeader } from '../components/UXPrimitives';
 
 const API_BASE = '/api';
 
 export default function HRSettings() {
+  const { notify } = useFeedback();
   const [departments, setDepartments] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -31,31 +34,39 @@ export default function HRSettings() {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/departments`, { DepartmentName: deptName, ActionUserID: 1 });
+      notify({ type: 'success', title: 'Department added', message: deptName });
       setDeptName(''); fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not add department', message: err.response?.data?.error || err.message });
+    }
   };
 
   const handleAddDesig = async (e) => {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/designations`, { DesignationName: desigName, ActionUserID: 1 });
+      notify({ type: 'success', title: 'Designation added', message: desigName });
       setDesigName(''); fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not add designation', message: err.response?.data?.error || err.message });
+    }
   };
 
   return (
-    <div>
-      <h1 className="page-title">HR Configurations</h1>
-      <p className="page-subtitle">Manage departments, designations, and the org-chart relationships used by escalation chains.</p>
+    <div className="ux-page-stack">
+      <PageHeader
+        title="HR Configurations"
+        subtitle="Manage departments, designations, and org-chart relationships used by escalation chains."
+      />
 
-      <div className="grid-2" style={{ marginTop: '24px', gap: '24px' }}>
+      <div className="grid-2" style={{ gap: '24px' }}>
         <div className="card">
           <h2 className="card-title">Departments</h2>
           <form onSubmit={handleAddDept} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <input style={{ flex: 1 }} type="text" placeholder="e.g. Sales, Service" value={deptName} onChange={e => setDeptName(e.target.value)} required />
             <button type="submit" className="btn" style={{ padding: '10px' }}><Plus size={18} /></button>
           </form>
-          <DepartmentManagerList departments={departments} employees={employees} onChanged={fetchData} />
+          <DepartmentManagerList departments={departments} employees={employees} onChanged={fetchData} notify={notify} />
         </div>
 
         <div className="card">
@@ -81,23 +92,23 @@ export default function HRSettings() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 16 }}>
           Set <strong>Reports To</strong> for each employee. Drives escalation chains and org-chart reports.
         </p>
-        <EmployeeReportsToList employees={employees} onChanged={fetchData} />
+        <EmployeeReportsToList employees={employees} onChanged={fetchData} notify={notify} />
       </div>
     </div>
   );
 }
 
-function DepartmentManagerList({ departments, employees, onChanged }) {
+function DepartmentManagerList({ departments, employees, onChanged, notify }) {
   return (
     <div>
       {departments.map(d => (
-        <DeptManagerRow key={d.DepartmentID} dept={d} employees={employees} onSaved={onChanged} />
+        <DeptManagerRow key={d.DepartmentID} dept={d} employees={employees} onSaved={onChanged} notify={notify} />
       ))}
     </div>
   );
 }
 
-function DeptManagerRow({ dept, employees, onSaved }) {
+function DeptManagerRow({ dept, employees, onSaved, notify }) {
   const [managerId, setManagerId] = useState(dept.ManagerEmployeeID || '');
   const [busy, setBusy] = useState(false);
   const dirty = String(managerId || '') !== String(dept.ManagerEmployeeID || '');
@@ -108,8 +119,11 @@ function DeptManagerRow({ dept, employees, onSaved }) {
       await axios.patch(`${API_BASE}/departments/${dept.DepartmentID}/manager`, {
         ManagerEmployeeID: managerId || null
       });
+      notify({ type: 'success', title: 'Department manager updated', message: dept.DepartmentName });
       onSaved();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not update department manager', message: err.response?.data?.error || err.message });
+    }
     setBusy(false);
   };
 
@@ -145,7 +159,7 @@ function DeptManagerRow({ dept, employees, onSaved }) {
   );
 }
 
-function EmployeeReportsToList({ employees, onChanged }) {
+function EmployeeReportsToList({ employees, onChanged, notify }) {
   const [filter, setFilter] = useState('');
   const filtered = filter
     ? employees.filter(e => e.EmployeeName?.toLowerCase().includes(filter.toLowerCase()) ||
@@ -173,7 +187,7 @@ function EmployeeReportsToList({ employees, onChanged }) {
           </thead>
           <tbody>
             {filtered.map(emp => (
-              <ReportsToRow key={emp.EmployeeID} emp={emp} all={employees} onSaved={onChanged} />
+              <ReportsToRow key={emp.EmployeeID} emp={emp} all={employees} onSaved={onChanged} notify={notify} />
             ))}
           </tbody>
         </table>
@@ -182,7 +196,7 @@ function EmployeeReportsToList({ employees, onChanged }) {
   );
 }
 
-function ReportsToRow({ emp, all, onSaved }) {
+function ReportsToRow({ emp, all, onSaved, notify }) {
   const [reportsToId, setReportsToId] = useState(emp.ReportsToID || '');
   const [busy, setBusy] = useState(false);
   const dirty = String(reportsToId || '') !== String(emp.ReportsToID || '');
@@ -193,8 +207,11 @@ function ReportsToRow({ emp, all, onSaved }) {
       await axios.patch(`${API_BASE}/employees/${emp.EmployeeID}/reports-to`, {
         ReportsToID: reportsToId || null
       });
+      notify({ type: 'success', title: 'Reporting line updated', message: emp.EmployeeName });
       onSaved();
-    } catch (err) { alert('Error: ' + (err.response?.data?.error || err.message)); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not update reporting line', message: err.response?.data?.error || err.message });
+    }
     setBusy(false);
   };
 

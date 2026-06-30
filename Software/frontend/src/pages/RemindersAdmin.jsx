@@ -5,13 +5,13 @@
  * flips them Scheduled → Sent on their DueDate. The CRO officer works the
  * Sent list, calls customers, marks Acknowledged or Booked.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
-    Bell, RefreshCw, Loader2, Search, Phone, CheckCircle2, Calendar,
-    XCircle, Wrench, ZapOff, Hammer,
+    Bell, RefreshCw, Loader2, Search, Phone, Calendar, XCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -30,6 +30,7 @@ const TYPE_STYLE = {
 
 export default function RemindersAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [statusFilter, setStatusFilter] = useState('Sent');
@@ -61,13 +62,25 @@ export default function RemindersAdmin() {
     };
 
     const cancel = async (id) => {
-        if (!window.confirm('Cancel this reminder? It will not be re-sent.')) return;
+        const ok = await confirmAction({
+            title: 'Cancel reminder?',
+            message: 'This reminder will not be re-sent.',
+            confirmLabel: 'Cancel reminder',
+            tone: 'warning'
+        });
+        if (!ok) return;
         try { await axios.post(`${API}/cro/reminders/${id}/cancel`); flash('ok', 'Cancelled'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
 
     const regenerate = async () => {
-        if (!window.confirm('Back-fill reminders for finalized JCs without one? Up to 500 at a time.')) return;
+        const ok = await confirmAction({
+            title: 'Back-fill reminders?',
+            message: 'This evaluates finalized job cards without reminders and can create up to 500 reminders at a time.',
+            confirmLabel: 'Back-fill',
+            tone: 'warning'
+        });
+        if (!ok) return;
         try {
             const r = await axios.post(`${API}/cro/reminders/regenerate`);
             flash('ok', `Evaluated ${r.data.evaluated}, created ${r.data.created} reminders`);

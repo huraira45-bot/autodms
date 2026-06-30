@@ -534,33 +534,60 @@ exports.getDayBook = async (req, res) => {
  * Buckets: Current (0-30), 31-60, 61-90, 90+.
  */
 function bucketAging(lines, asOfDate, isReceivable) {
+    // Group ledger rows by party. For each party we keep:
+    //   - a list of "charge" rows (Dr for receivable / Cr for payable) with their dates
+    //   - a single net "payment" pool (Cr for receivable / Dr for payable)
+    // Payments are applied FIFO against the oldest open charges, so a payment
+    // received today properly clears the original invoice from the older bucket.
     const partyMap = new Map();
     for (const l of lines) {
         const key = l.PartyID;
-        if (!partyMap.has(key)) partyMap.set(key, { PartyID: key, PartyName: l.PartyName, current: 0, b31_60: 0, b61_90: 0, b90plus: 0, total: 0 });
+        if (!partyMap.has(key)) partyMap.set(key, { PartyName: l.PartyName, charges: [], paid: 0 });
         const p = partyMap.get(key);
-        const net = Number(l.Debit) - Number(l.Credit);
-        // For receivables, debits increase what's owed; for payables, credits do.
-        const owing = isReceivable ? net : -net;
-        if (owing <= 0) continue;
-        const days = Math.floor((asOfDate - new Date(l.VoucherDate)) / (1000 * 60 * 60 * 24));
-        if      (days <= 30) p.current  += owing;
-        else if (days <= 60) p.b31_60   += owing;
-        else if (days <= 90) p.b61_90   += owing;
-        else                 p.b90plus  += owing;
-        p.total += owing;
+        const dr = Number(l.Debit) || 0;
+        const cr = Number(l.Credit) || 0;
+        if (isReceivable) {
+            if (dr > 0) p.charges.push({ amt: dr, date: new Date(l.VoucherDate) });
+            if (cr > 0) p.paid += cr;
+        } else {
+            if (cr > 0) p.charges.push({ amt: cr, date: new Date(l.VoucherDate) });
+            if (dr > 0) p.paid += dr;
+        }
     }
-    // Filter out zero/negative net (party has credits >= debits for the period)
-    return Array.from(partyMap.values()).filter(p => p.total > 0.005)
-        .map(p => ({
-            ...p,
-            current: +p.current.toFixed(2),
-            b31_60:  +p.b31_60.toFixed(2),
-            b61_90:  +p.b61_90.toFixed(2),
-            b90plus: +p.b90plus.toFixed(2),
-            total:   +p.total.toFixed(2)
-        }))
-        .sort((a, b) => b.total - a.total);
+
+    const out = [];
+    for (const [PartyID, p] of partyMap) {
+        // Apply payments FIFO against oldest charges first
+        let pool = p.paid;
+        const sorted = p.charges.slice().sort((a, b) => a.date - b.date);
+        const buckets = { current: 0, b31_60: 0, b61_90: 0, b90plus: 0 };
+        for (const c of sorted) {
+            let remaining = c.amt;
+            if (pool > 0) {
+                const settled = Math.min(pool, remaining);
+                remaining -= settled;
+                pool -= settled;
+            }
+            if (remaining <= 0.005) continue;
+            const days = Math.floor((asOfDate - c.date) / (1000 * 60 * 60 * 24));
+            if      (days <= 30) buckets.current += remaining;
+            else if (days <= 60) buckets.b31_60  += remaining;
+            else if (days <= 90) buckets.b61_90  += remaining;
+            else                 buckets.b90plus += remaining;
+        }
+        const total = buckets.current + buckets.b31_60 + buckets.b61_90 + buckets.b90plus;
+        if (total > 0.005) {
+            out.push({
+                PartyID, PartyName: p.PartyName,
+                current: +buckets.current.toFixed(2),
+                b31_60:  +buckets.b31_60.toFixed(2),
+                b61_90:  +buckets.b61_90.toFixed(2),
+                b90plus: +buckets.b90plus.toFixed(2),
+                total:   +total.toFixed(2),
+            });
+        }
+    }
+    return out.sort((a, b) => b.total - a.total);
 }
 
 async function agingReport(req, res, isReceivable) {
@@ -569,6 +596,8 @@ async function agingReport(req, res, isReceivable) {
         const asOf = endOfDay(asOfRaw);
 
         const pool = await getPool();
+
+        // Standard party-based aging (from the subsidiary ledger)
         const r = await pool.request()
             .input('asOf', sql.DateTime, asOf)
             .query(`
@@ -580,6 +609,41 @@ async function agingReport(req, res, isReceivable) {
                 WHERE v.Status='Posted' AND v.VoucherDate <= @asOf
             `);
         const rows = bucketAging(r.recordset, asOf, isReceivable);
+
+        // Receivables-only: also include MCML campaign claim balances that have
+        // NO matching party (e.g. auto-created "CAMPAIGN: Free car wash" leaves).
+        // Party-linked 102006xxx claims are already counted in the subsidiary
+        // ledger above; including them here would double-count.
+        if (isReceivable) {
+            const cmp = await pool.request()
+                .input('asOf', sql.DateTime, asOf)
+                .query(`
+                    SELECT g.GLCAID, g.GLCode, g.GLTitle, v.VoucherDate,
+                           ISNULL(d.Debit,0) AS Debit, ISNULL(d.Credit,0) AS Credit
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
+                    INNER JOIN GLChartOFAccount g ON d.GLCAID = g.GLCAID
+                    WHERE v.Status='Posted' AND v.VoucherDate <= @asOf
+                      AND LEFT(g.GLCode, 6) = '102006'
+                      AND LEN(g.GLCode) > 6
+                      AND NOT EXISTS (SELECT 1 FROM gen_PartiesInfo p WHERE p.PartyGLID = g.GLCAID)
+                `);
+            // Re-use bucketAging by mapping GLCAID into the PartyID slot —
+            // PartyID is set to negative GLCAID to avoid collision with real parties.
+            const synthetic = cmp.recordset.map(x => ({
+                PartyID:   -x.GLCAID,
+                PartyName: `${x.GLCode} ${x.GLTitle}`,
+                VoucherDate: x.VoucherDate,
+                Debit:  x.Debit,
+                Credit: x.Credit,
+            }));
+            const campaignRows = bucketAging(synthetic, asOf, true);
+            // Flag them so the frontend can label them differently
+            campaignRows.forEach(r => { r.Kind = 'campaign'; });
+            rows.push(...campaignRows);
+            rows.sort((a, b) => b.total - a.total);
+        }
+
         const totals = rows.reduce((t, r) => ({
             current: t.current + r.current,
             b31_60:  t.b31_60  + r.b31_60,
@@ -679,23 +743,49 @@ exports.getPOSPending = async (req, res) => {
 
 /**
  * GET /reports/cheques-on-hand?asOf=
- * All un-cleared cheque lines on CHEQUES_ON_HAND control account.
+ * Pending cheques (received and issued) joined with dms_PendingCheques for rich
+ * metadata: cheque #, drawer/deposit bank, payer/payee, source voucher, age.
  */
 exports.getChequesOnHand = async (req, res) => {
     try {
         const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
         const asOf = endOfDay(asOfRaw);
         const pool = await getPool();
-        const epoch = new Date('1900-01-01');
-        const { glcaid, lines } = await roleAccountLines('CHEQUES_ON_HAND', pool, epoch, asOf);
-        // On-hand = debit (received) lines not yet allocated to a clearance voucher.
-        const onHand = lines.filter(l => Number(l.Debit) > 0 && !l.AllocatedToVoucherID);
-        const total = onHand.reduce((s, l) => s + Number(l.Debit), 0);
+        const glcaid = await resolveRole('CHEQUES_ON_HAND');
+        const r = await pool.request()
+            .input('asOf', sql.DateTime, asOf)
+            .query(`
+                SELECT pc.ChequeID, pc.Direction,
+                       pc.ChequeNo, pc.ChequeDate, pc.Amount, pc.DrawerBank,
+                       db.GLCode AS BankCode, db.GLTitle AS BankTitle,
+                       pc.PartyID, pt.PartyName,
+                       pc.JobCardID, jc.JobCardNo,
+                       rv.VoucherNo AS SourceVoucherNo, rv.VoucherDate AS SourceDate,
+                       DATEDIFF(day, pc.ChequeDate, @asOf) AS AgeDays,
+                       CASE WHEN pc.ChequeDate > CAST(@asOf AS DATE) THEN 1 ELSE 0 END AS PostDated
+                FROM dms_PendingCheques pc
+                LEFT JOIN GLChartOFAccount        db ON db.GLCAID    = pc.DepositBankGLCAID
+                LEFT JOIN gen_PartiesInfo         pt ON pt.PartyID   = pc.PartyID
+                LEFT JOIN Addata_JobCardInfo      jc ON jc.JobCardId = pc.JobCardID
+                LEFT JOIN data_FinanceVoucherInfo rv ON rv.VoucherID = pc.ReceiptVoucherID
+                WHERE pc.Status = 'Pending'
+                ORDER BY pc.Direction, pc.ChequeDate ASC, pc.ChequeID ASC`);
+        const rows = r.recordset;
+        const totals = rows.reduce((t, x) => {
+            if (x.Direction === 'Received') t.received += Number(x.Amount);
+            else                            t.issued   += Number(x.Amount);
+            return t;
+        }, { received: 0, issued: 0 });
         res.json({
             asOf: asOfRaw.toISOString().slice(0, 10),
             glcaid,
-            rows: onHand,
-            total: +total.toFixed(2)
+            rows,
+            totals: {
+                received: +totals.received.toFixed(2),
+                issued:   +totals.issued.toFixed(2),
+                net:      +(totals.received - totals.issued).toFixed(2),
+            },
+            total: +totals.received.toFixed(2)  // backward compat for existing callers
         });
     } catch (err) {
         console.error('Cheques error:', err);
@@ -989,7 +1079,9 @@ exports.getInventoryValuation = async (req, res) => {
         const outMap = new Map(outflow.recordset.map(r => [r.ItemId, Number(r.QtyOut)]));
 
         let rows = items.recordset.map(x => {
-            const onHand = (inMap.get(x.ItemId) || 0) - (outMap.get(x.ItemId) || 0);
+            // data_StockInOutDetail.Quantity is signed (purchase +, issue/sale -)
+            // so it's added, not subtracted. data_StockArrival is opening stock + manual arrivals.
+            const onHand = (inMap.get(x.ItemId) || 0) + (outMap.get(x.ItemId) || 0);
             const rate = Number(x.WeightedRate || 0);
             return {
                 ItemId:      x.ItemId,
@@ -1025,6 +1117,75 @@ exports.getInventoryValuation = async (req, res) => {
         });
     } catch (err) {
         console.error('Inventory Valuation error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /reports/walkin-outstanding?asOf=
+ * Walk-in (no-party) JCs whose SI voucher still has a GENERAL_CUSTOMER Debit
+ * net of any settlement Cr (allocated by VoucherID). One row per pending JC,
+ * with payment type as a hint to the cashier.
+ */
+exports.getWalkInOutstanding = async (req, res) => {
+    try {
+        const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
+        const asOf = endOfDay(asOfRaw);
+
+        const pool = await getPool();
+        const gcGL = await resolveRole('GENERAL_CUSTOMER');
+
+        const r = await pool.request()
+            .input('gl',   sql.Int,      gcGL)
+            .input('asOf', sql.DateTime, asOf)
+            .query(`
+                WITH InvoiceLines AS (
+                    SELECT d.VoucherID, d.JobCardID, SUM(d.Debit) AS Invoiced, MIN(v.VoucherDate) AS InvDate
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE d.GLCAID = @gl AND d.Debit > 0
+                      AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.SourceDocType='JOBCARD' AND v.VoucherDate <= @asOf
+                    GROUP BY d.VoucherID, d.JobCardID
+                ),
+                Settled AS (
+                    SELECT d.AllocatedToVoucherID, SUM(d.Credit) AS Paid
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE d.GLCAID = @gl AND d.Credit > 0 AND d.AllocatedToVoucherID IS NOT NULL
+                      AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.VoucherDate <= @asOf
+                    GROUP BY d.AllocatedToVoucherID
+                )
+                SELECT i.VoucherID, vi.VoucherNo,
+                       jc.JobCardId, jc.JobCardNo, jc.JobCardDate,
+                       jc.[Status] AS PaymentType, jc.PaymentBankID,
+                       i.Invoiced,
+                       ISNULL(s.Paid, 0) AS Paid,
+                       i.Invoiced - ISNULL(s.Paid, 0) AS Outstanding,
+                       DATEDIFF(day, jc.JobCardDate, @asOf) AS AgeDays
+                FROM InvoiceLines i
+                LEFT JOIN Settled s ON s.AllocatedToVoucherID = i.VoucherID
+                INNER JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = i.VoucherID
+                INNER JOIN Addata_JobCardInfo jc ON jc.JobCardId = i.JobCardID
+                WHERE i.Invoiced - ISNULL(s.Paid, 0) > 0.005
+                ORDER BY jc.JobCardDate ASC
+            `);
+
+        const totals = r.recordset.reduce((t, x) => {
+            t.invoiced += Number(x.Invoiced);
+            t.paid     += Number(x.Paid);
+            t.outstanding += Number(x.Outstanding);
+            return t;
+        }, { invoiced: 0, paid: 0, outstanding: 0 });
+
+        res.json({
+            asOf: asOfRaw.toISOString().slice(0, 10),
+            rows: r.recordset,
+            totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, +v.toFixed(2)])),
+        });
+    } catch (err) {
+        console.error('Walk-in Outstanding error:', err);
         res.status(500).json({ error: err.message });
     }
 };

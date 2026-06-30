@@ -50,7 +50,7 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
     const voucherTypeId = vt.recordset[0].Voucherid;
 
     const seqRes = await new sql.Request(transaction).query(
-        `SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo`);
+        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
     const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 
     const narration = `Staff incentive accrued — booking ${a.BookingNo}, employee #${a.EarnerEmployeeID}`;
@@ -138,7 +138,7 @@ async function postDisbursementVoucher(dis, userInfo, transaction) {
     const voucherTypeId = vt.recordset[0].Voucherid;
 
     const seqRes = await new sql.Request(transaction).query(
-        `SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo`);
+        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
     const voucherNo = `${vtCode}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 
     const narration = dis.narration || `Staff incentive disbursement #${dis.sourceDocId || ''}`;

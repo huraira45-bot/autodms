@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, RefreshCw, Printer } from 'lucide-react';
 
 export const API_BASE = '/api';
 
@@ -38,18 +38,26 @@ export default function ReportShell({
 
     const updateParam = (k, v) => setParams(p => ({ ...p, [k]: v }));
 
+    const printedAt = new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+    const filterSummary = formatFilterSummary(params);
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <PrintHeader title={title} subtitle={subtitle} printedAt={printedAt} filterSummary={filterSummary} />
             <div className="card-header">
                 <div>
                     <h1 className="page-title">{title}</h1>
                     {subtitle && <p className="page-subtitle">{subtitle}</p>}
                 </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                     {controls && controls({ params, updateParam })}
                     <button className="btn" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         Refresh
+                    </button>
+                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
+                        style={{ background: '#0f766e' }}>
+                        <Printer size={16} /> Print
                     </button>
                 </div>
             </div>
@@ -59,6 +67,28 @@ export default function ReportShell({
                 </div>
             )}
             {data && children(data, { params, updateParam, reload: load, loading, Icon })}
+        </div>
+    );
+}
+
+function formatFilterSummary(params) {
+    if (!params) return '';
+    const parts = [];
+    if (params.from && params.to) parts.push(`Period: ${params.from} → ${params.to}`);
+    else if (params.asOf) parts.push(`As of: ${params.asOf}`);
+    else if (params.date) parts.push(`Date: ${params.date}`);
+    return parts.join('  •  ');
+}
+
+export function PrintHeader({ title, subtitle, printedAt, filterSummary }) {
+    return (
+        <div className="print-only print-header">
+            <h1>{title}</h1>
+            {subtitle && <div style={{ fontSize: '9pt', color: '#475569', marginTop: 2 }}>{subtitle}</div>}
+            <div className="meta">
+                <span>{filterSummary}</span>
+                <span>Printed: {printedAt}</span>
+            </div>
         </div>
     );
 }

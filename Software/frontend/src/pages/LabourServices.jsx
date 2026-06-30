@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Wrench, Plus, Edit, X, Search, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import { EmptyState } from '../components/UXPrimitives';
 
 const API_BASE = '/api';
 
 export default function LabourServices() {
+  const { notify } = useFeedback();
   const [items, setItems] = useState([]);
   const [jobTypes, setJobTypes] = useState([]);
   const [search, setSearch] = useState('');
@@ -12,7 +15,6 @@ export default function LabourServices() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ItenName: '', ItemSalesPrice: '', JobTypeID: '', ItemType: 'Service', UOMId: 1 });
-  const [success, setSuccess] = useState('');
 
   const fetchData = async () => {
     try {
@@ -51,13 +53,10 @@ export default function LabourServices() {
 
   const toggleSection = (key) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
 
-  const jobTypeLabel = (jt) => jt.CardCode ? `${jt.CardCode} — ${jt.Title}` : jt.Title;
-
   const openNew = () => {
     setEditing(null);
     setForm({ ItenName: '', ItemSalesPrice: '', JobTypeID: '', ItemType: 'Service', UOMId: 1 });
     setShowForm(true);
-    setSuccess('');
   };
 
   const openEdit = (item) => {
@@ -70,7 +69,6 @@ export default function LabourServices() {
       UOMId: item.UOMId || 1
     });
     setShowForm(true);
-    setSuccess('');
   };
 
   const handleSubmit = async (e) => {
@@ -81,11 +79,12 @@ export default function LabourServices() {
       } else {
         await axios.post(`${API_BASE}/items`, form);
       }
-      setSuccess(editing ? 'Service updated!' : 'Service added!');
+      notify({ type: 'success', title: editing ? 'Service updated' : 'Service added', message: form.ItenName });
       setShowForm(false);
       fetchData();
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) { alert('Error: ' + (err.response?.data?.details || err.response?.data?.error || err.message)); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not save service', message: err.response?.data?.details || err.response?.data?.error || err.message });
+    }
   };
 
   const totalServices = filtered.length;
@@ -101,12 +100,6 @@ export default function LabourServices() {
           <Plus size={16} /> Add Service
         </button>
       </div>
-
-      {success && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', padding: '12px 16px', borderRadius: '8px', color: '#166534', fontWeight: 500 }}>
-          {success}
-        </div>
-      )}
 
       {/* Search */}
       <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -125,13 +118,12 @@ export default function LabourServices() {
 
       {/* Grouped sections */}
       {grouped.length === 0 ? (
-        <div className="card" style={{ padding: '48px', textAlign: 'center', color: '#94a3b8' }}>
-          <Wrench size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {search ? 'No services match your search.' : 'No services defined yet.'}
-          </div>
-          {!search && <div style={{ fontSize: 13 }}>Click "Add Service" to get started.</div>}
-        </div>
+        <EmptyState
+          icon={Wrench}
+          title={search ? 'No services match your search' : 'No services defined yet'}
+          message={search ? 'Try another search term.' : 'Add the standard labour operations used on job cards.'}
+          action={!search && <button className="btn-sm" onClick={openNew}><Plus size={14} /> Add Service</button>}
+        />
       ) : (
         grouped.map(group => {
           const isCollapsed = collapsed[group.JobTypeID];
@@ -204,13 +196,13 @@ export default function LabourServices() {
 
       {/* Add / Edit Modal */}
       {showForm && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'white', borderRadius: '12px', width: '480px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            <div style={{ padding: '16px 20px', background: '#f0f9ff', borderBottom: '1px solid #bae6fd', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '12px 12px 0 0' }}>
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ width: 480 }}>
+            <div className="modal-header">
               <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Wrench size={18} /> {editing ? 'Edit Service' : 'Add New Service'}
               </h3>
-              <button onClick={() => setShowForm(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+              <button onClick={() => setShowForm(false)}><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="form-group">

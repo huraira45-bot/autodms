@@ -9,7 +9,10 @@
  *   grn       — { PurchaseID, PurchaseVoucherNo, PartyID (supplier), FreightAmount,
  *                 NetDiscount (trade discount, post-tax), FreightTaxable }
  *   lines     — [{ ItemId, Quantity, ItemRate, TaxRate, TaxAmount, UnitLandedCost }]
- *   accounts  — { INVENTORY_PARTS, INPUT_GST, TRADE_CREDITORS } each { GLCAID }
+ *   accounts  — { INVENTORY_PARTS, INPUT_GST } each { GLCAID }
+ *   supplierGL — { GLCAID } — the supplier's own PartyGLID leaf (required).
+ *                Each supplier carries its own A/P account in gen_PartiesInfo;
+ *                we never fall back to a system-wide TRADE_CREDITORS bucket.
  *
  * Output:
  *   { header, lines, subsidiaryWrites, totals }
@@ -17,10 +20,13 @@
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildGRNJournalLines({ grn, lines = [], accounts }) {
+function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) {
     if (!accounts) throw new Error('accounts map required');
     if (!grn) throw new Error('grn header required');
     if (!grn.PartyID) throw new Error('Supplier PartyID is required for GRN voucher posting.');
+    if (!supplierGL?.GLCAID) {
+        throw new Error('Supplier has no GL account set (PartyGLID is null). Edit the supplier party and assign one.');
+    }
 
     // Aggregate from snapshot columns. Inventory debit = sum of (line.qty × line.UnitLandedCost).
     // Input GST = sum of line TaxAmount (snapshot already accounts for freight-taxable split).
@@ -75,15 +81,15 @@ function buildGRNJournalLines({ grn, lines = [], accounts }) {
         });
     }
 
-    // (3) Cr Trade Creditors — supplier subsidiary
+    // (3) Cr supplier A/P leaf (the supplier's own PartyGLID)
     journalLines.push({
-        GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+        GLCAID: supplierGL.GLCAID,
         Debit: 0, Credit: supplierCredit,
         Narration: `Supplier payable — ${narrationRef}`,
         PartyID: grn.PartyID, JobCardID: null,
     });
     subsidiaryWrites.push({
-        GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+        GLCAID: supplierGL.GLCAID,
         Debit: 0, Credit: supplierCredit,
         PartyID: grn.PartyID, JobCardID: null,
         Narration: `Supplier payable — ${narrationRef}`,

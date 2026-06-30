@@ -137,8 +137,21 @@ exports.getBooking = async (req, res) => {
         const negotiation = await pool.request().input('id', sql.Int, id)
             .query(`SELECT TOP 5 * FROM dms_NegotiationRequests WHERE BookingID=@id ORDER BY ProposedAt DESC`);
 
+        // Cumulative amount forwarded to Master against this booking — sum of
+        // BOOKING_VARIANT_RECEIVABLE Dr legs tagged with the booking. Used by
+        // the UI to show remaining-to-pay-master and toggle the Pay Master button.
+        const masterPaidR = await pool.request().input('id', sql.Int, id).query(`
+            SELECT ISNULL(SUM(d.Debit - d.Credit), 0) AS AmountPaidToMaster
+            FROM data_FinanceVoucherDetail d
+            INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+            INNER JOIN dms_SystemAccounts      sa ON sa.GLCAID    = d.GLCAID
+            WHERE v.Status='Posted'
+              AND sa.RoleKey='BOOKING_VARIANT_RECEIVABLE'
+              AND d.BookingID=@id`);
+
         res.json({
             ...bk.recordset[0],
+            AmountPaidToMaster: Number(masterPaidR.recordset[0]?.AmountPaidToMaster || 0),
             payments: payments.recordset,
             transitions: transitions.recordset,
             negotiations: negotiation.recordset,
@@ -652,10 +665,15 @@ exports.recordPayment = async (req, res) => {
             return res.status(409).json({ error: `Cannot accept payment in status ${booking.Status}` });
         }
 
-        // Compute new total to decide if minimum threshold is crossed
+        // Compute new total to decide if state thresholds are crossed
         const minAmt = Number(booking.MinimumBookingAmount) || 0;
+        const negotiated = Number(booking.NegotiatedPrice) || 0;
         const newTotal = Number(booking.AmountPaidToDate) + amount;
         const willConfirmBooking = booking.Status === 'PendingBookingPayment' && newTotal >= minAmt;
+        // Advance to PendingPayment once the booking is fully paid — this is what
+        // unlocks the Allocate Vehicle button on the booking detail screen.
+        const willFlagFullyPaid = ['PendingBookingPayment', 'BookingConfirmed'].includes(booking.Status)
+            && negotiated > 0 && newTotal >= negotiated - 0.01;
 
         const tx = new sql.Transaction(pool);
         await tx.begin();
@@ -713,6 +731,18 @@ exports.recordPayment = async (req, res) => {
                     .query(`UPDATE dms_SalesBookings SET Status='BookingConfirmed', UpdatedAt=GETDATE() WHERE BookingID=@id`);
                 await logTransition(tx, id, 'PendingBookingPayment', 'BookingConfirmed', req.user,
                     `Minimum booking amount (PKR ${minAmt.toLocaleString()}) received. Booking confirmed. Cancellation now requires AM approval.`);
+            }
+
+            // Once the booking is fully paid (or over-paid), advance to
+            // PendingPayment so the Allocate Vehicle button becomes available.
+            // This jump may skip BookingConfirmed if min and full are crossed
+            // by the same payment.
+            if (willFlagFullyPaid) {
+                const fromState = willConfirmBooking ? 'BookingConfirmed' : booking.Status;
+                await new sql.Request(tx).input('id', sql.Int, id)
+                    .query(`UPDATE dms_SalesBookings SET Status='PendingPayment', UpdatedAt=GETDATE() WHERE BookingID=@id`);
+                await logTransition(tx, id, fromState, 'PendingPayment', req.user,
+                    `Booking fully paid (PKR ${newTotal.toLocaleString()} of ${negotiated.toLocaleString()}). Ready for vehicle allocation.`);
             }
 
             // GL posting — gated. If any required system-account role is unmapped,

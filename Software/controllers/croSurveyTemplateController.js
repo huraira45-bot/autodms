@@ -88,7 +88,8 @@ exports.create = async (req, res) => {
                 .input('v',   sql.Int, version)
                 .input('q',   sql.NVarChar(sql.MAX), JSON.stringify(b.Questions))
                 .input('act', sql.Bit, b.IsActive ? 1 : 0)
-                .input('cby', sql.Int, req.user?.userId || null)
+                // CreatedByEmployeeID has an FK to gen_EmployeeInfo — must be employeeId, not userId.
+                .input('cby', sql.Int, req.user?.employeeId || null)
                 .input('cbyN', sql.NVarChar(100), req.user?.userName || null)
                 .query(`INSERT INTO dms_CRO_SurveyTemplates
                             (SurveyType, Version, QuestionsJSON, IsActive, CreatedAt, CreatedByEmployeeID, CreatedByName)

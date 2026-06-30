@@ -26,7 +26,7 @@ const PAYMENT_MODES = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBank = null }) {
+function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBank = null, campaign = null, partyGL = null }) {
     if (!accounts) throw new Error('accounts map required');
     if (!storeSale) throw new Error('storeSale header required');
 
@@ -49,7 +49,13 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
     partsTax = round2(partsTax);
     partsCOGS = round2(partsCOGS);
 
-    const customerPays = round2(partsGross - partsDiscount + partsTax);
+    const invoiceTotal = round2(partsGross - partsDiscount + partsTax);
+    // Phase 3: campaign benefit reduces what the customer pays — debited to
+    // the campaign GL account (MCML claim or our expense).
+    const campaignBenefit = campaign && campaign.BenefitAmount > 0
+        ? round2(Math.min(Number(campaign.BenefitAmount), invoiceTotal))
+        : 0;
+    const customerPays = round2(invoiceTotal - campaignBenefit);
 
     // Resolve payment-side
     const paymentMode = storeSale.PaymentMode || 'Cash';
@@ -59,7 +65,8 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
 
     if (paymentMode === 'Credit') {
         if (!storeSale.PartyID) throw new Error('Credit Store Sale requires PartyID (named credit party).');
-        customerSubsidiaryAccount = accounts.TRADE_DEBTORS;
+        if (!partyGL?.GLCAID) throw new Error('Credit customer has no GL account set (PartyGLID is null). Edit the party and pick one before finalizing.');
+        customerSubsidiaryAccount = partyGL;
         partyTagForInvoiceLeg = storeSale.PartyID;
     } else {
         customerSubsidiaryAccount = accounts.GENERAL_CUSTOMER;
@@ -90,7 +97,11 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         };
     }
 
-    // (1) Invoice leg — Dr customer subsidiary for total customer-pays
+    // (1) Invoice leg — Dr customer subsidiary for total customer-pays.
+    // Only emit a dms_PartyLedger row when there's an actual subsidiary to
+    // track (named credit customer). For cash/POS/bank sales the GENERAL_CUSTOMER
+    // Dr is balanced by an immediate Cr on the same voucher, so no per-party
+    // history is needed — and the CK_PartyLedger_Tag check requires a tag.
     if (customerPays > 0) {
         journalLines.push({
             GLCAID: customerSubsidiaryAccount.GLCAID,
@@ -98,12 +109,24 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
             Narration: `Counter sale invoice — ${narrationRef}`,
             PartyID: partyTagForInvoiceLeg, JobCardID: null,
         });
-        subsidiaryWrites.push({
-            GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: customerPays, Credit: 0,
-            PartyID: partyTagForInvoiceLeg,
-            JobCardID: null,
-            Narration: `Counter sale — ${narrationRef}`,
+        if (partyTagForInvoiceLeg) {
+            subsidiaryWrites.push({
+                GLCAID: customerSubsidiaryAccount.GLCAID,
+                Debit: customerPays, Credit: 0,
+                PartyID: partyTagForInvoiceLeg,
+                JobCardID: null,
+                Narration: `Counter sale — ${narrationRef}`,
+            });
+        }
+    }
+
+    // (1b) Campaign claim leg — Dr the campaign GL account for the benefit
+    if (campaign && campaignBenefit > 0) {
+        journalLines.push({
+            GLCAID: campaign.GLAccountID,
+            Debit: campaignBenefit, Credit: 0,
+            Narration: `Campaign claim: ${campaign.CampaignName} — ${narrationRef}`,
+            PartyID: null, JobCardID: null,
         });
     }
 
@@ -157,27 +180,12 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         });
     }
 
-    // (7) & (8) Payment receipt leg — only for non-Credit modes
-    if (paymentMode !== 'Credit' && customerPays > 0) {
-        journalLines.push({
-            GLCAID: paymentSideAccount.GLCAID,
-            Debit: customerPays, Credit: 0,
-            Narration: `${paymentMode} receipt — ${narrationRef}`,
-            PartyID: null, JobCardID: null,
-        });
-        journalLines.push({
-            GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: 0, Credit: customerPays,
-            Narration: `Settle via ${paymentMode} — ${narrationRef}`,
-            PartyID: null, JobCardID: null,
-        });
-        subsidiaryWrites.push({
-            GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: 0, Credit: customerPays,
-            PartyID: null, JobCardID: null,
-            Narration: `Settle via ${paymentMode} — ${narrationRef}`,
-        });
-    }
+    // NOTE: payment-side receipt leg intentionally removed. Cash/POS/Bank/Cheque
+    // store sales now post ONLY the invoice (Dr GENERAL_CUSTOMER / Cr revenue +
+    // tax + COGS movement), matching the Job Card pattern. The cashier records
+    // the actual receipt via the Receive Payment screen → "Walk-in deposit
+    // against Store Sale" tab, which posts the bank/cash debit and settles the
+    // GENERAL_CUSTOMER Dr by AllocatedToVoucherID + JobCardID-equivalent tag.
 
     // Balance check
     const totalDr = round2(journalLines.reduce((a, l) => a + (l.Debit || 0), 0));
@@ -186,19 +194,30 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         throw new Error(`Store Sale journal not balanced: Dr ${totalDr} vs Cr ${totalCr}`);
     }
 
+    // Single-leg customer AR descriptor for POS auto-settle at finalize.
+    // Store sales never have an AR split, so this is always set when there's
+    // a customer-pays leg.
+    const customerARDr = (customerPays > 0)
+        ? { GLCAID: customerSubsidiaryAccount.GLCAID, PartyID: partyTagForInvoiceLeg, Amount: customerPays }
+        : null;
+
     return {
         header: {
             SourceDocType: 'STORE_SALE',
             SourceDocID: storeSale.SaleID,
-            Narration: `Store Sale finalize — ${narrationRef}`,
-            TotalAmount: customerPays,
+            Narration: campaign
+                ? `Store Sale finalize — ${narrationRef} (campaign: ${campaign.CampaignName})`
+                : `Store Sale finalize — ${narrationRef}`,
+            TotalAmount: invoiceTotal,
         },
         lines: journalLines,
         subsidiaryWrites,
+        customerARDr,
         totals: {
             partsGross, partsDiscount, partsTax, partsCOGS,
-            customerPays, totalDr, totalCr,
+            invoiceTotal, campaignBenefit, customerPays, totalDr, totalCr,
         },
+        appliedCampaignID: campaign?.ApplicationID || null,
     };
 }
 

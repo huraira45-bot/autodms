@@ -1,9 +1,13 @@
 const { sql, getPool } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const MODULES = require('../config/modules');
+const { SECTIONS } = require('../config/permissions');
 
-// ── Module list (static) ──────────────────────────────────────────────────────
+// Legacy flat module list (kept for any older callers that hit /modules)
 exports.getModules = (req, res) => res.json(MODULES);
+
+// New granular registry: sections + items (each item has kind: document/workflow/report)
+exports.getPermissionRegistry = (req, res) => res.json(SECTIONS);
 
 // ── Roles ─────────────────────────────────────────────────────────────────────
 exports.getRoles = async (req, res) => {
@@ -12,6 +16,37 @@ exports.getRoles = async (req, res) => {
         const result = await pool.request()
             .query('SELECT GroupID, GroupTitle, Description FROM GLUserGroup WHERE ISNULL(Inactive,0) = 0 ORDER BY GroupTitle');
         res.json(result.recordset);
+    } catch (err) {
+        res.status(500).json({ error: 'Server error', details: err.message });
+    }
+};
+
+exports.deleteRole = async (req, res) => {
+    try {
+        const groupId = parseInt(req.params.groupId);
+        if (groupId === 1) {
+            return res.status(400).json({ error: 'Cannot delete the admin role.' });
+        }
+        const pool = await getPool();
+        // Block deletion if any users are still in this group
+        const inUse = await pool.request()
+            .input('groupId', sql.Int, groupId)
+            .query('SELECT COUNT(*) AS n FROM GLUser WHERE GroupID = @groupId');
+        if (inUse.recordset[0].n > 0) {
+            return res.status(409).json({
+                error: `Cannot delete: ${inUse.recordset[0].n} user(s) are still assigned to this role.`,
+            });
+        }
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            await new sql.Request(tx).input('g', sql.Int, groupId)
+                .query('DELETE FROM dms_ModulePermissions WHERE GroupID = @g');
+            await new sql.Request(tx).input('g', sql.Int, groupId)
+                .query('DELETE FROM GLUserGroup WHERE GroupID = @g');
+            await tx.commit();
+            res.json({ message: 'Role deleted' });
+        } catch (e) { await tx.rollback(); throw e; }
     } catch (err) {
         res.status(500).json({ error: 'Server error', details: err.message });
     }
@@ -33,23 +68,28 @@ exports.createRole = async (req, res) => {
     }
 };
 
-// ── Role Permissions ──────────────────────────────────────────────────────────
+// Role Permissions — returns flat array of PermissionKey strings for the group
 exports.getRolePermissions = async (req, res) => {
     try {
         const pool = await getPool();
         const result = await pool.request()
             .input('groupId', sql.Int, parseInt(req.params.groupId))
-            .query('SELECT ModuleKey FROM dms_ModulePermissions WHERE GroupID = @groupId');
-        res.json(result.recordset.map(r => r.ModuleKey));
+            .query('SELECT PermissionKey FROM dms_ModulePermissions WHERE GroupID = @groupId');
+        res.json(result.recordset.map(r => r.PermissionKey));
     } catch (err) {
         res.status(500).json({ error: 'Server error', details: err.message });
     }
 };
 
+// Accepts { permissions: ['workshop_jobs:view', 'report:trial_balance', 'finalize', ...] }
+// Also still accepts legacy { modules: [...] } for backward compat — those entries
+// are taken to mean "grant all 4 actions" on that document module.
 exports.setRolePermissions = async (req, res) => {
     try {
         const groupId = parseInt(req.params.groupId);
-        const { modules } = req.body; // array of ModuleKey strings
+        const incoming = Array.isArray(req.body.permissions) ? req.body.permissions
+                       : Array.isArray(req.body.modules)     ? req.body.modules
+                       : [];
         const pool = await getPool();
         const transaction = new sql.Transaction(pool);
         await transaction.begin();
@@ -58,14 +98,16 @@ exports.setRolePermissions = async (req, res) => {
                 .input('groupId', sql.Int, groupId)
                 .query('DELETE FROM dms_ModulePermissions WHERE GroupID = @groupId');
 
-            for (const key of (modules || [])) {
+            // De-dupe and insert
+            const unique = Array.from(new Set(incoming.filter(k => typeof k === 'string' && k.length > 0)));
+            for (const key of unique) {
                 await new sql.Request(transaction)
                     .input('groupId', sql.Int, groupId)
-                    .input('key', sql.NVarChar(50), key)
-                    .query('INSERT INTO dms_ModulePermissions (GroupID, ModuleKey) VALUES (@groupId, @key)');
+                    .input('key', sql.NVarChar(80), key)
+                    .query('INSERT INTO dms_ModulePermissions (GroupID, PermissionKey) VALUES (@groupId, @key)');
             }
             await transaction.commit();
-            res.json({ message: 'Permissions saved' });
+            res.json({ message: 'Permissions saved', count: unique.length });
         } catch (err) {
             await transaction.rollback();
             throw err;

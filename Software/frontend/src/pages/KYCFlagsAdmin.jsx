@@ -4,13 +4,14 @@
  * Banner on the JobCardForm reads from `/active-for-chassis/:chasis` and
  * forces the Advisor to acknowledge before they can save the JC.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
     ShieldAlert, Plus, RefreshCw, Loader2, Search, XCircle,
     CheckCircle2, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -24,6 +25,7 @@ const TYPE_STYLE = {
 
 export default function KYCFlagsAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [openOnly, setOpenOnly] = useState(true);
@@ -51,7 +53,13 @@ export default function KYCFlagsAdmin() {
     useEffect(() => { load(); }, [load]);
 
     const remove = async (id) => {
-        if (!window.confirm('Delete this flag permanently? Acknowledgments will also be removed.')) return;
+        const ok = await confirmAction({
+            title: 'Delete KYC flag?',
+            message: 'This permanently removes the flag and its acknowledgments.',
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/cro/kyc-flags/${id}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };

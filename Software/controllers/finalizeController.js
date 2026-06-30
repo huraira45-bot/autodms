@@ -20,7 +20,7 @@ const POST_COMMIT_HOOKS = {
     },
 };
 
-const ENTITY_MAP = {
+const ENTITY_MAP = Object.freeze({
     JOBCARD:    { table: 'Addata_JobCardInfo',           pk: 'JobCardId',        refCol: 'JobCardNo'         },
     GRN:        { table: 'data_PurchaseInfo',             pk: 'PurchaseID',       refCol: 'PurchaseVoucherNo' },
     GRTN:       { table: 'data_PurchaseReturnInfo',       pk: 'PurchaseReturnID', refCol: 'PurchaseReturnNo'  },
@@ -29,7 +29,17 @@ const ENTITY_MAP = {
     // Manual vouchers — finalize means Draft → Posted; unfinalize means a reversal voucher is posted.
     // Status column drives the state machine instead of IsFinalized.
     VOUCHER:    { table: 'data_FinanceVoucherInfo',       pk: 'VoucherID',        refCol: 'VoucherNo', isVoucher: true },
-};
+});
+
+// Defense-in-depth: each table/pk/refCol value is interpolated directly into
+// queries. Validate the shape at module load so any future hand-edit that
+// accidentally introduces a quote / space / semicolon fails fast.
+const SQL_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+for (const [k, v] of Object.entries(ENTITY_MAP)) {
+    if (!SQL_IDENT.test(v.table) || !SQL_IDENT.test(v.pk) || !SQL_IDENT.test(v.refCol)) {
+        throw new Error(`ENTITY_MAP[${k}] has an unsafe identifier (must match [A-Za-z_][A-Za-z0-9_]*).`);
+    }
+}
 
 // Posting hooks fired inside the finalize transaction. Each function takes
 // (entityId, userInfo, transaction) and returns the new VoucherID (or null).
@@ -295,6 +305,28 @@ exports.adminUnfinalize = async (req, res) => {
                     transaction
                 );
             } else {
+                // For non-voucher entities (JOBCARD, GRN, GRTN, STORE_SALE, SSR) we
+                // (a) reverse the source-document's auto-posted voucher (if any) so
+                //     the GL doesn't carry a duplicate when the record is re-finalized,
+                // (b) flip IsFinalized=0 on the record itself,
+                // (c) reactivate any campaign application that was linked to the
+                //     reversed voucher (so the user can re-apply / change it before
+                //     re-finalizing).
+                const postedVoucher = await new sql.Request(transaction)
+                    .input('src',   sql.NVarChar(20), r.EntityType)
+                    .input('srcId', sql.Int,          r.EntityID)
+                    .query(`SELECT TOP 1 VoucherID FROM data_FinanceVoucherInfo
+                            WHERE SourceDocType = @src AND SourceDocID = @srcId
+                              AND Status = 'Posted' AND ReversesVoucherID IS NULL
+                            ORDER BY VoucherID DESC`);
+                if (postedVoucher.recordset.length) {
+                    reversalInfo = await postReversalVoucher(
+                        postedVoucher.recordset[0].VoucherID,
+                        { userId: req.user.userId, userName: req.user.userName },
+                        transaction
+                    );
+                }
+
                 await new sql.Request(transaction)
                     .input('id', sql.Int, r.EntityID)
                     .query(`UPDATE ${em.table} SET IsFinalized=0, FinalizedBy=NULL, FinalizedByName=NULL, FinalizedAt=NULL WHERE ${em.pk}=@id`);

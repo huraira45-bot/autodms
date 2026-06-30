@@ -227,7 +227,7 @@ exports.addAction = async (req, res) => {
         await transaction.begin();
         try {
             await writeAction(transaction, id, type, {
-                employeeId: req.user?.userId,
+                employeeId: req.user?.employeeId,
                 employeeName: req.user?.userName,
                 notes: Notes.trim(),
             });
@@ -292,7 +292,7 @@ exports.markResolved = async (req, res) => {
                         SET Status='PendingCROVerify', UpdatedAt=GETDATE(), UpdatedBy=@uby
                         WHERE ComplaintID=@id`);
             await writeAction(transaction, id, 'Resolved', {
-                employeeId: req.user?.userId,
+                employeeId: req.user?.employeeId,
                 employeeName: req.user?.userName,
                 notes: Notes || 'Resolution posted; awaiting CRO verification.',
             });
@@ -320,7 +320,7 @@ exports.whatsAppOverride = async (req, res) => {
         await transaction.begin();
         try {
             await writeAction(transaction, id, 'WhatsAppProofOverride', {
-                employeeId: req.user?.userId,
+                employeeId: req.user?.employeeId,
                 employeeName: req.user?.userName,
                 notes: `OVERRIDE: ${Reason.trim()}`,
             });
@@ -353,7 +353,7 @@ exports.recordVerdict = async (req, res) => {
         await transaction.begin();
         try {
             await writeAction(transaction, id, 'CustomerVerdict', {
-                employeeId: req.user?.userId,
+                employeeId: req.user?.employeeId,
                 employeeName: req.user?.userName,
                 notes: Notes || `Verdict: ${Verdict}`,
                 customerVerdict: Verdict,
@@ -368,14 +368,14 @@ exports.recordVerdict = async (req, res) => {
                 newStatus = 'Assigned';
                 newLevel = 2;
                 await writeAction(transaction, id, 'ReOpened', {
-                    employeeId: req.user?.userId,
+                    employeeId: req.user?.employeeId,
                     employeeName: req.user?.userName,
                     notes: 'Customer rejected resolution — escalated to L2.',
                     escalationLevelBefore: levelBefore,
                     escalationLevelAfter: 2,
                 });
                 await writeAction(transaction, id, 'Escalated', {
-                    employeeId: req.user?.userId,
+                    employeeId: req.user?.employeeId,
                     employeeName: req.user?.userName,
                     notes: 'Forced L2 escalation per NotSatisfied kickback rule (decision #5).',
                     escalationLevelBefore: levelBefore,
@@ -400,7 +400,7 @@ exports.recordVerdict = async (req, res) => {
 
             if (newStatus === 'Closed') {
                 await writeAction(transaction, id, 'Closed', {
-                    employeeId: req.user?.userId,
+                    employeeId: req.user?.employeeId,
                     employeeName: req.user?.userName,
                     notes: 'Complaint closed — customer satisfied.',
                 });
@@ -446,7 +446,7 @@ exports.manualEscalate = async (req, res) => {
         await tx.begin();
         try {
             await writeAction(tx, id, 'Escalated', {
-                employeeId: req.user?.userId,
+                employeeId: req.user?.employeeId,
                 employeeName: req.user?.userName,
                 notes: `MANUAL: ${Reason.trim()}`,
                 escalationLevelBefore: levelBefore,
@@ -493,7 +493,7 @@ exports.reassign = async (req, res) => {
                             UpdatedAt=GETDATE(), UpdatedBy=@uby
                         WHERE ComplaintID=@id`);
             await writeAction(tx, id, 'Reassigned', {
-                employeeId: req.user?.userId,
+                employeeId: req.user?.employeeId,
                 employeeName: req.user?.userName,
                 notes: `Reassigned to ${empRow.recordset[0].EmployeeName}${Reason ? ` — ${Reason}` : ''}.`,
             });

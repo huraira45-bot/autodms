@@ -8,19 +8,23 @@ const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildGRNJournalLines } = require('../utils/grnJournalBuilder');
 
-async function resolveGRNAccounts(transaction) {
-    const byCode = async (code) => {
-        const r = await new sql.Request(transaction)
-            .input('c', sql.NVarChar(50), code)
-            .query('SELECT GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND Status=1');
-        if (!r.recordset.length) throw new Error(`COA account ${code} not found.`);
-        return { GLCAID: r.recordset[0].GLCAID };
-    };
+async function resolveGRNAccounts(/* transaction */) {
     return {
-        INVENTORY_PARTS:  await byCode('101004'),
+        INVENTORY_PARTS:  { GLCAID: await resolveRole('INVENTORY_PARTS') },
         INPUT_GST:        { GLCAID: await resolveRole('INPUT_GST') },
-        TRADE_CREDITORS:  await byCode('201001'),
     };
+}
+
+// Each supplier carries its own A/P leaf in gen_PartiesInfo.PartyGLID.
+// Load it here; throws if missing so the user sees a clear error.
+async function loadSupplierGL(partyId, transaction) {
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, partyId)
+        .query('SELECT PartyName, PartyGLID FROM gen_PartiesInfo WHERE PartyID=@id');
+    if (!r.recordset.length) throw new Error(`Supplier party #${partyId} not found.`);
+    const p = r.recordset[0];
+    if (!p.PartyGLID) throw new Error(`Supplier "${p.PartyName}" has no GL account linked. Edit the party and pick one before finalizing the GRN.`);
+    return { GLCAID: p.PartyGLID };
 }
 
 async function loadGRNData(purchaseId, transaction) {
@@ -47,7 +51,8 @@ async function loadGRNData(purchaseId, transaction) {
 async function postGRNVoucher(purchaseId, userInfo, transaction) {
     const { grn, lines } = await loadGRNData(purchaseId, transaction);
     const accounts = await resolveGRNAccounts(transaction);
-    const built = buildGRNJournalLines({ grn, lines, accounts });
+    const supplierGL = await loadSupplierGL(grn.PartyID, transaction);
+    const built = buildGRNJournalLines({ grn, lines, accounts, supplierGL });
 
     if (built.lines.length === 0) return null;
 
@@ -58,7 +63,7 @@ async function postGRNVoucher(purchaseId, userInfo, transaction) {
 
     // Generate sequential voucher number
     const seqRes = await new sql.Request(transaction).query(
-        "SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo"
+        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
     );
     const voucherNo = `PV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 

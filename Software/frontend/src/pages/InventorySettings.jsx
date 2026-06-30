@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Plus, Warehouse } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import { PageHeader } from '../components/UXPrimitives';
 
 const API_BASE = '/api';
 
 export default function InventorySettings() {
+  const { notify } = useFeedback();
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
   const [uoms, setUOMs] = useState([]);
@@ -32,34 +35,56 @@ export default function InventorySettings() {
 
   useEffect(() => { fetchData(); }, []);
 
+  const showError = (title, err) => {
+    notify({ type: 'error', title, message: err.response?.data?.details || err.response?.data?.error || err.message });
+  };
+
   const handleAddCat = async (e) => {
     e.preventDefault();
-    try { await axios.post(`${API_BASE}/inventory-config/categories`, { CategoryName: catName }); setCatName(''); fetchData(); } 
-    catch (err) { alert('Error: ' + err.message); }
+    try {
+      await axios.post(`${API_BASE}/inventory-config/categories`, { CategoryName: catName });
+      notify({ type: 'success', title: 'Category added', message: catName });
+      setCatName('');
+      fetchData();
+    } catch (err) { showError('Could not add category', err); }
   };
 
   const handleAddBrand = async (e) => {
     e.preventDefault();
-    try { await axios.post(`${API_BASE}/inventory-config/brands`, { BrandName: brandName }); setBrandName(''); fetchData(); } 
-    catch (err) { alert('Error: ' + err.message); }
+    try {
+      await axios.post(`${API_BASE}/inventory-config/brands`, { BrandName: brandName });
+      notify({ type: 'success', title: 'Brand added', message: brandName });
+      setBrandName('');
+      fetchData();
+    } catch (err) { showError('Could not add brand', err); }
   };
 
   const handleAddUom = async (e) => {
     e.preventDefault();
-    try { await axios.post(`${API_BASE}/inventory-config/uoms`, { UOMName: uomName, Scale: 1 }); setUomName(''); fetchData(); } 
-    catch (err) { alert('Error: ' + err.message); }
+    try {
+      await axios.post(`${API_BASE}/inventory-config/uoms`, { UOMName: uomName, Scale: 1 });
+      notify({ type: 'success', title: 'Unit added', message: uomName });
+      setUomName('');
+      fetchData();
+    } catch (err) { showError('Could not add unit', err); }
   };
 
   const handleAddWarehouse = async (e) => {
     e.preventDefault();
-    try { await axios.post(`${API_BASE}/inventory-config/warehouses`, whData); setWhData({ WHDesc: '', WhCode: '', PhoneNo: '', LocationAddress: '' }); fetchData(); } 
-    catch (err) { alert('Error: ' + err.message); }
+    try {
+      await axios.post(`${API_BASE}/inventory-config/warehouses`, whData);
+      notify({ type: 'success', title: 'Warehouse added', message: whData.WHDesc });
+      setWhData({ WHDesc: '', WhCode: '', PhoneNo: '', LocationAddress: '' });
+      fetchData();
+    } catch (err) { showError('Could not add warehouse', err); }
   };
 
   return (
-    <div>
-      <h1 className="page-title">Inventory Configurations</h1>
-      <p className="page-subtitle">Setup lookups, categories, and units for the Master Catalog.</p>
+    <div className="ux-page-stack">
+      <PageHeader
+        title="Inventory Configurations"
+        subtitle="Setup lookups, categories, brands, warehouses, and units for the master catalog."
+      />
       
       <div className="grid-2" style={{ marginTop: '24px', gap: '24px' }}>
         <div className="card">

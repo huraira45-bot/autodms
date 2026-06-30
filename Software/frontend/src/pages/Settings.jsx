@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Plus } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import { PageHeader } from '../components/UXPrimitives';
 
 const API_BASE = '/api';
 
 export default function Settings() {
+  const { notify } = useFeedback();
   const [departments, setDepartments] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -36,48 +39,58 @@ export default function Settings() {
     fetchData();
   }, []);
 
+  const showError = (title, err) => {
+    notify({ type: 'error', title, message: err.response?.data?.details || err.response?.data?.error || err.message });
+  };
+
   const handleAddDept = async (e) => {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/departments`, { DepartmentName: deptName, ActionUserID: 1 });
+      notify({ type: 'success', title: 'Department added', message: deptName });
       setDeptName('');
       fetchData();
-    } catch (err) { alert('Error adding department: ' + (err.response?.data?.details || err.message)); }
+    } catch (err) { showError('Could not add department', err); }
   };
 
   const handleAddDesig = async (e) => {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/designations`, { DesignationName: desigName, ActionUserID: 1 });
+      notify({ type: 'success', title: 'Designation added', message: desigName });
       setDesigName('');
       fetchData();
-    } catch (err) { alert('Error adding designation: ' + (err.response?.data?.details || err.message)); }
+    } catch (err) { showError('Could not add designation', err); }
   };
 
   const handleAddCat = async (e) => {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/inventory-config/categories`, { CategoryName: catName });
+      notify({ type: 'success', title: 'Category added', message: catName });
       setCatName('');
       fetchData();
-    } catch (err) { alert('Error adding category: ' + err.message); }
+    } catch (err) { showError('Could not add category', err); }
   };
 
   const handleAddUom = async (e) => {
     e.preventDefault();
     try {
       await axios.post(`${API_BASE}/inventory-config/uoms`, { UOMName: uomName, Scale: 1 });
+      notify({ type: 'success', title: 'Unit added', message: uomName });
       setUomName('');
       fetchData();
-    } catch (err) { alert('Error adding UOM: ' + err.message); }
+    } catch (err) { showError('Could not add unit', err); }
   };
 
   return (
-    <div>
-      <h1 className="page-title">Master Settings</h1>
-      <p className="page-subtitle">Configure organization structure and inventory lookups.</p>
+    <div className="ux-page-stack">
+      <PageHeader
+        title="Master Settings"
+        subtitle="Configure organization structure and inventory lookups."
+      />
 
-      <div className="grid-2" style={{ marginTop: '24px', gap: '24px' }}>
+      <div className="grid-2" style={{ gap: '24px' }}>
         
         {/* Departments Column */}
         <div className="card">

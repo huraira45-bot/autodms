@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Filter, Loader2, RefreshCw, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Filter, Loader2, RefreshCw, X, ChevronLeft, ChevronRight, Printer, User } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE = '/api';
 
@@ -23,11 +24,22 @@ const STATUS_BADGE = {
     Reversed: { bg: '#fee2e2', col: '#b91c1c' }
 };
 
+const SOURCE_DOC_LABELS = {
+    JOBCARD: 'Job Card',
+    STORE_SALE: 'Store Sale',
+    GRN: 'GRN',
+    GRTN: 'GRTN',
+    SSR: 'Store Sale Return',
+    SALES_PAYMENT: 'Sales Payment',
+    CHEQUE: 'Cheque',
+};
+
 const todayISO     = () => new Date().toISOString().slice(0, 10);
 const yearStartISO = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 
 export default function VoucherBrowser() {
     const navigate = useNavigate();
+    const { user } = useAuth();
     const [filters, setFilters] = useState({
         types: [],
         status: '',
@@ -35,7 +47,8 @@ export default function VoucherBrowser() {
         to: todayISO(),
         q: '',
         minAmount: '',
-        maxAmount: ''
+        maxAmount: '',
+        createdById: ''   // when set to the current user's id, shows only their vouchers
     });
     const [data, setData]   = useState({ rows: [], total: 0, limit: 50, offset: 0 });
     const [busy, setBusy]   = useState(false);
@@ -53,6 +66,7 @@ export default function VoucherBrowser() {
                 q:         filters.q || undefined,
                 minAmount: filters.minAmount || undefined,
                 maxAmount: filters.maxAmount || undefined,
+                createdById: filters.createdById || undefined,
                 limit:     50,
                 offset
             };
@@ -77,8 +91,14 @@ export default function VoucherBrowser() {
 
     const clearAll = () => setFilters({
         types: [], status: '', from: yearStartISO(), to: todayISO(),
-        q: '', minAmount: '', maxAmount: ''
+        q: '', minAmount: '', maxAmount: '', createdById: ''
     });
+
+    const toggleMyVouchers = () => {
+        if (!user?.userId) return;
+        setFilters(f => ({ ...f, createdById: f.createdById ? '' : user.userId }));
+    };
+    const myVouchersOn = filters.createdById && user?.userId && Number(filters.createdById) === Number(user.userId);
 
     const openVoucher = (v) => {
         const route = TYPE_TO_ROUTE[v.VoucherType] || '/vouchers/jv';
@@ -90,16 +110,37 @@ export default function VoucherBrowser() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* Print-only header */}
+            <div className="print-only print-header">
+                <h1>Voucher Listing{myVouchersOn ? ` — ${user?.userName || 'My Vouchers'}` : ''}</h1>
+                <div className="meta">
+                    <span>Period: {filters.from} → {filters.to}{filters.types.length ? `  •  Types: ${filters.types.join(', ')}` : ''}{filters.status ? `  •  Status: ${filters.status}` : ''}</span>
+                    <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                </div>
+            </div>
+
             <div className="card-header">
                 <div>
                     <h1 className="page-title">Voucher Browser</h1>
                     <p className="page-subtitle">Search every voucher across all types, with status / date / amount / party filters and free-text search on number, remarks, and line narration.</p>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div className="no-print" style={{ display: 'flex', gap: 8 }}>
+                    {user?.userId && (
+                        <button className="btn-sm" onClick={toggleMyVouchers}
+                            style={{ background: myVouchersOn ? 'var(--primary)' : '#f1f5f9',
+                                     color: myVouchersOn ? 'white' : '#475569',
+                                     border: '1px solid ' + (myVouchersOn ? 'var(--primary)' : '#cbd5e1') }}>
+                            <User size={14} /> {myVouchersOn ? 'Showing my vouchers' : 'My vouchers only'}
+                        </button>
+                    )}
                     <button className="btn-sm" onClick={clearAll}><X size={14} /> Clear</button>
                     <button className="btn-sm" onClick={() => reload({ offset: 0 })} disabled={busy}>
                         {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         Refresh
+                    </button>
+                    <button className="btn-sm" onClick={() => window.print()} disabled={busy || data.rows.length === 0}
+                        style={{ background: '#0f766e', color: 'white', border: '1px solid #0f766e' }}>
+                        <Printer size={14} /> Print
                     </button>
                 </div>
             </div>
@@ -248,7 +289,7 @@ export default function VoucherBrowser() {
                                                 </span>
                                             </td>
                                             <td style={{ padding: '8px 12px', color: '#64748b', fontSize: '0.8rem' }}>
-                                                {v.SourceDocType ? `${v.SourceDocType} #${v.SourceDocID}` : '—'}
+                                                {v.SourceDocType ? (SOURCE_DOC_LABELS[v.SourceDocType] || v.SourceDocType) + ` #${v.SourceDocID}` : '—'}
                                             </td>
                                             <td style={{ padding: '8px 12px', color: '#475569', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                                                 title={v.LineSnippet || v.Remarks || ''}>

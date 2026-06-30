@@ -80,7 +80,8 @@ exports.create = async (req, res) => {
             .input('mt', sql.NVarChar(sql.MAX), b.MessageTemplate || null)
             .input('tp', sql.NVarChar(100), b.TemplateSid || null)
             .input('sa', sql.DateTime, b.ScheduledAt ? new Date(b.ScheduledAt) : null)
-            .input('eby', sql.Int, req.user?.userId || null)
+            // CreatedByEmployeeID has an FK to gen_EmployeeInfo — must be employeeId, not userId.
+            .input('eby', sql.Int, req.user?.employeeId || null)
             .input('ebyN', sql.NVarChar(100), req.user?.userName || null)
             .query(`INSERT INTO dms_CRO_Campaigns
                         (Name, Channel, SegmentRulesJSON, MessageTemplate, TemplateSid,

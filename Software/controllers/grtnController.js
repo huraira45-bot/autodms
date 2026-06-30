@@ -65,6 +65,106 @@ exports.saveGRTN = async (req, res) => {
   }
 };
 
+// GET /api/grtn/:id/print-data — gated on IsFinalized
+exports.getGRTNPrintData = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const head = await pool.request()
+            .input('id', sql.Int, parseInt(req.params.id))
+            .query('SELECT IsFinalized FROM data_PurchaseReturnInfo WHERE PurchaseReturnID=@id');
+        if (!head.recordset.length) return res.status(404).json({ error: 'GRTN not found' });
+        if (!head.recordset[0].IsFinalized) {
+            return res.status(409).json({ error: 'GRTN must be finalized before printing.' });
+        }
+        return exports.getGRTNById(req, res);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+// GET /api/grtn/:id  — single GRTN + lines
+exports.getGRTNById = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const hdr = await pool.request()
+            .input('id', sql.Int, parseInt(req.params.id))
+            .query('SELECT * FROM vw_PurchaseReturnHeader WHERE PurchaseReturnID=@id');
+        if (!hdr.recordset.length) return res.status(404).json({ error: 'GRTN not found' });
+        const lines = await pool.request()
+            .input('id', sql.Int, parseInt(req.params.id))
+            .query(`SELECT d.*, i.ItenName, i.ItemNumber
+                    FROM data_PurchaseReturnDetail d
+                    LEFT JOIN InventItems i ON i.ItemId = d.ItemId
+                    WHERE d.PurchaseReturnID=@id`);
+        res.json({ ...hdr.recordset[0], Items: lines.recordset });
+    } catch (err) {
+        console.error('getGRTNById:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// PUT /api/grtn/:id  — update existing GRTN (refused if finalized)
+exports.updateGRTN = async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id.' });
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        const hdr = await new sql.Request(tx)
+            .input('id', sql.Int, id)
+            .query('SELECT IsFinalized FROM data_PurchaseReturnInfo WITH (UPDLOCK, HOLDLOCK) WHERE PurchaseReturnID=@id');
+        if (!hdr.recordset.length) throw new Error('GRTN not found.');
+        if (hdr.recordset[0].IsFinalized) {
+            const e = new Error('GRTN is finalized — cannot edit.'); e.statusCode = 423; throw e;
+        }
+
+        const { PurchaseReturnDate, PartyID, WHID, Remarks, DiscountAmount, FreightAmount, NetAmount, Items, PurchaseID } = req.body;
+        const parsedItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
+
+        await new sql.Request(tx)
+            .input('id',   sql.Int,           id)
+            .input('pd',   sql.DateTime,      PurchaseReturnDate)
+            .input('pid',  sql.Int,           PartyID)
+            .input('whid', sql.Int,           WHID)
+            .input('rem',  sql.NVarChar(sql.MAX), Remarks || '')
+            .input('da',   sql.Decimal(18,2), DiscountAmount || 0)
+            .input('fa',   sql.Decimal(18,2), FreightAmount || 0)
+            .input('na',   sql.Decimal(18,2), NetAmount || 0)
+            .input('puid', sql.Int,           PurchaseID || null)
+            .query(`UPDATE data_PurchaseReturnInfo
+                    SET PurchaseReturnDate=@pd, PartyID=@pid, WHID=@whid,
+                        Remarks=@rem, DiscountAmount=@da, FreightAmount=@fa,
+                        NetAmount=@na, PurchaseID=@puid
+                    WHERE PurchaseReturnID=@id`);
+
+        await new sql.Request(tx)
+            .input('id', sql.Int, id)
+            .query('DELETE FROM data_PurchaseReturnDetail WHERE PurchaseReturnID=@id');
+
+        for (const li of (parsedItems || [])) {
+            await new sql.Request(tx)
+                .input('rid',  sql.Int,           id)
+                .input('iid',  sql.Int,           parseInt(li.ItemId))
+                .input('qty',  sql.Decimal(18,3), parseFloat(li.Quantity) || 0)
+                .input('rate', sql.Decimal(18,2), parseFloat(li.ItemRate) || 0)
+                .input('da',   sql.Decimal(18,2), parseFloat(li.DiscountAmount) || 0)
+                .input('na',   sql.Decimal(18,2), parseFloat(li.NetAmount) || 0)
+                .input('sr',   sql.Decimal(18,2), parseFloat(li.StockRate) || 0)
+                .query(`INSERT INTO data_PurchaseReturnDetail
+                            (PurchaseReturnID, ItemId, Quantity, ItemRate,
+                             DiscountAmount, NetAmount, StockRate)
+                        VALUES (@rid, @iid, @qty, @rate, @da, @na, @sr)`);
+        }
+
+        await tx.commit();
+        res.json({ message: 'GRTN updated.' });
+    } catch (err) {
+        try { await tx.rollback(); } catch {}
+        console.error('updateGRTN:', err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
 exports.getGRTNs = async (req, res) => {
   try {
     const { search } = req.query;

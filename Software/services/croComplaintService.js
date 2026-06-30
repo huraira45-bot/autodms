@@ -164,7 +164,8 @@ async function createComplaint(input, user, transaction = null) {
         const complaintId = ins.recordset[0].ComplaintID;
 
         await writeAction(tx, complaintId, 'Routed', {
-            employeeId: user?.userId,
+            // PerformedByEmployeeID FK to gen_EmployeeInfo — use employeeId, not userId.
+            employeeId: user?.employeeId,
             employeeName: user?.userName,
             notes: `Complaint filed via ${b.Source}; routed to ${routing.AssignedEmployeeID ? `employee #${routing.AssignedEmployeeID}` : 'unassigned'}.`,
             escalationLevelAfter: 0,

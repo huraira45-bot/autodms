@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Package, Search, Plus, Trash2, Save, Loader2 } from 'lucide-react';
+import { Package, Search, Plus, Trash2, Save, Loader2, Printer } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api';
 
 export default function PartsIssue() {
+  const { notify } = useFeedback();
   const [jobCards, setJobCards] = useState([]);
   const [items, setItems] = useState([]);
   const [issuedParts, setIssuedParts] = useState([]);
@@ -59,8 +62,14 @@ export default function PartsIssue() {
   const totalIssued = issuedParts.reduce((s, i) => s + (parseFloat(i.IssueQuantity||0) * parseFloat(i.ItemRate||0)), 0);
 
   const handleIssue = async () => {
-    if (!selectedJob) { alert('Select a job card first.'); return; }
-    if (newItems.length === 0) { alert('Add at least one part.'); return; }
+    if (!selectedJob) {
+      notify({ type: 'warning', title: 'Select a job card', message: 'Choose the job card before issuing parts.' });
+      return;
+    }
+    if (newItems.length === 0) {
+      notify({ type: 'warning', title: 'Add at least one part', message: 'Add the parts and quantities to issue.' });
+      return;
+    }
     setSaving(true);
     try {
       await axios.post(`${API}/workshop/parts-issue`, {
@@ -69,18 +78,31 @@ export default function PartsIssue() {
         Items: newItems,
         Remarks: remarks
       });
-      alert('Parts issued successfully!');
+      notify({ type: 'success', title: 'Parts issued', message: `PKR ${totalNew.toLocaleString()} issued to JC-${selectedJob.JobCardNo}.` });
       setNewItems([]);
       setRemarks('');
       selectJob(selectedJob); // Refresh issued list
-    } catch (err) { alert('Error: ' + (err.response?.data?.error || err.message)); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not issue parts', message: err.response?.data?.error || err.message });
+    }
     setSaving(false);
   };
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
+      <div className="print-only print-header">
+        <h1>Parts Issue to Job Card</h1>
+        <div className="meta">
+          <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        </div>
+      </div>
       <div className="card-header">
         <div><h1 className="page-title">Parts Issue to Job Card</h1><p className="page-subtitle">Parts department: Issue spare parts against workshop job cards.</p></div>
+        <div className="no-print">
+          <button onClick={() => window.print()} className="btn" style={{ background: '#0f766e', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Printer size={16} /> Print Issue Slip
+          </button>
+        </div>
       </div>
 
       {/* Job Card Search */}
@@ -154,10 +176,14 @@ export default function PartsIssue() {
                 {newItems.map((item, i) => (
                   <tr key={i}>
                     <td style={{padding:'8px 12px',borderBottom:'1px solid #e2e8f0'}}>
-                      <select value={item.ItemId} onChange={e => updateItem(i,'ItemId',e.target.value)} style={{width:'100%',padding:'8px',border:'1px solid #cbd5e1',borderRadius:'4px'}}>
-                        <option value="">Select Part...</option>
-                        {items.map(it => <option key={it.ItemId} value={it.ItemId}>{it.ItenName} ({it.ItemNumber})</option>)}
-                      </select>
+                      <SearchableSelect
+                        value={item.ItemId}
+                        onChange={(id) => updateItem(i, 'ItemId', id)}
+                        placeholder="Search part by code or name…"
+                        options={items
+                          .filter(it => it.ItemType === 'Part')
+                          .map(it => ({ id: it.ItemId, label: it.ItenName, sub: `#${it.ItemNumber}${it.ManualNumber ? ' · ' + it.ManualNumber : ''}` }))}
+                      />
                     </td>
                     <td style={{padding:'8px 12px',borderBottom:'1px solid #e2e8f0'}}><input type="number" value={item.Quantity} onChange={e => updateItem(i,'Quantity',e.target.value)} style={{width:'100%',padding:'8px',border:'1px solid #cbd5e1',borderRadius:'4px'}} /></td>
                     <td style={{padding:'8px 12px',borderBottom:'1px solid #e2e8f0'}}><input type="number" value={item.Rate} onChange={e => updateItem(i,'Rate',e.target.value)} style={{width:'100%',padding:'8px',border:'1px solid #cbd5e1',borderRadius:'4px'}} /></td>
@@ -185,11 +211,6 @@ export default function PartsIssue() {
           </div>
         </>
       )}
-
-      <style>{`
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        .animate-spin { animation: spin 1s linear infinite; }
-      `}</style>
     </div>
   );
 }

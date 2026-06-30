@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Settings, Plus, Edit, Trash2, X, Briefcase, Tags, Loader2, Hash, LayoutGrid } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api/workshop';
 
 export default function WorkshopSettings() {
+  const { notify, confirm } = useFeedback();
   const [jobTypes, setJobTypes] = useState([]);
   const [orderTypes, setOrderTypes] = useState([]);
   const [roCounters, setRoCounters] = useState([]);
@@ -26,6 +29,10 @@ export default function WorkshopSettings() {
   // Order Type Modal State
   const [showOTModal, setShowOTModal] = useState(false);
   const [otForm, setOtForm] = useState({ OrderTypeId: '', OrderTypeName: '' });
+
+  const showError = (title, err) => {
+    notify({ type: 'error', title, message: err.response?.data?.error || err.response?.data?.details || err.message });
+  };
 
   const fetchData = async () => {
     try {
@@ -55,16 +62,24 @@ export default function WorkshopSettings() {
     try {
       await axios.post(`${API}/job-types`, jtForm);
       setShowJTModal(false);
+      notify({ type: 'success', title: 'Business type saved', message: jtForm.Title || jtForm.CardCode });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not save business type', err); }
   };
 
   const deleteJT = async (id) => {
-    if(!window.confirm('Are you sure you want to delete this Business Type?')) return;
+    const ok = await confirm({
+      title: 'Delete business type?',
+      message: 'This removes the business type if it is not already used by job cards.',
+      confirmLabel: 'Delete',
+      tone: 'danger'
+    });
+    if(!ok) return;
     try {
       await axios.delete(`${API}/job-types/${id}`);
+      notify({ type: 'success', title: 'Business type deleted' });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not delete business type', err); }
   };
 
   // --- Handlers for Order Types ---
@@ -73,16 +88,24 @@ export default function WorkshopSettings() {
     try {
       await axios.post(`${API}/order-types`, otForm);
       setShowOTModal(false);
+      notify({ type: 'success', title: 'Order type saved', message: otForm.OrderTypeName });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not save order type', err); }
   };
 
   const deleteOT = async (id) => {
-    if(!window.confirm('Are you sure you want to delete this Order Type?')) return;
+    const ok = await confirm({
+      title: 'Delete order type?',
+      message: 'This removes the order type if it is not already used by workshop records.',
+      confirmLabel: 'Delete',
+      tone: 'danger'
+    });
+    if(!ok) return;
     try {
       await axios.delete(`${API}/order-types/${id}`);
+      notify({ type: 'success', title: 'Order type deleted' });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not delete order type', err); }
   };
 
   const saveCounter = async (type, code) => {
@@ -92,8 +115,9 @@ export default function WorkshopSettings() {
         : `${API}/doc-counters/${code}`;
       await axios.put(url, { CurrentCounter: parseInt(counterVal) });
       setEditingCounter(null);
+      notify({ type: 'success', title: 'Counter updated', message: `${code} next number was changed.` });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not update counter', err); }
   };
 
   // --- Handlers for Bays ---
@@ -106,19 +130,27 @@ export default function WorkshopSettings() {
         await axios.post(`${API}/bays`, bayForm);
       }
       setShowBayModal(false);
+      notify({ type: 'success', title: 'Bay saved', message: bayForm.BayName });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not save bay', err); }
   };
 
   const deactivateBay = async (id) => {
-    if (!window.confirm('Deactivate this bay? It will no longer appear in Job Controller.')) return;
+    const ok = await confirm({
+      title: 'Deactivate bay?',
+      message: 'The bay will no longer appear in Job Controller assignment lists.',
+      confirmLabel: 'Deactivate',
+      tone: 'warning'
+    });
+    if (!ok) return;
     try {
       await axios.delete(`${API}/bays/${id}`);
+      notify({ type: 'success', title: 'Bay deactivated' });
       fetchData();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) { showError('Could not deactivate bay', err); }
   };
 
-  if (loading) return <div style={{display:'flex',justifyContent:'center',padding:'60px'}}><Loader2 className="animate-spin" /></div>;
+  if (loading) return <div className="loading-state"><Loader2 className="animate-spin" /> Loading workshop settings...</div>;
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
@@ -143,6 +175,7 @@ export default function WorkshopSettings() {
                 <th style={{padding:'10px 16px'}}>Code</th>
                 <th style={{padding:'10px 16px'}}>Title</th>
                 <th style={{padding:'10px 16px'}}>L0 Manager (CRO)</th>
+                <th style={{padding:'10px 16px'}}>GL Mapping</th>
                 <th style={{padding:'10px 16px',width:'80px'}}>Actions</th>
               </tr>
             </thead>
@@ -152,7 +185,10 @@ export default function WorkshopSettings() {
                   <td style={{padding:'10px 16px',fontWeight:600}}>{j.CardCode}</td>
                   <td style={{padding:'10px 16px'}}>{j.Title}</td>
                   <td style={{padding:'8px 16px'}}>
-                    <JobTypeManagerPicker jt={j} employees={employees} onSaved={fetchData} />
+                    <JobTypeManagerPicker jt={j} employees={employees} onSaved={fetchData} notify={notify} />
+                  </td>
+                  <td style={{padding:'8px 16px'}}>
+                    <JobTypeGLPicker jt={j} onSaved={fetchData} notify={notify} />
                   </td>
                   <td style={{padding:'10px 16px',display:'flex',gap:'8px'}}>
                     <button onClick={() => { setJtForm(j); setShowJTModal(true); }} style={{background:'none',border:'none',color:'#3b82f6',cursor:'pointer'}}><Edit size={16}/></button>
@@ -160,7 +196,7 @@ export default function WorkshopSettings() {
                   </td>
                 </tr>
               ))}
-              {jobTypes.length === 0 && <tr><td colSpan="4" style={{padding:'20px',textAlign:'center',color:'#94a3b8'}}>No Business Types found.</td></tr>}
+              {jobTypes.length === 0 && <tr><td colSpan="5" style={{padding:'20px',textAlign:'center',color:'#94a3b8'}}>No Business Types found.</td></tr>}
             </tbody>
           </table>
           <div style={{padding:'10px 16px',fontSize:'0.75rem',color:'#64748b',background:'#f8fafc',borderTop:'1px solid #e2e8f0'}}>
@@ -346,7 +382,144 @@ export default function WorkshopSettings() {
 }
 
 // Inline manager picker for each JC business type. Auto-saves on change.
-function JobTypeManagerPicker({ jt, employees, onSaved }) {
+function JobTypeGLPicker({ jt, onSaved, notify }) {
+  // SearchableSelect is imported at the top of the file (see imports)
+  const [open, setOpen] = useState(false);
+  const [incomeAccts, setIncomeAccts] = useState([]);
+  const [arAccts, setArAccts] = useState([]);
+  const [form, setForm] = useState({
+    JobRevenueAccount: jt.JobRevenueAccount || '',
+    PartsRevenueAccount: jt.PartsRevenueAccount || '',
+    ReceivableAccount: jt.ReceivableAccount || '',
+  });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    // Income accounts: L3 groups + L4 leaves under '4' so the user can pick
+    // department-level (e.g. 401002 Income - Service Department) or a specific
+    // sub-account if they've created one.
+    // Absolute paths — the `API` const above is workshop-scoped (/api/workshop),
+    // so we don't use it here.
+    Promise.all([
+      axios.get(`/api/accounts/coa?parentCode=4`).catch(() => ({ data: [] })),
+      axios.get(`/api/parties/coa-pickable`).catch(() => ({ data: { groups: {} } })),
+    ]).then(([inc, ar]) => {
+      // Only show actual postable accounts (level >= 3). Skip the root (level 1).
+      const filtered = (inc.data || []).filter(a => a.GLLevel >= 3);
+      setIncomeAccts(filtered);
+      // Receivables: 102xxx pickables only
+      const flat = [];
+      Object.entries(ar.data?.groups || {}).forEach(([parent, accts]) => {
+        if (parent.startsWith('102')) accts.forEach(a => flat.push({ ...a, _group: parent }));
+      });
+      setArAccts(flat);
+    });
+  }, [open]);
+
+  // Refresh form when jt changes (after a successful save the parent re-fetches)
+  useEffect(() => {
+    setForm({
+      JobRevenueAccount: jt.JobRevenueAccount || '',
+      PartsRevenueAccount: jt.PartsRevenueAccount || '',
+      ReceivableAccount: jt.ReceivableAccount || '',
+    });
+  }, [jt.JobRevenueAccount, jt.PartsRevenueAccount, jt.ReceivableAccount]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await axios.patch(`/api/workshop/job-types/${jt.JobCardTypeId}/gl`, form);
+      notify?.({ type: 'success', title: 'GL mapping saved', message: `${jt.CardCode} now posts to your selected accounts.` });
+      setOpen(false);
+      onSaved();
+    } catch (err) {
+      notify?.({ type: 'error', title: 'Save failed', message: err.response?.data?.error || err.message });
+    }
+    setBusy(false);
+  };
+
+  const hasMapping = jt.JobRevenueAccount || jt.PartsRevenueAccount || jt.ReceivableAccount;
+  const summary = (
+    <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+      {jt.JobRevenueCode && <div>Labour Rev: <code>{jt.JobRevenueCode}</code></div>}
+      {jt.PartsRevenueCode && <div>Parts Rev: <code>{jt.PartsRevenueCode}</code></div>}
+      {jt.ReceivableCode && <div>Receivable: <code>{jt.ReceivableCode}</code></div>}
+      {!hasMapping && <span style={{ fontStyle: 'italic', color: '#94a3b8' }}>(using system defaults)</span>}
+    </div>
+  );
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {summary}
+        <button onClick={() => setOpen(true)}
+          style={{ background: hasMapping ? '#dcfce7' : '#fef3c7',
+                   border: '1px solid ' + (hasMapping ? '#86efac' : '#fde68a'),
+                   color: hasMapping ? '#15803d' : '#92400e',
+                   padding: '4px 10px', borderRadius: 4, fontSize: '0.78rem',
+                   fontWeight: 600, cursor: 'pointer' }}>
+          {hasMapping ? 'Edit' : 'Configure'}
+        </button>
+      </div>
+
+      {open && (
+        <div onClick={() => setOpen(false)}
+             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()}
+               style={{ background: 'white', borderRadius: 8, padding: 20, width: 560, maxHeight: '85vh', overflowY: 'auto' }}>
+            <h3 style={{ marginTop: 0 }}>GL Mapping — {jt.CardCode} ({jt.Title})</h3>
+            <p style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              When a Job Card of this business unit is finalized, revenue + receivable lines
+              post to the accounts you pick here. Leave blank to fall back to the system defaults.
+            </p>
+
+            <div style={{ marginTop: 16 }}>
+              <label style={lblStyle}>Labour / Service Revenue (Income, 4xxx)</label>
+              <SearchableSelect
+                value={form.JobRevenueAccount}
+                onChange={v => setForm(f => ({ ...f, JobRevenueAccount: v }))}
+                options={incomeAccts.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode, group: a.isParent ? 'Group accounts' : 'Detail accounts' }))}
+                placeholder="Use system default" />
+              </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={lblStyle}>Parts Revenue (when parts issued via JC)</label>
+              <SearchableSelect
+                value={form.PartsRevenueAccount}
+                onChange={v => setForm(f => ({ ...f, PartsRevenueAccount: v }))}
+                options={incomeAccts.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode, group: a.isParent ? 'Group accounts' : 'Detail accounts' }))}
+                placeholder="Use system default" />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={lblStyle}>Receivable A/C (for walk-in customers on this business unit)</label>
+              <SearchableSelect
+                value={form.ReceivableAccount}
+                onChange={v => setForm(f => ({ ...f, ReceivableAccount: v }))}
+                options={arAccts.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode, group: a._group }))}
+                placeholder="Use system default (General Customer A/C)" />
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
+                Named-party JCs always post to the party's own GL; this only applies when there's no party.
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setOpen(false)} className="btn-sm">Cancel</button>
+              <button onClick={save} disabled={busy} className="btn">
+                {busy ? 'Saving...' : 'Save GL mapping'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const lblStyle = { display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#475569', marginBottom: 4 };
+const selStyle = { width: '100%', padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.85rem' };
+
+function JobTypeManagerPicker({ jt, employees, onSaved, notify }) {
   const [value, setValue] = useState(jt.ManagerEmployeeID || '');
   const [busy, setBusy] = useState(false);
 
@@ -360,7 +533,7 @@ function JobTypeManagerPicker({ jt, employees, onSaved }) {
       });
       onSaved();
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.error || err.message));
+      notify?.({ type: 'error', title: 'Could not assign manager', message: err.response?.data?.error || err.message });
       setValue(jt.ManagerEmployeeID || '');
     }
     setBusy(false);

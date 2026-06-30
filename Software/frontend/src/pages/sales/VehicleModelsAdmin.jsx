@@ -2,15 +2,17 @@
  * Sales — Vehicle Models admin (CRUD).
  * Per locked decision #1: Models are the top of Model → Variant → Vehicle hierarchy.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Car, Plus, RefreshCw, Loader2, Search, Pencil, Trash2, Power, XCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useFeedback } from '../../context/FeedbackContext';
 
 const API = '/api';
 
 export default function VehicleModelsAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const canEdit = hasModule('sales_admin_settings');
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -40,7 +42,13 @@ export default function VehicleModelsAdmin() {
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
     const remove = async (m) => {
-        if (!window.confirm(`Delete model "${m.ModelName}"? Only allowed if no variants exist.`)) return;
+        const ok = await confirmAction({
+            title: 'Delete vehicle model?',
+            message: `Delete "${m.ModelName}"? This only works when no variants exist for the model.`,
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/sales/models/${m.ModelID}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };

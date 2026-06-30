@@ -43,7 +43,8 @@ exports.upload = async (req, res) => {
                 .input('orig',   sql.NVarChar(300), req.file.originalname || null)
                 .input('mime',   sql.NVarChar(100), req.file.mimetype || null)
                 .input('size',   sql.Int,           req.file.size || null)
-                .input('uby',    sql.Int,           req.user?.userId || null)
+                // UploadedByEmployeeID FK to gen_EmployeeInfo — must be employeeId, not userId.
+                .input('uby',    sql.Int,           req.user?.employeeId || null)
                 .input('ubyN',   sql.NVarChar(100), req.user?.userName || null)
                 .input('desc',   sql.NVarChar(500), description)
                 .query(`INSERT INTO dms_CRO_Attachments
@@ -58,7 +59,8 @@ exports.upload = async (req, res) => {
                 await new sql.Request(transaction)
                     .input('cid',   sql.Int,           complaintId)
                     .input('type',  sql.NVarChar(30),  'WhatsAppProof')
-                    .input('emp',   sql.Int,           req.user?.userId || null)
+                    // PerformedByEmployeeID FK to gen_EmployeeInfo — must be employeeId.
+                    .input('emp',   sql.Int,           req.user?.employeeId || null)
                     .input('empN',  sql.NVarChar(100), req.user?.userName || null)
                     .input('notes', sql.NVarChar(sql.MAX), `Uploaded: ${req.file.originalname || relPath}`)
                     .query(`INSERT INTO dms_CRO_ComplaintActions
@@ -125,7 +127,8 @@ exports.softDelete = async (req, res) => {
 
         await pool.request()
             .input('id', sql.Int, attachmentId)
-            .input('uby', sql.Int, req.user?.userId || null)
+            // DeletedByEmployeeID FK to gen_EmployeeInfo — must be employeeId.
+            .input('uby', sql.Int, req.user?.employeeId || null)
             .query(`UPDATE dms_CRO_Attachments
                     SET DeletedAt=GETDATE(), DeletedByEmployeeID=@uby
                     WHERE AttachmentID=@id`);

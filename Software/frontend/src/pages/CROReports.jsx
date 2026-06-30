@@ -5,8 +5,9 @@ import {
     FileBarChart, RefreshCw, Loader2, AlertTriangle, Clock,
     Headphones, Flame, Building, ChevronRight,
     User, TrendingDown, Users, ThumbsDown, Star, Bell, ShieldAlert, Megaphone,
-    UserSearch, GitBranch,
+    UserSearch, GitBranch, Printer,
 } from 'lucide-react';
+import { PrintHeader } from './reports/ReportShell';
 
 const API = '/api';
 const fmtH = (h) => h == null ? '—' : `${Number(h).toFixed(1)}h`;
@@ -1059,10 +1060,18 @@ const Td = ({ children, align = 'left', mono, style = {} }) => (
 export default function CROReports() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <PrintHeader title="CRO Reports"
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
+                filterSummary="" />
             <div className="card-header">
                 <div>
                     <h1 className="page-title">CRO Reports</h1>
                     <p className="page-subtitle">v1 daily-use reports. v2 (Complaints-by-Responder, Escalation Heatmap, Repeat Complaints, NotSatisfied tracker) on the backlog. Survey + reminder reports unlock with Phase 5.</p>
+                </div>
+                <div className="no-print">
+                    <button className="btn" onClick={() => window.print()} style={{ background: '#0f766e' }}>
+                        <Printer size={16} /> Print all sections
+                    </button>
                 </div>
             </div>
 

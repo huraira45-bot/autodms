@@ -1,6 +1,7 @@
 const { sql, getPool } = require('../config/db');
 const { computeLineDiscAmt, validateDiscountCap } = require('../utils/careOffUtils');
 const { resolveRate } = require('./taxRatesController');
+const { assertEnoughStock } = require('../services/stockBalanceService');
 
 // Pure helper: snapshot tax for a labour/sublet line per §14.4 (discount before tax).
 // Returns { taxRate, taxAmount }.
@@ -108,8 +109,18 @@ exports.addCustomerVehicle = async (req, res) => {
 // ============== PARTIES (Credit) ==============
 exports.getParties = async (req, res) => {
     try {
+        const { business } = req.query;
         const pool = await getPool();
-        const result = await pool.request().query('SELECT PartyID, PartyName, PhoneOne, CNIC FROM vw_ActiveParties ORDER BY PartyName');
+        const r = pool.request();
+        let where = '';
+        if (business) {
+            r.input('biz', sql.NVarChar(20), business);
+            where = `WHERE EXISTS (SELECT 1 FROM dms_PartyBusinessAccess pba
+                                   WHERE pba.PartyID = p.PartyID AND pba.BusinessKey = @biz)`;
+        }
+        const result = await r.query(`SELECT p.PartyID, p.PartyName, p.PhoneOne, p.CNIC
+                                       FROM vw_ActiveParties p ${where}
+                                       ORDER BY p.PartyName`);
         res.json(result.recordset);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -135,13 +146,46 @@ exports.getJobCardTypes = async (req, res) => {
         const result = await pool.request().query(`
             SELECT t.JobCardTypeId, t.CardCode, t.Title,
                    t.ManagerEmployeeID,
-                   e.EmployeeName AS ManagerEmployeeName
+                   e.EmployeeName AS ManagerEmployeeName,
+                   t.JobRevenueAccount,   rev.GLCode AS JobRevenueCode,   rev.GLTitle AS JobRevenueTitle,
+                   t.PartsRevenueAccount, prt.GLCode AS PartsRevenueCode, prt.GLTitle AS PartsRevenueTitle,
+                   t.ReceivableAccount,   rcv.GLCode AS ReceivableCode,   rcv.GLTitle AS ReceivableTitle
             FROM gen_JobCardType t
-            LEFT JOIN gen_EmployeeInfo e ON t.ManagerEmployeeID = e.EmployeeID
+            LEFT JOIN gen_EmployeeInfo e   ON t.ManagerEmployeeID = e.EmployeeID
+            LEFT JOIN GLChartOFAccount rev ON t.JobRevenueAccount   = rev.GLCAID
+            LEFT JOIN GLChartOFAccount prt ON t.PartsRevenueAccount = prt.GLCAID
+            LEFT JOIN GLChartOFAccount rcv ON t.ReceivableAccount   = rcv.GLCAID
             WHERE t.Status = 1 ORDER BY t.SNo
         `);
         res.json(result.recordset);
     } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+/**
+ * PATCH /api/workshop/job-types/:id/gl  body: { JobRevenueAccount, PartsRevenueAccount, ReceivableAccount }
+ * Sets the GL accounts that JCs of this business unit post against. NULL is allowed
+ * (means "fall back to the system-default Service / Parts / Trade Debtors role").
+ */
+exports.setJobCardTypeGL = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const id = parseInt(req.params.id);
+        const norm = (v) => (v === '' || v == null) ? null : parseInt(v);
+
+        await pool.request()
+            .input('id',  sql.Int, id)
+            .input('rev', sql.Int, norm(req.body.JobRevenueAccount))
+            .input('prt', sql.Int, norm(req.body.PartsRevenueAccount))
+            .input('rcv', sql.Int, norm(req.body.ReceivableAccount))
+            .query(`UPDATE gen_JobCardType
+                    SET JobRevenueAccount = @rev,
+                        PartsRevenueAccount = @prt,
+                        ReceivableAccount = @rcv
+                    WHERE JobCardTypeId = @id`);
+        res.json({ message: 'GL mapping saved' });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
 };
 
 exports.saveJobCardType = async (req, res) => {
@@ -261,6 +305,24 @@ exports.resolveByRO = async (req, res) => {
     }
 };
 
+// GET /api/workshop/job-cards/:id/print-data
+// Same payload as getJobCardById, but refuses if the JC is not finalized.
+// Backstops the frontend gate — a curl call cannot bypass the IsFinalized check.
+exports.getJobCardPrintData = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const head = await pool.request()
+            .input('id', sql.Int, req.params.id)
+            .query('SELECT IsFinalized FROM Addata_JobCardInfo WHERE JobCardId=@id');
+        if (!head.recordset.length) return res.status(404).json({ error: 'Job Card not found' });
+        if (!head.recordset[0].IsFinalized) {
+            return res.status(409).json({ error: 'Job Card must be finalized before printing.' });
+        }
+        // Delegate to the regular fetcher
+        return exports.getJobCardById(req, res);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
 exports.getJobCardById = async (req, res) => {
     try {
         const pool = await getPool();
@@ -276,6 +338,7 @@ exports.getJobCardById = async (req, res) => {
         const parts = await pool.request()
             .input('id', sql.Int, req.params.id)
             .query(`SELECT sid.StockIssueDetailID, sid.ItemId, sid.Quantity, sid.StockRate, sid.ItemRate, sid.IssueQuantity,
+                    sid.TaxRate, sid.TaxAmount,
                     i.ItenName AS ItemName, i.ItemNumber, si.IssueDate, si.IssueNo
                     FROM data_StockIssuetoJobCardDetail sid
                     JOIN data_StockIssuetoJobCard si ON sid.StockIssueID = si.StockIssueID
@@ -433,7 +496,12 @@ exports.saveJobCard = async (req, res) => {
                         .input('discType', sql.NVarChar(10), item.DiscType || null)
                         .input('taxRate', sql.Decimal(8, 4), tax.taxRate)
                         .input('taxAmount', sql.Decimal(18, 2), tax.taxAmount)
-                        .query('INSERT INTO Addata_JobCardInfoDetail (JobCardId, Remarks, Price, Discount, DiscAmt, DiscType, TaxRate, TaxAmount) VALUES (@jcId, @remarks, @price, @discount, @discAmt, @discType, @taxRate, @taxAmount)');
+                        // JobInfoId = the InventItems.ItemId of the labour service
+                        // (the labour catalog lives in InventItems with ItemType='Service').
+                        // Stored so campaign matching can detect which labour services
+                        // are on this JC, and so service-history reports can group by code.
+                        .input('jobInfoId', sql.Int, item.JobInfoId ? parseInt(item.JobInfoId) : null)
+                        .query('INSERT INTO Addata_JobCardInfoDetail (JobCardId, Remarks, Price, Discount, DiscAmt, DiscType, TaxRate, TaxAmount, JobInfoId) VALUES (@jcId, @remarks, @price, @discount, @discAmt, @discType, @taxRate, @taxAmount, @jobInfoId)');
                 }
 
                 if (Accessories && Array.isArray(Accessories)) {
@@ -594,7 +662,12 @@ exports.saveJobCard = async (req, res) => {
                         .input('discType', sql.NVarChar(10), item.DiscType || null)
                         .input('taxRate', sql.Decimal(8, 4), tax.taxRate)
                         .input('taxAmount', sql.Decimal(18, 2), tax.taxAmount)
-                        .query('INSERT INTO Addata_JobCardInfoDetail (JobCardId, Remarks, Price, Discount, DiscAmt, DiscType, TaxRate, TaxAmount) VALUES (@jcId, @remarks, @price, @discount, @discAmt, @discType, @taxRate, @taxAmount)');
+                        // JobInfoId = the InventItems.ItemId of the labour service
+                        // (the labour catalog lives in InventItems with ItemType='Service').
+                        // Stored so campaign matching can detect which labour services
+                        // are on this JC, and so service-history reports can group by code.
+                        .input('jobInfoId', sql.Int, item.JobInfoId ? parseInt(item.JobInfoId) : null)
+                        .query('INSERT INTO Addata_JobCardInfoDetail (JobCardId, Remarks, Price, Discount, DiscAmt, DiscType, TaxRate, TaxAmount, JobInfoId) VALUES (@jcId, @remarks, @price, @discount, @discAmt, @discType, @taxRate, @taxAmount, @jobInfoId)');
                 }
 
                 if (Accessories && Array.isArray(Accessories)) {
@@ -678,7 +751,11 @@ exports.getSublets = async (req, res) => {
 
 exports.saveSublet = async (req, res) => {
     try {
-        const { SubletJobDetailID, JobCardId, VendorID, Remarks, InvoiceAmount, PayableAmount, SubletJobDate } = req.body;
+        const { SubletJobDetailID, JobCardId, VendorID, Remarks, InvoiceAmount, PayableAmount, SubletJobDate, PaymentType } = req.body;
+        const payType = PaymentType === 'Credit' ? 'Credit' : 'Cash';
+        if (payType === 'Credit' && !VendorID) {
+            return res.status(400).json({ error: 'Credit sublet requires a Vendor party. Pick a vendor or switch to Cash.' });
+        }
         const pool = await getPool();
 
         if (!SubletJobDetailID) {
@@ -713,9 +790,10 @@ exports.saveSublet = async (req, res) => {
                 .input('date', sql.DateTime, SubletJobDate || new Date())
                 .input('taxRate', sql.Decimal(8,4), tax.taxRate)
                 .input('taxAmount', sql.Decimal(18,2), tax.taxAmount)
+                .input('payType', sql.NVarChar(20), payType)
                 .query(`UPDATE Addata_JobCardInfoSubletJobDetail SET
                     VendorID=@vendor, Remarks=@remarks, InvoiceAmount=@invoice, PayableAmount=@payable, SubletJobDate=@date,
-                    TaxRate=@taxRate, TaxAmount=@taxAmount
+                    TaxRate=@taxRate, TaxAmount=@taxAmount, PaymentType=@payType
                     WHERE SubletJobDetailID=@id`);
             res.json({ message: 'Sublet updated' });
         } else {
@@ -728,10 +806,11 @@ exports.saveSublet = async (req, res) => {
                 .input('date', sql.DateTime, SubletJobDate || new Date())
                 .input('taxRate', sql.Decimal(8,4), tax.taxRate)
                 .input('taxAmount', sql.Decimal(18,2), tax.taxAmount)
+                .input('payType', sql.NVarChar(20), payType)
                 .query(`INSERT INTO Addata_JobCardInfoSubletJobDetail
-                    (JobCardId, VendorID, Remarks, InvoiceAmount, PayableAmount, SubletJobDate, TaxRate, TaxAmount)
+                    (JobCardId, VendorID, Remarks, InvoiceAmount, PayableAmount, SubletJobDate, TaxRate, TaxAmount, PaymentType)
                     OUTPUT INSERTED.SubletJobDetailID
-                    VALUES (@jcId, @vendor, @remarks, @invoice, @payable, @date, @taxRate, @taxAmount)`);
+                    VALUES (@jcId, @vendor, @remarks, @invoice, @payable, @date, @taxRate, @taxAmount, @payType)`);
             res.status(201).json({ message: 'Sublet created', SubletJobDetailID: result.recordset[0].SubletJobDetailID });
         }
     } catch (err) { res.status(400).json({ error: err.message }); }
@@ -777,6 +856,14 @@ exports.issuePartsToJobCard = async (req, res) => {
             if (finCheck.recordset[0]?.IsFinalized) {
                 await transaction.rollback();
                 return res.status(423).json({ error: 'Job Card is finalized. Cannot issue parts.' });
+            }
+
+            // Block over-issue: every line's quantity must be ≤ current on-hand
+            // (computed inside this transaction so concurrent issues can't both pass).
+            try { await assertEnoughStock(transaction, Items); }
+            catch (e) {
+                await transaction.rollback();
+                return res.status(400).json({ error: e.message });
             }
 
             // 1. Create issue header
@@ -837,15 +924,40 @@ exports.issuePartsToJobCard = async (req, res) => {
             const ioNoRes = await transaction.request().query('SELECT ISNULL(MAX(StockIONo), 0) + 1 AS NextNo FROM data_StockInOutInfo');
             const ioNo = ioNoRes.recordset[0].NextNo;
 
+            // WHID is now NOT NULL on data_StockInOutInfo. Pick the warehouse
+            // from the first issued line; fall back to any active warehouse.
+            // (We can't assume WHID=1 exists — it was wiped in migration 050.)
+            let issueWHID = Items.find(i => i.WHID)?.WHID;
+            if (!issueWHID) {
+                const whRes = await transaction.request().query(
+                    `SELECT TOP 1 WHID FROM InventWareHouse
+                     WHERE ISNULL(InActive, 0) = 0
+                     ORDER BY WHID`
+                );
+                if (!whRes.recordset.length) {
+                    throw new Error('No active warehouse exists. Create one in Parts Config first.');
+                }
+                issueWHID = whRes.recordset[0].WHID;
+            } else {
+                // Validate the supplied WHID exists — friendlier error than the FK conflict
+                const check = await transaction.request()
+                    .input('w', sql.Int, issueWHID)
+                    .query('SELECT 1 AS ok FROM InventWareHouse WHERE WHID = @w');
+                if (!check.recordset.length) {
+                    throw new Error(`Warehouse #${issueWHID} does not exist. Pick a valid warehouse on each parts line.`);
+                }
+            }
+
             const ioRes = await transaction.request()
                 .input('ioNo', sql.Int, ioNo)
                 .input('ioDate', sql.Date, new Date())
                 .input('issueId', sql.Int, issueId)
                 .input('companyId', sql.Int, 1)
+                .input('whId', sql.Int, issueWHID)
                 .query(`INSERT INTO data_StockInOutInfo
-                    (StockIONo, StockIODate, StockType, IssuanceID, CompanyID, EntryUserDateTime, IsTaxable, ReadOnly)
+                    (StockIONo, StockIODate, StockType, IssuanceID, CompanyID, WHID, EntryUserDateTime, IsTaxable, ReadOnly)
                     OUTPUT INSERTED.StockIOID
-                    VALUES (@ioNo, @ioDate, 'Issue', @issueId, @companyId, GETDATE(), 0, 0)`);
+                    VALUES (@ioNo, @ioDate, 'Issue', @issueId, @companyId, @whId, GETDATE(), 0, 0)`);
 
             const ioId = ioRes.recordset[0].StockIOID;
 
@@ -1093,4 +1205,475 @@ exports.saveDamageMarks = async (req, res) => {
         }
         res.json({ message: 'Damage marks saved' });
     } catch (err) { res.status(400).json({ error: err.message }); }
+};
+
+// GET /workshop/job-cards/:id/insurance
+// Returns { header, parts[], payments[], totals }. `parts` includes every part issued
+// to the JC plus its per-row GST snapshot — Dep Amount is computed on the GST-inclusive
+// total so the customer's depreciation share matches the invoiced amount.
+exports.getJobCardInsurance = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const pool = await getPool();
+        const hdr = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo
+                    FROM dms_JobCardInsurance WHERE JobCardId=@id`);
+        const header = hdr.recordset[0] || { CompanyName:'', SurveyorName:'', SurveyorMobile:'', SurveyorMobile2:'', InsClaimNo:'' };
+
+        // Parts issued to the JC
+        const partsRs = await pool.request().input('id', sql.Int, id).query(`
+            SELECT 'Part' AS LineType,
+                   sid.StockIssueDetailID AS LineRefID,
+                   i.ItemNumber           AS ItemNumber,
+                   i.ItenName             AS ItemName,
+                   sid.IssueQuantity      AS Qty,
+                   sid.ItemRate           AS Rate,
+                   (sid.IssueQuantity * sid.ItemRate) AS TotalAmount,
+                   ISNULL(sid.TaxRate, 0)   AS TaxRate,
+                   ISNULL(sid.TaxAmount, 0) AS TaxAmount,
+                   ((sid.IssueQuantity * sid.ItemRate) + ISNULL(sid.TaxAmount, 0)) AS TotalWithTax,
+                   ISNULL(d.DepreciationPct, 0) AS DepreciationPct,
+                   ISNULL(d.DepAmount, 0)       AS DepAmount
+            FROM data_StockIssuetoJobCardDetail sid
+            LEFT JOIN InventItems i ON sid.ItemId = i.ItemId
+            LEFT JOIN dms_JobCardPartsDepreciation d
+                   ON d.JobCardId = sid.JobCardId AND d.StockIssueDetailID = sid.StockIssueDetailID
+            WHERE sid.JobCardId = @id`);
+
+        // Labour / Service lines (Addata_JobCardInfoDetail). Net of discount, plus PST.
+        const labourRs = await pool.request().input('id', sql.Int, id).query(`
+            SELECT 'Service' AS LineType,
+                   l.DetailId  AS LineRefID,
+                   CAST(NULL AS NVARCHAR(50)) AS ItemNumber,
+                   l.Remarks   AS ItemName,
+                   CAST(1 AS DECIMAL(18,3))  AS Qty,
+                   (l.Price - ISNULL(l.DiscAmt, 0)) AS Rate,
+                   (l.Price - ISNULL(l.DiscAmt, 0)) AS TotalAmount,
+                   ISNULL(l.TaxRate, 0)   AS TaxRate,
+                   ISNULL(l.TaxAmount, 0) AS TaxAmount,
+                   ((l.Price - ISNULL(l.DiscAmt, 0)) + ISNULL(l.TaxAmount, 0)) AS TotalWithTax,
+                   ISNULL(d.DepreciationPct, 0) AS DepreciationPct,
+                   ISNULL(d.DepAmount, 0)       AS DepAmount
+            FROM Addata_JobCardInfoDetail l
+            LEFT JOIN dms_JobCardPartsDepreciation d
+                   ON d.JobCardId = l.JobCardId AND d.LabourDetailID = l.DetailId
+            WHERE l.JobCardId = @id`);
+
+        // Combine — parts first, then services, both ordered by their ID
+        const parts = { recordset: [
+            ...partsRs.recordset.sort((a, b) => a.LineRefID - b.LineRefID),
+            ...labourRs.recordset.sort((a, b) => a.LineRefID - b.LineRefID),
+        ]};
+
+        const pays = await pool.request().input('id', sql.Int, id).query(`
+            SELECT DepPaymentID, PaidAmount, PaymentMode, BankAccountID, ReferenceNo, Notes,
+                   ReceivedAt, ReceivedByName, VoucherID
+            FROM dms_JobCardDepreciationPayments
+            WHERE JobCardId = @id
+            ORDER BY ReceivedAt DESC, DepPaymentID DESC`);
+
+        const depreciationTotal = parts.recordset.reduce((s, p) => s + Number(p.DepAmount || 0), 0);
+        const depreciationPaid  = pays.recordset.reduce((s, p) => s + Number(p.PaidAmount || 0), 0);
+
+        res.json({
+            header,
+            parts: parts.recordset,
+            payments: pays.recordset,
+            totals: {
+                depreciationTotal: +depreciationTotal.toFixed(2),
+                depreciationPaid:  +depreciationPaid.toFixed(2),
+                depreciationBalance: +(depreciationTotal - depreciationPaid).toFixed(2)
+            }
+        });
+    } catch (err) {
+        console.error('getJobCardInsurance:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// POST /workshop/job-cards/:id/insurance
+// Body: { header: {...}, parts: [{ StockIssueDetailID, DepreciationPct }, ...] }
+// Replaces the depreciation rows for this JC and upserts the insurance header in a transaction.
+exports.saveJobCardInsurance = async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { header = {}, parts = [] } = req.body || {};
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid JobCardId' });
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        // Block if finalized — match the existing JC-mutation pattern
+        const fin = await new sql.Request(tx).input('id', sql.Int, id)
+            .query('SELECT IsFinalized FROM Addata_JobCardInfo WHERE JobCardId=@id');
+        if (!fin.recordset.length) {
+            await tx.rollback();
+            return res.status(404).json({ error: 'Job Card not found' });
+        }
+        if (fin.recordset[0].IsFinalized) {
+            await tx.rollback();
+            return res.status(423).json({ error: 'Job Card is finalized. Request unfinalize to edit insurance info.' });
+        }
+
+        // Upsert header
+        await new sql.Request(tx)
+            .input('id', sql.Int, id)
+            .input('co',  sql.NVarChar(200), header.CompanyName     || null)
+            .input('sn',  sql.NVarChar(150), header.SurveyorName    || null)
+            .input('sm',  sql.NVarChar(30),  header.SurveyorMobile  || null)
+            .input('sm2', sql.NVarChar(30),  header.SurveyorMobile2 || null)
+            .input('cn',  sql.NVarChar(80),  header.InsClaimNo      || null)
+            .query(`
+                IF EXISTS (SELECT 1 FROM dms_JobCardInsurance WHERE JobCardId=@id)
+                    UPDATE dms_JobCardInsurance
+                       SET CompanyName=@co, SurveyorName=@sn, SurveyorMobile=@sm,
+                           SurveyorMobile2=@sm2, InsClaimNo=@cn, UpdatedAt=GETDATE()
+                     WHERE JobCardId=@id;
+                ELSE
+                    INSERT INTO dms_JobCardInsurance
+                        (JobCardId, CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo)
+                    VALUES (@id, @co, @sn, @sm, @sm2, @cn);
+            `);
+
+        // Replace depreciation rows
+        await new sql.Request(tx).input('id', sql.Int, id)
+            .query('DELETE FROM dms_JobCardPartsDepreciation WHERE JobCardId=@id');
+
+        for (const row of parts) {
+            const pct = Number(row.DepreciationPct) || 0;
+            if (pct < 0 || pct > 100) continue;
+            const lineType = row.LineType === 'Service' ? 'Service' : 'Part';
+            const refId = parseInt(row.LineRefID ?? row.StockIssueDetailID ?? row.LabourDetailID);
+            if (!Number.isFinite(refId)) continue;
+
+            // Authoritative server-side recompute on GST-inclusive total.
+            let totalAmount = 0, taxAmount = 0;
+            if (lineType === 'Part') {
+                const t = await new sql.Request(tx)
+                    .input('sid', sql.Int, refId)
+                    .input('jc',  sql.Int, id)
+                    .query(`SELECT (IssueQuantity * ItemRate) AS TotalAmount,
+                                   ISNULL(TaxAmount, 0)       AS TaxAmount
+                              FROM data_StockIssuetoJobCardDetail
+                             WHERE StockIssueDetailID=@sid AND JobCardId=@jc`);
+                if (!t.recordset.length) continue;
+                totalAmount = Number(t.recordset[0].TotalAmount) || 0;
+                taxAmount   = Number(t.recordset[0].TaxAmount)   || 0;
+            } else {
+                const t = await new sql.Request(tx)
+                    .input('did', sql.Int, refId)
+                    .input('jc',  sql.Int, id)
+                    .query(`SELECT (Price - ISNULL(DiscAmt, 0)) AS TotalAmount,
+                                   ISNULL(TaxAmount, 0)         AS TaxAmount
+                              FROM Addata_JobCardInfoDetail
+                             WHERE DetailId=@did AND JobCardId=@jc`);
+                if (!t.recordset.length) continue;
+                totalAmount = Number(t.recordset[0].TotalAmount) || 0;
+                taxAmount   = Number(t.recordset[0].TaxAmount)   || 0;
+            }
+
+            const basis = totalAmount + taxAmount;
+            const depAmount = +(basis * pct / 100).toFixed(2);
+
+            const ins = new sql.Request(tx)
+                .input('jc',  sql.Int, id)
+                .input('pct', sql.Decimal(5,2), pct)
+                .input('amt', sql.Decimal(18,2), depAmount);
+            if (lineType === 'Part') {
+                ins.input('sid', sql.Int, refId);
+                await ins.query(`INSERT INTO dms_JobCardPartsDepreciation
+                                    (JobCardId, StockIssueDetailID, DepreciationPct, DepAmount)
+                                 VALUES (@jc, @sid, @pct, @amt)`);
+            } else {
+                ins.input('lid', sql.Int, refId);
+                await ins.query(`INSERT INTO dms_JobCardPartsDepreciation
+                                    (JobCardId, LabourDetailID, DepreciationPct, DepAmount)
+                                 VALUES (@jc, @lid, @pct, @amt)`);
+            }
+        }
+
+        // Total = sum of saved DepAmounts
+        const tot = await new sql.Request(tx).input('id', sql.Int, id)
+            .query(`SELECT ISNULL(SUM(DepAmount), 0) AS Total
+                    FROM dms_JobCardPartsDepreciation WHERE JobCardId=@id`);
+
+        await tx.commit();
+        res.json({ message: 'Insurance info saved', depreciationTotal: Number(tot.recordset[0].Total) || 0 });
+    } catch (err) {
+        try { await tx.rollback(); } catch {}
+        console.error('saveJobCardInsurance:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// POST /workshop/job-cards/:id/depreciation-payments
+// Record a payment the END CUSTOMER made against their depreciation share.
+// Body: { PaidAmount, PaymentMode, BankAccountID?, ReferenceNo?, Notes? }
+// Stores the payment in dms_JobCardDepreciationPayments. The Insurance tab
+// then shows total / paid / balance with this row included.
+// GL posting against the JC's customer party is on the backlog (see memory).
+exports.recordDepreciationPayment = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const b = req.body || {};
+        const amount = Number(b.PaidAmount);
+        const mode = b.PaymentMode;
+        if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'PaidAmount must be > 0' });
+        if (!['Cash','BankTransfer','Cheque','POS','PayOrder'].includes(mode))
+            return res.status(400).json({ error: 'Invalid PaymentMode' });
+        if (mode !== 'Cash' && !b.BankAccountID)
+            return res.status(400).json({ error: 'BankAccountID is required for non-cash modes' });
+        if (mode === 'Cheque') {
+            if (!b.ReferenceNo) return res.status(400).json({ error: 'Cheque # (ReferenceNo) is required for Cheque mode.' });
+            if (!b.ChequeDate)  return res.status(400).json({ error: 'ChequeDate is required for Cheque mode.' });
+        }
+
+        const pool = await getPool();
+
+        // Job Card must be finalized before depreciation can be received from the customer.
+        const jcCheck = await pool.request().input('id', sql.Int, id)
+            .query('SELECT IsFinalized, JobCardNo FROM Addata_JobCardInfo WHERE JobCardId=@id');
+        if (!jcCheck.recordset.length) return res.status(404).json({ error: 'Job Card not found' });
+        if (!jcCheck.recordset[0].IsFinalized) {
+            return res.status(423).json({
+                error: `Job Card ${jcCheck.recordset[0].JobCardNo} must be finalized before its depreciation can be received.`
+            });
+        }
+
+        // Cap at outstanding balance to prevent overpayment
+        const totals = await pool.request().input('id', sql.Int, id).query(`
+            SELECT
+              (SELECT ISNULL(SUM(DepAmount), 0) FROM dms_JobCardPartsDepreciation WHERE JobCardId=@id) AS Total,
+              (SELECT ISNULL(SUM(PaidAmount), 0) FROM dms_JobCardDepreciationPayments WHERE JobCardId=@id) AS Paid`);
+        const total = Number(totals.recordset[0].Total) || 0;
+        const paid  = Number(totals.recordset[0].Paid)  || 0;
+        const balance = +(total - paid).toFixed(2);
+        if (amount > balance + 0.005) {
+            return res.status(400).json({ error: `Amount (${amount.toFixed(2)}) exceeds outstanding depreciation balance (${balance.toFixed(2)})` });
+        }
+
+        // Resolve GL accounts for the voucher:
+        //   Dr  → CASH_BOOK (Cash) / chosen bank GLCAID (Bank/Cheque/POS/PayOrder)
+        //   Cr  → depends on whether the finalize voucher split the AR leg:
+        //         - SPLIT (new path): GENERAL_CUSTOMER tagged with JobCardID only —
+        //           the customer's depreciation share already sits there, so paying
+        //           it reduces that Gen-Cust-tagged-by-JC balance.
+        //         - LEGACY (pre-split JCs): INSURER'S PartyGLID tagged with PartyID +
+        //           JobCardID — the full AR was charged to the insurer, so reducing
+        //           that insurer-tagged balance still nets correctly per-party.
+        //         - Walk-in (no PartyID): GENERAL_CUSTOMER tagged with JobCardID.
+        //
+        // Detection: look for a Gen-Cust-tagged-by-JC Dr leg in the JC's finalize
+        // voucher — if present, the AR was split; if not, it's a legacy JC.
+        const { resolveRole } = require('./systemAccountsController');
+        const isCash   = mode === 'Cash';
+        const isCheque = mode === 'Cheque';
+        let drGL, depositBankGL = null;
+        if (isCash) {
+            drGL = await resolveRole('CASH_BOOK');
+        } else if (isCheque) {
+            // Cheque receipts go to CHEQUES_ON_HAND first; the chosen bank is the
+            // intended deposit bank, stored on the dms_PendingCheques row and used
+            // by the Cheque Clearance screen to post the eventual Dr Bank leg.
+            const bkChk = await pool.request().input('id', sql.Int, parseInt(b.BankAccountID))
+                .query('SELECT GLCAID FROM dms_BankAccounts WHERE GLCAID=@id AND IsActive=1');
+            if (!bkChk.recordset.length) return res.status(400).json({ error: 'Bank account not active or not registered.' });
+            depositBankGL = bkChk.recordset[0].GLCAID;
+            drGL = await resolveRole('CHEQUES_ON_HAND');
+        } else {
+            const bkChk = await pool.request().input('id', sql.Int, parseInt(b.BankAccountID))
+                .query('SELECT GLCAID FROM dms_BankAccounts WHERE GLCAID=@id AND IsActive=1');
+            if (!bkChk.recordset.length) return res.status(400).json({ error: 'Bank account not active or not registered.' });
+            drGL = bkChk.recordset[0].GLCAID;
+        }
+
+        const genCustGL = await resolveRole('GENERAL_CUSTOMER');
+
+        // Did finalize split the AR? Look for a Gen-Cust-tagged-by-JC Dr leg.
+        const splitChk = await pool.request()
+            .input('id', sql.Int, id)
+            .input('gc', sql.Int, genCustGL)
+            .query(`SELECT TOP 1 1 AS HasSplit
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE v.SourceDocType='JOBCARD' AND v.SourceDocID=@id
+                      AND v.Status='Posted'
+                      AND d.GLCAID=@gc AND d.JobCardID=@id AND d.PartyID IS NULL
+                      AND d.Debit > 0`);
+        const isSplit = splitChk.recordset.length > 0;
+
+        // Look up the JC's insurer party + their PartyGLID
+        const jcParty = await pool.request().input('id', sql.Int, id).query(`
+            SELECT j.PartyID, p.PartyName, p.PartyGLID
+            FROM Addata_JobCardInfo j
+            LEFT JOIN gen_PartiesInfo p ON j.PartyID = p.PartyID
+            WHERE j.JobCardId = @id`);
+        const partyRow = jcParty.recordset[0] || {};
+        const insurerPartyID = partyRow.PartyID || null;
+        let crGL, crPartyTag = null;
+        if (isSplit) {
+            // New split path — credit Gen Cust against the JC-tagged Dr leg.
+            crGL = genCustGL;
+        } else if (insurerPartyID && partyRow.PartyGLID) {
+            crGL = partyRow.PartyGLID;
+            crPartyTag = insurerPartyID;
+        } else if (insurerPartyID && !partyRow.PartyGLID) {
+            return res.status(400).json({ error: `Party "${partyRow.PartyName || '#' + insurerPartyID}" has no GL account set. Edit the party and assign one.` });
+        } else {
+            crGL = genCustGL;
+        }
+
+        // Pick voucher type — CRV (cash) or BRV (any bank-routed mode).
+        // GLVoucherType has duplicate Title rows from legacy data — take the lowest Voucherid.
+        const vtCode = isCash ? 'CRV' : 'BRV';
+        const vtRes = await pool.request().input('t', sql.NVarChar(20), vtCode)
+            .query('SELECT TOP 1 Voucherid FROM GLVoucherType WHERE Title=@t ORDER BY Voucherid');
+        if (!vtRes.recordset.length) return res.status(400).json({ error: `Voucher type ${vtCode} not configured.` });
+        const voucherTypeId = vtRes.recordset[0].Voucherid;
+
+        const jcNo = jcCheck.recordset[0].JobCardNo;
+        const narration = `Depreciation receipt for ${jcNo} — ${mode}${b.ReferenceNo ? ` (${b.ReferenceNo})` : ''}`;
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            // 1. Insert the payment row
+            const insPay = await new sql.Request(tx)
+                .input('jc',   sql.Int,           id)
+                .input('amt',  sql.Decimal(18,2), amount)
+                .input('mode', sql.NVarChar(30),  mode)
+                .input('bnk',  sql.Int,           b.BankAccountID ? parseInt(b.BankAccountID) : null)
+                .input('ref',  sql.NVarChar(100), b.ReferenceNo || null)
+                .input('nts',  sql.NVarChar(500), b.Notes || null)
+                .input('by',   sql.Int,           req.user?.userId || null)
+                .input('byN',  sql.NVarChar(100), req.user?.userName || null)
+                .query(`INSERT INTO dms_JobCardDepreciationPayments
+                            (JobCardId, PaidAmount, PaymentMode, BankAccountID, ReferenceNo, Notes,
+                             ReceivedByUserID, ReceivedByName)
+                        OUTPUT INSERTED.DepPaymentID
+                        VALUES (@jc, @amt, @mode, @bnk, @ref, @nts, @by, @byN)`);
+            const depPaymentId = insPay.recordset[0].DepPaymentID;
+
+            // 2. Voucher header (Draft)
+            const seqRes = await new sql.Request(tx).query(
+                'SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo');
+            const voucherNo = `${vtCode}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+
+            const hdrRes = await new sql.Request(tx)
+                .input('vd',   sql.DateTime,     new Date())
+                .input('vno',  sql.NVarChar(50), voucherNo)
+                .input('vtId', sql.Int,          voucherTypeId)
+                .input('rem',  sql.NVarChar(sql.MAX), narration)
+                .input('tot',  sql.Decimal(18,2), amount)
+                .input('src',  sql.NVarChar(20), 'JOBCARD')
+                .input('srcId',sql.Int,          id)
+                .input('cby',  sql.Int,          req.user?.userId || null)
+                .input('cbyN', sql.NVarChar(100),req.user?.userName || null)
+                .query(`INSERT INTO data_FinanceVoucherInfo
+                            (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
+                             Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
+                        OUTPUT INSERTED.VoucherID
+                        VALUES (@vd, @vno, @vtId, @rem, @tot,
+                                'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+            const voucherId = hdrRes.recordset[0].VoucherID;
+
+            // 3. Two balanced lines. The Cr leg also gets a PartyID tag (when the JC
+            // has an insurance party) so subsidiary-ledger queries by party work.
+            const insertLine = async (glcaid, dr, cr, lineNar, partyId) => {
+                const r = await new sql.Request(tx)
+                    .input('vid',  sql.Int,           voucherId)
+                    .input('gl',   sql.Int,           glcaid)
+                    .input('nar',  sql.NVarChar(sql.MAX), lineNar)
+                    .input('dr',   sql.Decimal(18,2), dr || 0)
+                    .input('cr',   sql.Decimal(18,2), cr || 0)
+                    .input('pid',  sql.Int,           partyId || null)
+                    .input('jcid', sql.Int,           id)
+                    .query(`INSERT INTO data_FinanceVoucherDetail
+                                (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID)
+                            OUTPUT INSERTED.VoucherDetailID
+                            VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid)`);
+                return r.recordset[0].VoucherDetailID;
+            };
+            const drDetailId = await insertLine(drGL, amount, 0, `${mode} receipt — depreciation for ${jcNo}`, null);
+            const crNar = crPartyTag
+                ? `Insurer A/R reduced — customer paid depreciation portion for ${jcNo}`
+                : `Customer A/R reduced — depreciation for ${jcNo}`;
+            await insertLine(crGL, 0, amount, crNar, crPartyTag);
+
+            // Subsidiary ledger — only the party-tagged Cr leg goes into dms_PartyLedger
+            if (crPartyTag) {
+                await new sql.Request(tx)
+                    .input('pid', sql.Int, crPartyTag)
+                    .input('jcid', sql.Int, id)
+                    .input('vid', sql.Int, voucherId)
+                    .input('gl',  sql.Int, crGL)
+                    .input('cr',  sql.Decimal(18,2), amount)
+                    .input('nar', sql.NVarChar(500), crNar)
+                    .query(`INSERT INTO dms_PartyLedger
+                                (PartyID, JobCardID, VoucherID, GLCAID, Debit, Credit, Narration)
+                            VALUES (@pid, @jcid, @vid, @gl, 0, @cr, @nar)`);
+            }
+
+            // 4. Flip to Posted (balanced-entry trigger validates)
+            await new sql.Request(tx)
+                .input('vid', sql.Int, voucherId)
+                .input('pby', sql.Int, req.user?.userId || null)
+                .query(`UPDATE data_FinanceVoucherInfo
+                        SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
+                        WHERE VoucherID=@vid`);
+
+            // 5. Stamp the VoucherID back to the payment row
+            await new sql.Request(tx)
+                .input('id', sql.Int, depPaymentId)
+                .input('vid', sql.Int, voucherId)
+                .query('UPDATE dms_JobCardDepreciationPayments SET VoucherID=@vid WHERE DepPaymentID=@id');
+
+            // 6. Cheque mode: register the pending cheque so the Cheque Clearance
+            //    screen can later move it from Cheques on Hand to the deposit bank.
+            if (isCheque) {
+                await new sql.Request(tx)
+                    .input('vid',  sql.Int,            voucherId)
+                    .input('did',  sql.Int,            drDetailId)
+                    .input('dir',  sql.NVarChar(20),   'Received')
+                    .input('no',   sql.NVarChar(50),   b.ReferenceNo)
+                    .input('dt',   sql.Date,           b.ChequeDate)
+                    .input('amt',  sql.Decimal(18,2),  amount)
+                    .input('db',   sql.NVarChar(150),  b.DrawerBank || null)
+                    .input('dbg',  sql.Int,            depositBankGL)
+                    .input('pid',  sql.Int,            insurerPartyID || null)
+                    .input('jcid', sql.Int,            id)
+                    .input('cby',  sql.Int,            req.user?.userId || null)
+                    .input('cbyN', sql.NVarChar(100),  req.user?.userName || null)
+                    .query(`INSERT INTO dms_PendingCheques
+                                (ReceiptVoucherID, ReceiptDetailID, Direction,
+                                 ChequeNo, ChequeDate, Amount,
+                                 DrawerBank, DepositBankGLCAID, PartyID, JobCardID,
+                                 CreatedBy, CreatedByName)
+                            VALUES (@vid, @did, @dir,
+                                    @no, @dt, @amt,
+                                    @db, @dbg, @pid, @jcid,
+                                    @cby, @cbyN)`);
+            }
+
+            await tx.commit();
+
+            res.status(201).json({
+                DepPaymentID: depPaymentId,
+                VoucherID: voucherId,
+                VoucherNo: voucherNo,
+                message: 'Depreciation payment recorded and posted',
+                totals: {
+                    depreciationTotal: total,
+                    depreciationPaid: +(paid + amount).toFixed(2),
+                    depreciationBalance: +(balance - amount).toFixed(2)
+                }
+            });
+        } catch (txErr) {
+            try { await tx.rollback(); } catch {}
+            throw txErr;
+        }
+    } catch (err) {
+        console.error('recordDepreciationPayment:', err);
+        res.status(500).json({ error: err.message });
+    }
 };

@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Database, Plus, ChevronRight, ChevronDown, Landmark, X, Search, Loader2, Building } from 'lucide-react';
+import { Plus, ChevronRight, ChevronDown, Landmark, X, Search, Loader2, Building } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API_BASE = '/api';
 
 const BankToggle = ({ acc }) => {
+  const { notify } = useFeedback();
   const [isBank, setIsBank] = useState(!!acc.IsBank);
   const [busy, setBusy] = useState(false);
   const toggle = async (e) => {
@@ -13,7 +15,10 @@ const BankToggle = ({ acc }) => {
     try {
       const res = await axios.patch(`${API_BASE}/accounts/banks/${acc.GLCAID}/toggle`);
       setIsBank(res.data.isBank);
-    } catch (err) { alert('Error: ' + err.message); }
+      notify({ type: 'success', title: res.data.isBank ? 'Marked as bank account' : 'Bank flag removed', message: acc.GLTitle });
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not update bank flag', message: err.response?.data?.error || err.message });
+    }
     setBusy(false);
   };
   // Only show toggle on leaf-level accounts (where money actually posts)
@@ -79,6 +84,7 @@ const AccountNode = ({ acc }) => {
 };
 
 export default function ChartOfAccounts() {
+  const { notify } = useFeedback();
   const [roots, setRoots] = useState([]);
   const [allParents, setAllParents] = useState([]);
   const [search, setSearch] = useState('');
@@ -149,8 +155,11 @@ export default function ChartOfAccounts() {
       await axios.post(`${API_BASE}/accounts/coa`, newAcc);
       setShowModal(false);
       setNewAcc({ GLTitle: '', GLLevel: 3, GLNature: 'Debit', isParent: false, ParentCode: '', ClassRoot: 1 });
+      notify({ type: 'success', title: 'Account created', message: newAcc.GLTitle });
       fetchRoots();
-    } catch (err) { alert('Error: ' + err.message); }
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not create account', message: err.response?.data?.error || err.message });
+    }
   };
 
   return (

@@ -1,47 +1,47 @@
 /**
- * Gate Pass / Delivery → ledger posting service.
+ * Gate Pass / Delivery → ledger posting service (agency model, migration 045 +
+ * per-customer COA leaves + premium-separated treatment).
  *
- * Fires when an authorized user issues the gate pass for an allocated chassis.
- * This is the revenue-recognition event for the booking.
+ *   A. Settle the customer's vehicle account against Master fulfilment
+ *        Dr Customer A/c             (= masterPaid)
+ *        Cr BOOKING_VARIANT_RECEIVABLE (masterPaid)
  *
- * Composite voucher (one event = one voucher per §14):
+ *   B. Recognize premium (kept strictly separate from the vehicle account)
+ *        Dr PREMIUM_DEFERRED          (premium)
+ *        Cr PREMIUM_INCOME            (premium)
  *
- *   A. Revenue recognition
- *      Dr BOOKING_ADVANCE         (AmountPaidToDate cap'd at NegotiatedPrice)
- *      Dr BOOKING_RECEIVABLE      (remaining = NegotiatedPrice - AmountPaidToDate)
- *      Cr VEHICLE_SALES_REVENUE   (NegotiatedPrice)
+ * Customer A/c is the customer's own COA leaf (gen_PartiesInfo.PartyGLID).
+ * Fallback to BOOKING_ADVANCE when accounts hasn't created the leaf yet.
  *
- *      If the negotiated price is < standard and SALES_DISCOUNT_GIVEN is
- *      mapped, an additional Dr line for the discount + Cr VEHICLE_SALES_REVENUE
- *      grosses up — but Phase 5 keeps revenue at NegotiatedPrice (Decision #19);
- *      discount is informational only. We skip the gross-up here.
+ * If the customer's vehicle payments don't cover masterPaid, the Customer A/c
+ * ends up Dr-balanced (= receivable owed back to dealer). Sales Recovery picks
+ * it up. Premium is recognized at the full booking amount regardless.
  *
- *   B. COGS recognition
- *      Dr COGS_VEHICLES           (WholesalePrice)
- *      Cr VEHICLE_INVENTORY       (WholesalePrice)
- *
- *   C. Premium recognition (only if PremiumAmount > 0)
- *      Dr BOOKING_ADVANCE         (PremiumAmount)
- *      Cr PREMIUM_INCOME          (PremiumAmount)
- *
- * Subsidiary ledger writes one row that shifts BOOKING_ADVANCE → BOOKING_RECEIVABLE
- * on the customer's ledger so historical payments are visible against the
- * recognized booking line.
+ * Wholesale revenue, COGS, and vehicle inventory are NOT touched — Master's books.
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 
 async function resolveAccounts() {
-    const need = ['BOOKING_ADVANCE', 'BOOKING_RECEIVABLE', 'VEHICLE_SALES_REVENUE',
-                  'VEHICLE_INVENTORY', 'COGS_VEHICLES', 'PREMIUM_INCOME'];
+    const need = ['BOOKING_ADVANCE', 'BOOKING_VARIANT_RECEIVABLE',
+                  'PREMIUM_DEFERRED', 'PREMIUM_INCOME'];
     const out = {};
     for (const r of need) out[r] = { GLCAID: await resolveRole(r) };
     return out;
 }
 
+async function resolveCustomerGL(partyId, fallbackGL, transaction) {
+    if (!partyId) return { GLCAID: fallbackGL, isPartyLeaf: false };
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, partyId)
+        .query(`SELECT PartyGLID FROM gen_PartiesInfo WHERE PartyID=@id`);
+    const gl = r.recordset[0]?.PartyGLID;
+    return gl
+        ? { GLCAID: gl, isPartyLeaf: true }
+        : { GLCAID: fallbackGL, isPartyLeaf: false };
+}
+
 async function loadBooking(bookingId, transaction) {
-    // WholesalePrice lives on the variant — pull it in via join here so the
-    // booking row doesn't need a redundant copy.
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, bookingId)
         .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.NegotiatedPrice,
@@ -54,41 +54,51 @@ async function loadBooking(bookingId, transaction) {
     return r.recordset[0];
 }
 
+// What did we actually pay Master against this booking? Sum of Dr legs on
+// BOOKING_VARIANT_RECEIVABLE in posted vouchers tagged to this BookingID.
+async function loadMasterPaid(bookingId, bvrGL, transaction) {
+    const r = await new sql.Request(transaction)
+        .input('gl', sql.Int, bvrGL)
+        .input('bid', sql.Int, bookingId)
+        .query(`SELECT
+                  ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0) AS Dr,
+                  ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Cr
+                FROM data_FinanceVoucherDetail d
+                INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                WHERE v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=@bid`);
+    const { Dr, Cr } = r.recordset[0] || { Dr: 0, Cr: 0 };
+    return Number(Dr) - Number(Cr);
+}
+
 /**
- * Posts the delivery/COGS/premium composite voucher.
- * Caller must be inside an open transaction.
- *
+ * Posts the delivery voucher (agency model). Caller must be inside an open transaction.
  * @returns {number} VoucherID
  */
 async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     const b = await loadBooking(bookingId, transaction);
-    const negotiated = Number(b.NegotiatedPrice || 0);
-    const wholesale  = Number(b.WholesalePrice || 0);
-    const paid       = Number(b.AmountPaidToDate || 0);
-    const premium    = Number(b.PremiumAmount || 0);
-
-    if (negotiated <= 0) throw new Error(`Booking ${b.BookingNo} has no NegotiatedPrice — cannot recognize revenue.`);
-
     const acc = await resolveAccounts();
+    const customerLeaf = await resolveCustomerGL(b.PartyID, acc.BOOKING_ADVANCE.GLCAID, transaction);
 
-    // Use SI (Sales Invoice) voucher type
-    const vt = await new sql.Request(transaction).query("SELECT Voucherid FROM GLVoucherType WHERE Title='SI'");
-    if (!vt.recordset.length) throw new Error('SI voucher type missing');
+    const negotiated = Number(b.NegotiatedPrice || 0);
+    const premium    = Number(b.PremiumAmount || 0);
+    if (negotiated <= 0) throw new Error(`Booking ${b.BookingNo} has no NegotiatedPrice.`);
+
+    // What we actually paid Master against this booking (sum of BVR Dr legs).
+    const masterPaid = await loadMasterPaid(bookingId, acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, transaction);
+
+    // Use JV voucher type — agency model has no internal sales invoice
+    const vt = await new sql.Request(transaction).query("SELECT Voucherid FROM GLVoucherType WHERE Title='JV'");
+    if (!vt.recordset.length) throw new Error('JV voucher type missing');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
     const seqRes = await new sql.Request(transaction).query(
-        `SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo`);
-    const voucherNo = `SI-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
+    const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 
-    // Caps: advance leg is min(paid, negotiated) — anything above goes into premium
-    // already, so advance cap == negotiated cap when there's overflow.
-    const advanceApplied = Math.min(paid, negotiated);
-    const receivableOpened = Math.max(0, negotiated - advanceApplied);
-
-    // Total voucher amount = negotiated + premium (sum of credit sides)
-    const totalAmount = negotiated + (premium > 0 ? premium : 0) + wholesale;
-
-    const narration = `Delivery — revenue recognized for booking ${b.BookingNo} (negotiated PKR ${negotiated.toLocaleString('en-PK')})`;
+    const totalAmount = masterPaid + premium;
+    const narration = `Delivery — settling booking ${b.BookingNo}`
+        + (masterPaid > 0 ? ` (vehicle: PKR ${masterPaid.toLocaleString('en-PK')})` : '')
+        + (premium > 0 ? `, premium PKR ${premium.toLocaleString('en-PK')} recognized` : '');
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     new Date())
@@ -123,44 +133,32 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
                     VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @bid)`);
     };
 
-    // A. Revenue
-    if (advanceApplied > 0) {
-        await insertLine(acc.BOOKING_ADVANCE.GLCAID, advanceApplied, 0,
-            `Booking advance applied to revenue (${b.BookingNo})`);
-    }
-    if (receivableOpened > 0) {
-        await insertLine(acc.BOOKING_RECEIVABLE.GLCAID, receivableOpened, 0,
-            `Receivable opened for unpaid portion (${b.BookingNo})`);
-    }
-    await insertLine(acc.VEHICLE_SALES_REVENUE.GLCAID, 0, negotiated,
-        `Vehicle sale recognized (${b.BookingNo})`);
-
-    // B. COGS
-    if (wholesale > 0) {
-        await insertLine(acc.COGS_VEHICLES.GLCAID, wholesale, 0,
-            `COGS for chassis released (${b.BookingNo})`);
-        await insertLine(acc.VEHICLE_INVENTORY.GLCAID, 0, wholesale,
-            `Vehicle inventory released (${b.BookingNo})`);
+    // A. Vehicle settlement — Customer A/c against BVR (no premium here)
+    if (masterPaid > 0) {
+        await insertLine(customerLeaf.GLCAID, masterPaid, 0,
+            `Vehicle delivery settled — ${b.BookingNo}`
+            + (customerLeaf.isPartyLeaf ? '' : ' (Booking Advance fallback)'));
+        await insertLine(acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, 0, masterPaid,
+            `Booking variant fulfilled by Master (${b.BookingNo})`);
     }
 
-    // C. Premium
+    // B. Premium recognition — strictly separate, never on the customer A/c
     if (premium > 0) {
-        await insertLine(acc.BOOKING_ADVANCE.GLCAID, premium, 0,
-            `Booking advance — premium portion (${b.BookingNo})`);
+        await insertLine(acc.PREMIUM_DEFERRED.GLCAID, premium, 0,
+            `Premium deferred → recognized (${b.BookingNo})`);
         await insertLine(acc.PREMIUM_INCOME.GLCAID, 0, premium,
-            `Premium income recognized (${b.BookingNo})`);
+            `Premium income recognized at delivery (${b.BookingNo})`);
     }
 
-    // Subsidiary ledger — the shift from advance to receivable for the customer.
-    // Net: customer's ledger sees a Debit for any newly-opened receivable.
-    if (receivableOpened > 0) {
+    // Subsidiary ledger — track the vehicle-side Dr against the customer's running balance.
+    if (masterPaid > 0) {
         await new sql.Request(transaction)
             .input('pid', sql.Int, b.PartyID)
             .input('bid', sql.Int, b.BookingID)
             .input('vid', sql.Int, voucherId)
-            .input('gl',  sql.Int, acc.BOOKING_RECEIVABLE.GLCAID)
-            .input('dr',  sql.Decimal(18,2), receivableOpened)
-            .input('nar', sql.NVarChar(500), `Receivable opened on delivery — ${b.BookingNo}`)
+            .input('gl',  sql.Int, customerLeaf.GLCAID)
+            .input('dr',  sql.Decimal(18,2), masterPaid)
+            .input('nar', sql.NVarChar(500), `Vehicle delivered — ${b.BookingNo}`)
             .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                     VALUES (@pid, @bid, @vid, @gl, @dr, 0, @nar)`);
     }

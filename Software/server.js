@@ -5,6 +5,13 @@ const cors = require('cors');
 const { connectDB } = require('./config/db');
 const authMiddleware = require('./middleware/auth');
 
+// Fail fast if JWT secret isn't configured. Otherwise the auth layer silently
+// falls back to a known string and every token in the wild becomes forgeable.
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
+    console.error('FATAL: JWT_SECRET env var must be set to a 16+ character secret. Aborting startup.');
+    process.exit(1);
+}
+
 const app = express();
 
 // Middleware
@@ -60,7 +67,13 @@ app.use('/api/system-accounts', require('./routes/systemAccountsRoutes'));
 app.use('/api/tax-rates', require('./routes/taxRatesRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/pos-settlement', require('./routes/posSettlementRoutes'));
+app.use('/api/cheques', require('./routes/chequeRoutes'));
+app.use('/api/gatepass', require('./routes/gatePassRoutes'));
 app.use('/api/reports', require('./routes/reportsRoutes'));
+app.use('/api/reports/service', require('./routes/serviceReportsRoutes'));
+app.use('/api/reports/parts',   require('./routes/partsReportsRoutes'));
+app.use('/api/reports/sales',   require('./routes/salesReportsRoutes'));
+app.use('/api/service-campaigns', require('./routes/serviceCampaignRoutes'));
 app.use('/api/crd', require('./routes/crdRoutes'));
 app.use('/api/cro', require('./routes/croRoutes'));
 app.use('/api/sales', require('./routes/salesRoutes'));

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Receipt, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Wallet } from 'lucide-react';
+import { Receipt, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Wallet, Printer } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
 
 // Receive Payment from customers.
@@ -20,16 +20,33 @@ export default function ReceivePayment() {
   const [walkInResolved, setWalkInResolved] = useState(null);  // { JobCardId, JobCardNo } once resolved
   const [walkInResolving, setWalkInResolving] = useState(false);
   const [walkInBalance, setWalkInBalance] = useState(null);    // { invoiceTotal, paid, outstanding, hasInvoiceVoucher, voucher }
-  const [mode, setMode] = useState('named');                 // 'named' or 'walkin'
+  // Walk-in Store Sale: enter SaleID (e.g. 1 → SAL-00001), resolve to voucher + balance
+  const [walkInSaleNumber, setWalkInSaleNumber] = useState('');
+  const [walkInSaleResolved, setWalkInSaleResolved] = useState(null);  // { SaleID, InvoiceNo, IsFinalized }
+  const [walkInSaleResolving, setWalkInSaleResolving] = useState(false);
+  const [walkInSaleBalance, setWalkInSaleBalance] = useState(null);    // { invoiceTotal, paid, outstanding, voucher }
+  // JC Insurance Depreciation: same RO entry as walkin, but only for FINALIZED JCs;
+  // payments go against the customer's depreciation share (not the insurer's invoice).
+  const [depCardCode, setDepCardCode] = useState('');
+  const [depNumber, setDepNumber] = useState('');
+  const [depResolved, setDepResolved] = useState(null);   // { JobCardId, JobCardNo, IsFinalized }
+  const [depResolving, setDepResolving] = useState(false);
+  const [depBalance, setDepBalance] = useState(null);     // { total, paid, balance }
+  const [mode, setMode] = useState('named');                 // 'named' | 'walkin' | 'walkinSS' | 'depreciation'
   const [selectedParty, setSelectedParty] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [advanceBalance, setAdvanceBalance] = useState(0);
   const [allocations, setAllocations] = useState({});         // { [voucherId]: amount }
-  const [paymentLines, setPaymentLines] = useState([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '' }]);
+  const [paymentLines, setPaymentLines] = useState([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
+  // Tax / write-off adjustments — customer withholds these amounts on settlement.
+  // Resolved server-side to GL leaves: WHTL=102005005, WHTP=102005006, STWH=102005007,
+  // Salvage=502002038, Short=502002039.
+  const [adjustments, setAdjustments] = useState({ WHTL: '', WHTP: '', STWH: '', Salvage: '', Short: '' });
   const [narration, setNarration] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [lastVoucher, setLastVoucher] = useState(null); // { voucherId, voucherNo } for Print Receipt
 
   const flash = (m, isErr = false) => {
     isErr ? setErr(m) : setMsg(m);
@@ -41,9 +58,42 @@ export default function ReceivePayment() {
     axios.get('/api/accounts/banks').then(r => setBanks(r.data)).catch(() => {});
     axios.get('/api/workshop/job-types').then(r => {
       setJobTypes(r.data);
-      if (r.data.length > 0) setWalkInCardCode(r.data[0].CardCode);
+      if (r.data.length > 0) {
+        setWalkInCardCode(r.data[0].CardCode);
+        setDepCardCode(r.data[0].CardCode);
+      }
     }).catch(() => {});
   }, []);
+
+  // Resolve the JC for depreciation mode + fetch outstanding balance from the
+  // insurance endpoint. Reject if the JC isn't finalized (also enforced server-side).
+  useEffect(() => {
+    if (mode !== 'depreciation' || !depCardCode || !depNumber) {
+      setDepResolved(null);
+      setDepBalance(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setDepResolving(true);
+      setDepBalance(null);
+      try {
+        const r = await axios.get('/api/workshop/job-cards/resolve-ro', {
+          params: { cardCode: depCardCode, number: depNumber },
+        });
+        // resolve-ro doesn't tell us IsFinalized — fetch the JC header
+        const jc = await axios.get(`/api/workshop/job-cards/${r.data.JobCardId}`);
+        setDepResolved({ ...r.data, IsFinalized: !!jc.data.IsFinalized });
+        if (jc.data.IsFinalized) {
+          const ins = await axios.get(`/api/workshop/job-cards/${r.data.JobCardId}/insurance`);
+          setDepBalance(ins.data?.totals || null);
+        }
+      } catch {
+        setDepResolved(null);
+      }
+      setDepResolving(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [depCardCode, depNumber, mode]);
 
   // Resolve walk-in RO whenever code or number changes; then fetch balance
   useEffect(() => {
@@ -72,6 +122,29 @@ export default function ReceivePayment() {
     }, 400);
     return () => clearTimeout(t);
   }, [walkInCardCode, walkInNumber, mode]);
+
+  // Resolve walk-in Store Sale: enter a sale ID (the number in SAL-NNNNN) and
+  // fetch its outstanding balance.
+  useEffect(() => {
+    if (mode !== 'walkinSS' || !walkInSaleNumber) {
+      setWalkInSaleResolved(null);
+      setWalkInSaleBalance(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setWalkInSaleResolving(true);
+      try {
+        const b = await axios.get(`/api/payments/storesale-balance/${parseInt(walkInSaleNumber)}`);
+        setWalkInSaleResolved(b.data.sale);
+        setWalkInSaleBalance(b.data);
+      } catch (e) {
+        setWalkInSaleResolved(null);
+        setWalkInSaleBalance(null);
+      }
+      setWalkInSaleResolving(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [walkInSaleNumber, mode]);
 
   // Auto-fill payment amount with outstanding balance when balance loads (convenience)
   // Only if no payment lines have an amount yet
@@ -112,7 +185,7 @@ export default function ReceivePayment() {
   };
 
   // ---- Payment lines ----
-  const addPaymentLine = () => setPaymentLines([...paymentLines, { Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '' }]);
+  const addPaymentLine = () => setPaymentLines([...paymentLines, { Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
   const removePaymentLine = (i) => setPaymentLines(paymentLines.filter((_, idx) => idx !== i));
   const updatePaymentLine = (i, field, value) => {
     const next = [...paymentLines];
@@ -120,10 +193,16 @@ export default function ReceivePayment() {
     setPaymentLines(next);
   };
 
-  const totalPayment = useMemo(
+  const cashPayment = useMemo(
     () => paymentLines.reduce((s, p) => s + (parseFloat(p.Amount) || 0), 0),
     [paymentLines]
   );
+  const adjustmentTotal = useMemo(
+    () => Object.values(adjustments).reduce((s, v) => s + (parseFloat(v) || 0), 0),
+    [adjustments]
+  );
+  // What "settles" the invoice = cash received + adjustments withheld by customer
+  const totalPayment = cashPayment + adjustmentTotal;
 
   // ---- Allocations ----
   const allocatedSum = useMemo(
@@ -162,50 +241,123 @@ export default function ReceivePayment() {
     if (mode === 'walkin' && !walkInResolved) {
       flash('Pick a Business Unit and enter a valid RO number first.', true); return;
     }
+    if (mode === 'walkinSS' && !walkInSaleResolved) {
+      flash('Enter a valid Store Sale invoice number.', true); return;
+    }
+    if (mode === 'depreciation') {
+      if (!depResolved) { flash('Pick a Business Unit and enter a valid RO number.', true); return; }
+      if (!depResolved.IsFinalized) { flash('The Job Card must be finalized first.', true); return; }
+      if (!depBalance || depBalance.depreciationBalance <= 0) { flash('No outstanding depreciation balance on this Job Card.', true); return; }
+    }
     if (totalPayment <= 0) { flash('Enter at least one payment line with amount.', true); return; }
     if (allocatedSum > totalPayment + 0.01) { flash(`Allocations (${allocatedSum.toFixed(2)}) exceed payment total (${totalPayment.toFixed(2)}).`, true); return; }
     for (const p of paymentLines) {
       if (p.Mode === 'Bank Transfer' && !p.BankGLCAID) {
         flash('Pick a bank for each Bank Transfer line.', true); return;
       }
+      if (p.Mode === 'Cheque') {
+        if (!p.BankGLCAID)  { flash('Pick a Deposit Bank for each Cheque line.', true); return; }
+        if (!p.Reference)   { flash('Enter the Cheque # for each Cheque line.', true); return; }
+        if (!p.ChequeDate)  { flash('Enter the Cheque Date for each Cheque line.', true); return; }
+      }
+    }
+
+    // ---- Depreciation mode posts via the JC depreciation-payments endpoint (one POST per line) ----
+    if (mode === 'depreciation') {
+      if (totalPayment > depBalance.depreciationBalance + 0.005) {
+        flash(`Total (${totalPayment.toFixed(2)}) exceeds outstanding depreciation (${depBalance.depreciationBalance.toFixed(2)}).`, true);
+        return;
+      }
+      setSaving(true);
+      try {
+        const lines = paymentLines.filter(p => parseFloat(p.Amount) > 0);
+        for (const p of lines) {
+          // Map the existing UI label "Bank Transfer" → backend enum "BankTransfer"
+          const backendMode = p.Mode === 'Bank Transfer' ? 'BankTransfer' : p.Mode;
+          await axios.post(`/api/workshop/job-cards/${depResolved.JobCardId}/depreciation-payments`, {
+            PaidAmount: parseFloat(p.Amount),
+            PaymentMode: backendMode,
+            BankAccountID: p.BankGLCAID ? parseInt(p.BankGLCAID) : null,
+            ReferenceNo: p.Reference || null,
+            ChequeDate: p.Mode === 'Cheque' ? (p.ChequeDate || null) : null,
+            DrawerBank: p.Mode === 'Cheque' ? (p.DrawerBank || null) : null,
+            Notes: narration || null,
+          });
+        }
+        flash(`Depreciation payment of PKR ${totalPayment.toLocaleString()} recorded against ${depResolved.JobCardNo}.`);
+        // Reset
+        setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
+        setNarration('');
+        // Refresh the balance display
+        const ins = await axios.get(`/api/workshop/job-cards/${depResolved.JobCardId}/insurance`);
+        setDepBalance(ins.data?.totals || null);
+      } catch (e) {
+        flash(e.response?.data?.error || e.message, true);
+      }
+      setSaving(false);
+      return;
     }
 
     let allocArray = Object.entries(allocations)
       .filter(([, v]) => parseFloat(v) > 0)
       .map(([vid, v]) => ({ TargetVoucherID: parseInt(vid), Amount: parseFloat(v) }));
 
-    // For walk-in mode: if the JC has an invoice voucher with outstanding, auto-allocate
-    // the lesser of (totalPayment, outstanding) to it. Excess becomes advance.
+    // Walk-in JC: auto-allocate to the JC's SI voucher if outstanding > 0
     if (mode === 'walkin' && walkInBalance && walkInBalance.hasInvoiceVoucher && walkInBalance.outstanding > 0 && walkInBalance.voucher) {
       const toAllocate = Math.min(totalPayment, walkInBalance.outstanding);
       if (toAllocate > 0.005) {
         allocArray = [{ TargetVoucherID: walkInBalance.voucher.VoucherID, Amount: +toAllocate.toFixed(2) }];
       }
     }
+    // Walk-in Store Sale: auto-allocate to the SS voucher
+    if (mode === 'walkinSS' && walkInSaleBalance && walkInSaleBalance.hasInvoiceVoucher && walkInSaleBalance.outstanding > 0 && walkInSaleBalance.voucher) {
+      const toAllocate = Math.min(totalPayment, walkInSaleBalance.outstanding);
+      if (toAllocate > 0.005) {
+        allocArray = [{ TargetVoucherID: walkInSaleBalance.voucher.VoucherID, Amount: +toAllocate.toFixed(2) }];
+      }
+    }
 
     setSaving(true);
     try {
+      // Pack adjustments — only positive amounts. Only applied for named-customer mode.
+      const adjPayload = mode === 'named'
+        ? Object.fromEntries(Object.entries(adjustments)
+            .map(([k, v]) => [k, parseFloat(v) || 0])
+            .filter(([, v]) => v > 0))
+        : {};
+
       const r = await axios.post('/api/payments/receive', {
         partyId: mode === 'named' ? selectedParty.PartyID : null,
         walkInJobCardID: mode === 'walkin' ? walkInResolved.JobCardId : null,
+        walkInSaleID:    mode === 'walkinSS' ? walkInSaleResolved.SaleID : null,
         paymentLines: paymentLines.filter(p => parseFloat(p.Amount) > 0).map(p => ({
           Mode: p.Mode,
           Amount: parseFloat(p.Amount),
           Reference: p.Reference || null,
           BankGLCAID: p.BankGLCAID ? parseInt(p.BankGLCAID) : null,
+          ChequeDate: p.Mode === 'Cheque' ? (p.ChequeDate || null) : null,
+          DrawerBank: p.Mode === 'Cheque' ? (p.DrawerBank || null) : null,
         })),
         allocations: allocArray,
+        adjustments: adjPayload,
         narration: narration || null,
       });
       flash(`Payment posted as ${r.data.voucherNo}.`);
+      setLastVoucher({ voucherId: r.data.voucherId, voucherNo: r.data.voucherNo });
       // Reset and refresh
-      setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '' }]);
+      setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
+      setAdjustments({ WHTL: '', WHTP: '', STWH: '', Salvage: '', Short: '' });
       setAllocations({});
       setNarration('');
       if (mode === 'named' && selectedParty) pickParty(selectedParty);
       if (mode === 'walkin') {
         setWalkInNumber('');
         setWalkInResolved(null);
+      }
+      if (mode === 'walkinSS') {
+        setWalkInSaleNumber('');
+        setWalkInSaleResolved(null);
+        setWalkInSaleBalance(null);
       }
     } catch (e) {
       flash(e.response?.data?.error || e.message, true);
@@ -224,11 +376,34 @@ export default function ReceivePayment() {
         Record cash, cheque, POS, or bank-transfer receipts from customers. Multiple payment modes per receipt are supported. Excess routes to Customer Advance Received.
       </p>
 
-      {msg && <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
+      {msg && (
+        <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>{msg}</span>
+          {lastVoucher && (
+            <a href={`/vouchers/crv?id=${lastVoucher.voucherId}&print=1`} target="_blank" rel="noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#0f766e', color: 'white', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', textDecoration: 'none' }}>
+              <Printer size={14} /> Print Receipt {lastVoucher.voucherNo}
+            </a>
+          )}
+        </div>
+      )}
       {err && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{err}</div>}
 
+      {/* Heads-up: vehicle (car) sale payments live on the Booking, not here */}
+      <div style={{
+        background: '#fef3c7', border: '1px solid #fde68a', color: '#92400e',
+        padding: '8px 12px', borderRadius: 6, marginBottom: 14, fontSize: '0.85rem',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10
+      }}>
+        <span><AlertTriangle size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 6 }} />
+          <strong>Car-sale payment?</strong> Record it on the booking, not here — proof-of-payment upload is mandatory and the booking state advances automatically.</span>
+        <a href="/sales/bookings" style={{ background: '#b45309', color: 'white', padding: '4px 10px', borderRadius: 4, textDecoration: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
+          Open Bookings →
+        </a>
+      </div>
+
       {/* Mode toggle */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <label style={radioWrap(mode === 'named')}>
           <input type="radio" value="named" checked={mode === 'named'} onChange={() => { setMode('named'); clearParty(); }} />
           <span>Named customer</span>
@@ -237,11 +412,19 @@ export default function ReceivePayment() {
           <input type="radio" value="walkin" checked={mode === 'walkin'} onChange={() => { setMode('walkin'); clearParty(); }} />
           <span>Walk-in deposit against Job Card</span>
         </label>
+        <label style={radioWrap(mode === 'walkinSS')}>
+          <input type="radio" value="walkinSS" checked={mode === 'walkinSS'} onChange={() => { setMode('walkinSS'); clearParty(); }} />
+          <span>Walk-in deposit against Store Sale</span>
+        </label>
+        <label style={radioWrap(mode === 'depreciation')}>
+          <input type="radio" value="depreciation" checked={mode === 'depreciation'} onChange={() => { setMode('depreciation'); clearParty(); }} />
+          <span>JC Insurance Depreciation</span>
+        </label>
       </div>
 
-      {/* Party / RO picker */}
+      {/* Party / RO / SS picker */}
       <div style={card}>
-        {mode === 'named' ? (
+        {mode === 'named' && (
           <div>
             <label style={lblStyle}>Customer</label>
             <div style={{ position: 'relative' }}>
@@ -279,7 +462,9 @@ export default function ReceivePayment() {
               </div>
             )}
           </div>
-        ) : (
+        )}
+
+        {mode === 'walkin' && (
           <div>
             <label style={lblStyle}>Walk-in deposit against Job Card</label>
             <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 10 }}>
@@ -340,6 +525,125 @@ export default function ReceivePayment() {
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
               Walk-in advance will be tagged with this Job Card. When the Job Card is finalised later, the advance can be applied via the Receive Payment screen.
             </div>
+          </div>
+        )}
+
+        {mode === 'walkinSS' && (
+          <div>
+            <label style={lblStyle}>Walk-in deposit against Store Sale</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 10, alignItems: 'end' }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 2 }}>Sale Invoice Number</div>
+                <input
+                  type="number"
+                  placeholder="e.g. 1 (resolves SAL-00001)"
+                  value={walkInSaleNumber}
+                  onChange={e => setWalkInSaleNumber(e.target.value)}
+                  style={inp}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>
+                Enter the SAL-NNNNN suffix as a number (e.g. 7 for SAL-00007).
+              </div>
+            </div>
+            <div style={{ fontSize: 12, marginTop: 8, minHeight: 20 }}>
+              {walkInSaleResolving && <span style={{ color: '#94a3b8' }}><Loader2 size={12} className="spin" /> Looking up...</span>}
+              {!walkInSaleResolving && walkInSaleResolved && (
+                <span style={{ color: '#16a34a', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Check size={14} /> Found: {walkInSaleResolved.InvoiceNo} ({walkInSaleResolved.PaymentMode})
+                  {walkInSaleResolved.IsFinalized ? <span style={{ marginLeft: 6, padding: '2px 6px', background: '#fef3c7', color: '#92400e', borderRadius: 10, fontSize: 10 }}>FINALIZED</span> : null}
+                </span>
+              )}
+              {!walkInSaleResolving && !walkInSaleResolved && walkInSaleNumber && (
+                <span style={{ color: '#dc2626' }}><AlertTriangle size={12} /> No Store Sale found for #{walkInSaleNumber}</span>
+              )}
+            </div>
+
+            {walkInSaleBalance && (
+              <div style={{ marginTop: 12, padding: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                  <MiniStat label="Invoice total" value={walkInSaleBalance.invoiceTotal} colour="#1e293b" />
+                  <MiniStat label="Already paid" value={walkInSaleBalance.paid} colour="#0284c7" />
+                  <MiniStat label="Outstanding" value={walkInSaleBalance.outstanding} colour={walkInSaleBalance.outstanding > 0 ? '#dc2626' : '#16a34a'} />
+                </div>
+                {!walkInSaleBalance.hasInvoiceVoucher && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#92400e', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                    <span>No invoice voucher posted for this Store Sale yet.</span>
+                  </div>
+                )}
+                {walkInSaleBalance.outstanding === 0 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Check size={12} /> This Store Sale is fully paid.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {mode === 'depreciation' && (
+          <div>
+            <label style={lblStyle}>Receive Job Card Insurance Depreciation</label>
+            <div style={{ fontSize: 11, color: '#92400e', marginBottom: 8, background: '#fef3c7', border: '1px solid #fde68a', padding: '6px 10px', borderRadius: 4 }}>
+              <AlertTriangle size={12} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: 4 }} />
+              Only <strong>finalized</strong> Job Cards can receive depreciation. The customer pays their depreciation share of each part (insurance pays the rest).
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 2 }}>Business Unit</div>
+                <select value={depCardCode} onChange={e => setDepCardCode(e.target.value)} style={inp}>
+                  {jobTypes.map(jt => (
+                    <option key={jt.JobCardTypeId} value={jt.CardCode}>{jt.CardCode} — {jt.Title}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 2 }}>RO Number</div>
+                <input
+                  type="number"
+                  placeholder="e.g. 42 (will resolve as e.g. CT-0042)"
+                  value={depNumber}
+                  onChange={e => setDepNumber(e.target.value)}
+                  style={inp}
+                />
+              </div>
+            </div>
+            <div style={{ fontSize: 12, marginTop: 8, minHeight: 20 }}>
+              {depResolving && <span style={{ color: '#94a3b8' }}><Loader2 size={12} className="spin" /> Looking up...</span>}
+              {!depResolving && depResolved && (
+                <span style={{ color: depResolved.IsFinalized ? '#16a34a' : '#b91c1c', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  {depResolved.IsFinalized ? <Check size={14} /> : <AlertTriangle size={14} />}
+                  {depResolved.JobCardNo}
+                  {depResolved.IsFinalized
+                    ? <span style={{ marginLeft: 6, padding: '2px 6px', background: '#dcfce7', color: '#15803d', borderRadius: 10, fontSize: 10 }}>FINALIZED</span>
+                    : <span style={{ marginLeft: 6, padding: '2px 6px', background: '#fee2e2', color: '#b91c1c', borderRadius: 10, fontSize: 10 }}>NOT FINALIZED — payment blocked</span>}
+                </span>
+              )}
+              {!depResolving && !depResolved && depCardCode && depNumber && (
+                <span style={{ color: '#dc2626' }}><AlertTriangle size={12} /> No Job Card found for {depCardCode}-{String(depNumber).padStart(4, '0')}</span>
+              )}
+            </div>
+
+            {depBalance && depResolved?.IsFinalized && (
+              <div style={{ marginTop: 12, padding: 12, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                  <MiniStat label="Depreciation Total" value={depBalance.depreciationTotal} colour="#7c2d12" />
+                  <MiniStat label="Already paid" value={depBalance.depreciationPaid} colour="#15803d" />
+                  <MiniStat label="Outstanding" value={depBalance.depreciationBalance} colour={depBalance.depreciationBalance > 0 ? '#dc2626' : '#16a34a'} />
+                </div>
+                {depBalance.depreciationBalance <= 0 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Check size={12} /> Depreciation fully recovered.
+                  </div>
+                )}
+                {depBalance.depreciationTotal === 0 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#92400e', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <AlertTriangle size={12} /> No depreciation entered on the Insurance tab of this Job Card yet.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -409,75 +713,147 @@ export default function ReceivePayment() {
         </div>
         {paymentLines.map((p, i) => {
           const isAdvance = p.Mode === 'Advance';
+          const isCheque  = p.Mode === 'Cheque';
+          const isBankT   = p.Mode === 'Bank Transfer';
+          const needsBank = isBankT || isCheque;
           const advanceAllowed = mode === 'named' && advanceBalance > 0;
           return (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '160px 180px 160px 1fr 32px', gap: 8, marginBottom: 8, alignItems: 'end' }}>
-            <div>
-              <label style={lblStyle}>Mode</label>
-              <select value={p.Mode} onChange={e => updatePaymentLine(i, 'Mode', e.target.value)} style={inp}>
-                <option value="Cash">Cash</option>
-                <option value="Cheque">Cheque</option>
-                <option value="POS">POS</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                {advanceAllowed && <option value="Advance">Apply Advance (PKR {advanceBalance.toFixed(2)} available)</option>}
-              </select>
+          <div key={i} style={{ marginBottom: 12, paddingBottom: isCheque ? 10 : 0, borderBottom: isCheque ? '1px dashed #e2e8f0' : 'none' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 180px 160px 1fr 32px', gap: 8, alignItems: 'end' }}>
+              <div>
+                <label style={lblStyle}>Mode</label>
+                <select value={p.Mode} onChange={e => updatePaymentLine(i, 'Mode', e.target.value)} style={inp}>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="POS">POS</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  {advanceAllowed && <option value="Advance">Apply Advance (PKR {advanceBalance.toFixed(2)} available)</option>}
+                </select>
+              </div>
+              <div>
+                <label style={lblStyle}>Amount (PKR)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  max={isAdvance ? advanceBalance : undefined}
+                  value={p.Amount}
+                  onChange={e => updatePaymentLine(i, 'Amount', e.target.value)}
+                  style={{
+                    ...inp,
+                    borderColor: isAdvance && parseFloat(p.Amount || 0) > advanceBalance + 0.005 ? '#dc2626' : (inp.borderColor || '#cbd5e1')
+                  }}
+                />
+                {isAdvance && (
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                    Available: PKR {advanceBalance.toFixed(2)}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label style={lblStyle}>{isCheque ? 'Cheque # *' : 'Reference'}</label>
+                <input
+                  type="text"
+                  placeholder={isCheque ? 'Cheque #' : isAdvance ? 'Memo' : 'Optional'}
+                  value={p.Reference}
+                  onChange={e => updatePaymentLine(i, 'Reference', e.target.value)}
+                  style={inp}
+                  disabled={isAdvance}
+                />
+              </div>
+              <div>
+                <label style={lblStyle}>{needsBank ? (isCheque ? 'Deposit Bank *' : 'Bank Account *') : <span style={{ color: '#cbd5e1' }}>—</span>}</label>
+                <select
+                  value={p.BankGLCAID}
+                  onChange={e => updatePaymentLine(i, 'BankGLCAID', e.target.value)}
+                  disabled={!needsBank}
+                  style={{ ...inp, background: !needsBank ? '#f8fafc' : 'white' }}
+                >
+                  <option value="">Pick bank...</option>
+                  {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
+                </select>
+              </div>
+              <div>
+                {paymentLines.length > 1 && (
+                  <button onClick={() => removePaymentLine(i)} style={{ ...iconBtn, color: '#ef4444' }}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
             </div>
-            <div>
-              <label style={lblStyle}>Amount (PKR)</label>
-              <input
-                type="number" step="0.01" min="0"
-                max={isAdvance ? advanceBalance : undefined}
-                value={p.Amount}
-                onChange={e => updatePaymentLine(i, 'Amount', e.target.value)}
-                style={{
-                  ...inp,
-                  borderColor: isAdvance && parseFloat(p.Amount || 0) > advanceBalance + 0.005 ? '#dc2626' : (inp.borderColor || '#cbd5e1')
-                }}
-              />
-              {isAdvance && (
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                  Available: PKR {advanceBalance.toFixed(2)}
+            {isCheque && (
+              <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 32px', gap: 8, alignItems: 'end', marginTop: 6 }}>
+                <div>
+                  <label style={lblStyle}>Cheque Date *</label>
+                  <input
+                    type="date"
+                    value={p.ChequeDate}
+                    onChange={e => updatePaymentLine(i, 'ChequeDate', e.target.value)}
+                    style={inp}
+                  />
                 </div>
-              )}
-            </div>
-            <div>
-              <label style={lblStyle}>Reference</label>
-              <input
-                type="text"
-                placeholder={p.Mode === 'Cheque' ? 'Cheque #' : isAdvance ? 'Memo' : 'Optional'}
-                value={p.Reference}
-                onChange={e => updatePaymentLine(i, 'Reference', e.target.value)}
-                style={inp}
-                disabled={isAdvance}
-              />
-            </div>
-            <div>
-              <label style={lblStyle}>{p.Mode === 'Bank Transfer' ? 'Bank Account *' : <span style={{ color: '#cbd5e1' }}>—</span>}</label>
-              <select
-                value={p.BankGLCAID}
-                onChange={e => updatePaymentLine(i, 'BankGLCAID', e.target.value)}
-                disabled={p.Mode !== 'Bank Transfer'}
-                style={{ ...inp, background: p.Mode !== 'Bank Transfer' ? '#f8fafc' : 'white' }}
-              >
-                <option value="">Pick bank...</option>
-                {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
-              </select>
-            </div>
-            <div>
-              {paymentLines.length > 1 && (
-                <button onClick={() => removePaymentLine(i)} style={{ ...iconBtn, color: '#ef4444' }}>
-                  <Trash2 size={16} />
-                </button>
-              )}
-            </div>
+                <div>
+                  <label style={lblStyle}>Drawer Bank (on the cheque)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. HBL Liaqat Pur branch"
+                    value={p.DrawerBank}
+                    onChange={e => updatePaymentLine(i, 'DrawerBank', e.target.value)}
+                    style={inp}
+                  />
+                </div>
+                <div />
+              </div>
+            )}
           </div>
         );})}
       </div>
 
+      {/* Tax / write-off adjustments — named-customer only.
+          Customer withholds these amounts on settlement (WHT certificates, etc.).
+          Each non-zero field becomes a Dr leg posted with the customer's PartyID,
+          plus a subsidiary-ledger row so the WHT-receivable balance per party is correct.
+          The cash receipt + adjustments together settle the invoice. */}
+      {mode === 'named' && selectedParty && (
+        <div style={{ ...card, background: '#fffbeb', border: '1px solid #fde68a' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div>
+              <strong style={{ color: '#92400e' }}>Tax / Write-off Adjustments</strong>
+              <div style={{ fontSize: 11, color: '#78350f', marginTop: 2 }}>
+                Use when the customer withholds taxes (WHT on labour/parts, sales tax) or you absorb a shortage / salvage on their behalf. Tagged to <strong>{selectedParty.PartyName}</strong>.
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: '#92400e' }}>
+              Adj. total: <strong>PKR {adjustmentTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+            {[
+              { k: 'WHTL',    label: 'WHT — Service',  hint: '102005005 Advance Tax on Service' },
+              { k: 'WHTP',    label: 'WHT — Parts',    hint: '102005006 Advance Tax on Goods' },
+              { k: 'STWH',    label: 'Sales Tax W/H',  hint: '102005007 Sales Tax Withheld' },
+              { k: 'Salvage', label: 'Salvage',        hint: '502002038 Salvage Expense' },
+              { k: 'Short',   label: 'Shortage',       hint: '502002039 Shortage in RO (Service)' },
+            ].map(f => (
+              <div key={f.k}>
+                <label style={{ ...lblStyle, color: '#78350f' }} title={f.hint}>{f.label}</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={adjustments[f.k]}
+                  onChange={e => setAdjustments(a => ({ ...a, [f.k]: e.target.value }))}
+                  placeholder="0.00"
+                  style={{ ...inp, borderColor: '#fde68a', background: 'white' }}
+                  title={f.hint}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Totals + advance preview */}
       <div style={{ ...card, background: '#f8fafc' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <Stat label="Total received" value={totalPayment} colour="#1e293b" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
+          <Stat label="Cash received" value={cashPayment} colour="#1e293b" />
+          <Stat label="Adjustments" value={adjustmentTotal} colour="#92400e" />
           <Stat label="Allocated to invoices" value={allocatedSum} colour="#16a34a" />
           <Stat
             label={excess >= 0 ? 'To advance (excess)' : 'Allocation OVER total!'}

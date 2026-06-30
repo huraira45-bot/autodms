@@ -11,7 +11,7 @@
  *
  * Gated by cro_workspace / cro_admin / cro_reports.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
     ClipboardList, RefreshCw, Loader2, Search, Send, Copy, ExternalLink,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import SurveyCapturePanel from '../components/SurveyCapturePanel';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -43,6 +44,7 @@ function StatusBadge({ s }) {
 
 export default function SurveysAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [statusFilter, setStatusFilter] = useState('');
@@ -96,7 +98,13 @@ export default function SurveysAdmin() {
     };
 
     const deleteSurvey = async (id) => {
-        if (!window.confirm('Permanently delete this survey row? This cannot be undone.')) return;
+        const ok = await confirmAction({
+            title: 'Delete survey?',
+            message: 'This permanently deletes the survey row and cannot be undone.',
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try {
             await axios.delete(`${API}/cro/surveys/${id}`);
             flash('ok', 'Deleted');
@@ -105,7 +113,13 @@ export default function SurveysAdmin() {
     };
 
     const cancelSurvey = async (id) => {
-        if (!window.confirm('Cancel this survey? Customer will no longer be able to respond.')) return;
+        const ok = await confirmAction({
+            title: 'Cancel survey?',
+            message: 'The customer will no longer be able to respond to this survey.',
+            confirmLabel: 'Cancel survey',
+            tone: 'warning'
+        });
+        if (!ok) return;
         try {
             await axios.post(`${API}/cro/surveys/${id}/cancel`);
             flash('ok', 'Cancelled');

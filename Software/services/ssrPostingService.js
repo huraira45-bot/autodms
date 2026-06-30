@@ -6,23 +6,24 @@ const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildSSRJournalLines } = require('../utils/ssrJournalBuilder');
 
-async function resolveSSRAccounts(transaction) {
+async function resolveSSRAccounts(/* transaction */) {
     const roles = ['CASH_BOOK', 'GENERAL_CUSTOMER', 'GST_PAYABLE', 'POS_CLEARING',
-                   'DEFAULT_DISCOUNT_GIVEN', 'CHEQUES_ON_HAND'];
+                   'DEFAULT_DISCOUNT_GIVEN', 'CHEQUES_ON_HAND',
+                   'PARTS_REVENUE', 'COGS_PARTS', 'INVENTORY_PARTS'];
     const out = {};
     for (const r of roles) out[r] = { GLCAID: await resolveRole(r) };
-    const byCode = async (code) => {
-        const r = await new sql.Request(transaction)
-            .input('c', sql.NVarChar(50), code)
-            .query('SELECT GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND Status=1');
-        if (!r.recordset.length) throw new Error(`COA account ${code} not found.`);
-        return { GLCAID: r.recordset[0].GLCAID };
-    };
-    out.TRADE_DEBTORS    = await byCode('101005');
-    out.PARTS_REVENUE    = await byCode('401002');
-    out.COGS_PARTS       = await byCode('501001');
-    out.INVENTORY_PARTS  = await byCode('101004');
     return out;
+}
+
+async function loadPartyGL(partyId, transaction) {
+    if (!partyId) return null;
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, partyId)
+        .query('SELECT PartyName, PartyGLID FROM gen_PartiesInfo WHERE PartyID=@id');
+    if (!r.recordset.length) throw new Error(`Customer party #${partyId} not found.`);
+    const p = r.recordset[0];
+    if (!p.PartyGLID) throw new Error(`Customer "${p.PartyName}" has no GL account linked.`);
+    return { GLCAID: p.PartyGLID };
 }
 
 async function loadSSRData(returnId, transaction) {
@@ -53,7 +54,8 @@ async function postSSRVoucher(returnId, userInfo, transaction) {
     const { ssr, lines } = await loadSSRData(returnId, transaction);
     const accounts = await resolveSSRAccounts(transaction);
     const paymentBank = await resolvePaymentBank(ssr, transaction);
-    const built = buildSSRJournalLines({ ssr, lines, accounts, paymentBank });
+    const partyGL = await loadPartyGL(ssr.PartyID, transaction);
+    const built = buildSSRJournalLines({ ssr, lines, accounts, paymentBank, partyGL });
 
     if (built.lines.length === 0) return null;
 
@@ -62,7 +64,7 @@ async function postSSRVoucher(returnId, userInfo, transaction) {
     const voucherTypeId = vt.recordset[0].Voucherid;
 
     const seqRes = await new sql.Request(transaction).query(
-        "SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo"
+        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
     );
     const voucherNo = `SSR-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
 

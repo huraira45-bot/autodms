@@ -38,7 +38,7 @@ const MODE_TO_ROLE = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = null, paymentLines = [], allocations = [], accounts, refNo = null }) {
+function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = null, walkInSaleID = null, paymentLines = [], allocations = [], adjustments = [], accounts, partyGL = null, refNo = null }) {
     if (!accounts) throw new Error('accounts map required');
     if (direction !== 'receive' && direction !== 'make') {
         throw new Error("direction must be 'receive' or 'make'");
@@ -46,15 +46,27 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
     if (direction === 'make' && !party?.PartyID) {
         throw new Error('Make Payment requires a supplier PartyID.');
     }
-    // For receive: must have party OR walkInJobCardID
-    if (direction === 'receive' && !party?.PartyID && !walkInJobCardID) {
-        throw new Error('Receive Payment requires PartyID or walkInJobCardID (walk-in advance).');
+    // For receive: must have a party OR a walk-in tag (JC or Store Sale).
+    if (direction === 'receive' && !party?.PartyID && !walkInJobCardID && !walkInSaleID) {
+        throw new Error('Receive Payment requires PartyID, walkInJobCardID or walkInSaleID.');
     }
 
-    // Total in / out
-    const totalAmount = round2(paymentLines.reduce((a, p) => a + (Number(p.Amount) || 0), 0));
+    // Total received in cash/bank/etc. + Dr-side adjustments (WHT, salvage, shortage, etc.).
+    // The full sum is what settles the customer's invoice — the customer's AR is credited
+    // for cash + adjustments combined, because the adjustment lines represent value the
+    // customer "paid" via tax withholding or other deductions on their behalf.
+    const cashAmount   = round2(paymentLines.reduce((a, p) => a + (Number(p.Amount) || 0), 0));
+    const adjAmount    = round2(adjustments.reduce((a, x) => a + (Number(x.Amount) || 0), 0));
+    const totalAmount  = round2(cashAmount + adjAmount);
     if (totalAmount <= 0) {
         throw new Error('Payment total must be positive.');
+    }
+    // Adjustments only make sense on the receive side and against a named party
+    if (adjAmount > 0 && direction !== 'receive') {
+        throw new Error('Tax/expense adjustments are only supported on Receive Payment.');
+    }
+    if (adjAmount > 0 && !party?.PartyID) {
+        throw new Error('Tax/expense adjustments require a named party (the customer whose WHT cert these belong to).');
     }
 
     const allocatedSum = round2(allocations.reduce((a, x) => a + (Number(x.Amount) || 0), 0));
@@ -104,23 +116,57 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
             }
         }
 
-        // (2) Cr Trade Debtors (party) for each allocated invoice
+        // (1b) Dr adjustment lines (WHT-receivable, salvage expense, shortage, etc.).
+        // Each one is value the customer "paid" by withholding or deducting on their
+        // behalf, so it counts toward settling the customer's AR. Tagged with PartyID
+        // so the WHT-receivable subsidiary ledger shows who withheld what.
+        for (const adj of adjustments) {
+            const amt = round2(Number(adj.Amount) || 0);
+            if (amt <= 0) continue;
+            if (!adj.GLCAID) throw new Error(`Adjustment ${adj.Type || ''} missing GLCAID`);
+            journalLines.push({
+                GLCAID: adj.GLCAID, Debit: amt, Credit: 0,
+                Narration: adj.Narration || `${adj.Type || 'Adjustment'} — ${ref}`,
+                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
+            });
+            // Subsidiary ledger entry so per-party totals on WHT/etc accounts work.
+            subsidiaryWrites.push({
+                GLCAID: adj.GLCAID, Debit: amt, Credit: 0,
+                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
+                Narration: adj.Narration || `${adj.Type || 'Adjustment'} — ${ref}`,
+            });
+        }
+
+        // (2) Cr customer-A/R leg for each allocated invoice.
+        //   - Named party     → party's own PartyGLID (mirrors the JC/Store Sale invoice leg).
+        //   - Walk-in JC      → GENERAL_CUSTOMER tagged by JobCardID.
+        //   - Walk-in Store Sale → GENERAL_CUSTOMER, no tag (no SaleID column on
+        //     dms_PartyLedger; settlement is found via AllocatedToVoucherID).
+        const settleAccount = partyGL || accounts.GENERAL_CUSTOMER;
+        if (allocations.length > 0 && !settleAccount?.GLCAID) {
+            throw new Error('No subsidiary account available for invoice settlement.');
+        }
+        const settleJobCardTag = partyId ? null : walkInJobCardID;
         for (const a of allocations) {
             const amt = round2(Number(a.Amount) || 0);
             if (amt <= 0) continue;
             if (!a.TargetVoucherID) throw new Error('Each allocation needs TargetVoucherID.');
             journalLines.push({
-                GLCAID: accounts.TRADE_DEBTORS.GLCAID,
+                GLCAID: settleAccount.GLCAID,
                 Debit: 0, Credit: amt,
                 Narration: `Settle invoice voucher #${a.TargetVoucherID} — ${ref}`,
-                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: a.TargetVoucherID,
+                PartyID: partyId, JobCardID: settleJobCardTag, AllocatedToVoucherID: a.TargetVoucherID,
             });
-            subsidiaryWrites.push({
-                GLCAID: accounts.TRADE_DEBTORS.GLCAID,
-                Debit: 0, Credit: amt,
-                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: a.TargetVoucherID,
-                Narration: `Settle voucher #${a.TargetVoucherID} — ${ref}`,
-            });
+            // Subsidiary ledger has a CK constraint requiring PartyID or JobCardID.
+            // Skip the write for walk-in store sales (neither tag available).
+            if (partyId || settleJobCardTag) {
+                subsidiaryWrites.push({
+                    GLCAID: settleAccount.GLCAID,
+                    Debit: 0, Credit: amt,
+                    PartyID: partyId, JobCardID: settleJobCardTag, AllocatedToVoucherID: a.TargetVoucherID,
+                    Narration: `Settle voucher #${a.TargetVoucherID} — ${ref}`,
+                });
+            }
         }
 
         // (3) Cr Customer Advance Received for any excess (overpayment or pre-payment)
@@ -143,19 +189,23 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
 
     // ---------- MAKE PAYMENT ----------
     if (direction === 'make') {
-        // (1) Dr Trade Creditors per allocated bill
+        // (1) Dr supplier-A/P leaf per allocated bill. Each supplier carries
+        // its own PartyGLID; we never fall back to a system-wide bucket.
+        if (allocations.length > 0 && !partyGL?.GLCAID) {
+            throw new Error('Supplier has no GL account set (PartyGLID is null). Edit the party and pick one before paying.');
+        }
         for (const a of allocations) {
             const amt = round2(Number(a.Amount) || 0);
             if (amt <= 0) continue;
             if (!a.TargetVoucherID) throw new Error('Each allocation needs TargetVoucherID.');
             journalLines.push({
-                GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+                GLCAID: partyGL.GLCAID,
                 Debit: amt, Credit: 0,
                 Narration: `Settle bill voucher #${a.TargetVoucherID} — ${ref}`,
                 PartyID: partyId, JobCardID: null, AllocatedToVoucherID: a.TargetVoucherID,
             });
             subsidiaryWrites.push({
-                GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+                GLCAID: partyGL.GLCAID,
                 Debit: amt, Credit: 0,
                 PartyID: partyId, JobCardID: null, AllocatedToVoucherID: a.TargetVoucherID,
                 Narration: `Settle bill voucher #${a.TargetVoucherID} — ${ref}`,
@@ -185,9 +235,14 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
             const amt = round2(Number(p.Amount) || 0);
             if (amt <= 0) continue;
             const isAdvance = p.Mode === 'Advance';
+            // Issued cheques sit in CHEQUES_ISSUED_UNCLEARED (a liability) — not
+            // CHEQUES_ON_HAND, which only holds received-incoming assets. The
+            // Cheque Clearance screen drains this account into Bank at clearance.
             const glcaid = isAdvance
                 ? accounts.SUPPLIER_ADVANCE_PAID?.GLCAID
-                : p.Mode === 'Bank Transfer' ? p.BankGLCAID : accounts[MODE_TO_ROLE[p.Mode]]?.GLCAID;
+                : p.Mode === 'Cheque' ? accounts.CHEQUES_ISSUED_UNCLEARED?.GLCAID
+                : p.Mode === 'Bank Transfer' ? p.BankGLCAID
+                : accounts[MODE_TO_ROLE[p.Mode]]?.GLCAID;
             if (!glcaid) throw new Error(`No account resolved for mode '${p.Mode}'.`);
             const narration = isAdvance
                 ? `Applied supplier advance — ${ref}`

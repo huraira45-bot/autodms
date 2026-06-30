@@ -22,7 +22,7 @@ const REFUND_MODES = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null }) {
+function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null, partyGL = null }) {
     if (!accounts) throw new Error('accounts map required');
     if (!ssr) throw new Error('ssr header required');
 
@@ -55,7 +55,8 @@ function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null })
 
     if (refundMode === 'Credit') {
         if (!ssr.PartyID) throw new Error('Credit SSR (credit-to-account refund) requires PartyID.');
-        customerSubsidiaryAccount = accounts.TRADE_DEBTORS;
+        if (!partyGL?.GLCAID) throw new Error('Customer has no GL account set (PartyGLID is null). Edit the party and pick one before finalizing.');
+        customerSubsidiaryAccount = partyGL;
         partyTagForRefundLeg = ssr.PartyID;
     } else {
         customerSubsidiaryAccount = accounts.GENERAL_CUSTOMER;

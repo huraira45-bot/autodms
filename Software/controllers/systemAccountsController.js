@@ -29,6 +29,15 @@ const ROLE_DEFS = [
     { key: 'COGS_VEHICLES',              label: 'COGS - Vehicles',            type: 'Expense',   purpose: 'Cost of chassis released at delivery' },
     { key: 'STAFF_INCENTIVE_EXPENSE',    label: 'Staff Incentive Expense',    type: 'Expense',   purpose: 'P&L hit when sales-staff incentive accrues' },
     { key: 'SALES_DISCOUNT_GIVEN',       label: 'Sales Discount Given',       type: 'Expense',   purpose: 'Discount portion when NegotiatedPrice < StandardPrice (opt-in to GL)' },
+    // Workshop / Parts module roles (previously hardcoded by GLCode in posting services).
+    { key: 'INVENTORY_PARTS',            label: 'Inventory - Parts',          type: 'Asset',     purpose: 'On-hand spare parts at landed cost (GRN Dr, JC/Store-sale Cr)' },
+    { key: 'PARTS_REVENUE',              label: 'Parts Revenue (default)',    type: 'Revenue',   purpose: 'Fallback when a Job-Card Type has no PartsRevenueAccount override' },
+    { key: 'SERVICE_REVENUE',            label: 'Service Revenue (default)',  type: 'Revenue',   purpose: 'Fallback when a Job-Card Type has no JobRevenueAccount override' },
+    { key: 'SUBLET_REVENUE',             label: 'Sublet Revenue',             type: 'Revenue',   purpose: 'Revenue recognized when sublet vendor work is billed to the customer' },
+    { key: 'COGS_PARTS',                 label: 'COGS - Parts',               type: 'Expense',   purpose: 'Cost of parts issued to a Job Card / Store Sale at average cost' },
+    { key: 'SUBLET_COST',                label: 'Sublet Vendor Cost',         type: 'Expense',   purpose: 'Expense for the sublet vendor portion of a Job Card' },
+    { key: 'TRADE_DEBTORS',              label: 'Trade Debtors (fallback)',   type: 'Asset',     purpose: 'Receivable bucket when a billed party has no PartyGLID set' },
+    { key: 'TRADE_CREDITORS',            label: 'Trade Creditors (fallback)', type: 'Liability', purpose: 'Payable bucket when a supplier/sublet vendor has no PartyGLID set' },
 ];
 
 // Internal lookup — used by other controllers (Job Card finalize, GRN finalize, etc.).

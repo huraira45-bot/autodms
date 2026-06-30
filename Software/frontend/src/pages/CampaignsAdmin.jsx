@@ -9,13 +9,14 @@
  *   5. From the list, click "Send Now" — backend runs throttled in background
  *   6. Watch the status row update; click into detail to see per-recipient sends
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
     Megaphone, Plus, RefreshCw, Loader2, Search, XCircle, Send,
-    Eye, Pencil, Trash2, Pause, Users, BarChart3,
+    Eye, Pencil, Trash2, Pause, Users,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -30,6 +31,7 @@ const STATUS_STYLE = {
 
 export default function CampaignsAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const canEdit = hasModule('cro_admin');
 
     const [rows, setRows] = useState([]);
@@ -64,17 +66,35 @@ export default function CampaignsAdmin() {
     }, [rows, load]);
 
     const sendNow = async (id) => {
-        if (!window.confirm('Start sending this campaign now? Stub mode prints; real mode invokes Twilio.')) return;
+        const ok = await confirmAction({
+            title: 'Start campaign send?',
+            message: 'This starts the campaign sending process. In real mode it invokes the WhatsApp provider.',
+            confirmLabel: 'Send now',
+            tone: 'warning'
+        });
+        if (!ok) return;
         try { await axios.post(`${API}/cro/campaigns/${id}/send-now`); flash('ok', 'Send started — refreshing'); setTimeout(load, 1500); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
     const cancel = async (id) => {
-        if (!window.confirm('Cancel this campaign?')) return;
+        const ok = await confirmAction({
+            title: 'Cancel campaign?',
+            message: 'Cancelled campaigns stop sending and cannot continue.',
+            confirmLabel: 'Cancel campaign',
+            tone: 'warning'
+        });
+        if (!ok) return;
         try { await axios.post(`${API}/cro/campaigns/${id}/cancel`); flash('ok', 'Cancelled'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
     const remove = async (id) => {
-        if (!window.confirm('Delete this Draft campaign?')) return;
+        const ok = await confirmAction({
+            title: 'Delete draft campaign?',
+            message: 'This permanently deletes the draft campaign.',
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/cro/campaigns/${id}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };

@@ -5,15 +5,16 @@
  * negotiation history, state-transition timeline.
  * Allocation + Master invoice + delivery actions get their own panels (Phase 3+).
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import {
     ArrowLeft, Loader2, RefreshCw, Plus, DollarSign, Ban, Car,
-    User, FileText, XCircle, Briefcase, Clock, Link2, FileCheck2, Send, AlertTriangle,
-    Upload, Trash2, Paperclip,
+    User, Briefcase, Clock, Link2, FileCheck2, Send, AlertTriangle,
+    Upload, Trash2, Paperclip, Printer, CreditCard, X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useFeedback } from '../../context/FeedbackContext';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -39,6 +40,7 @@ export default function BookingDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const [data, setData] = useState(null);
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -47,6 +49,7 @@ export default function BookingDetail() {
     const [showPayment, setShowPayment] = useState(false);
     const [showCancel, setShowCancel] = useState(false);
     const [showAllocate, setShowAllocate] = useState(false);
+    const [showPayMaster, setShowPayMaster] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
     const [showGatePass, setShowGatePass] = useState(false);
 
@@ -72,16 +75,36 @@ export default function BookingDetail() {
     if (!data) return <div style={{ padding: 40, color: '#dc2626' }}>Booking not found</div>;
 
     const sty = STATUS_STYLE[data.Status] || STATUS_STYLE.Draft;
-    const remaining = (data.NegotiatedPrice || 0) - (data.AmountPaidToDate || 0);
+    // NegotiatedPrice = vehicle set price (paid to Master).
+    // PremiumAmount   = dealer's additive markup (kept).
+    // Customer total  = NegotiatedPrice + PremiumAmount.
+    const vehicleRemaining = (data.NegotiatedPrice || 0) - (data.AmountPaidToDate || 0);
+    const remaining = vehicleRemaining;
     const paidPct = data.NegotiatedPrice > 0 ? (data.AmountPaidToDate / data.NegotiatedPrice * 100) : 0;
-    const canPay = ['PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
+    const canPay = ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
         (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
     const canAllocate = ['PendingPayment', 'MasterInvoicePending'].includes(data.Status) &&
         !data.AllocatedVehicleID && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
-    const canPostMasterInvoice = data.AllocatedVehicleID && data.Status === 'Allocated' && hasModule('sales_master_settlement');
-    const canIssueGatePass = data.AllocatedVehicleID && ['MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status) &&
-        (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
+    // Pay Master: shown whenever there's vehicle-money pending forward to Master.
+    // Premium is additive on top of the set price and stays with the dealer,
+    // so wholesale due = NegotiatedPrice (the set price itself).
+    const wholesaleDue   = Math.max(0, data.NegotiatedPrice || 0);
+    const masterPaidSoFar = Number(data.AmountPaidToMaster || 0);
+    const masterStillOwed = Math.round((wholesaleDue - masterPaidSoFar) * 100) / 100;
+    const canPayMaster = (data.AmountPaidToDate || 0) > 0
+        && masterStillOwed > 0.01
+        && !['Closed', 'Cancelled'].includes(data.Status)
+        && (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'));
+
+    const canPostMasterInvoice = data.AllocatedVehicleID
+        && !['Closed', 'Cancelled'].includes(data.Status)
+        && hasModule('sales_master_settlement');
+
+    // Gate Pass available immediately after allocation — no Master Invoice prerequisite.
+    const canIssueGatePass = data.AllocatedVehicleID
+        && ['Allocated', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status)
+        && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1100, margin: '0 auto' }}>
@@ -114,6 +137,7 @@ export default function BookingDetail() {
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PartyType}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PhoneOne}</div>
                         {data.CorporatePONumber && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>PO: <strong>{data.CorporatePONumber}</strong></div>}
+                        <CustomerCoaPill partyId={data.PartyID} onLinked={load} />
                     </Block>
                     <Block icon={Car} title="Vehicle">
                         <div style={{ fontWeight: 600 }}>{data.BrandName} · {data.ModelCode}</div>
@@ -134,12 +158,13 @@ export default function BookingDetail() {
 
                 {/* Money row */}
                 <div style={{ marginTop: 16, padding: 14, background: '#f8fafc', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
-                    <Stat label="Standard" value={fmtN(data.StandardPrice)} />
-                    <Stat label="Negotiated" value={fmtN(data.NegotiatedPrice)} color="#1e40af" />
-                    {data.DiscountAmount > 0 && <Stat label="Discount" value={fmtN(data.DiscountAmount)} color="#b91c1c" sub={`${Number(data.DiscountPct).toFixed(2)}%`} />}
-                    <Stat label="Paid to date" value={fmtN(data.AmountPaidToDate)} color="#15803d" sub={`${paidPct.toFixed(1)}%`} />
-                    <Stat label="Remaining" value={fmtN(remaining)} color={remaining > 0 ? '#b45309' : '#94a3b8'} />
-                    {data.PremiumAmount > 0 && <Stat label="Premium" value={fmtN(data.PremiumAmount)} color="#7c3aed" />}
+                    <Stat label="Set Price (Vehicle)" value={fmtN(data.NegotiatedPrice)} color="#1e40af" />
+                    {data.PremiumAmount > 0 && <Stat label="Premium (on top)" value={fmtN(data.PremiumAmount)} color="#7c3aed" sub="+ additive" />}
+                    <Stat label="Customer Total" value={fmtN((data.NegotiatedPrice || 0) + (data.PremiumAmount || 0))} color="#0f172a" sub="vehicle + premium" />
+                    <Stat label="Vehicle Paid" value={fmtN(data.AmountPaidToDate)} color="#15803d" sub={`${paidPct.toFixed(1)}% of set price`} />
+                    <Stat label="Vehicle Remaining" value={fmtN(vehicleRemaining)} color={vehicleRemaining > 0 ? '#b45309' : '#94a3b8'} />
+                    <Stat label="Paid to Master" value={fmtN(data.AmountPaidToMaster)} color="#0e7490"
+                          sub={`of ${fmtN(data.NegotiatedPrice || 0)} set price`} />
                 </div>
 
                 {/* Progress bar */}
@@ -149,7 +174,7 @@ export default function BookingDetail() {
             </div>
 
             {/* Workflow actions row */}
-            {(canAllocate || canPostMasterInvoice || canIssueGatePass) && (
+            {(canAllocate || canPayMaster || canPostMasterInvoice || canIssueGatePass) && (
                 <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Next steps:</div>
                     {canAllocate && (
@@ -158,10 +183,16 @@ export default function BookingDetail() {
                             <Link2 size={14} /> Allocate Vehicle
                         </button>
                     )}
+                    {canPayMaster && (
+                        <button onClick={() => setShowPayMaster(true)}
+                            style={{ padding: '8px 14px', background: '#0e7490', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                            <CreditCard size={14} /> Pay Master Motors
+                        </button>
+                    )}
                     {canPostMasterInvoice && (
                         <button onClick={() => setShowMasterInvoice(true)}
                             style={{ padding: '8px 14px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                            <FileCheck2 size={14} /> Post Master Invoice
+                            <FileCheck2 size={14} /> Record Master Tax Invoice
                         </button>
                     )}
                     {canIssueGatePass && (
@@ -230,7 +261,13 @@ export default function BookingDetail() {
                                     <Td>
                                         <button className="btn-icon" title="Delete document"
                                             onClick={async () => {
-                                                if (!window.confirm(`Delete this ${d.DocType} document?`)) return;
+                                                const ok = await confirmAction({
+                                                    title: 'Delete document?',
+                                                    message: `Delete this ${d.DocType} document from the booking record?`,
+                                                    confirmLabel: 'Delete',
+                                                    tone: 'danger'
+                                                });
+                                                if (!ok) return;
                                                 try { await axios.delete(`${API}/sales/bookings/${id}/documents/${d.DocumentID}`); flash('ok', 'Deleted'); load(); }
                                                 catch (e) { flash('err', e.response?.data?.error || e.message); }
                                             }}
@@ -255,7 +292,7 @@ export default function BookingDetail() {
                     ) : (
                         <table style={{ width: '100%', fontSize: '0.82rem' }}>
                             <thead><tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                <Th>Date</Th><Th>Path</Th><Th>Mode</Th><Th align="right">Amount</Th>
+                                <Th>Date</Th><Th>Path</Th><Th>Mode</Th><Th align="right">Amount</Th><Th>Voucher</Th>
                             </tr></thead>
                             <tbody>
                                 {data.payments?.map(p => (
@@ -264,6 +301,18 @@ export default function BookingDetail() {
                                         <Td>{p.PaymentPath}</Td>
                                         <Td>{p.PaymentMode}</Td>
                                         <Td align="right" style={{ fontWeight: 600, color: '#15803d' }}>{fmtN(p.Amount)}</Td>
+                                        <Td>
+                                            {p.VoucherID ? (
+                                                <a href={`/vouchers/${p.PaymentMode === 'Cash' ? 'crv' : 'brv'}?id=${p.VoucherID}&print=1`}
+                                                   target="_blank" rel="noreferrer"
+                                                   title={`Print ${p.VoucherNo}`}
+                                                   style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#0f766e', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600 }}>
+                                                    <Printer size={12} /> {p.VoucherNo || 'Print'}
+                                                </a>
+                                            ) : (
+                                                <span style={{ color: '#94a3b8', fontSize: '0.72rem' }} title="GL voucher was not posted (system accounts may not be mapped)">—</span>
+                                            )}
+                                        </Td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -333,10 +382,15 @@ export default function BookingDetail() {
                     onClose={() => setShowAllocate(false)}
                     onSaved={() => { setShowAllocate(false); flash('ok', 'Vehicle allocated'); load(); }} />
             )}
+            {showPayMaster && (
+                <PayMasterModal booking={data}
+                    onClose={() => setShowPayMaster(false)}
+                    onSaved={(out) => { setShowPayMaster(false); flash('ok', `Master paid — voucher ${out.VoucherNo}`); load(); }} />
+            )}
             {showMasterInvoice && (
                 <MasterInvoiceModal booking={data}
                     onClose={() => setShowMasterInvoice(false)}
-                    onSaved={(out) => { setShowMasterInvoice(false); flash('ok', `Master invoice posted — accrued PKR ${Number(out.IncentiveAccrued?.total || 0).toLocaleString()}`); load(); }} />
+                    onSaved={(out) => { setShowMasterInvoice(false); flash('ok', `Master tax invoice recorded${out.IncentiveAccrued?.total ? ` — accrued PKR ${Number(out.IncentiveAccrued.total).toLocaleString()}` : ''}`); load(); }} />
             )}
             {showGatePass && (
                 <GatePassModal booking={data}
@@ -507,6 +561,69 @@ function AllocateModal({ booking, onClose, onSaved }) {
     );
 }
 
+function PayMasterModal({ booking, onClose, onSaved }) {
+    // Wholesale due = full NegotiatedPrice (premium is additive, stays with us).
+    const remaining = Math.max(0, (booking.NegotiatedPrice || 0) - (booking.AmountPaidToMaster || 0));
+    const [amount, setAmount] = useState(String(remaining || ''));
+    const [mode, setMode]     = useState('Bank');
+    const [bankId, setBankId] = useState('');
+    const [reference, setRef] = useState('');
+    const [notes, setNotes]   = useState('');
+    const [banks, setBanks]   = useState([]);
+    const [busy, setBusy]     = useState(false);
+    const [err, setErr]       = useState(null);
+
+    useEffect(() => {
+        axios.get(`${API}/accounts/banks`).then(r => setBanks(r.data || [])).catch(() => {});
+    }, []);
+
+    const save = async () => {
+        if (!(Number(amount) > 0))             { setErr('Amount must be > 0'); return; }
+        if (mode === 'Bank' && !bankId)        { setErr('Pick a bank'); return; }
+        setBusy(true); setErr(null);
+        try {
+            const r = await axios.post(`${API}/sales/bookings/${booking.BookingID}/pay-master`, {
+                Amount: Number(amount), Mode: mode,
+                BankAccountGLCAID: mode === 'Bank' ? Number(bankId) : undefined,
+                Reference: reference || undefined, Notes: notes || undefined,
+            });
+            onSaved(r.data);
+        } catch (e) { setErr(e.response?.data?.error || e.message); }
+        setBusy(false);
+    };
+
+    return (
+        <Shell title="Pay Master Motors" onClose={onClose}>
+            {err && <Err>{err}</Err>}
+            <p style={{ fontSize: '0.85rem', color: '#475569' }}>
+                Posts <strong>Dr Booking Variant Receivable / Cr {mode === 'Cash' ? 'Cash' : 'Bank'}</strong> against booking {booking.BookingNo}. This is the cash you forward to Master for this chassis.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+                <Field label="Amount (PKR) *" flex><input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={inputStyle} /></Field>
+                <Field label="Mode" flex>
+                    <select value={mode} onChange={e => setMode(e.target.value)} style={inputStyle}>
+                        <option value="Bank">Bank</option>
+                        <option value="Cash">Cash</option>
+                    </select>
+                </Field>
+            </div>
+            {mode === 'Bank' && (
+                <Field label="From bank *">
+                    <select value={bankId} onChange={e => setBankId(e.target.value)} style={inputStyle}>
+                        <option value="">— Pick a bank —</option>
+                        {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} · {b.GLTitle}</option>)}
+                    </select>
+                </Field>
+            )}
+            <div style={{ display: 'flex', gap: 10 }}>
+                <Field label="Reference / Cheque #" flex><input value={reference} onChange={e => setRef(e.target.value)} style={inputStyle} /></Field>
+            </div>
+            <Field label="Notes (optional)"><textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Pay Master" busy={busy} disabled={!(Number(amount) > 0) || (mode === 'Bank' && !bankId)} />
+        </Shell>
+    );
+}
+
 function MasterInvoiceModal({ booking, onClose, onSaved }) {
     const [invoiceNo, setInvoiceNo] = useState('');
     const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
@@ -531,10 +648,10 @@ function MasterInvoiceModal({ booking, onClose, onSaved }) {
     };
 
     return (
-        <Shell title="Post Master Changan Invoice" onClose={onClose}>
+        <Shell title="Record Master Tax Invoice" onClose={onClose}>
             {err && <Err>{err}</Err>}
             <p style={{ fontSize: '0.85rem', color: '#475569' }}>
-                Posting Master's invoice transfers ownership of <strong>{booking.AllocatedChasisNo}</strong> to us and accrues Master incentive (Standard + active campaigns).
+                Records Master's sales-tax invoice for compliance and triggers the Master incentive accrual (Dr Master Incentive Receivable / Cr Master Incentive Income). The invoice itself is in the <strong>customer's</strong> name — this is a memo record on our side.
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
                 <Field label="Master Invoice # *" flex><input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="MCI-2026-XXXX" style={inputStyle} /></Field>
@@ -615,6 +732,7 @@ function PaymentModal({ booking, onClose, onSaved }) {
     const [amount, setAmount] = useState('');
     const [premium, setPremium] = useState('0');
     const [refField, setRefField] = useState('');
+    const [chequeDate, setChequeDate] = useState('');
     const [bankAccountId, setBankAccountId] = useState('');
     const [banks, setBanks] = useState([]);
     const [proofFile, setProofFile] = useState(null);
@@ -631,7 +749,7 @@ function PaymentModal({ booking, onClose, onSaved }) {
     // Load active banks once for the bank dropdown (BankTransfer / Cheque / POS / PayOrder all hit a bank account)
     useEffect(() => {
         (async () => {
-            try { const r = await axios.get(`${API}/accounting/banks`); setBanks(r.data || []); }
+            try { const r = await axios.get(`${API}/accounts/banks`); setBanks(r.data || []); }
             catch { /* dropdown will just be empty; admin must mark banks in Accounting > Banks */ }
         })();
     }, []);
@@ -651,7 +769,7 @@ function PaymentModal({ booking, onClose, onSaved }) {
             fd.append('Amount', String(Number(amount)));
             fd.append('PremiumPortion', String(Number(premium) || 0));
             if (needsBank && bankAccountId) fd.append('BankAccountID', String(Number(bankAccountId)));
-            if (mode === 'Cheque')   fd.append('ChequeNumber', refField);
+            if (mode === 'Cheque')   { fd.append('ChequeNumber', refField); fd.append('ChequeDate', chequeDate); }
             if (mode === 'POS')      fd.append('POSTransactionRef', refField);
             if (path === 'PayOrder') fd.append('PayOrderNumber', refField);
             if (proofDescription)    fd.append('ProofDescription', proofDescription);
@@ -664,7 +782,8 @@ function PaymentModal({ booking, onClose, onSaved }) {
         setBusy(false);
     };
 
-    const ready = Number(amount) > 0 && proofFile && (!needsBank || bankAccountId);
+    const ready = Number(amount) > 0 && proofFile && (!needsBank || bankAccountId)
+        && (mode !== 'Cheque' || (refField && chequeDate));
     const overage = Number(amount) + Number(premium) > remaining;
 
     return (
@@ -709,16 +828,25 @@ function PaymentModal({ booking, onClose, onSaved }) {
             )}
 
             <div style={{ display: 'flex', gap: 10 }}>
-                <Field label="Amount (PKR) *" flex>
+                <Field label="Vehicle Amount (PKR) *" flex>
                     <input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={inputStyle} />
                 </Field>
-                <Field label="Premium portion (if any)" flex>
+                <Field label="Premium (additive — over set price)" flex>
                     <input type="number" value={premium} onChange={e => setPremium(e.target.value)} style={inputStyle} />
                 </Field>
             </div>
+            <div style={{ padding: 8, background: '#f0f9ff', borderLeft: '3px solid #1e40af', borderRadius: 4, fontSize: '0.78rem', color: '#1e3a8a', marginBottom: 10 }}>
+                Total received from customer: <strong>PKR {fmtN(Number(amount || 0) + Number(premium || 0))}</strong>
+                {Number(premium || 0) > 0 && ` (vehicle ${fmtN(Number(amount || 0))} + premium ${fmtN(Number(premium || 0))})`}
+            </div>
             {(mode === 'Cheque' || mode === 'POS' || path === 'PayOrder') && (
-                <Field label={mode === 'Cheque' ? 'Cheque number' : path === 'PayOrder' ? 'Pay Order #' : 'POS transaction ref'}>
+                <Field label={mode === 'Cheque' ? 'Cheque number *' : path === 'PayOrder' ? 'Pay Order #' : 'POS transaction ref'}>
                     <input value={refField} onChange={e => setRefField(e.target.value)} style={inputStyle} />
+                </Field>
+            )}
+            {mode === 'Cheque' && (
+                <Field label="Cheque date *">
+                    <input type="date" value={chequeDate} onChange={e => setChequeDate(e.target.value)} style={inputStyle} />
                 </Field>
             )}
 
@@ -786,5 +914,123 @@ function Stat({ label, value, color = '#475569', sub }) {
             <div style={{ fontWeight: 700, fontSize: '1.2rem', color }}>{value}</div>
             {sub && <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{sub}</div>}
         </div>
+    );
+}
+
+function CustomerCoaPill({ partyId, onLinked }) {
+    const [status, setStatus] = useState(null);
+    const [showModal, setShowModal] = useState(false);
+
+    const load = useCallback(async () => {
+        if (!partyId) return;
+        try {
+            const r = await axios.get(`${API}/sales/parties/${partyId}/coa-status`);
+            setStatus(r.data);
+        } catch { /* silent — UI just shows nothing */ }
+    }, [partyId]);
+
+    useEffect(() => { load(); }, [load]);
+
+    if (!partyId || !status) return null;
+
+    return (
+        <>
+            <div style={{ marginTop: 8 }}>
+                {status.linked ? (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: '#dcfce7', color: '#166534', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600 }}>
+                        <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 99, background: '#16a34a' }} />
+                        COA: <code style={{ fontFamily: 'monospace' }}>{status.GLCode}</code> · {status.GLTitle}
+                    </div>
+                ) : (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: '#fef3c7', color: '#92400e', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}
+                         onClick={() => setShowModal(true)}>
+                        <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 99, background: '#f59e0b' }} />
+                        COA not linked — click to set up
+                    </div>
+                )}
+            </div>
+            {showModal && (
+                <CoaLinkModal partyId={partyId} partyName={status.PartyName}
+                    onClose={() => setShowModal(false)}
+                    onSaved={() => { setShowModal(false); load(); onLinked?.(); }} />
+            )}
+        </>
+    );
+}
+
+function CoaLinkModal({ partyId, partyName, onClose, onSaved }) {
+    const [tab, setTab] = useState('existing');   // 'existing' | 'auto'
+    const [leaves, setLeaves] = useState([]);
+    const [selected, setSelected] = useState('');
+    const [title, setTitle] = useState(partyName || '');
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+
+    useEffect(() => {
+        axios.get(`${API}/sales/coa/vehicle-party-leaves`).then(r => setLeaves(r.data || [])).catch(() => {});
+    }, []);
+
+    const linkExisting = async () => {
+        if (!selected) { setErr('Pick a leaf to link.'); return; }
+        setBusy(true); setErr(null);
+        try {
+            await axios.post(`${API}/sales/parties/${partyId}/link-coa`, { GLCAID: Number(selected) });
+            onSaved();
+        } catch (e) { setErr(e.response?.data?.error || e.message); }
+        setBusy(false);
+    };
+
+    const createAndLink = async () => {
+        if (!title.trim()) { setErr('Title required.'); return; }
+        setBusy(true); setErr(null);
+        try {
+            await axios.post(`${API}/sales/parties/${partyId}/create-coa-leaf`, { Title: title.trim() });
+            onSaved();
+        } catch (e) { setErr(e.response?.data?.error || e.message); }
+        setBusy(false);
+    };
+
+    return (
+        <Shell title={`Link ${partyName} to Chart of Accounts`} onClose={onClose}>
+            {err && <Err>{err}</Err>}
+            <p style={{ fontSize: '0.85rem', color: '#475569', marginTop: 0 }}>
+                Each customer's vehicle account lives under <code>201002</code> "Customer Advances - Vehicle Parties". Pick an existing leaf or auto-create one.
+            </p>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                {[['existing','Link Existing'],['auto','Auto-Create']].map(([k,l]) => (
+                    <button key={k} type="button" onClick={() => setTab(k)}
+                        style={{ flex: 1, padding: 8, border: '2px solid ' + (tab===k?'#1e40af':'#cbd5e1'), background: tab===k?'#dbeafe':'white', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: '0.82rem' }}>
+                        {l}
+                    </button>
+                ))}
+            </div>
+            {tab === 'existing' && (
+                <>
+                    <Field label="Available leaves under 201002">
+                        <select value={selected} onChange={e => setSelected(e.target.value)} style={inputStyle}>
+                            <option value="">— Pick a leaf —</option>
+                            {leaves.map(l => (
+                                <option key={l.GLCAID} value={l.GLCAID} disabled={!!l.LinkedPartyID}>
+                                    {l.GLCode} · {l.GLTitle}
+                                    {l.LinkedPartyID ? ` (taken by ${l.LinkedPartyName})` : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </Field>
+                    <Actions onCancel={onClose} onConfirm={linkExisting} confirmLabel="Link" busy={busy} disabled={!selected} />
+                </>
+            )}
+            {tab === 'auto' && (
+                <>
+                    <Field label="New leaf title (defaults to customer name)">
+                        <input value={title} onChange={e => setTitle(e.target.value)} style={inputStyle} />
+                    </Field>
+                    <div style={{ padding: 8, background: '#f0f9ff', borderRadius: 4, fontSize: '0.78rem', color: '#1e3a8a', marginBottom: 10 }}>
+                        Will create a new leaf with the next sequential code under <code>201002</code> (e.g. 201002021) and link it to this customer.
+                    </div>
+                    <Actions onCancel={onClose} onConfirm={createAndLink} confirmLabel="Create & Link" busy={busy} disabled={!title.trim()} />
+                </>
+            )}
+        </Shell>
     );
 }

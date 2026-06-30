@@ -29,10 +29,12 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
         throw new Error(`Cannot reverse voucher ${orig.VoucherNo} — current status is ${orig.Status}.`);
     }
 
-    // 2. Load original detail lines
+    // 2. Load original detail lines. Critical: carry AllocatedToVoucherID
+    // through so settlement-aware reports (Receive Payment outstanding,
+    // POS Settlement pending) net the mirror against the original.
     const linesRes = await new sql.Request(transaction)
         .input('id', sql.Int, originalVoucherId)
-        .query(`SELECT GLCAID, Narration, Debit, Credit, PartyID, JobCardID
+        .query(`SELECT GLCAID, Narration, Debit, Credit, PartyID, JobCardID, AllocatedToVoucherID
                 FROM data_FinanceVoucherDetail WHERE VoucherID=@id`);
 
     // 3. Load original subsidiary ledger rows
@@ -43,7 +45,7 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
 
     // 4. Generate reversal voucher number — same type prefix, next sequential
     const seqRes = await new sql.Request(transaction).query(
-        `SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo`
+        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`
     );
     const nextId = seqRes.recordset[0].nextNo;
     const typeRes = await new sql.Request(transaction)
@@ -77,7 +79,8 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
                         @cby, @cbyN)`);
     const reversalId = newHdr.recordset[0].VoucherID;
 
-    // 6. Insert mirror detail lines (Debit ↔ Credit swapped)
+    // 6. Insert mirror detail lines (Debit ↔ Credit swapped), preserving the
+    // AllocatedToVoucherID tag from the original.
     for (const l of linesRes.recordset) {
         await new sql.Request(transaction)
             .input('vid',  sql.Int,              reversalId)
@@ -87,9 +90,10 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
             .input('cr',   sql.Decimal(18,2),    l.Debit  || 0)
             .input('pid',  sql.Int,              l.PartyID  || null)
             .input('jcid', sql.Int,              l.JobCardID || null)
+            .input('alloc',sql.Int,              l.AllocatedToVoucherID || null)
             .query(`INSERT INTO data_FinanceVoucherDetail
-                        (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID)
-                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid)`);
+                        (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID, AllocatedToVoucherID)
+                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid, @alloc)`);
     }
 
     // 7. Insert mirror subsidiary ledger rows (Debit ↔ Credit swapped)
@@ -123,6 +127,27 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
         .query(`UPDATE data_FinanceVoucherInfo
                 SET Status='Reversed', ReversedBy=@by, ReversedByName=@byN, ReversedAt=GETDATE()
                 WHERE VoucherID=@id`);
+
+    // 10. Sync dms_PendingCheques with the reversal:
+    //   - If the reversed voucher is the original receipt/issue → any Pending row
+    //     tied to it is forcibly Bounced (the receipt didn't really happen).
+    //   - If the reversed voucher is a Clearance/Bounce voucher → revert that
+    //     row back to Pending so it shows up on the Clearance screen again.
+    await new sql.Request(transaction)
+        .input('vid',  sql.Int,           originalVoucherId)
+        .input('uby',  sql.Int,           userInfo?.userId || null)
+        .input('ubyN', sql.NVarChar(100), userInfo?.userName || null)
+        .query(`UPDATE dms_PendingCheques
+                SET Status='Bounced', ClearedAt=GETDATE(), ClearanceVoucherID=NULL,
+                    UpdatedAt=GETDATE(), UpdatedBy=@uby, UpdatedByName=@ubyN,
+                    Notes=COALESCE(Notes + ' / ', '') + 'Auto-bounced: source voucher reversed.'
+                WHERE ReceiptVoucherID=@vid AND Status='Pending';
+
+                UPDATE dms_PendingCheques
+                SET Status='Pending', ClearedAt=NULL, ClearanceVoucherID=NULL,
+                    UpdatedAt=GETDATE(), UpdatedBy=@uby, UpdatedByName=@ubyN,
+                    Notes=COALESCE(Notes + ' / ', '') + 'Reverted: clearance voucher reversed.'
+                WHERE ClearanceVoucherID=@vid AND Status IN ('Cleared','Bounced');`);
 
     return { reversalId, reversalNo };
 }

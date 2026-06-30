@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { FileBarChart, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Search, ChevronRight } from 'lucide-react';
+import { FileBarChart, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Search, ChevronRight, Printer } from 'lucide-react';
+import { PrintHeader } from './reports/ReportShell';
 
 const API_BASE = '/api';
 
@@ -59,12 +60,15 @@ export default function TrialBalance() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <PrintHeader title="Trial Balance" subtitle={`As of ${asOf}`}
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
+                filterSummary={`As of: ${asOf}${search ? `  •  Filter: "${search}"` : ''}`} />
             <div className="card-header">
                 <div>
                     <h1 className="page-title">Trial Balance</h1>
                     <p className="page-subtitle">All GL accounts with non-zero balance as of a chosen date. Click any row to drill into GL Detail.</p>
                 </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <div className="search-box" style={{ width: 240 }}>
                         <Search size={16} />
                         <input
@@ -87,6 +91,10 @@ export default function TrialBalance() {
                     <button className="btn" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         Refresh
+                    </button>
+                    <button className="btn" onClick={() => window.print()} disabled={loading || data.rows.length === 0}
+                        style={{ background: '#0f766e' }}>
+                        <Printer size={16} /> Print
                     </button>
                 </div>
             </div>

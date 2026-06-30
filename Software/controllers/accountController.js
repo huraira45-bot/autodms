@@ -1,5 +1,30 @@
 const { sql, getPool } = require('../config/db');
 
+/**
+ * Policy: vouchers can only be posted with today's date — no back-date, no
+ * future-date. The cheque-clearance / payment / finalize-driven postings all
+ * already use new Date(), so the only ingress to enforce here is the manual
+ * voucher entry surface (saveVoucher / updateVoucher).
+ *
+ * Returns null if the date is today (in server local time), else a string
+ * describing the violation. Accepts ISO date strings, full timestamps, or
+ * blank (blank is treated as "today" because the frontend defaults that way).
+ */
+function checkVoucherDateIsToday(input) {
+    if (!input) return null;                       // empty → server defaults to GETDATE/now
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) return 'Voucher date is invalid.';
+    const today = new Date();
+    const sameDay =
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth()    === today.getMonth() &&
+        d.getDate()     === today.getDate();
+    if (sameDay) return null;
+    return d > today
+        ? 'Future-dated vouchers are not allowed. Please use today\'s date.'
+        : 'Back-dated vouchers are not allowed. Please use today\'s date.';
+}
+
 exports.addAccount = async (req, res) => {
     try {
         const { GLTitle, GLLevel, GLNature, isParent, ParentCode, ClassRoot } = req.body;
@@ -270,6 +295,7 @@ exports.searchVouchers = async (req, res) => {
         const types = (req.query.type || '').split(',').filter(Boolean);
         const status = req.query.status;
         const partyId = req.query.partyId ? parseInt(req.query.partyId) : null;
+        const createdById = req.query.createdById ? parseInt(req.query.createdById) : null;
         const minAmt = req.query.minAmount ? parseFloat(req.query.minAmount) : null;
         const maxAmt = req.query.maxAmount ? parseFloat(req.query.maxAmount) : null;
         const fromD = req.query.from ? new Date(req.query.from) : null;
@@ -295,6 +321,10 @@ exports.searchVouchers = async (req, res) => {
         if (partyId) {
             r.input('pid', sql.Int, partyId);
             where.push(`EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d2 WHERE d2.VoucherID = v.VoucherID AND d2.PartyID = @pid)`);
+        }
+        if (createdById) {
+            r.input('cby', sql.Int, createdById);
+            where.push(`v.CreatedBy = @cby`);
         }
         if (q) {
             r.input('q', sql.NVarChar(200), `%${q}%`);
@@ -336,6 +366,8 @@ exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { VoucherDate, VoucherTypeID, Remarks, Items } = req.body;
+        const dateErr = checkVoucherDateIsToday(VoucherDate);
+        if (dateErr) return res.status(400).json({ error: dateErr });
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
 
@@ -424,6 +456,8 @@ exports.deleteVoucher = async (req, res) => {
 exports.saveVoucher = async (req, res) => {
     try {
         const { VoucherDate, VoucherTypeID, Remarks, Items } = req.body;
+        const dateErr = checkVoucherDateIsToday(VoucherDate);
+        if (dateErr) return res.status(400).json({ error: dateErr });
         const totalAmount = Items.reduce((sum, i) => sum + parseFloat(i.Debit || 0), 0);
 
         const pool = await getPool();

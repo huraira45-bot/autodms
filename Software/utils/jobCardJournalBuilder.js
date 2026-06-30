@@ -35,7 +35,7 @@ const PAYMENT_MODES = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsLines = [], accounts, paymentBank = null }) {
+function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsLines = [], accounts, paymentBank = null, campaign = null, partyGL = null, subletVendorGLs = new Map(), depreciationTotal = 0 }) {
     if (!accounts) throw new Error('accounts map required');
 
     // ---- Compute totals from each line group ----
@@ -88,77 +88,134 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
     const totalRevenueGross = round2(partsGross + labourGross + subletRevenueGross);
     const totalDiscount = round2(partsDiscount + labourDiscount);
     const totalTax = round2(partsTax + labourPST + subletPST);
-    const customerPays = round2(totalRevenueGross - totalDiscount + totalTax);
+    const invoiceTotal = round2(totalRevenueGross - totalDiscount + totalTax);
+
+    // Campaign benefit reduces what the customer actually pays — that portion
+    // gets debited to the campaign GL account instead (claimable from MCML or
+    // booked as our marketing expense, depending on campaign.BorneBy).
+    const campaignBenefit = campaign && campaign.BenefitAmount > 0
+        ? round2(Math.min(Number(campaign.BenefitAmount), invoiceTotal))
+        : 0;
+    const customerPays = round2(invoiceTotal - campaignBenefit);
+
     const subletCostTotal = round2(Object.values(subletVendorTotalsByPartyId).reduce((a, b) => a + b, 0));
 
-    // ---- Resolve which payment-side account to use ----
+    // ---- Resolve which subsidiary account to use ----
+    // Finalize only raises the invoice; receipts are posted separately by the
+    // cashier via Receive Payment.
+    //
+    // Customer subsidiary:
+    //   - PartyID set → party's own linked PartyGLID (per-party COA leaf)
+    //   - Walk-in → JobCardType.ReceivableAccount if set, else General Customer
+    //
+    // Revenue accounts:
+    //   - Labour → JobCardType.JobRevenueAccount if set, else SERVICE_REVENUE
+    //   - Parts  → JobCardType.PartsRevenueAccount if set, else PARTS_REVENUE
+    //
+    // This lets each business unit (GR / B&P / CT) post to its own revenue
+    // GL leaf, so the COA + P&L show per-department income separately.
     const paymentMode = jobCard.PaymentType || 'Cash';
-    let paymentSideAccount = null;
-    let paymentSidePartyID = null;
-    let customerSubsidiaryAccount = null;     // for the invoice leg (Trade Debtors named) OR General Customer
-
-    if (paymentMode === 'Credit') {
-        // Credit: no cash leg. Debit Trade Debtors (named party subsidiary).
-        if (!jobCard.PartyID) {
-            throw new Error('Credit Job Card requires PartyID (named credit party).');
+    let customerSubsidiaryAccount = null;
+    let partyTagForInvoiceLeg = null;
+    if (jobCard.PartyID) {
+        if (!partyGL || !partyGL.GLCAID) {
+            throw new Error('Job Card has a named party but the party has no linked GL account. Edit the party and pick one before finalizing.');
         }
-        customerSubsidiaryAccount = accounts.TRADE_DEBTORS;
-        paymentSidePartyID = jobCard.PartyID;
-        // No payment-side debit; receipt voucher comes later
+        customerSubsidiaryAccount = partyGL;
+        partyTagForInvoiceLeg = jobCard.PartyID;
+    } else if (jobCard.TypeReceivableGL) {
+        customerSubsidiaryAccount = { GLCAID: jobCard.TypeReceivableGL };
     } else {
-        // Cash / POS / Cheque / Bank Transfer: General Customer transit
         customerSubsidiaryAccount = accounts.GENERAL_CUSTOMER;
-        if (paymentMode === 'Bank Transfer') {
-            if (!paymentBank || !paymentBank.GLCAID) {
-                throw new Error('Bank Transfer requires a paymentBank account.');
-            }
-            paymentSideAccount = paymentBank;
-        } else {
-            const roleKey = PAYMENT_MODES[paymentMode];
-            if (!roleKey) throw new Error(`Unsupported payment mode: ${paymentMode}`);
-            paymentSideAccount = accounts[roleKey];
-            if (!paymentSideAccount) throw new Error(`Account for role ${roleKey} not resolved`);
-        }
     }
+
+    // Per-business-unit revenue accounts (override the system roles when set
+    // on gen_JobCardType.JobRevenueAccount / PartsRevenueAccount).
+    const labourRevenueAcct = jobCard.TypeServiceRevenueGL
+        ? { GLCAID: jobCard.TypeServiceRevenueGL }
+        : accounts.SERVICE_REVENUE;
+    const partsRevenueAcct = jobCard.TypePartsRevenueGL
+        ? { GLCAID: jobCard.TypePartsRevenueGL }
+        : accounts.PARTS_REVENUE;
 
     // ---- Build the journal lines ----
     const lines = [];
     const subsidiaryWrites = [];
-    const partyTagForInvoiceLeg = (paymentMode === 'Credit') ? jobCard.PartyID : null;
     // JobCardID tagging keeps a back-reference on every line for reports/aging
     const jcTag = jobCard.JobCardId;
 
-    // (1) Invoice leg — Dr customer subsidiary for total customer-pays
-    if (customerPays > 0) {
+    // (1) Invoice leg — Dr customer subsidiary for the *net* customer-pays
+    // (gross + tax − discount − campaignBenefit). If a campaign covers the
+    // full invoice, customerPays = 0 and we skip the line entirely.
+    //
+    // Insurance-claim split: when the JC has a named insurer party AND the
+    // Insurance tab recorded a depreciation total, that portion belongs to the
+    // END CUSTOMER not the insurer. Split the Dr leg into:
+    //   - Insurer (PartyGLID, party-tagged) for (customerPays - dep)
+    //   - General Customer (JC-tagged only)  for (dep)
+    // For walk-ins or no-dep cases, the single-leg path is unchanged.
+    const depSplit = (partyTagForInvoiceLeg != null) && depreciationTotal > 0
+        ? round2(Math.min(depreciationTotal, customerPays))
+        : 0;
+    const insurerShare = round2(customerPays - depSplit);
+
+    if (insurerShare > 0) {
         lines.push({
             GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: customerPays, Credit: 0,
+            Debit: insurerShare, Credit: 0,
             Narration: `Invoice JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
             PartyID: partyTagForInvoiceLeg, JobCardID: jcTag,
         });
         subsidiaryWrites.push({
             GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: customerPays, Credit: 0,
+            Debit: insurerShare, Credit: 0,
             PartyID: partyTagForInvoiceLeg,
             JobCardID: (partyTagForInvoiceLeg == null) ? jcTag : null,
             Narration: `Invoice JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
         });
     }
 
-    // (2) Parts Sales Revenue — Cr
+    if (depSplit > 0) {
+        lines.push({
+            GLCAID: accounts.GENERAL_CUSTOMER.GLCAID,
+            Debit: depSplit, Credit: 0,
+            Narration: `Customer depreciation share — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
+            PartyID: null, JobCardID: jcTag,
+        });
+        subsidiaryWrites.push({
+            GLCAID: accounts.GENERAL_CUSTOMER.GLCAID,
+            Debit: depSplit, Credit: 0,
+            PartyID: null, JobCardID: jcTag,
+            Narration: `Customer depreciation share — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
+        });
+    }
+
+    // (1b) Campaign leg — Dr the campaign GL account for the benefit portion.
+    // For MCML campaigns the GL is a sub-account under 102006 (a receivable);
+    // for "borne by us" campaigns it's an operating-expense account (5xxx).
+    if (campaign && campaignBenefit > 0) {
+        lines.push({
+            GLCAID: campaign.GLAccountID,
+            Debit: campaignBenefit, Credit: 0,
+            Narration: `Campaign claim: ${campaign.CampaignName} — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
+            PartyID: null, JobCardID: jcTag,
+        });
+    }
+
+    // (2) Parts Sales Revenue — Cr (uses business-unit's PartsRevenueAccount if set)
     if (partsGross > 0) {
         lines.push({
-            GLCAID: accounts.PARTS_REVENUE.GLCAID,
+            GLCAID: partsRevenueAcct.GLCAID,
             Debit: 0, Credit: partsGross,
             Narration: `Parts sale (gross) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
             PartyID: null, JobCardID: jcTag,
         });
     }
 
-    // (3) Service Revenue — Cr
+    // (3) Service Revenue — Cr (uses business-unit's JobRevenueAccount if set)
     if (labourGross > 0) {
         lines.push({
-            GLCAID: accounts.SERVICE_REVENUE.GLCAID,
+            GLCAID: labourRevenueAcct.GLCAID,
             Debit: 0, Credit: labourGross,
             Narration: `Labour (gross) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
             PartyID: null, JobCardID: jcTag,
@@ -236,48 +293,34 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
         });
     }
 
-    // (11) Trade Creditors (sublet vendor subsidiary) — Cr — one line per vendor
+    // (11) Sublet vendor subsidiary — Cr — one line per vendor, posted to each
+    // vendor's own PartyGLID leaf (loaded by the posting service).
     for (const [vendorIdStr, amount] of Object.entries(subletVendorTotalsByPartyId)) {
         const vendorId = Number(vendorIdStr);
         if (amount <= 0) continue;
+        const vendorAcc = subletVendorGLs.get(vendorId);
+        if (!vendorAcc) {
+            throw new Error(`Sublet vendor #${vendorId} has no GL account set. Edit the party and assign a GL account.`);
+        }
         lines.push({
-            GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+            GLCAID: vendorAcc.GLCAID,
             Debit: 0, Credit: amount,
             Narration: `Sublet payable — vendor #${vendorId} — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
             PartyID: vendorId, JobCardID: jcTag,
         });
         subsidiaryWrites.push({
-            GLCAID: accounts.TRADE_CREDITORS.GLCAID,
+            GLCAID: vendorAcc.GLCAID,
             Debit: 0, Credit: amount,
             PartyID: vendorId, JobCardID: null,
             Narration: `Sublet payable — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
         });
     }
 
-    // (12) & (13) Payment receipt leg — only for non-Credit modes
-    if (paymentMode !== 'Credit' && customerPays > 0) {
-        // (12) Dr payment-side account (Cash Book / POS Clearing / Cheques on Hand / Bank)
-        lines.push({
-            GLCAID: paymentSideAccount.GLCAID,
-            Debit: customerPays, Credit: 0,
-            Narration: `${paymentMode} receipt — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
-            PartyID: null, JobCardID: jcTag,
-        });
-        // (13) Cr General Customer (settles the invoice leg) — same subsidiary entry to settle
-        lines.push({
-            GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: 0, Credit: customerPays,
-            Narration: `Settle invoice via ${paymentMode} — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
-            PartyID: null, JobCardID: jcTag,
-        });
-        subsidiaryWrites.push({
-            GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: 0, Credit: customerPays,
-            PartyID: null,
-            JobCardID: jcTag,
-            Narration: `Settle invoice via ${paymentMode} — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
-        });
-    }
+    // NOTE: receipt + settle legs intentionally removed. The cashier records
+    // actual receipts (Cash / POS / Cheque / Bank Transfer) via the Receive
+    // Payment screen, which posts its own voucher (Dr payment-side / Cr
+    // customer subsidiary). The JC's PaymentMode is now just a hint to the
+    // cashier about how the customer plans to pay.
 
     // ---- Balance check (defensive — the DB trigger also enforces this) ----
     const totalDr = round2(lines.reduce((a, l) => a + (l.Debit || 0), 0));
@@ -286,23 +329,35 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
         throw new Error(`Journal not balanced: Dr ${totalDr} vs Cr ${totalCr}`);
     }
 
+    // Single-leg customer AR descriptor — populated only when the AR is NOT
+    // split between insurer + Gen-Cust. Used by the posting service for POS
+    // auto-settle at finalize (cashier doesn't need to record the POS receipt
+    // separately — card swipe at the counter already cleared the AR).
+    const customerARDr = (depSplit === 0 && insurerShare > 0)
+        ? { GLCAID: customerSubsidiaryAccount.GLCAID, PartyID: partyTagForInvoiceLeg, Amount: insurerShare }
+        : null;
+
     return {
         header: {
             SourceDocType: 'JOBCARD',
             SourceDocID: jobCard.JobCardId,
-            Narration: `Job Card finalize — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
-            TotalAmount: customerPays,
+            Narration: campaign
+                ? `Job Card finalize — JC-${jobCard.JobCardNo || jobCard.JobCardId} (campaign: ${campaign.CampaignName})`
+                : `Job Card finalize — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
+            TotalAmount: invoiceTotal,
         },
         lines,
         subsidiaryWrites,
+        customerARDr,
         totals: {
             partsGross, labourGross, subletRevenueGross,
             partsDiscount, labourDiscount, totalDiscount,
             partsTax, labourPST, subletPST, totalTax,
             partsCOGS, subletCostTotal,
-            customerPays,
+            invoiceTotal, campaignBenefit, customerPays,
             totalDr, totalCr,
         },
+        appliedCampaignID: campaign?.ApplicationID || null,
     };
 }
 

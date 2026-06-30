@@ -1,59 +1,95 @@
 /**
  * Party (Customer / Supplier / Insurance) master.
  *
- * `gen_PartiesInfo.PartyGLID` points to the *control* GL account a party posts against:
- *   - Customer / Insurance / Both → Trade Debtors  (GLCode 101005)
- *   - Supplier                    → Trade Creditors (GLCode 201001)
+ * `gen_PartiesInfo.PartyGLID` points to the GL leaf account this party posts
+ * against. The user PICKS the account at creation time — they're the canonical
+ * source of "which sub-account in COA is this party". Transactions against
+ * the party (job-card invoice, payment, GRN, etc.) hit this GL account, so
+ * the party ledger and the GL balance stay reconciled by design.
  *
- * Per-party balances live in dms_PartyLedger (subsidiary ledger). No per-party
- * sub-account is created in the COA — control accounts are leaves and the system
- * is intentionally designed around the subsidiary-ledger pattern (see §14.2).
- *
- * The legacy `sp_InsertParty` only accepts 7 columns; we bypass it and INSERT directly
- * so the full 20+ field set is captured. We keep `sp_InsertParty` untouched so any
- * legacy callers continue to work (CLAUDE.md rule).
+ * Eligible GL leaves: any L4 detail under Current Assets (1020xx) or Current
+ * Liabilities (2010xx). This covers receivables / payables / advances. The
+ * UI groups them by L3 parent so picking is fast.
  */
 const { sql, getPool } = require('../config/db');
 
-const CONTROL_GLCODES = {
-    Customer:  '101005',  // Trade Debtors
-    Insurance: '101005',  // Trade Debtors (until §14.10 split-receivable lands)
-    Both:      '101005',  // Default to Debtors; AR/AP both still go via subsidiary ledger
-    Supplier:  '201001'   // Trade Creditors
-};
+const PICKABLE_PARENT_PREFIXES = ['102', '201'];   // Current Assets + Current Liabilities
 
-async function resolveControlGLCAID(pool, partyType) {
-    const code = CONTROL_GLCODES[partyType];
-    if (!code) throw new Error(`Unknown PartyType "${partyType}". Expected one of: ${Object.keys(CONTROL_GLCODES).join(', ')}.`);
-    const r = await pool.request()
-        .input('c', sql.NVarChar(50), code)
-        .query(`SELECT GLCAID, GLCode, GLTitle FROM GLChartOFAccount WHERE GLCode=@c AND Status=1`);
-    if (!r.recordset.length) throw new Error(`Control account ${code} for ${partyType} not found in COA.`);
-    return r.recordset[0];
-}
-
-// Lightweight client-side echo of the same logic so the UI can preview the GL link.
-exports.previewControlAccount = async (req, res) => {
+/**
+ * GET /api/parties/coa-pickable
+ * Returns L4 leaf accounts under Current Assets / Current Liabilities, grouped
+ * by L3 parent so the frontend can render a sensible dropdown.
+ */
+exports.listPickableAccounts = async (req, res) => {
     try {
-        const t = req.query.type;
-        if (!CONTROL_GLCODES[t]) return res.status(400).json({ error: 'Invalid type' });
         const pool = await getPool();
-        const acct = await resolveControlGLCAID(pool, t);
-        res.json(acct);
+        const r = await pool.request().query(`
+            SELECT c.GLCAID, c.GLCode, c.GLTitle, c.GLNature,
+                   LEFT(c.GLCode, 6) AS ParentCode,
+                   p.GLTitle AS ParentTitle
+            FROM GLChartOFAccount c
+            LEFT JOIN GLChartOFAccount p
+                ON p.GLCode = LEFT(c.GLCode, 6) AND p.GLLevel = 3
+            WHERE c.GLLevel = 4
+              AND c.Status = 1
+              AND (LEFT(c.GLCode, 3) = '102' OR LEFT(c.GLCode, 3) = '201')
+            ORDER BY c.GLCode`);
+
+        const grouped = {};
+        for (const row of r.recordset) {
+            const key = `${row.ParentCode} ${row.ParentTitle || ''}`.trim();
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push({
+                GLCAID:  row.GLCAID,
+                GLCode:  row.GLCode,
+                GLTitle: row.GLTitle,
+                Nature:  row.GLNature === 1 ? 'Debit' : 'Credit',
+            });
+        }
+        res.json({ groups: grouped });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
+/**
+ * Validate that a user-supplied PartyGLID is a real, active L4 leaf under an
+ * allowed parent. Returns the account row for echoing back in the response.
+ */
+async function validatePartyGLID(pool, partyGLID) {
+    if (!partyGLID) throw new Error('PartyGLID is required — pick the GL account this party posts against.');
+    const r = await pool.request()
+        .input('id', sql.Int, parseInt(partyGLID))
+        .query(`SELECT GLCAID, GLCode, GLTitle, GLLevel, isParent, Status
+                FROM GLChartOFAccount WHERE GLCAID = @id`);
+    if (!r.recordset.length) throw new Error(`GL account #${partyGLID} not found.`);
+    const acct = r.recordset[0];
+    if (!acct.Status) throw new Error(`GL account ${acct.GLCode} is inactive.`);
+    if (acct.isParent) throw new Error(`GL account ${acct.GLCode} is a group, not a leaf — pick a detail account.`);
+    const prefix = acct.GLCode.substring(0, 3);
+    if (!PICKABLE_PARENT_PREFIXES.includes(prefix)) {
+        throw new Error(`GL account ${acct.GLCode} is not under a Current Asset / Current Liability — parties must post against receivables, payables, or advances.`);
+    }
+    return acct;
+}
+
 exports.getParties = async (req, res) => {
     try {
-        const { type, search } = req.query;
+        const { type, search, business } = req.query;
         const pool = await getPool();
         const r = pool.request();
         let where = `1=1`;
         if (type)   { r.input('t', sql.NVarChar(20), type);     where += ` AND p.PartyType = @t`; }
         if (search) { r.input('q', sql.NVarChar(200), `%${search}%`);
                       where += ` AND (p.PartyName LIKE @q OR p.CNIC LIKE @q OR p.PhoneOne LIKE @q OR p.NTNNO LIKE @q)`; }
+        // Optional business filter (?business=WORKSHOP|SALES|PROCUREMENT|SUBLET):
+        // only parties mapped to that business via dms_PartyBusinessAccess are returned.
+        // No row in the access table → party is hidden from that picker (strict opt-in).
+        if (business) {
+            r.input('biz', sql.NVarChar(20), business);
+            where += ` AND EXISTS (SELECT 1 FROM dms_PartyBusinessAccess pba
+                                   WHERE pba.PartyID = p.PartyID AND pba.BusinessKey = @biz)`;
+        }
 
         const result = await r.query(`
             SELECT p.PartyID, p.PartyName, p.PartyType, p.PhoneOne, p.Email, p.CNIC, p.NTNNO,
@@ -69,6 +105,84 @@ exports.getParties = async (req, res) => {
         res.json(result.recordset);
     } catch (err) {
         res.status(500).json({ error: 'Server Error', details: err.message });
+    }
+};
+
+// GET /api/parties/business-access
+// Returns the full matrix: every party with an array of BusinessKeys they're mapped to.
+exports.getBusinessAccessMatrix = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request().query(`
+            SELECT p.PartyID, p.PartyName, p.PartyType, p.PhoneOne, p.CreditLimit,
+                   (SELECT STUFF((SELECT ',' + pba.BusinessKey
+                                  FROM dms_PartyBusinessAccess pba
+                                  WHERE pba.PartyID = p.PartyID FOR XML PATH('')), 1, 1, '')) AS Businesses
+            FROM gen_PartiesInfo p
+            ORDER BY p.PartyName`);
+        const rows = r.recordset.map(row => ({
+            ...row,
+            Businesses: row.Businesses ? row.Businesses.split(',') : []
+        }));
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// POST /api/parties/business-access
+// Body: { PartyID, BusinessKeys: ['WORKSHOP', 'SALES', ...] }
+// Replaces this party's full access set.
+exports.savePartyBusinessAccess = async (req, res) => {
+    try {
+        const partyId = parseInt(req.body.PartyID);
+        const keys = Array.isArray(req.body.BusinessKeys) ? req.body.BusinessKeys : [];
+        if (!Number.isFinite(partyId)) return res.status(400).json({ error: 'PartyID required' });
+        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET']);
+        for (const k of keys) {
+            if (!valid.has(k)) return res.status(400).json({ error: `Invalid BusinessKey: ${k}` });
+        }
+        const pool = await getPool();
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            await new sql.Request(tx).input('id', sql.Int, partyId)
+                .query('DELETE FROM dms_PartyBusinessAccess WHERE PartyID = @id');
+            for (const k of keys) {
+                await new sql.Request(tx)
+                    .input('id', sql.Int, partyId)
+                    .input('k',  sql.NVarChar(20), k)
+                    .input('by', sql.Int, req.user?.userId || null)
+                    .query(`INSERT INTO dms_PartyBusinessAccess (PartyID, BusinessKey, GrantedByUserID)
+                            VALUES (@id, @k, @by)`);
+            }
+            await tx.commit();
+            res.json({ message: 'Access updated', PartyID: partyId, BusinessKeys: keys });
+        } catch (e) { try { await tx.rollback(); } catch {} throw e; }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// POST /api/parties/business-access/grant-all
+// Bootstrap helper — grants ALL businesses to ALL parties. Used once when first
+// enabling the access module so the existing party set isn't immediately hidden.
+exports.grantAllPartyBusinessAccess = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request().input('by', sql.Int, req.user?.userId || null).query(`
+            INSERT INTO dms_PartyBusinessAccess (PartyID, BusinessKey, GrantedByUserID)
+            SELECT p.PartyID, k.BusinessKey, @by
+            FROM gen_PartiesInfo p
+            CROSS JOIN (VALUES ('WORKSHOP'), ('SALES'), ('PROCUREMENT'), ('SUBLET')) k(BusinessKey)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM dms_PartyBusinessAccess pba
+                WHERE pba.PartyID = p.PartyID AND pba.BusinessKey = k.BusinessKey
+            );
+            SELECT @@ROWCOUNT AS Inserted;`);
+        res.json({ message: 'Granted all access', inserted: r.recordset[0].Inserted });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -118,18 +232,20 @@ function normaliseNTN(s) {
     return digits;
 }
 
+const VALID_PARTY_TYPES = new Set(['Customer', 'Supplier', 'Insurance', 'Both']);
+
 exports.createParty = async (req, res) => {
     try {
         const b = req.body;
         const PartyType = b.PartyType || 'Customer';
         if (!b.PartyName?.trim()) return res.status(400).json({ error: 'PartyName is required.' });
-        if (!CONTROL_GLCODES[PartyType]) return res.status(400).json({ error: `Invalid PartyType "${PartyType}".` });
+        if (!VALID_PARTY_TYPES.has(PartyType)) return res.status(400).json({ error: `Invalid PartyType "${PartyType}".` });
 
         const cnic = normaliseCNIC(b.CNIC);
         const ntn  = normaliseNTN(b.NTNNO);
 
         const pool = await getPool();
-        const control = await resolveControlGLCAID(pool, PartyType);
+        const control = await validatePartyGLID(pool, b.PartyGLID);
 
         // Duplicate checks — phone (legacy SP behavior), CNIC, NTN
         const dup = await pool.request()
@@ -209,13 +325,13 @@ exports.updateParty = async (req, res) => {
         const b = req.body;
         const PartyType = b.PartyType || 'Customer';
         if (!b.PartyName?.trim()) return res.status(400).json({ error: 'PartyName is required.' });
-        if (!CONTROL_GLCODES[PartyType]) return res.status(400).json({ error: `Invalid PartyType "${PartyType}".` });
+        if (!VALID_PARTY_TYPES.has(PartyType)) return res.status(400).json({ error: `Invalid PartyType "${PartyType}".` });
 
         const cnic = normaliseCNIC(b.CNIC);
         const ntn  = normaliseNTN(b.NTNNO);
 
         const pool = await getPool();
-        const control = await resolveControlGLCAID(pool, PartyType);
+        const control = await validatePartyGLID(pool, b.PartyGLID);
 
         // Duplicate checks against OTHER parties
         const dup = await pool.request()

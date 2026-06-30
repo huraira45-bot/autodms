@@ -17,6 +17,70 @@ const docs = require('./salesDocumentController');
 // Helpers
 // =========================================================================
 
+const { logAudit } = require('../services/salesAuditService');
+
+function addDaysISO(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+
+// POST /api/sales/bookings/:id/pay-master  body: { Amount, Mode, BankAccountGLCAID?, Reference?, Notes? }
+//
+// Agency-model step: dealer remits the wholesale price to Master Motors for
+// this booking. Dr BOOKING_VARIANT_RECEIVABLE / Cr Bank|Cash.
+exports.payMaster = async (req, res) => {
+    const bookingId = parseInt(req.params.id);
+    const { Amount, Mode, BankAccountGLCAID, Reference, Notes } = req.body || {};
+    const amt = Number(Amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Amount must be > 0.' });
+    if (!['Cash', 'Bank'].includes(Mode))   return res.status(400).json({ error: 'Mode must be Cash or Bank.' });
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        const { postPayMasterVoucher } = require('../services/payMasterService');
+        const { voucherId, voucherNo } = await postPayMasterVoucher({
+            bookingId, amount: amt, mode: Mode,
+            bankAccountGLCAID: BankAccountGLCAID ? Number(BankAccountGLCAID) : null,
+            reference: Reference, notes: Notes,
+        }, req.user, tx);
+
+        await logAudit(tx, {
+            bookingId, entityType: 'Booking', entityId: bookingId,
+            action: 'PayMaster',
+            newValue: { amount: amt, mode: Mode, voucherNo },
+            actor: req.user, notes: Notes,
+        });
+
+        await tx.commit();
+        res.json({ message: 'Master payment recorded.', VoucherID: voucherId, VoucherNo: voucherNo });
+    } catch (err) {
+        try { await tx.rollback(); } catch {}
+        console.error('payMaster:', err);
+        res.status(400).json({ error: err.message });
+    }
+};
+
+// GET /api/sales/bookings/:id/audit — chronological audit timeline for a booking
+exports.bookingAudit = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const pool = await getPool();
+        const r = await pool.request().input('bid', sql.Int, id).query(`
+            SELECT AuditID, EntityType, EntityID, Action, OldValue, NewValue,
+                   ActorEmployeeID, ActorName, At, Notes
+            FROM dms_SalesAuditLog
+            WHERE BookingID=@bid
+            ORDER BY At DESC, AuditID DESC`);
+        res.json(r.recordset);
+    } catch (err) {
+        console.error('bookingAudit:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 async function logTransition(tx, bookingId, fromState, toState, user, reason) {
     await new sql.Request(tx)
         .input('bid', sql.Int, bookingId)
@@ -29,6 +93,12 @@ async function logTransition(tx, bookingId, fromState, toState, user, reason) {
         .query(`INSERT INTO dms_BookingStateTransitions
                     (BookingID, FromState, ToState, ActorEmployeeID, ActorName, ActorRole, Reason)
                 VALUES (@bid, @from, @to, @emp, @name, @role, @reason)`);
+    // Mirror into the wider audit log (§23) — never throws.
+    await logAudit(tx, {
+        bookingId, entityType: 'Booking', entityId: bookingId,
+        action: `Transition: ${fromState} → ${toState}`,
+        oldValue: fromState, newValue: toState, actor: user, notes: reason,
+    });
 }
 
 // Resolve a system-account role to its GL account ID. Returns null if unmapped.
@@ -478,8 +548,8 @@ exports.issueGatePass = async (req, res) => {
         const paidPct = b.NegotiatedPrice > 0 ? Number(b.AmountPaidToDate) / Number(b.NegotiatedPrice) * 100 : 0;
         const fullyPaid = paidPct >= 100;
         if (!b.AllocatedVehicleID) return res.status(409).json({ error: 'Vehicle not allocated' });
-        if (b.Status !== 'MasterInvoicePosted' && b.Status !== 'ReadyForDelivery') {
-            return res.status(409).json({ error: `Status must be MasterInvoicePosted or ReadyForDelivery (got ${b.Status})` });
+        if (!['Allocated', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(b.Status)) {
+            return res.status(409).json({ error: `Status must be Allocated / MasterInvoicePosted / ReadyForDelivery (got ${b.Status})` });
         }
         if (!fullyPaid) {
             if (!b.AllowPartialDelivery) return res.status(409).json({ error: 'Not fully paid and partial delivery not authorized.' });
@@ -542,6 +612,37 @@ exports.issueGatePass = async (req, res) => {
                     : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}.`;
             await logTransition(tx, id, b.Status, 'Closed', req.user,
                 `Gate pass ${gatePassNo} issued. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`} ${glIntent}`);
+
+            // Auto-create a placeholder recovery plan when delivery proceeds
+            // without full payment. The plan holds a single installment due in
+            // 30 days; the recovery officer adjusts the schedule afterward.
+            let autoRecoveryPlanId = null;
+            if (!fullyPaid) {
+                const remainder = Number(b.NegotiatedPrice) - Number(b.AmountPaidToDate);
+                if (remainder > 0.01) {
+                    const planIns = await new sql.Request(tx)
+                        .input('bid',   sql.Int,             id)
+                        .input('rem',   sql.Decimal(18,2),   remainder)
+                        .input('json',  sql.NVarChar(sql.MAX),
+                               JSON.stringify([{ DueDate: addDaysISO(30), AmountDue: remainder, Notes: 'Auto-created at gate pass — adjust schedule.' }]))
+                        .input('cby',   sql.Int,             req.user?.employeeId || null)
+                        .input('cbyN',  sql.NVarChar(100),   req.user?.userName || null)
+                        .query(`INSERT INTO dms_SalesRecoveryPlans
+                                    (BookingID, TotalRemainingAtDelivery, InstallmentsJSON,
+                                     Status, CreatedByEmployeeID, CreatedByName)
+                                OUTPUT INSERTED.RecoveryPlanID
+                                VALUES (@bid, @rem, @json, 'Active', @cby, @cbyN)`);
+                    autoRecoveryPlanId = planIns.recordset[0].RecoveryPlanID;
+                    await new sql.Request(tx)
+                        .input('pid', sql.Int,           autoRecoveryPlanId)
+                        .input('bid', sql.Int,           id)
+                        .input('due', sql.Date,          addDaysISO(30))
+                        .input('amt', sql.Decimal(18,2), remainder)
+                        .query(`INSERT INTO dms_SalesRecoveryInstallments
+                                    (RecoveryPlanID, BookingID, SeqNo, DueDate, AmountDue, Notes)
+                                VALUES (@pid, @bid, 1, @due, @amt, 'Auto-created at gate pass — adjust schedule.')`);
+                }
+            }
 
             await tx.commit();
             res.json({

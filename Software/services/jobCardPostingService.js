@@ -18,44 +18,123 @@ const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildJournalLines } = require('../utils/jobCardJournalBuilder');
 
-// Resolve all 12 system roles + the leaf accounts we need (the system-role helper
-// already enforces that the role is configured; we read GLCode + Title for narration).
-async function resolveAllAccounts(transaction) {
+// Resolve only the system roles the builder will actually consume. Trade
+// debtors/creditors are no longer system fallbacks — every party carries its
+// own PartyGLID (set at party creation) so customer A/R and sublet-vendor A/P
+// post to the party's chosen leaf account, not a system-wide bucket.
+async function resolveAllAccounts() {
     const roles = [
         'CASH_BOOK', 'GENERAL_CUSTOMER', 'GST_PAYABLE', 'INPUT_GST', 'PST_PAYABLE',
         'POS_CLEARING', 'DEFAULT_DISCOUNT_GIVEN', 'ROUNDING_ADJUSTMENT',
         'PURCHASE_RETURN_VARIANCE', 'CUSTOMER_ADVANCE_RECEIVED', 'SUPPLIER_ADVANCE_PAID',
         'CHEQUES_ON_HAND',
+        'INVENTORY_PARTS', 'PARTS_REVENUE', 'SERVICE_REVENUE', 'SUBLET_REVENUE',
+        'COGS_PARTS', 'SUBLET_COST',
     ];
     const out = {};
     for (const r of roles) {
         out[r] = { GLCAID: await resolveRole(r) };
     }
-    // The supporting (non-role) accounts we resolve by their fixed GLCode from migration 002.
-    // These are part of the §14.2 hierarchy and known by code; resolving by GLCode is safe.
-    const byCode = async (code) => {
-        const res = await new sql.Request(transaction)
-            .input('c', sql.NVarChar(50), code)
-            .query('SELECT GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND Status=1');
-        if (!res.recordset.length) throw new Error(`COA account ${code} not found.`);
-        return { GLCAID: res.recordset[0].GLCAID };
-    };
-    out.TRADE_DEBTORS    = await byCode('101005');
-    out.TRADE_CREDITORS  = await byCode('201001');
-    out.INVENTORY_PARTS  = await byCode('101004');
-    out.PARTS_REVENUE    = await byCode('401002');
-    out.SERVICE_REVENUE  = await byCode('401001');
-    out.SUBLET_REVENUE   = await byCode('401003');
-    out.COGS_PARTS       = await byCode('501001');
-    out.SUBLET_COST      = await byCode('502001');
     return out;
+}
+
+// For each sublet vendor referenced on the JC, look up that vendor's PartyGLID.
+// Returns a Map<vendorId, { GLCAID }>. Throws if any vendor has no PartyGLID
+// (we refuse to silently fall back to a system bucket).
+async function loadSubletVendorGLs(subletLines, transaction) {
+    const vendorIds = [...new Set(subletLines.map(l => l.VendorID).filter(Boolean))];
+    if (!vendorIds.length) return new Map();
+    const r = await new sql.Request(transaction)
+        .query(`SELECT PartyID, PartyName, PartyGLID FROM gen_PartiesInfo WHERE PartyID IN (${vendorIds.join(',')})`);
+    const map = new Map();
+    const missing = [];
+    for (const v of r.recordset) {
+        if (!v.PartyGLID) missing.push(`#${v.PartyID} ${v.PartyName}`);
+        else map.set(v.PartyID, { GLCAID: v.PartyGLID });
+    }
+    if (missing.length) {
+        throw new Error(`Sublet vendor(s) without GL account: ${missing.join(', ')}. Edit each party and assign a GL account.`);
+    }
+    return map;
+}
+
+/**
+ * Load the active campaign attached to this JC (Phase 3). Returns null if no
+ * application or if the campaign isn't in a valid state for posting.
+ *
+ *   Result: { ApplicationID, CampaignID, BenefitAmount, GLAccountID,
+ *             CampaignName, BorneBy }
+ */
+async function loadCampaignApplication(jobCardId, transaction) {
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, jobCardId)
+        .query(`
+            SELECT TOP 1 a.ApplicationID, a.CampaignID, a.BenefitAmount,
+                   c.CampaignName, c.BorneBy, c.GLAccountID
+            FROM dms_ServiceCampaignApplications a
+            JOIN dms_ServiceCampaigns c ON a.CampaignID = c.CampaignID
+            WHERE a.JobCardId = @id AND a.Status = 'Active'`);
+    if (!r.recordset.length) return null;
+    const camp = r.recordset[0];
+    if (!camp.GLAccountID) {
+        throw new Error(`Campaign "${camp.CampaignName}" has no GL account set — cannot finalize.`);
+    }
+    return camp;
+}
+
+/**
+ * Look up a party's chosen receivable/payable GL account. Each party has a
+ * PartyGLID pointing at one specific L4 leaf under 102xxx or 201xxx (set by
+ * the user when the party was created). That's the account to debit/credit
+ * when posting transactions for this party — NOT the legacy system-role
+ * "TRADE_DEBTORS" account, which doesn't exist after the COA renumber.
+ */
+async function loadPartyGL(partyId, transaction) {
+    if (!partyId) return null;
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, partyId)
+        .query(`SELECT p.PartyID, p.PartyName, p.PartyGLID,
+                       g.GLCode, g.GLTitle
+                FROM gen_PartiesInfo p
+                LEFT JOIN GLChartOFAccount g ON p.PartyGLID = g.GLCAID
+                WHERE p.PartyID = @id`);
+    if (!r.recordset.length) throw new Error(`Party #${partyId} not found.`);
+    const p = r.recordset[0];
+    if (!p.PartyGLID) throw new Error(`Party "${p.PartyName}" has no GL account linked. Edit the party and pick one before finalizing.`);
+    return { GLCAID: p.PartyGLID, GLCode: p.GLCode, GLTitle: p.GLTitle, PartyName: p.PartyName };
+}
+
+// For MCML-claim style JCs (SFS / FFS / PDS / PPM): the JC has no PartyID but
+// the JobCardType's ReceivableAccount points at a 102006xxx leaf. We look up
+// the party that owns that GL leaf so the invoice voucher line carries that
+// PartyID — without it, the claim can't be settled by party in Receive Payment.
+async function loadPartyForReceivableGL(glcaid, transaction) {
+    if (!glcaid) return null;
+    const r = await new sql.Request(transaction)
+        .input('gl', sql.Int, glcaid)
+        .query(`SELECT TOP 1 p.PartyID, p.PartyName, p.PartyGLID,
+                       g.GLCode, g.GLTitle
+                FROM gen_PartiesInfo p
+                LEFT JOIN GLChartOFAccount g ON p.PartyGLID = g.GLCAID
+                WHERE p.PartyGLID = @gl
+                ORDER BY p.PartyID`);
+    if (!r.recordset.length) return null;
+    const p = r.recordset[0];
+    return { PartyID: p.PartyID, GLCAID: p.PartyGLID, GLCode: p.GLCode, GLTitle: p.GLTitle, PartyName: p.PartyName };
 }
 
 async function loadJobCardData(jobCardId, transaction) {
     const hdr = await new sql.Request(transaction)
         .input('id', sql.Int, jobCardId)
-        .query(`SELECT JobCardId, JobCardNo, JobCardDate, Status AS PaymentType, PartyID, PaymentBankID
-                FROM Addata_JobCardInfo WHERE JobCardId=@id`);
+        .query(`SELECT j.JobCardId, j.JobCardNo, j.JobCardDate, j.Status AS PaymentType, j.PartyID, j.PaymentBankID,
+                       j.JobTypeId,
+                       t.JobRevenueAccount   AS TypeServiceRevenueGL,
+                       t.PartsRevenueAccount AS TypePartsRevenueGL,
+                       t.ReceivableAccount   AS TypeReceivableGL,
+                       t.CardCode AS JobTypeCode, t.Title AS JobTypeTitle
+                FROM Addata_JobCardInfo j
+                LEFT JOIN gen_JobCardType t ON j.JobTypeId = t.JobCardTypeId
+                WHERE j.JobCardId=@id`);
     if (!hdr.recordset.length) throw new Error(`Job Card ${jobCardId} not found.`);
     const jobCard = hdr.recordset[0];
 
@@ -79,11 +158,21 @@ async function loadJobCardData(jobCardId, transaction) {
                 INNER JOIN data_StockIssuetoJobCard h ON d.StockIssueID = h.StockIssueID
                 WHERE h.JobCardId=@id`);
 
+    // Insurance-claim depreciation total — the portion of customerPays that
+    // belongs to the END CUSTOMER, not the insurer. The builder splits the AR
+    // leg when this is > 0.
+    const depRs = await new sql.Request(transaction)
+        .input('id', sql.Int, jobCardId)
+        .query(`SELECT ISNULL(SUM(DepAmount), 0) AS Total
+                FROM dms_JobCardPartsDepreciation WHERE JobCardId=@id`);
+    const depreciationTotal = Number(depRs.recordset[0].Total) || 0;
+
     return {
         jobCard,
         labourLines: labour.recordset,
         subletLines: sublet.recordset,
         partsLines: parts.recordset,
+        depreciationTotal,
     };
 }
 
@@ -106,18 +195,33 @@ async function resolvePaymentBank(jobCard, transaction) {
  * @param {sql.Transaction} transaction
  */
 async function postJobCardVoucher(jobCardId, userInfo, transaction) {
-    // 1. Load all job-card data
-    const { jobCard, labourLines, subletLines, partsLines } = await loadJobCardData(jobCardId, transaction);
+    // 1. Load all job-card data + any active campaign application
+    const { jobCard, labourLines, subletLines, partsLines, depreciationTotal } = await loadJobCardData(jobCardId, transaction);
+    const campaign = await loadCampaignApplication(jobCardId, transaction);
 
-    // 2. Resolve all accounts
-    const accounts = await resolveAllAccounts(transaction);
-    const paymentBank = await resolvePaymentBank(jobCard, transaction);
+    // 2. Resolve system accounts + per-party GLs. Customer A/R uses the JC
+    //    party's PartyGLID; sublet vendor A/P uses each vendor's own PartyGLID.
+    const accounts        = await resolveAllAccounts();
+    let   partyGL         = await loadPartyGL(jobCard.PartyID, transaction);
+    const subletVendorGLs = await loadSubletVendorGLs(subletLines, transaction);
+
+    // For MCML-claim JC types (SFS / FFS / PDS / PPM) with no named customer:
+    // resolve the party that owns the JC type's ReceivableAccount and treat it
+    // as the JC's party so Receive Payment can settle it by party.
+    if (!jobCard.PartyID && jobCard.TypeReceivableGL) {
+        const claimParty = await loadPartyForReceivableGL(jobCard.TypeReceivableGL, transaction);
+        if (claimParty) {
+            jobCard.PartyID = claimParty.PartyID;
+            partyGL = claimParty;
+        }
+    }
 
     // 3. Build journal lines via the pure builder
     const built = buildJournalLines({
         jobCard,
         labourLines, subletLines, partsLines,
-        accounts, paymentBank,
+        accounts, campaign, partyGL, subletVendorGLs,
+        depreciationTotal,
     });
 
     // Refuse to finalize an empty Job Card. Previously this silently returned null,
@@ -137,7 +241,7 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
 
     // 5. Generate voucher number (SI-<sequential>)
     const seqResult = await new sql.Request(transaction).query(
-        "SELECT ISNULL(MAX(VoucherID),0) + 1 AS nextNo FROM data_FinanceVoucherInfo"
+        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
     );
     const voucherNo = `SI-${String(seqResult.recordset[0].nextNo).padStart(4, '0')}`;
 
@@ -199,7 +303,114 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
                 SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
                 WHERE VoucherID=@vid`);
 
+    // 10. If a campaign was applied, link the application row back to this voucher
+    if (campaign && built.appliedCampaignID) {
+        await new sql.Request(transaction)
+            .input('aid', sql.Int, built.appliedCampaignID)
+            .input('vid', sql.Int, voucherId)
+            .query(`UPDATE dms_ServiceCampaignApplications
+                    SET AccountVoucherID = @vid
+                    WHERE ApplicationID = @aid`);
+    }
+
+    // 11. POS auto-settle. When the JC is paid by POS at the counter the card
+    //     terminal has already cleared the customer's balance — only the bank
+    //     settlement (POS_CLEARING → Bank) is pending, and that's what the POS
+    //     Settlement module handles. So we post the receipt CRV in this same
+    //     transaction (Dr POS_CLEARING / Cr customer subsidiary, allocated to
+    //     the SI we just posted). Skipped when the AR is split (insurer + dep)
+    //     because POS would only cover the customer's dep portion — that edge
+    //     case still flows through Receive Payment.
+    if ((jobCard.PaymentType || '').toUpperCase() === 'POS' && built.customerARDr) {
+        await postPOSAutoSettleForJobCard({
+            transaction, siVoucherId: voucherId, jobCard, userInfo,
+            ar: built.customerARDr, posClearingGL: accounts.POS_CLEARING.GLCAID,
+        });
+    }
+
     return voucherId;
+}
+
+// Posts the POS receipt CRV that auto-settles a POS-paid JC's customer A/R.
+// Inserts header + Dr POS_CLEARING + Cr customer-subsidiary (with AllocatedToVoucherID
+// pointing at the SI voucher), writes a subsidiary-ledger Cr row, then flips to Posted.
+async function postPOSAutoSettleForJobCard({ transaction, siVoucherId, jobCard, userInfo, ar, posClearingGL }) {
+    const jcNo = jobCard.JobCardNo || jobCard.JobCardId;
+
+    const vt = await new sql.Request(transaction).query(
+        "SELECT TOP 1 Voucherid FROM GLVoucherType WHERE Title='CRV' ORDER BY Voucherid");
+    if (!vt.recordset.length) throw new Error('CRV voucher type missing.');
+    const crvTypeId = vt.recordset[0].Voucherid;
+
+    const seq = await new sql.Request(transaction).query(
+        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo");
+    const crvNo = `CRV-${String(seq.recordset[0].nextNo).padStart(4, '0')}`;
+
+    const narration = `POS receipt at finalize — JC-${jcNo}`;
+    const hdr = await new sql.Request(transaction)
+        .input('vd',    sql.DateTime,     new Date())
+        .input('vno',   sql.NVarChar(50), crvNo)
+        .input('vtId',  sql.Int,          crvTypeId)
+        .input('rem',   sql.NVarChar(sql.MAX), narration)
+        .input('tot',   sql.Decimal(18,2), ar.Amount)
+        .input('src',   sql.NVarChar(20), 'JOBCARD')
+        .input('srcId', sql.Int,          jobCard.JobCardId)
+        .input('cby',   sql.Int,          userInfo?.userId || null)
+        .input('cbyN',  sql.NVarChar(100),userInfo?.userName || null)
+        .query(`INSERT INTO data_FinanceVoucherInfo
+                    (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
+                     Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
+                OUTPUT INSERTED.VoucherID
+                VALUES (@vd, @vno, @vtId, @rem, @tot,
+                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+    const crvId = hdr.recordset[0].VoucherID;
+
+    // Dr POS_CLEARING — tagged by JobCardID so POS Settlement / GL Detail can trace it back
+    await new sql.Request(transaction)
+        .input('vid',  sql.Int,           crvId)
+        .input('gl',   sql.Int,           posClearingGL)
+        .input('nar',  sql.NVarChar(sql.MAX), `POS swipe — JC-${jcNo}`)
+        .input('dr',   sql.Decimal(18,2), ar.Amount)
+        .input('cr',   sql.Decimal(18,2), 0)
+        .input('jcid', sql.Int,           jobCard.JobCardId)
+        .query(`INSERT INTO data_FinanceVoucherDetail
+                    (VoucherID, GLCAID, Narration, Debit, Credit, JobCardID)
+                VALUES (@vid, @gl, @nar, @dr, @cr, @jcid)`);
+
+    // Cr customer subsidiary — allocated to SI so Walk-in Outstanding subtracts this
+    await new sql.Request(transaction)
+        .input('vid',   sql.Int,           crvId)
+        .input('gl',    sql.Int,           ar.GLCAID)
+        .input('nar',   sql.NVarChar(sql.MAX), `Settled by POS — JC-${jcNo}`)
+        .input('dr',    sql.Decimal(18,2), 0)
+        .input('cr',    sql.Decimal(18,2), ar.Amount)
+        .input('pid',   sql.Int,           ar.PartyID || null)
+        .input('jcid',  sql.Int,           jobCard.JobCardId)
+        .input('alloc', sql.Int,           siVoucherId)
+        .query(`INSERT INTO data_FinanceVoucherDetail
+                    (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID, AllocatedToVoucherID)
+                VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid, @alloc)`);
+
+    // Subsidiary-ledger Cr — PartyID-tagged for named-party JCs, JobCardID-tagged for walk-ins
+    await new sql.Request(transaction)
+        .input('pid',   sql.Int,           ar.PartyID || null)
+        .input('jcid',  sql.Int,           ar.PartyID ? null : jobCard.JobCardId)
+        .input('vid',   sql.Int,           crvId)
+        .input('gl',    sql.Int,           ar.GLCAID)
+        .input('dr',    sql.Decimal(18,2), 0)
+        .input('cr',    sql.Decimal(18,2), ar.Amount)
+        .input('nar',   sql.NVarChar(500), `Settled by POS — JC-${jcNo}`)
+        .input('alloc', sql.Int,           siVoucherId)
+        .query(`INSERT INTO dms_PartyLedger
+                    (PartyID, JobCardID, VoucherID, GLCAID, Debit, Credit, Narration, AllocatedToVoucherID)
+                VALUES (@pid, @jcid, @vid, @gl, @dr, @cr, @nar, @alloc)`);
+
+    await new sql.Request(transaction)
+        .input('vid', sql.Int, crvId)
+        .input('pby', sql.Int, userInfo?.userId || null)
+        .query(`UPDATE data_FinanceVoucherInfo
+                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
+                WHERE VoucherID=@vid`);
 }
 
 module.exports = { postJobCardVoucher, resolveAllAccounts };

@@ -1,9 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
-    Building, Plus, Search, X, Loader2, Save, Edit3, Landmark,
+    Building, Plus, X, Loader2, Save, Edit3, Landmark,
     UserCircle, FileText, Phone, MapPin, Briefcase
 } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import { DataCard, EmptyState, FilterBar, PageHeader, SearchField, StatusPill } from '../components/UXPrimitives';
+import SearchableSelect from '../components/SearchableSelect';
+import Can from '../components/Can';
 
 const API_BASE = '/api';
 
@@ -15,10 +19,10 @@ const PARTY_TYPES = [
 ];
 
 const TYPE_BADGE = {
-    Customer:  { bg: '#dbeafe', col: '#1e40af' },
-    Supplier:  { bg: '#fef3c7', col: '#a16207' },
-    Insurance: { bg: '#ede9fe', col: '#6d28d9' },
-    Both:      { bg: '#d1fae5', col: '#047857' }
+    Customer: 'blue',
+    Supplier: 'amber',
+    Insurance: 'indigo',
+    Both: 'green'
 };
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -30,17 +34,12 @@ const EMPTY_FORM = {
     AddressOne: '', AddressTwo: '', CityNameManual: '',
     ContactPerson: '', ContactPersonMobile: '', ContactPersonEmail: '',
     CreditLimit: '', LicenseNo: '', LicenseExpiryDate: '',
-    PartyGroupID: '', Remarks: ''
+    PartyGroupID: '', Remarks: '',
+    PartyGLID: ''  // user picks at creation time; required
 };
 
 function TypeBadge({ type }) {
-    const s = TYPE_BADGE[type] || TYPE_BADGE.Customer;
-    return (
-        <span style={{
-            background: s.bg, color: s.col, padding: '2px 8px',
-            borderRadius: 99, fontSize: '0.7rem', fontWeight: 700
-        }}>{type || 'Customer'}</span>
-    );
+    return <StatusPill tone={TYPE_BADGE[type] || TYPE_BADGE.Customer}>{type || 'Customer'}</StatusPill>;
 }
 
 function Section({ icon: Icon, title, children }) {
@@ -59,14 +58,15 @@ function Section({ icon: Icon, title, children }) {
 }
 
 export default function Customers() {
+    const { notify } = useFeedback();
     const [parties, setParties] = useState([]);
     const [groups, setGroups] = useState([]);
+    const [pickableGl, setPickableGl] = useState({});   // { 'parentCode title': [{GLCAID, GLCode, GLTitle, Nature}, ...] }
     const [search, setSearch] = useState('');
     const [filterType, setFilterType] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
-    const [glPreview, setGlPreview] = useState(null);
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
 
@@ -90,14 +90,13 @@ export default function Customers() {
     useEffect(() => { fetchParties(); }, [fetchParties]);
     useEffect(() => { fetchGroups(); }, [fetchGroups]);
 
-    // Preview which control account this party will be linked to
+    // Load the list of GL accounts available for party linkage (Current Assets +
+    // Current Liabilities L4 leaves, grouped by their L3 parent)
     useEffect(() => {
-        let cancel = false;
-        axios.get(`${API_BASE}/parties/control-account`, { params: { type: form.PartyType } })
-            .then(r => { if (!cancel) setGlPreview(r.data); })
-            .catch(() => { if (!cancel) setGlPreview(null); });
-        return () => { cancel = true; };
-    }, [form.PartyType]);
+        axios.get(`${API_BASE}/parties/coa-pickable`)
+            .then(r => setPickableGl(r.data.groups || {}))
+            .catch(() => setPickableGl({}));
+    }, []);
 
     const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -124,73 +123,68 @@ export default function Customers() {
                 LicenseNo: p.LicenseNo || '',
                 LicenseExpiryDate: p.LicenseExpiryDate ? p.LicenseExpiryDate.slice(0, 10) : '',
                 PartyGroupID: p.PartyGroupID ?? '',
-                Remarks: p.Remarks || ''
+                Remarks: p.Remarks || '',
+                PartyGLID: p.PartyGLID ?? ''
             });
             setEditingId(p.PartyID);
             setMsg(null);
             setShowModal(true);
         } catch (err) {
-            alert('Failed to load party: ' + (err.response?.data?.error || err.message));
+            notify({ type: 'error', title: 'Could not load party', message: err.response?.data?.error || err.message });
         }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!form.PartyName.trim()) return alert('Party Name is required.');
+        if (!form.PartyName.trim()) {
+            notify({ type: 'warning', title: 'Party name required', message: 'Enter a party name before saving.' });
+            return;
+        }
         setBusy(true); setMsg(null);
         try {
             if (editingId) {
                 await axios.put(`${API_BASE}/parties/${editingId}`, form);
                 setMsg({ kind: 'ok', text: 'Party updated.' });
+                notify({ type: 'success', title: 'Party updated', message: form.PartyName });
             } else {
                 const r = await axios.post(`${API_BASE}/parties`, form);
                 setMsg({ kind: 'ok', text: `Party "${form.PartyName}" created (#${r.data.PartyID}, linked to ${r.data.PartyGLCode} ${r.data.PartyGLTitle}).` });
+                notify({ type: 'success', title: 'Party created', message: `${form.PartyName} linked to ${r.data.PartyGLCode}.` });
             }
             await fetchParties();
             setTimeout(() => { setShowModal(false); setMsg(null); }, 1500);
         } catch (err) {
-            setMsg({ kind: 'err', text: err.response?.data?.error || err.response?.data?.details || err.message });
+            const text = err.response?.data?.error || err.response?.data?.details || err.message;
+            setMsg({ kind: 'err', text });
+            notify({ type: 'error', title: 'Party save failed', message: text });
         }
         setBusy(false);
     };
 
     return (
-        <div>
-            <div className="card-header" style={{ marginBottom: 20 }}>
-                <div>
-                    <h1 className="page-title">Parties</h1>
-                    <p className="page-subtitle">
-                        Customers, Suppliers, and Insurance companies — with automatic GL control-account linkage.
-                        Per-party balances tracked via subsidiary ledger.
-                    </p>
-                </div>
-                <button className="btn" onClick={openCreate}><Plus size={18} /> New Party</button>
-            </div>
-
-            {/* Filter bar */}
-            <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div className="search-box" style={{ width: 280 }}>
-                    <Search size={16} />
-                    <input
-                        type="text"
-                        placeholder="Search name, phone, CNIC, NTN..."
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        style={{ border: 'none', outline: 'none', flex: 1, fontSize: '0.875rem' }}
-                    />
-                </div>
-                <select value={filterType} onChange={e => setFilterType(e.target.value)}
-                    style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }}>
+        <div className="ux-page-stack">
+            <PageHeader
+                icon={Building}
+                eyebrow="Master data"
+                title="Parties"
+                subtitle="Customers, suppliers, and insurance companies linked directly to their GL accounts."
+                actions={<Can perm="crm_parties" action="insert"><button className="btn" onClick={openCreate}><Plus size={18} /> New Party</button></Can>}
+            />
+            <FilterBar resultLabel={`${parties.length} parties`}>
+                <SearchField
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search name, phone, CNIC, NTN..."
+                    width={320}
+                />
+                <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ minWidth: 150 }}>
                     <option value="">All Types</option>
                     {PARTY_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select>
-                <div style={{ color: '#64748b', fontSize: '0.85rem', marginLeft: 'auto' }}>
-                    {parties.length} parties
-                </div>
-            </div>
+            </FilterBar>
 
             {/* Directory table */}
-            <div className="card">
+            <DataCard>
                 <div className="table-wrapper">
                     <table>
                         <thead>
@@ -203,7 +197,16 @@ export default function Customers() {
                         </thead>
                         <tbody>
                             {parties.length === 0 ? (
-                                <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>No parties match the filter.</td></tr>
+                                <tr>
+                                    <td colSpan={10} className="table-empty-row">
+                                        <EmptyState
+                                            icon={Building}
+                                            title="No parties found"
+                                            message="Try a different search or create a new party."
+                                            action={<Can perm="crm_parties" action="insert"><button className="btn-sm" onClick={openCreate}><Plus size={14} /> New Party</button></Can>}
+                                        />
+                                    </td>
+                                </tr>
                             ) : parties.slice(0, 100).map(p => (
                                 <tr key={p.PartyID}>
                                     <td>#{p.PartyID}</td>
@@ -218,16 +221,18 @@ export default function Customers() {
                                         {p.PartyGLCode ? <><span style={{ fontFamily: 'monospace' }}>{p.PartyGLCode}</span> {p.PartyGLTitle}</> : '—'}
                                     </td>
                                     <td>
-                                        <button onClick={() => openEdit(p)} className="btn-sm" style={{ padding: '4px 8px' }}>
-                                            <Edit3 size={12} /> Edit
-                                        </button>
+                                        <Can perm="crm_parties" action="edit">
+                                            <button onClick={() => openEdit(p)} className="btn-sm" style={{ padding: '4px 8px' }}>
+                                                <Edit3 size={12} /> Edit
+                                            </button>
+                                        </Can>
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
-            </div>
+            </DataCard>
 
             {/* Modal */}
             {showModal && (
@@ -280,21 +285,21 @@ export default function Customers() {
                                         borderRadius: 8, padding: 14
                                     }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#475569', fontSize: '0.75rem', textTransform: 'uppercase', marginBottom: 8 }}>
-                                            <Landmark size={14} /> Auto-Linked Control Account
+                                            <Landmark size={14} /> GL Account (Required)
                                         </div>
-                                        {glPreview ? (
-                                            <>
-                                                <div style={{ fontFamily: 'monospace', fontWeight: 600, color: '#1e40af', fontSize: '0.95rem' }}>
-                                                    {glPreview.GLCode}
-                                                </div>
-                                                <div style={{ fontWeight: 500 }}>{glPreview.GLTitle}</div>
-                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 6 }}>
-                                                    Postings will hit this account; per-party balance lives in <strong>dms_PartyLedger</strong>.
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>Resolving...</div>
-                                        )}
+                                        <SearchableSelect
+                                            value={form.PartyGLID}
+                                            onChange={v => update('PartyGLID', v)}
+                                            options={Object.entries(pickableGl).flatMap(([parent, accts]) => accts.map(a => ({
+                                                id: a.GLCAID,
+                                                label: a.GLTitle,
+                                                sub: a.GLCode + ' · ' + a.Nature,
+                                                group: parent,
+                                            })))}
+                                            placeholder="Pick the GL account this party posts against" />
+                                        <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 8 }}>
+                                            All transactions for this party (job-card billing, payment, GRN, etc.) will hit the selected GL account, so the party ledger and the GL stay reconciled by design.
+                                        </div>
                                     </div>
                                 </div>
                             </Section>
@@ -417,15 +422,6 @@ export default function Customers() {
                     </div>
                 </div>
             )}
-
-            <style>{`
-                .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-                .modal-card { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
-                .modal-header { padding: 16px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-                .modal-header h3 { margin: 0; font-size: 1rem; }
-                .modal-header button { background: transparent; border: none; cursor: pointer; }
-                .search-box { display: flex; align-items: center; gap: 8px; background: white; padding: 0 12px; border: 1px solid #cbd5e1; border-radius: 8px; height: 40px; }
-            `}</style>
         </div>
     );
 }

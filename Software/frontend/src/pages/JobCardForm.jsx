@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Lock, Unlock, UserCircle, Loader2, Search, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Lock, Unlock, UserCircle, Loader2, Search, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import KYCBanner from '../components/KYCBanner';
+import CampaignBox from '../components/CampaignBox';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api/workshop';
 const API_BASE = '/api';
@@ -11,7 +13,7 @@ const API_BASE = '/api';
 const FUEL_LEVELS = ['Empty', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8', 'Full'];
 const PM_TYPES = ['None', 'Monthly', 'Quarterly', 'Annual'];
 const BRING_BY_TYPES = ['Self', 'Driver', 'Towing', 'Other'];
-const TABS = ['General', 'Vehicle Info', 'Job Card Info', 'Spares', 'Sublet Repair'];
+const TABS = ['General', 'Vehicle Info', 'Job Card Info', 'Spares', 'Sublet Repair', 'Insurance'];
 
 const PRE_DELIVERY = ['Cleanliness', 'Mirror Position', 'Courtesy Item Removal', 'Clock Adjustment'];
 const JOB_RESULT_EXP = ['Job Detail Explanation', 'Fee Explanation', 'Result Confirmation With Customer', 'Walk Around Check'];
@@ -48,6 +50,7 @@ export default function JobCardForm() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { hasModule, user } = useAuth();
+  const { notify, confirm } = useFeedback();
   const isEdit = !!id && id !== 'new';
 
   const [loading, setLoading] = useState(false);
@@ -65,6 +68,14 @@ export default function JobCardForm() {
   const [customerVehicles, setCustomerVehicles] = useState([]);
   const [issuedParts, setIssuedParts] = useState([]);
   const [subletItems, setSubletItems] = useState([]);
+
+  // Insurance tab — claim header + per-part depreciation rows + payments
+  const [insHeader, setInsHeader] = useState({
+    CompanyName: '', SurveyorName: '', SurveyorMobile: '', SurveyorMobile2: '', InsClaimNo: ''
+  });
+  const [insParts, setInsParts] = useState([]);      // includes TaxRate / TaxAmount / TotalWithTax
+  const [insPayments, setInsPayments] = useState([]);
+  const [insSaving, setInsSaving] = useState(false);
   const [labourItems, setLabourItems] = useState([]);
   const [careOffs, setCareOffs] = useState([]);
   const [allEmployees, setAllEmployees] = useState([]);
@@ -122,7 +133,7 @@ export default function JobCardForm() {
       try {
         const [typesRes, partiesRes, itemsRes, otRes, empRes, banksRes, taxRes] = await Promise.all([
           axios.get(`${API}/job-types`),
-          axios.get(`${API}/parties`),
+          axios.get(`${API}/parties?business=WORKSHOP`),
           axios.get(`${API_BASE}/items`),
           axios.get(`${API}/order-types`),
           axios.get(`${API_BASE}/employees`).catch(() => ({ data: [] })),
@@ -204,7 +215,7 @@ export default function JobCardForm() {
             WACResults: jc.WACResults || '',
           });
           setSelectedCustomer({ CustomerName: jc.CustomerName, PhoneNo: jc.CustomerPhone, CNIC: jc.CustomerCNIC, Address: jc.CustomerAddress });
-          if (jc.LabourItems) setLabourItems(jc.LabourItems.map(l => ({ WorkDescription: l.Remarks || '', Price: l.Price || 0, Discount: l.Discount || 0, DiscType: l.DiscType || null })));
+          if (jc.LabourItems) setLabourItems(jc.LabourItems.map(l => ({ JobInfoId: l.JobInfoId || null, WorkDescription: l.Remarks || '', Price: l.Price || 0, Discount: l.Discount || 0, DiscType: l.DiscType || null })));
           if (jc.CareOffID) {
             const foundCO = careOffsList.find(c => c.CareOffID === jc.CareOffID);
             setCareOff(foundCO || { CareOffID: jc.CareOffID, EmployeeName: jc.CareOffName || `Care-Off #${jc.CareOffID}`, MaxDiscountPct: 100, IsActive: false });
@@ -213,6 +224,13 @@ export default function JobCardForm() {
           if (jc.SubletItems) setSubletItems(jc.SubletItems);
           if (jc.Accessories) setAccessories(jc.Accessories);
           if (jc.DamageMarks) setDamageMarks(jc.DamageMarks);
+
+          // Load insurance header + per-part depreciation grid + payments (non-blocking)
+          axios.get(`${API}/job-cards/${id}/insurance`).then(insRes => {
+            if (insRes.data?.header) setInsHeader(insRes.data.header);
+            if (Array.isArray(insRes.data?.parts)) setInsParts(insRes.data.parts);
+            if (Array.isArray(insRes.data?.payments)) setInsPayments(insRes.data.payments);
+          }).catch(() => {});
           if (jc.VOCRemarks) { try { setVocChecks(JSON.parse(jc.VOCRemarks)); } catch (e) {} }
           setIsFinalized(!!jc.IsFinalized);
           setCreatedById(jc.CreatedBy || null);
@@ -259,7 +277,9 @@ export default function JobCardForm() {
   };
 
   const addServiceAsLabour = (svc) => {
-    setLabourItems(p => [...p, { WorkDescription: svc.ItenName, Price: parseFloat(svc.ItemSalesPrice || 0), Discount: 0, DiscType: null }]);
+    // Pass the catalog ItemId through as JobInfoId so the saved JC line carries
+    // a real FK to the labour service — needed for campaign matching + reports.
+    setLabourItems(p => [...p, { JobInfoId: svc.ItemId, WorkDescription: svc.ItenName, Price: parseFloat(svc.ItemSalesPrice || 0), Discount: 0, DiscType: null }]);
     setLabourSearch(''); setLabourResults([]); setShowLabourDD(false);
   };
 
@@ -364,14 +384,63 @@ export default function JobCardForm() {
     } finally { setSaving(false); }
   };
 
+  // Insurance tab — update a single row's % and recompute Dep Amount on the
+  // GST-inclusive total (server does the same calc authoritatively on save).
+  // Rows are keyed by (LineType, LineRefID) so Parts and Services don't collide.
+  const updateInsRow = (lineType, refId, pctStr) => {
+    setInsParts(prev => prev.map(p => {
+      if (p.LineType !== lineType || p.LineRefID !== refId) return p;
+      const pct = Math.max(0, Math.min(100, Number(pctStr) || 0));
+      const basis = Number(p.TotalAmount || 0) + Number(p.TaxAmount || 0);
+      const depAmt = +(basis * pct / 100).toFixed(2);
+      return { ...p, DepreciationPct: pct, DepAmount: depAmt };
+    }));
+  };
+
+  const totalDepAmount = insParts.reduce((s, p) => s + (Number(p.DepAmount) || 0), 0);
+  const totalDepPaid   = insPayments.reduce((s, p) => s + (Number(p.PaidAmount) || 0), 0);
+  const totalDepBalance = +(totalDepAmount - totalDepPaid).toFixed(2);
+
+  const saveInsurance = async () => {
+    if (!isEdit) { flash('Save the job card once first, then enter insurance info.', true); return; }
+    setInsSaving(true);
+    try {
+      const payload = {
+        header: insHeader,
+        parts: insParts.map(p => ({
+          LineType: p.LineType,
+          LineRefID: p.LineRefID,
+          DepreciationPct: Number(p.DepreciationPct) || 0
+        }))
+      };
+      const r = await axios.post(`${API}/job-cards/${id}/insurance`, payload);
+      flash(`Insurance info saved. Depreciation total: PKR ${Number(r.data.depreciationTotal || 0).toLocaleString()}`);
+    } catch (e) {
+      const msg = e.response?.data?.error || e.message;
+      flash(msg, true);
+    } finally { setInsSaving(false); }
+  };
+
   const handleFinalize = async () => {
-    if (!window.confirm('Finalize this Job Card? It will be locked for editing.')) return;
+    const ok = await confirm({
+      title: 'Finalize this Job Card?',
+      message: 'This will lock the job card for editing and post the related workshop accounting entries.',
+      details: 'Finalized job cards can only be reopened through the unfinalize approval workflow.',
+      confirmLabel: 'Finalize Job Card',
+      tone: 'warning',
+    });
+    if (!ok) return;
     setFinalizing(true);
     try {
       await axios.post(`/api/finalize/JOBCARD/${id}`);
       setIsFinalized(true);
       flash('Job Card finalized.');
-    } catch (e) { flash(e.response?.data?.error || 'Error', true); }
+      notify({ type: 'success', title: 'Job Card finalized', message: 'The job card is now locked and posted.' });
+    } catch (e) {
+      const text = e.response?.data?.error || 'Error';
+      flash(text, true);
+      notify({ type: 'error', title: 'Finalize failed', message: text });
+    }
     finally { setFinalizing(false); }
   };
 
@@ -385,15 +454,26 @@ export default function JobCardForm() {
   };
 
   const handleRequestUnfinalize = async () => {
-    if (!unfinalizeReason.trim()) return;
+    if (!unfinalizeReason.trim()) {
+      notify({ type: 'warning', title: 'Reason required', message: 'Explain why this job card needs to be reopened.' });
+      return;
+    }
     try {
       await axios.post(`/api/finalize/JOBCARD/${id}/request-unfinalize`, { reason: unfinalizeReason });
       setUnfinalizeModal(false); setUnfinalizeReason(''); setUnfinalizeBlockers(null);
       flash('Unfinalize request submitted.');
+      notify({ type: 'success', title: 'Request submitted', message: 'Job Card unfinalize request was sent for approval.' });
     } catch (e) {
       const data = e.response?.data;
-      if (data?.blockers?.length) { setUnfinalizeBlockers(data.blockers); }
-      else { flash(data?.error || 'Error', true); }
+      if (data?.blockers?.length) {
+        setUnfinalizeBlockers(data.blockers);
+        notify({ type: 'error', title: 'Request blocked', message: 'Downstream references must be cleared first.' });
+      }
+      else {
+        const text = data?.error || 'Error';
+        flash(text, true);
+        notify({ type: 'error', title: 'Request failed', message: text });
+      }
     }
   };
 
@@ -436,7 +516,7 @@ export default function JobCardForm() {
       </div>
 
       {/* Toolbar */}
-      <div style={S.toolbar}>
+      <div style={S.toolbar} className="no-print">
         <button style={{ ...S.toolBtn, opacity: nav.firstId ? 1 : 0.4 }} onClick={() => nav.firstId && navigate(`/workshop/jobs/${nav.firstId}`)} title="First"><ChevronFirst size={14} /></button>
         <button style={{ ...S.toolBtn, opacity: nav.prevId ? 1 : 0.4 }} onClick={() => nav.prevId && navigate(`/workshop/jobs/${nav.prevId}`)} title="Previous"><ChevronLeft size={14} /></button>
         <button style={{ ...S.toolBtn, opacity: nav.nextId ? 1 : 0.4 }} onClick={() => nav.nextId && navigate(`/workshop/jobs/${nav.nextId}`)} title="Next"><ChevronRight size={14} /></button>
@@ -446,6 +526,16 @@ export default function JobCardForm() {
         {!disabled && <button style={S.toolBtn} onClick={handleSubmit} disabled={saving}>💾 {saving ? 'Saving…' : 'Save'}</button>}
         <button style={S.toolBtn} onClick={() => navigate('/workshop/jobs')}>✖ Close</button>
         <div style={{ width: 1, background: '#9aaac0', height: 20, margin: '0 4px' }} />
+        {isEdit && (
+          <button
+            style={{ ...S.toolBtn, color: '#0f766e', borderColor: '#0f766e',
+                     opacity: isFinalized ? 1 : 0.4, cursor: isFinalized ? 'pointer' : 'not-allowed' }}
+            disabled={!isFinalized}
+            title={isFinalized ? 'Open Work Order print view' : 'Finalize the Job Card before printing'}
+            onClick={() => isFinalized && window.open(`/workshop/jobs/${id}/print`, '_blank')}>
+            <Printer size={12} /> Print
+          </button>
+        )}
         {canFinalize && (
           <button style={{ ...S.toolBtnGreen, background: 'linear-gradient(to bottom,#4a9f4a,#256025)' }} onClick={handleFinalize} disabled={finalizing}>
             <Lock size={12} /> {finalizing ? 'Finalizing…' : 'Finalize'}
@@ -456,6 +546,15 @@ export default function JobCardForm() {
             <Unlock size={12} /> Request Unfinalize
           </button>
         )}
+      </div>
+
+      {/* Print-only header */}
+      <div className="print-only print-header">
+        <h1>Repair Order — {form.JobCardNo || '(draft)'}</h1>
+        <div className="meta">
+          <span>Status: {isFinalized ? 'Finalized' : 'Active'}{createdByName ? `  •  Created by ${createdByName}` : ''}</span>
+          <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        </div>
       </div>
 
       {/* RO + Job No bar */}
@@ -473,11 +572,20 @@ export default function JobCardForm() {
       {capOver && <div style={{ background: '#fef9c3', color: '#854d0e', padding: '4px 10px', fontSize: 11, borderBottom: '1px solid #fde68a' }}>⚠ Discount cap exceeded: PKR {totalDiscountUsed.toLocaleString()} used, max PKR {maxDiscountAllowed.toLocaleString()}. Reduce discounts before saving.</div>}
 
       <form onSubmit={handleSubmit}>
-        <fieldset disabled={disabled} style={{ border: 'none', padding: 0, margin: 0 }}>
         <div style={S.body}>
+        <fieldset disabled={disabled} style={{ border: 'none', padding: 0, margin: 0 }}>
 
           {/* KYC banner — shown when the entered chassis has any open flag; must be acknowledged before save */}
           <KYCBanner chasisNo={form.ChasisNo} jobCardId={isEdit ? form.JobCardId : null} onAcknowledgedChange={setKycCleared} />
+
+          {/* Campaign attachment — appears once JC is saved. We use the route
+              param `id` directly because `form.JobCardId` isn't populated by
+              the edit-mode setForm() above. */}
+          <CampaignBox type="jobcard" id={isEdit ? parseInt(id) : null}
+                       grossAmount={grandTotal}
+                       labourGross={totalLabour}
+                       partsGross={totalParts}
+                       taxAmount={totalTax} />
 
           {/* Top row: Business Unit | Order Type | PM Type | Date In | RO Status | Promise Date | Service Advisor | Repeat RO */}
           <div style={{ ...S.groupBox }}>
@@ -764,15 +872,21 @@ export default function JobCardForm() {
                   </div>
                 </div>
               </div>
+
             </div>
           </div>
 
-          {/* Tabs */}
+          </fieldset>
+
+          {/* Tabs — navigation buttons rendered OUTSIDE the disabled fieldset
+              so they remain clickable when the JC is finalized. Each tab's
+              content opens its own fieldset below. */}
           <div style={{ marginTop: 8 }}>
             <div style={{ display: 'flex' }}>
               {TABS.map(t => <button key={t} type="button" style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>{t}</button>)}
             </div>
             <div style={S.tabContent}>
+            <fieldset disabled={disabled} style={{ border: 'none', padding: 0, margin: 0 }}>
 
               {/* General Tab */}
               {activeTab === 'General' && (
@@ -1171,6 +1285,158 @@ export default function JobCardForm() {
                   }
                 </div>
               )}
+
+              {activeTab === 'Insurance' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 10 }}>
+                  {/* Left panel — Insurance Info */}
+                  <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 4, padding: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#7c2d12', marginBottom: 6 }}>Insurance Info</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={S.field}>
+                        <label style={S.label}>Company Name</label>
+                        <input style={S.input} value={insHeader.CompanyName || ''}
+                          onChange={e => setInsHeader(h => ({ ...h, CompanyName: e.target.value }))}
+                          disabled={disabled} />
+                      </div>
+                      <div style={S.field}>
+                        <label style={S.label}>Surveyor Name</label>
+                        <input style={S.input} value={insHeader.SurveyorName || ''}
+                          onChange={e => setInsHeader(h => ({ ...h, SurveyorName: e.target.value }))}
+                          disabled={disabled} />
+                      </div>
+                      <div style={S.field}>
+                        <label style={S.label}>Surveyor Mobile</label>
+                        <input style={S.input} value={insHeader.SurveyorMobile || ''}
+                          onChange={e => setInsHeader(h => ({ ...h, SurveyorMobile: e.target.value }))}
+                          disabled={disabled} />
+                      </div>
+                      <div style={S.field}>
+                        <label style={S.label}>Surveyor Mobile 2</label>
+                        <input style={S.input} value={insHeader.SurveyorMobile2 || ''}
+                          onChange={e => setInsHeader(h => ({ ...h, SurveyorMobile2: e.target.value }))}
+                          disabled={disabled} />
+                      </div>
+                      <div style={S.field}>
+                        <label style={S.label}>Ins. Claim #</label>
+                        <input style={S.input} value={insHeader.InsClaimNo || ''}
+                          onChange={e => setInsHeader(h => ({ ...h, InsClaimNo: e.target.value }))}
+                          disabled={disabled} />
+                      </div>
+                      <div style={{ ...S.field, marginTop: 6, paddingTop: 6, borderTop: '1px solid #fed7aa' }}>
+                        <label style={{ ...S.label, fontWeight: 700, color: '#7c2d12' }}>Depreciation total Amount</label>
+                        <div style={{ ...S.billVal, fontWeight: 700, color: '#7c2d12', background: '#ffedd5', textAlign: 'right', padding: '4px 8px' }}>
+                          {totalDepAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <button type="button" onClick={saveInsurance}
+                        disabled={disabled || insSaving || !isEdit}
+                        style={{ ...S.toolBtn, marginTop: 6, justifyContent: 'center', background: insSaving ? '#cbd5e1' : '#15803d', color: 'white', borderColor: '#15803d' }}>
+                        💾 {insSaving ? 'Saving…' : 'Save Insurance Info'}
+                      </button>
+                      {!isEdit && (
+                        <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>
+                          Save the Job Card first, then this tab unlocks.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right panel — Per-part depreciation grid + payments */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {insParts.length === 0 ? (
+                      <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 11, border: '1px solid #c8d4e4', borderRadius: 4 }}>
+                        No parts or services on this Job Card yet. Add parts via Parts Issue and services on the Job Card Info tab, then come back here.
+                      </div>
+                    ) : (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ background: '#e8edf2' }}>
+                            {['Type', 'Item number', 'Description', 'Qty', 'Rate', 'Total', 'GST', 'Total+GST', 'Dep %', 'Dep Amount'].map(h => (
+                              <th key={h} style={{ padding: '4px 8px', textAlign: h === 'Description' || h === 'Item number' || h === 'Type' ? 'left' : 'right', border: '1px solid #c8d4e4' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {insParts.map(p => {
+                            const basis = Number(p.TotalAmount || 0) + Number(p.TaxAmount || 0);
+                            const isService = p.LineType === 'Service';
+                            return (
+                              <tr key={`${p.LineType}-${p.LineRefID}`}>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontWeight: 600, color: isService ? '#0e7490' : '#1f2937' }}>{p.LineType}</td>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontFamily: 'monospace' }}>{p.ItemNumber || '—'}</td>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0' }}>{p.ItemName || '—'}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0' }}>{Number(p.Qty).toLocaleString()}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0' }}>{Number(p.Rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0' }}>{Number(p.TotalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0', color: '#1d4ed8' }}>{Number(p.TaxAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0', fontWeight: 600 }}>{basis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td style={{ padding: '2px 4px', border: '1px solid #e2e8f0', textAlign: 'right' }}>
+                                  <input type="number" step="0.01" min="0" max="100"
+                                    value={p.DepreciationPct}
+                                    onChange={e => updateInsRow(p.LineType, p.LineRefID, e.target.value)}
+                                    disabled={disabled}
+                                    style={{ width: 60, textAlign: 'right', padding: '2px 4px', border: '1px solid #cbd5e1', borderRadius: 2, fontSize: 11, background: disabled ? '#f1f5f9' : '#fff7ed' }} />
+                                </td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0', fontWeight: 700, color: '#7c2d12', background: '#ffedd5' }}>{Number(p.DepAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: '#fffbeb', fontWeight: 700 }}>
+                            <td colSpan={5} style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4' }}>Totals</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4' }}>{insParts.reduce((s, p) => s + Number(p.TotalAmount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4', color: '#1d4ed8' }}>{insParts.reduce((s, p) => s + Number(p.TaxAmount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4' }}>{insParts.reduce((s, p) => s + Number(p.TotalAmount || 0) + Number(p.TaxAmount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4' }}></td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4', color: '#7c2d12' }}>{totalDepAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    )}
+
+                    {/* Depreciation Payments — read-only summary. Recording is done from
+                        Cashier ▸ Receive Payment ▸ "JC Insurance Depreciation" mode,
+                        only after the Job Card has been finalized. */}
+                    {isEdit && (
+                      <div style={{ border: '1px solid #c8d4e4', borderRadius: 4, padding: 8, background: '#fafbfc' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#1a3a6a' }}>Depreciation Payments (read-only)</div>
+                          <div style={{ fontSize: 10, color: '#475569' }}>
+                            Total: <strong style={{ color: '#7c2d12' }}>PKR {totalDepAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            {'  '}·{'  '}Paid: <strong style={{ color: '#15803d' }}>PKR {totalDepPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            {'  '}·{'  '}Balance: <strong style={{ color: totalDepBalance > 0.005 ? '#b91c1c' : '#15803d' }}>PKR {totalDepBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', padding: '6px 10px', borderRadius: 4, marginBottom: 8 }}>
+                          To receive depreciation payment, go to <strong>Cashier ▸ Receive Payment</strong> and choose <strong>"JC Insurance Depreciation"</strong> mode. The Job Card must be <strong>finalized</strong> first.
+                        </div>
+                        {insPayments.length === 0 ? (
+                          <div style={{ padding: 10, textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>No depreciation payments yet.</div>
+                        ) : (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                            <thead><tr style={{ background: '#e8edf2' }}>
+                              {['Date', 'Mode', 'Reference', 'Amount', 'Received By'].map(h => (
+                                <th key={h} style={{ padding: '3px 8px', textAlign: h === 'Amount' ? 'right' : 'left', border: '1px solid #c8d4e4' }}>{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody>{insPayments.map(p => (
+                              <tr key={p.DepPaymentID}>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10 }}>{new Date(p.ReceivedAt).toLocaleString()}</td>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0' }}>{p.PaymentMode}</td>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10 }}>{p.ReferenceNo || '—'}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0', fontWeight: 700, color: '#15803d' }}>{Number(p.PaidAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10, color: '#64748b' }}>{p.ReceivedByName || '—'}</td>
+                              </tr>
+                            ))}</tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </fieldset>
             </div>
           </div>
 
@@ -1205,16 +1471,27 @@ export default function JobCardForm() {
               <button type="button" style={{ ...S.toolBtn, fontSize: 10, justifyContent: 'center' }}>GST Print</button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4, marginTop: 4 }}>
-              {[['Advance', 0], ['Payable', totalPayable], ['Post Recovery', 0], ['Balance', totalPayable]].map(([lbl, val]) => (
-                <div key={lbl} style={S.billField}>
-                  <div style={{ fontSize: 10, color: '#475569', marginBottom: 1 }}>{lbl}</div>
-                  <div style={S.billVal}>{typeof val === 'number' ? val.toLocaleString() : val}</div>
-                </div>
-              ))}
+              {(() => {
+                const balance = +(totalPayable - totalDepPaid).toFixed(2);
+                const rows = [
+                  ['Advance', 0],
+                  ['Payable', totalPayable],
+                  ['Dep. Paid', totalDepPaid, '#7c2d12'],
+                  ['Post Recovery', 0],
+                  ['Balance', balance, '#15803d'],
+                ];
+                return rows.map(([lbl, val, color]) => (
+                  <div key={lbl} style={S.billField}>
+                    <div style={{ fontSize: 10, color: '#475569', marginBottom: 1 }}>{lbl}</div>
+                    <div style={{ ...S.billVal, color: color || '#1e293b', fontWeight: lbl === 'Balance' || lbl === 'Dep. Paid' ? 700 : 400 }}>
+                      {typeof val === 'number' ? val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : val}
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         </div>
-        </fieldset>
 
         {/* Bottom action bar */}
         <div style={S.bottomBar}>

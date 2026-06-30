@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Send, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle } from 'lucide-react';
+import { Send, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Printer } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
 
 // Make Payment to suppliers. Symmetric to Receive Payment.
@@ -17,11 +17,12 @@ export default function MakePayment() {
   const [bills, setBills] = useState([]);
   const [advanceBalance, setAdvanceBalance] = useState(0);
   const [allocations, setAllocations] = useState({});
-  const [paymentLines, setPaymentLines] = useState([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '' }]);
+  const [paymentLines, setPaymentLines] = useState([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
   const [narration, setNarration] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [lastVoucher, setLastVoucher] = useState(null);
 
   const flash = (m, isErr = false) => {
     isErr ? setErr(m) : setMsg(m);
@@ -56,7 +57,7 @@ export default function MakePayment() {
     setSelectedParty(null); setPartySearch(''); setBills([]); setAdvanceBalance(0); setAllocations({});
   };
 
-  const addPaymentLine = () => setPaymentLines([...paymentLines, { Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '' }]);
+  const addPaymentLine = () => setPaymentLines([...paymentLines, { Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
   const removePaymentLine = (i) => setPaymentLines(paymentLines.filter((_, idx) => idx !== i));
   const updatePaymentLine = (i, field, value) => {
     const next = [...paymentLines];
@@ -94,6 +95,11 @@ export default function MakePayment() {
     if (allocatedSum > totalPayment + 0.01) { flash(`Allocations exceed payment total.`, true); return; }
     for (const p of paymentLines) {
       if (p.Mode === 'Bank Transfer' && !p.BankGLCAID) { flash('Pick a bank for Bank Transfer line.', true); return; }
+      if (p.Mode === 'Cheque') {
+        if (!p.BankGLCAID) { flash('Pick the Drawn-On Bank for each Cheque line.', true); return; }
+        if (!p.Reference)  { flash('Enter the Cheque # for each Cheque line.', true); return; }
+        if (!p.ChequeDate) { flash('Enter the Cheque Date for each Cheque line.', true); return; }
+      }
     }
 
     const allocArray = Object.entries(allocations)
@@ -109,12 +115,15 @@ export default function MakePayment() {
           Amount: parseFloat(p.Amount),
           Reference: p.Reference || null,
           BankGLCAID: p.BankGLCAID ? parseInt(p.BankGLCAID) : null,
+          ChequeDate: p.Mode === 'Cheque' ? (p.ChequeDate || null) : null,
+          DrawerBank: p.Mode === 'Cheque' ? (p.DrawerBank || null) : null,
         })),
         allocations: allocArray,
         narration: narration || null,
       });
       flash(`Payment posted as ${r.data.voucherNo}.`);
-      setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '' }]);
+      setLastVoucher({ voucherId: r.data.voucherId, voucherNo: r.data.voucherNo });
+      setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
       setAllocations({});
       setNarration('');
       if (selectedParty) pickParty(selectedParty);
@@ -135,7 +144,17 @@ export default function MakePayment() {
         Pay suppliers via cash, cheque, POS, or bank transfer. Allocate to specific bills or leave as a supplier advance.
       </p>
 
-      {msg && <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
+      {msg && (
+        <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>{msg}</span>
+          {lastVoucher && (
+            <a href={`/vouchers/cpv?id=${lastVoucher.voucherId}&print=1`} target="_blank" rel="noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#0f766e', color: 'white', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', textDecoration: 'none' }}>
+              <Printer size={14} /> Print Payment Voucher {lastVoucher.voucherNo}
+            </a>
+          )}
+        </div>
+      )}
       {err && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{err}</div>}
 
       {/* Supplier picker */}
@@ -236,51 +255,80 @@ export default function MakePayment() {
         </div>
         {paymentLines.map((p, i) => {
           const isAdvance = p.Mode === 'Advance';
+          const isCheque  = p.Mode === 'Cheque';
+          const isBankT   = p.Mode === 'Bank Transfer';
+          const needsBank = isBankT || isCheque;
           const advanceAllowed = !!selectedParty && advanceBalance > 0;
           return (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '160px 180px 160px 1fr 32px', gap: 8, marginBottom: 8, alignItems: 'end' }}>
-            <div>
-              <label style={lblStyle}>Mode</label>
-              <select value={p.Mode} onChange={e => updatePaymentLine(i, 'Mode', e.target.value)} style={inp}>
-                <option value="Cash">Cash</option>
-                <option value="Cheque">Cheque</option>
-                <option value="POS">POS</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                {advanceAllowed && <option value="Advance">Apply Supplier Advance (PKR {advanceBalance.toFixed(2)} available)</option>}
-              </select>
+          <div key={i} style={{ marginBottom: 12, paddingBottom: isCheque ? 10 : 0, borderBottom: isCheque ? '1px dashed #e2e8f0' : 'none' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 180px 160px 1fr 32px', gap: 8, alignItems: 'end' }}>
+              <div>
+                <label style={lblStyle}>Mode</label>
+                <select value={p.Mode} onChange={e => updatePaymentLine(i, 'Mode', e.target.value)} style={inp}>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="POS">POS</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  {advanceAllowed && <option value="Advance">Apply Supplier Advance (PKR {advanceBalance.toFixed(2)} available)</option>}
+                </select>
+              </div>
+              <div>
+                <label style={lblStyle}>Amount (PKR)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  max={isAdvance ? advanceBalance : undefined}
+                  value={p.Amount}
+                  onChange={e => updatePaymentLine(i, 'Amount', e.target.value)}
+                  style={{ ...inp, borderColor: isAdvance && parseFloat(p.Amount || 0) > advanceBalance + 0.005 ? '#dc2626' : (inp.borderColor || '#cbd5e1') }}
+                />
+                {isAdvance && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Available: PKR {advanceBalance.toFixed(2)}</div>}
+              </div>
+              <div>
+                <label style={lblStyle}>{isCheque ? 'Cheque # *' : 'Reference'}</label>
+                <input
+                  type="text"
+                  placeholder={isCheque ? 'Cheque #' : isAdvance ? 'Memo' : 'Optional'}
+                  value={p.Reference}
+                  onChange={e => updatePaymentLine(i, 'Reference', e.target.value)}
+                  style={inp}
+                  disabled={isAdvance}
+                />
+              </div>
+              <div>
+                <label style={lblStyle}>{needsBank ? (isCheque ? 'Drawn-On Bank *' : 'Bank Account *') : <span style={{ color: '#cbd5e1' }}>—</span>}</label>
+                <select value={p.BankGLCAID} onChange={e => updatePaymentLine(i, 'BankGLCAID', e.target.value)} disabled={!needsBank} style={{ ...inp, background: !needsBank ? '#f8fafc' : 'white' }}>
+                  <option value="">Pick bank...</option>
+                  {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
+                </select>
+              </div>
+              <div>
+                {paymentLines.length > 1 && <button onClick={() => removePaymentLine(i)} style={{ ...iconBtn, color: '#ef4444' }}><Trash2 size={16} /></button>}
+              </div>
             </div>
-            <div>
-              <label style={lblStyle}>Amount (PKR)</label>
-              <input
-                type="number" step="0.01" min="0"
-                max={isAdvance ? advanceBalance : undefined}
-                value={p.Amount}
-                onChange={e => updatePaymentLine(i, 'Amount', e.target.value)}
-                style={{ ...inp, borderColor: isAdvance && parseFloat(p.Amount || 0) > advanceBalance + 0.005 ? '#dc2626' : (inp.borderColor || '#cbd5e1') }}
-              />
-              {isAdvance && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Available: PKR {advanceBalance.toFixed(2)}</div>}
-            </div>
-            <div>
-              <label style={lblStyle}>Reference</label>
-              <input
-                type="text"
-                placeholder={p.Mode === 'Cheque' ? 'Cheque #' : isAdvance ? 'Memo' : 'Optional'}
-                value={p.Reference}
-                onChange={e => updatePaymentLine(i, 'Reference', e.target.value)}
-                style={inp}
-                disabled={isAdvance}
-              />
-            </div>
-            <div>
-              <label style={lblStyle}>{p.Mode === 'Bank Transfer' ? 'Bank Account *' : <span style={{ color: '#cbd5e1' }}>—</span>}</label>
-              <select value={p.BankGLCAID} onChange={e => updatePaymentLine(i, 'BankGLCAID', e.target.value)} disabled={p.Mode !== 'Bank Transfer'} style={{ ...inp, background: p.Mode !== 'Bank Transfer' ? '#f8fafc' : 'white' }}>
-                <option value="">Pick bank...</option>
-                {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
-              </select>
-            </div>
-            <div>
-              {paymentLines.length > 1 && <button onClick={() => removePaymentLine(i)} style={{ ...iconBtn, color: '#ef4444' }}><Trash2 size={16} /></button>}
-            </div>
+            {isCheque && (
+              <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 32px', gap: 8, alignItems: 'end', marginTop: 6 }}>
+                <div>
+                  <label style={lblStyle}>Cheque Date *</label>
+                  <input
+                    type="date"
+                    value={p.ChequeDate}
+                    onChange={e => updatePaymentLine(i, 'ChequeDate', e.target.value)}
+                    style={inp}
+                  />
+                </div>
+                <div>
+                  <label style={lblStyle}>Payee Bank (optional, on the cheque)</label>
+                  <input
+                    type="text"
+                    placeholder="Payee's bank if known"
+                    value={p.DrawerBank}
+                    onChange={e => updatePaymentLine(i, 'DrawerBank', e.target.value)}
+                    style={inp}
+                  />
+                </div>
+                <div />
+              </div>
+            )}
           </div>
         );})}
       </div>

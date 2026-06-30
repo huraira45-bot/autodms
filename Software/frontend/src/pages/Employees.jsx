@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { UserPlus, Wrench } from 'lucide-react';
+import { useFeedback } from '../context/FeedbackContext';
+import GLAccountPicker from '../components/GLAccountPicker';
+import Can from '../components/Can';
+import { useCan } from '../context/AuthContext';
 
 const API_BASE = '/api';
 
 export default function Employees() {
+  const { notify } = useFeedback();
+  const { canInsert, canEdit } = useCan('hr_employees');
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [designations, setDesignations] = useState([]);
@@ -31,8 +37,6 @@ export default function Employees() {
     ActionUserID: 1
   });
   
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [togglingId, setTogglingId] = useState(null);
 
   const fetchData = async () => {
@@ -56,14 +60,12 @@ export default function Employees() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
     
     try {
       // The UserName and Password are captured but will require the sp_InsertUser logic later.
       // For now, we pass all fields to our expanded sp_InsertEmployee endpoint.
       await axios.post(`${API_BASE}/employees`, formData);
-      setSuccess('Employee comprehensively registered!');
+      notify({ type: 'success', title: 'Employee registered', message: formData.EmployeeName });
       
       // Reset form
       setFormData({
@@ -75,7 +77,7 @@ export default function Employees() {
       setShowForm(false);
       fetchData();
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.details || 'An error occurred while saving.');
+      notify({ type: 'error', title: 'Could not save employee', message: err.response?.data?.message || err.response?.data?.details || err.message });
     }
   };
 
@@ -84,8 +86,9 @@ export default function Employees() {
     try {
       await axios.patch(`${API_BASE}/employees/${emp.EmployeeID}/technician`, { IsTechnician: !emp.IsTechnician });
       setEmployees(prev => prev.map(e => e.EmployeeID === emp.EmployeeID ? { ...e, IsTechnician: !emp.IsTechnician } : e));
+      notify({ type: 'success', title: !emp.IsTechnician ? 'Technician role added' : 'Technician role removed', message: emp.EmployeeName });
     } catch (err) {
-      alert('Failed to update: ' + err.message);
+      notify({ type: 'error', title: 'Could not update technician role', message: err.response?.data?.error || err.message });
     }
     setTogglingId(null);
   };
@@ -97,13 +100,10 @@ export default function Employees() {
           <h1 className="page-title">Employees</h1>
           <p className="page-subtitle">Manage dealership staff, credentials, and financials.</p>
         </div>
-        <button className="btn" onClick={() => setShowForm(!showForm)}>
+        {canInsert && <button className="btn" onClick={() => setShowForm(!showForm)}>
           {showForm ? 'Close Form' : <><UserPlus size={18} /> Add Employee</>}
-        </button>
+        </button>}
       </div>
-
-      {error && <div className="alert-error">{error}</div>}
-      {success && <div className="alert-success">{success}</div>}
 
       {showForm && (
         <div className="card" style={{ marginBottom: '24px', borderLeft: '4px solid var(--primary)' }}>
@@ -117,8 +117,13 @@ export default function Employees() {
                 <input type="text" placeholder="e.g. EMP-1768" value={formData.EmployeeNo} onChange={e => setFormData({...formData, EmployeeNo: e.target.value})} />
               </div>
               <div className="form-group">
-                <label>Emp. Account (GL ID)</label>
-                <input type="number" placeholder="120815" value={formData.EmployeeGLID} onChange={e => setFormData({...formData, EmployeeGLID: e.target.value})} />
+                <label>Emp. Account (Chart of Accounts)</label>
+                <GLAccountPicker
+                  value={formData.EmployeeGLID}
+                  onChange={(glcaid) => setFormData({ ...formData, EmployeeGLID: glcaid || '' })}
+                  parentCode="102004"
+                  placeholder="Search employee account under 102004 Staff Receivables…"
+                />
               </div>
 
               {/* Row 2 */}
@@ -253,7 +258,7 @@ export default function Employees() {
                     <td style={{ textAlign: 'center' }}>
                       <button
                         onClick={() => toggleTechnician(emp)}
-                        disabled={togglingId === emp.EmployeeID}
+                        disabled={togglingId === emp.EmployeeID || !canEdit}
                         title={emp.IsTechnician ? 'Remove technician role' : 'Mark as technician'}
                         style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

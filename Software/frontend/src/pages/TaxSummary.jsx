@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Percent, Loader2, RefreshCw } from 'lucide-react';
+import { Percent, Loader2, RefreshCw, Printer } from 'lucide-react';
+import { PrintHeader } from './reports/ReportShell';
 
 const API_BASE = '/api';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -41,12 +42,16 @@ export default function TaxSummary() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <PrintHeader title="Tax Summary"
+                subtitle={TYPES.find(t => t.key === type)?.label}
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
+                filterSummary={`Period: ${from} → ${to}`} />
             <div className="card-header">
                 <div>
                     <h1 className="page-title">Tax Summary</h1>
                     <p className="page-subtitle">GST collected, GST paid (input), and PST collected — for FBR returns.</p>
                 </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                     <select value={type} onChange={e => setType(e.target.value)}
                         style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }}>
                         {TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
@@ -64,6 +69,10 @@ export default function TaxSummary() {
                     <button className="btn" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         Refresh
+                    </button>
+                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
+                        style={{ background: '#0f766e' }}>
+                        <Printer size={16} /> Print
                     </button>
                 </div>
             </div>

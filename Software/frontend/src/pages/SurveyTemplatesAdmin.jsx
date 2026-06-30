@@ -6,13 +6,14 @@
  *   - Hard-delete only works when no surveys reference the template; otherwise
  *     UI nudges admin to "Deactivate" instead.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
     FileText, Plus, RefreshCw, Loader2, Pencil, Trash2, Power,
-    XCircle, Star, GripVertical,
+    XCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -24,6 +25,7 @@ const TYPE_LABEL = {
 
 export default function SurveyTemplatesAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const canEdit = hasModule('cro_admin');
 
     const [rows, setRows] = useState([]);
@@ -51,7 +53,13 @@ export default function SurveyTemplatesAdmin() {
     };
 
     const remove = async (t) => {
-        if (!window.confirm(`Permanently delete template #${t.TemplateID}? Only works if no surveys reference it.`)) return;
+        const ok = await confirmAction({
+            title: 'Delete survey template?',
+            message: `Permanently delete template #${t.TemplateID}? This only works when no surveys reference it.`,
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try {
             await axios.delete(`${API}/cro/survey-templates/${t.TemplateID}`);
             flash('ok', 'Deleted');

@@ -1,12 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Save, Upload, Percent, DollarSign, CheckCircle2, Circle, Lock, Unlock, UserCircle, Search } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { Plus, Trash2, Save, Upload, Percent, DollarSign, CheckCircle2, Circle, Lock, Unlock, UserCircle, Search, Printer } from 'lucide-react';
+import { useAuth, useCan } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
 export default function GRN() {
   const { hasModule, user } = useAuth();
+  const { canInsert, canEdit } = useCan('procurement_grn');
+  const { notify, confirm } = useFeedback();
   const [parties, setParties] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [parts, setParts] = useState([]);
@@ -32,6 +36,12 @@ export default function GRN() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [unfinalizeModal, setUnfinalizeModal] = useState(null); // PurchaseID
+
+  // Edit state — when set, we're viewing/editing an existing GRN
+  const [editingId, setEditingId]     = useState(null);
+  const [grnNo, setGrnNo]             = useState('');
+  const [isFinalizedEdit, setIsFinalizedEdit] = useState(false);
+  const disabled = isFinalizedEdit;
   const [unfinalizeReason, setUnfinalizeReason] = useState('');
   const [errMsg, setErrMsg] = useState('');
   const [grnSearch, setGrnSearch] = useState('');
@@ -40,7 +50,7 @@ export default function GRN() {
   const fetchFormData = async () => {
     try {
       const [pRes, wRes, itRes] = await Promise.all([
-        axios.get(`${API_BASE}/parties`),
+        axios.get(`${API_BASE}/parties?business=PROCUREMENT`),
         axios.get(`${API_BASE}/inventory-config/warehouses`),
         axios.get(`${API_BASE}/items`)
       ]);
@@ -48,6 +58,52 @@ export default function GRN() {
       setWarehouses(wRes.data);
       setParts(itRes.data.filter(i => i.ItemType?.trim().toLowerCase() === 'part'));
     } catch (err) { console.error('Error fetching data:', err); }
+  };
+
+  const startNew = () => {
+    setEditingId(null); setGrnNo(''); setIsFinalizedEdit(false);
+    setHeader({
+      PurchaseDate: new Date().toISOString().split('T')[0],
+      SupplierBillNo: '', PartyID: '', WHID: '',
+      Remarks: '', FreightAmount: 0, FreightTaxable: true,
+    });
+    setLineItems([]); setBillImage(null); setSuccess('');
+  };
+
+  const openGRN = async (id) => {
+    try {
+      const r = await axios.get(`${API_BASE}/procurement/grn/${id}`);
+      const d = r.data;
+      setEditingId(d.PurchaseID);
+      setGrnNo(d.PurchaseCode || d.PurchaseVoucherNo || '');
+      setIsFinalizedEdit(!!d.IsFinalized);
+      setHeader({
+        PurchaseDate:    d.PurchaseDate ? new Date(d.PurchaseDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        SupplierBillNo: d.FBRInvoiceNumber || d.SupplierBillNo || '',
+        PartyID:        d.PartyID || '',
+        WHID:           d.WHID || '',
+        Remarks:        d.Remarks || '',
+        FreightAmount:  Number(d.FreightAmount) || 0,
+        FreightTaxable: d.FreightTaxable === false ? false : true,
+      });
+      setLineItems((d.Items || []).map(it => ({
+        ItemID:    it.ItemId,
+        ItenName:  it.ItenName,
+        Qty:       Number(it.Quantity) || 0,
+        Rate:      Number(it.ItemRate) || 0,
+        SalesRate: 0,
+        TaxPercent: 0,
+        IsGST:     true,
+        Discount:  Number(it.DiscountAmount) || 0,
+        DiscType:  'Amount',
+        CalculatedTax: 0,
+        CalculatedDiscount: Number(it.DiscountAmount) || 0,
+        Total:     Number(it.NetAmount) || 0,
+      })));
+      setSuccess('');
+    } catch (err) {
+      notify({ type: 'error', title: 'Open failed', message: err.response?.data?.error || err.message });
+    }
   };
 
   const fetchGRNs = async (s = '') => {
@@ -81,8 +137,13 @@ export default function GRN() {
   const calculateGrandTotal = () => lineItems.reduce((sum, item) => sum + item.Total, 0);
 
   const handleSave = async () => {
+    if (disabled) return;
     if (lineItems.length === 0 || !header.PartyID || !header.WHID) {
-      alert('Please fill header and add at least one item.');
+      notify({
+        type: 'warning',
+        title: 'GRN is incomplete',
+        message: 'Select supplier, store, and add at least one item before saving.',
+      });
       return;
     }
     setLoading(true);
@@ -95,49 +156,104 @@ export default function GRN() {
     formData.append('NetDiscount', lineItems.reduce((sum, item) => sum + item.CalculatedDiscount, 0));
     formData.append('FreightAmount', header.FreightAmount || 0);
     formData.append('FreightTaxable', header.FreightTaxable ? 'true' : 'false');
-    formData.append('Items', JSON.stringify(lineItems.map(i => ({ ...i, Tax: i.CalculatedTax, Discount: i.CalculatedDiscount }))));
+    formData.append('Items', JSON.stringify(lineItems.map(i => ({ ...i, ItemId: i.ItemID, ItemRate: i.Rate, Quantity: i.Qty, NetAmount: i.Total, DiscountAmount: i.CalculatedDiscount, DiscountPercentage: i.DiscType === 'Percent' ? i.Discount : 0, StockRate: i.Rate, Tax: i.CalculatedTax, Discount: i.CalculatedDiscount }))));
     if (billImage) formData.append('BillImage', billImage);
+    const isEdit = !!editingId;
     try {
+      if (isEdit) {
+        await axios.put(`${API_BASE}/procurement/grn/${editingId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        notify({ type: 'success', title: 'GRN updated', message: `${grnNo || `#${editingId}`} saved.` });
+        setSuccess(`${grnNo || `GRN ${editingId}`} updated.`);
+        fetchGRNs(debouncedGrnSearch);
+        return;
+      }
       await axios.post(`${API_BASE}/procurement/grn`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       setSuccess('GRN Saved Successfully!');
+      notify({ type: 'success', title: 'GRN saved', message: 'Receiving document was saved successfully.' });
       setLineItems([]); setBillImage(null);
       setHeader({ ...header, SupplierBillNo: '', Remarks: '' });
       fetchGRNs(debouncedGrnSearch);
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.details || err.message));
+      const text = err.response?.data?.details || err.message;
+      notify({ type: 'error', title: 'GRN save failed', message: text });
     } finally { setLoading(false); }
   };
 
   const handleFinalize = async (id) => {
-    if (!window.confirm('Finalize this GRN?')) return;
+    const ok = await confirm({
+      title: 'Finalize this GRN?',
+      message: 'This will lock the receiving document and post the related inventory/accounting entries.',
+      details: 'After finalization, changes require the unfinalize approval workflow.',
+      confirmLabel: 'Finalize GRN',
+      tone: 'warning',
+    });
+    if (!ok) return;
     try {
       await axios.post(`/api/finalize/GRN/${id}`);
+      notify({ type: 'success', title: 'GRN finalized', message: 'Receiving document was posted and locked.' });
       fetchGRNs(debouncedGrnSearch);
-    } catch (e) { setErrMsg(e.response?.data?.error || 'Error'); setTimeout(() => setErrMsg(''), 3000); }
+    } catch (e) {
+      const text = e.response?.data?.error || 'Error';
+      setErrMsg(text);
+      notify({ type: 'error', title: 'Finalize failed', message: text });
+      setTimeout(() => setErrMsg(''), 3000);
+    }
   };
 
   const handleRequestUnfinalize = async () => {
-    if (!unfinalizeReason.trim()) return;
+    if (!unfinalizeReason.trim()) {
+      notify({ type: 'warning', title: 'Reason required', message: 'Explain why this GRN needs to be unfinalized.' });
+      return;
+    }
     try {
       await axios.post(`/api/finalize/GRN/${unfinalizeModal}/request-unfinalize`, { reason: unfinalizeReason });
       setUnfinalizeModal(null); setUnfinalizeReason('');
       setSuccess('Unfinalize request submitted');
+      notify({ type: 'success', title: 'Request submitted', message: 'GRN unfinalize request was sent for approval.' });
       setTimeout(() => setSuccess(''), 3000);
-    } catch (e) { setErrMsg(e.response?.data?.error || 'Error'); setTimeout(() => setErrMsg(''), 3000); }
+    } catch (e) {
+      const text = e.response?.data?.error || 'Error';
+      setErrMsg(text);
+      notify({ type: 'error', title: 'Request failed', message: text });
+      setTimeout(() => setErrMsg(''), 3000);
+    }
   };
 
   const canFinalizeRow = (row) => hasModule('finalize') && (user?.userId === row.CreatedBy || hasModule('admin_unfinalize'));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div className="print-only print-header">
+        <h1>Goods Receiving Note</h1>
+        <div className="meta">
+          <span>Bill #: {header.SupplierBillNo || '—'}  •  Date: {header.PurchaseDate}</span>
+          <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        </div>
+      </div>
       <div className="card-header">
-        <div><h1 className="page-title">Goods Receiving Note</h1><p className="page-subtitle">Procurement & Price Management.</p></div>
-        <button className="btn" onClick={handleSave} disabled={loading}><Save size={18} /> {loading ? 'Saving...' : 'Save GRN'}</button>
+        <div>
+          <h1 className="page-title">
+            Goods Receiving Note
+            {editingId && (
+              <>
+                <span style={{ marginLeft: 10, fontSize: '0.7em', color: '#475569', fontFamily: 'monospace' }}>· {grnNo || `#${editingId}`}</span>
+                {isFinalizedEdit && <span style={{ marginLeft: 10, background: '#f59e0b', color: '#fff', borderRadius: 4, padding: '2px 10px', fontSize: '0.6em', verticalAlign: 'middle' }}>FINALIZED</span>}
+              </>
+            )}
+          </h1>
+          <p className="page-subtitle">{editingId ? (isFinalizedEdit ? 'Read-only · open existing GRN' : 'Editing existing GRN — Save Changes to update') : 'Procurement & Price Management.'}</p>
+        </div>
+        <div className="no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {editingId && canInsert && <button className="btn-sm" onClick={startNew}><Plus size={14} /> New</button>}
+          <button className="btn" onClick={() => isFinalizedEdit && editingId && window.open(`/grn/${editingId}/print`, '_blank')} style={{ background: '#0f766e', opacity: (isFinalizedEdit && editingId) ? 1 : 0.4, cursor: (isFinalizedEdit && editingId) ? 'pointer' : 'not-allowed' }} disabled={!(isFinalizedEdit && editingId)} title={(isFinalizedEdit && editingId) ? 'Open GRN print view' : 'Open a finalized GRN to print'}><Printer size={16} /> Print</button>
+          {!disabled && (editingId ? canEdit : canInsert) && <button className="btn" onClick={handleSave} disabled={loading}><Save size={18} /> {loading ? 'Saving...' : (editingId ? 'Save Changes' : 'Save GRN')}</button>}
+        </div>
       </div>
 
       {success && <div className="alert-success">{success}</div>}
       {errMsg && <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '10px 14px', borderRadius: 6, fontSize: 13 }}>{errMsg}</div>}
 
+      <fieldset disabled={disabled} style={{ border: 'none', padding: 0, margin: 0 }}>
       <div className="card">
         <h2 className="card-title" style={{ marginBottom: '16px' }}>Document Header</h2>
         <div className="grid-4">
@@ -180,13 +296,15 @@ export default function GRN() {
           <div className="entry-row">
             <div className="form-group" style={{ flex: 3 }}>
               <label>Part / Description</label>
-              <select value={currentItem.ItemID} onChange={e => {
-                const part = parts.find(p => p.ItemId == e.target.value);
-                setCurrentItem({ ...currentItem, ItemID: e.target.value, Rate: part?.ItemPurchasePrice || 0, SalesRate: part?.ItemSalesPrice || 0 });
-              }}>
-                <option value="">Search Part...</option>
-                {parts.map(p => <option key={p.ItemId} value={p.ItemId}>{p.ItenName}</option>)}
-              </select>
+              <SearchableSelect
+                value={currentItem.ItemID}
+                onChange={(id) => {
+                  const part = parts.find(p => p.ItemId == id);
+                  setCurrentItem({ ...currentItem, ItemID: id, Rate: part?.ItemPurchasePrice || 0, SalesRate: part?.ItemSalesPrice || 0 });
+                }}
+                placeholder="Search part by code or name…"
+                options={parts.map(p => ({ id: p.ItemId, label: p.ItenName, sub: `#${p.ItemNumber}${p.ManualNumber ? ' · ' + p.ManualNumber : ''}` }))}
+              />
             </div>
             <div className="form-group" style={{ flex: 1 }}><label>Qty</label><input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({ ...currentItem, Qty: e.target.value })} /></div>
             <div className="form-group" style={{ flex: 1 }}><label>Pur. Rate</label><input type="number" value={currentItem.Rate} onChange={e => setCurrentItem({ ...currentItem, Rate: e.target.value })} /></div>
@@ -250,6 +368,7 @@ export default function GRN() {
         <div className="financial-item"><label>Total Other Exp</label><div className="value" style={{ color: 'var(--warning)' }}>PKR {lineItems.reduce((s, i) => s + Number(i.OtherExp), 0).toLocaleString()}</div></div>
         <div className="financial-item total"><label>Net Payable Amount</label><div className="value">PKR {calculateGrandTotal().toLocaleString()}</div></div>
       </div>
+      </fieldset>
 
       {/* Recent GRNs */}
       <div className="card">
@@ -284,7 +403,11 @@ export default function GRN() {
                         : <span style={{ padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600, background: '#dcfce7', color: '#166534' }}>Active</span>
                       }
                     </td>
-                    <td>
+                    <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button onClick={() => openGRN(g.PurchaseID)}
+                        style={{ padding: '4px 10px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                        Open
+                      </button>
                       {!g.IsFinalized && canFinalizeRow(g) && (
                         <button onClick={() => handleFinalize(g.PurchaseID)}
                           style={{ padding: '4px 10px', background: '#d97706', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>

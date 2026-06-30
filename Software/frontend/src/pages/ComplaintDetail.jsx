@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
-    ArrowLeft, Loader2, Upload, RefreshCw, CheckCircle2, XCircle,
+    ArrowLeft, Loader2, RefreshCw, CheckCircle2, XCircle,
     AlertTriangle, MessageSquare, Camera, Send, ClipboardCheck, Shield,
-    Phone, MapPin, Hash, Calendar, User, Briefcase, ArrowUp, UserPlus
+    Phone, Hash, User, Briefcase, ArrowUp, UserPlus
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
 
@@ -37,6 +38,7 @@ export default function ComplaintDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const fileRef = useRef();
 
     const [data, setData]   = useState(null);
@@ -104,7 +106,13 @@ export default function ComplaintDetail() {
     };
 
     const doMarkResolved = async () => {
-        if (!window.confirm('Mark this complaint as Resolved? It will move to Pending CRO Verify.')) return;
+        const ok = await confirmAction({
+            title: 'Mark complaint resolved?',
+            message: 'The complaint will move to Pending CRO Verify for final review.',
+            confirmLabel: 'Mark resolved',
+            tone: 'warning'
+        });
+        if (!ok) return;
         setBusy(true);
         try {
             await axios.post(`${API}/cro/complaints/${id}/resolve`);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Wallet, Loader2, RefreshCw, ArrowDown, ArrowUp } from 'lucide-react';
+import { Wallet, Loader2, RefreshCw, ArrowDown, ArrowUp, Printer } from 'lucide-react';
+import { PrintHeader } from './reports/ReportShell';
 
 const API_BASE = '/api';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -27,12 +28,15 @@ export default function DailyCashBook() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <PrintHeader title="Daily Cash Book"
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
+                filterSummary={`Date: ${date}`} />
             <div className="card-header">
                 <div>
                     <h1 className="page-title">Daily Cash Book</h1>
                     <p className="page-subtitle">All cash movements for one day, with running till balance.</p>
                 </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem' }}>
                         Date:
                         <input type="date" value={date} onChange={e => setDate(e.target.value)}
@@ -41,6 +45,10 @@ export default function DailyCashBook() {
                     <button className="btn" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         Refresh
+                    </button>
+                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
+                        style={{ background: '#0f766e' }}>
+                        <Printer size={16} /> Print
                     </button>
                 </div>
             </div>

@@ -2,10 +2,11 @@
  * Sales — Incentive Policies admin.
  * Defines what staff earn per car. Decision #10: base = negotiated price.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { TrendingUp, Plus, RefreshCw, Loader2, Pencil, Trash2, Power } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useFeedback } from '../../context/FeedbackContext';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -19,6 +20,7 @@ const LEVELS = ['SalesExecutive', 'AGMSales', 'GMSales', 'CustomChainOverride'];
 
 export default function IncentivePoliciesAdmin() {
     const { hasModule } = useAuth();
+    const { confirm: confirmAction } = useFeedback();
     const canEdit = hasModule('sales_admin_settings');
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -44,7 +46,13 @@ export default function IncentivePoliciesAdmin() {
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
     const remove = async (p) => {
-        if (!window.confirm('Delete this policy? Only allowed if no accruals reference it.')) return;
+        const ok = await confirmAction({
+            title: 'Delete incentive policy?',
+            message: 'This only works when no incentive accruals reference the policy.',
+            confirmLabel: 'Delete',
+            tone: 'danger'
+        });
+        if (!ok) return;
         try { await axios.delete(`${API}/sales/incentive-policies/${p.PolicyID}`); flash('ok', 'Deleted'); load(); }
         catch (e) { flash('err', e.response?.data?.error || e.message); }
     };
@@ -144,7 +152,7 @@ function PolicyEditor({ item, onClose, onSaved }) {
     useEffect(() => {
         (async () => {
             try { const r = await axios.get(`${API}/sales/variants`, { params: { activeOnly: 1 } }); setVariants(r.data); }
-            catch {}
+            catch (e) { setErr(e.response?.data?.error || e.message); }
         })();
     }, []);
 
