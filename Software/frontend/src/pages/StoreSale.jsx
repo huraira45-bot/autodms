@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Save, ShoppingCart, Percent, DollarSign, CheckCircle2, Circle, User, Truck, CreditCard, Printer, FileText, Search } from 'lucide-react';
+import { Plus, Trash2, Save, ShoppingCart, Percent, DollarSign, User, Truck, CreditCard, Printer, FileText, Search } from 'lucide-react';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
 import { useCan } from '../context/AuthContext';
@@ -36,8 +36,11 @@ export default function StoreSale() {
   });
 
   const [lineItems, setLineItems] = useState([]);
+  // GST is mandatory on store sales — no toggle, no editable rate. The rate
+  // comes from /api/tax-rates (the GST configured under Inventory Settings).
+  const [gstRate, setGstRate] = useState(18);
   const [currentItem, setCurrentItem] = useState({
-    ItemID: '', Qty: 1, SaleRate: 0, PurRate: 0, TaxPercent: 18, Discount: 0, 
+    ItemID: '', Qty: 1, SaleRate: 0, PurRate: 0, TaxPercent: 18, Discount: 0,
     DiscType: 'Amount', IsGST: true, WHID: ''
   });
 
@@ -137,19 +140,27 @@ export default function StoreSale() {
     // reject and warehouses stayed empty, then the sale posted with WHID=null
     // and sp_SaveStoreSale crashed with "Cannot insert NULL into WHID".
     const empty = { data: [] };
-    const [pRes, wRes, itRes, bRes] = await Promise.all([
+    const [pRes, wRes, itRes, bRes, txRes] = await Promise.all([
       axios.get(`${API_BASE}/parties?business=SALES`).catch(() => empty),
       axios.get(`${API_BASE}/inventory-config/warehouses`).catch(() => empty),
       axios.get(`${API_BASE}/items`).catch(() => empty),
       axios.get(`${API_BASE}/accounts/banks`).catch(() => empty),
+      axios.get(`${API_BASE}/tax-rates`).catch(() => ({ data: { current: [] } })),
     ]);
     setParties(pRes.data);
     setWarehouses(wRes.data);
     setParts((itRes.data || []).filter(i => i.ItemType?.trim().toLowerCase() === 'part'));
     setBanks(bRes.data);
+    // Pull the configured GST rate. Default 18% if the tax-rate row hasn't been
+    // seeded yet (e.g. on a fresh DB). The rate is then forced on every line —
+    // user can't disable GST or edit the percent on the Store Sale screen.
+    const gst = (txRes.data?.current || []).find(r => (r.TaxType || '').toUpperCase() === 'GST');
+    const rate = gst ? parseFloat(gst.Rate) : 18;
+    setGstRate(rate);
+    setCurrentItem(c => ({ ...c, IsGST: true, TaxPercent: rate }));
     if (wRes.data.length > 0) {
       setHeader(h => ({ ...h, WHID: wRes.data[0].WHID }));
-      setCurrentItem(c => ({ ...c, WHID: wRes.data[0].WHID }));
+      setCurrentItem(c => ({ ...c, WHID: wRes.data[0].WHID, IsGST: true, TaxPercent: rate }));
     }
   };
 
@@ -158,9 +169,11 @@ export default function StoreSale() {
   const addLineItem = () => {
     if (!currentItem.ItemID || currentItem.Qty <= 0) return;
     const part = parts.find(p => p.ItemId == currentItem.ItemID);
-    
+
+    // GST is forced on. Use the live configured rate, not whatever ended up
+    // in currentItem (defensive — older edits could have left a stale value).
     const subtotal = Number(currentItem.Qty) * Number(currentItem.SaleRate);
-    const taxAmt = currentItem.IsGST ? (subtotal * (Number(currentItem.TaxPercent) / 100)) : 0;
+    const taxAmt = subtotal * (Number(gstRate) / 100);
     
     let discAmt = Number(currentItem.Discount);
     if (currentItem.DiscType === 'Percent') {
@@ -172,13 +185,15 @@ export default function StoreSale() {
     const newItem = {
       ...currentItem,
       ItenName: part?.ItenName,
+      IsGST: true,
+      TaxPercent: gstRate,
       TaxAmt: taxAmt,
       DiscAmt: discAmt,
       NetAmt: netAmt
     };
-    
+
     setLineItems([...lineItems, newItem]);
-    setCurrentItem({ ...currentItem, ItemID: '', Qty: 1, SaleRate: 0, PurRate: 0, Discount: 0, DiscType: 'Amount' });
+    setCurrentItem({ ...currentItem, ItemID: '', Qty: 1, SaleRate: 0, PurRate: 0, Discount: 0, DiscType: 'Amount', IsGST: true, TaxPercent: gstRate });
   };
 
   const totals = {
@@ -467,9 +482,9 @@ export default function StoreSale() {
             <div className="form-group" style={{ flex: 1 }}><label>Qty</label><input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({...currentItem, Qty: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}><label>Price</label><input type="number" value={currentItem.SaleRate} onChange={e => setCurrentItem({...currentItem, SaleRate: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}>
-              <label>Tax (%)</label>
-              <div className={`input-with-icon ${!currentItem.IsGST ? 'disabled' : ''}`}>
-                <input type="number" disabled={!currentItem.IsGST} value={currentItem.TaxPercent} onChange={e => setCurrentItem({...currentItem, TaxPercent: e.target.value})} />
+              <label>GST ({gstRate}%)</label>
+              <div className="input-with-icon disabled" title="GST is mandatory on store sales — rate is set in Inventory Settings.">
+                <input type="number" disabled value={gstRate} readOnly />
                 <Percent size={14} />
               </div>
             </div>
@@ -483,13 +498,6 @@ export default function StoreSale() {
                   {currentItem.DiscType === 'Amount' ? <DollarSign size={14} /> : <Percent size={14} />}
                 </button>
               </div>
-            </div>
-            <div className="form-group" style={{ flex: 1.5 }}>
-              <label>Tax Type</label>
-              <button type="button" className={`toggle-btn ${currentItem.IsGST ? 'active' : ''}`} onClick={() => setCurrentItem({...currentItem, IsGST: !currentItem.IsGST})}>
-                {currentItem.IsGST ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-                {currentItem.IsGST ? 'Apply GST' : 'Non-GST'}
-              </button>
             </div>
             <div className="form-group" style={{ flex: 2 }}>
               <label>Issue From</label>

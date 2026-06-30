@@ -13,6 +13,18 @@ exports.saveStoreSale = async (req, res) => {
 
     const pool = await getPool();
 
+    // GST is mandatory on every store sale line. The frontend already enforces
+    // this (no toggle, rate from /api/tax-rates) — these checks block any sale
+    // that bypasses the UI (direct API call, stale browser, etc.).
+    if (Array.isArray(Items)) {
+      const bad = Items.find(it => it.IsGST === false || !(Number(it.TaxAmt || it.TaxAmount) > 0));
+      if (bad) {
+        return res.status(400).json({
+          error: 'GST is mandatory on every line. No store sale can be finalized without GST.',
+        });
+      }
+    }
+
     // Block over-sell: every line's quantity must be ≤ current on-hand
     try { await assertEnoughStock(pool.request(), Items); }
     catch (e) { return res.status(400).json({ error: e.message }); }
