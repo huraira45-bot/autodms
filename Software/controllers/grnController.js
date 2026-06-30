@@ -20,11 +20,24 @@ exports.saveGRN = async (req, res) => {
     const parsedItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
     const imagePath = req.file ? req.file.path : null;
 
+    // sp_SavePurchaseGRN's OPENJSON expects the legacy key names (ItemID, Qty,
+    // Rate, Tax, Discount, DiscType, IsGST, OtherExp, SalesRate). The new
+    // format uses ItemId/Quantity/ItemRate/etc — map them so the SP's inserts
+    // pick up the values. The new columns (AdditionalDiscount*, AITAmount,
+    // TaxRate) are patched per-line in the follow-up UPDATE below.
+    const spItems = (parsedItems || []).map(it => ({
+      ItemID:    it.ItemId ?? it.ItemID,
+      Qty:       Number(it.Quantity ?? it.Qty) || 0,
+      Rate:      Number(it.ItemRate ?? it.Rate) || 0,
+      Tax:       Number(it.TaxAmount ?? it.Tax) || 0,
+      Discount:  Number(it.DiscountAmount ?? it.Discount) || 0,
+      DiscType:  'Amount',
+      IsGST:     1,
+      OtherExp:  0,
+      SalesRate: Number(it.SalesRate ?? it.ItemRate ?? it.Rate) || 0,
+    }));
+
     const pool = await getPool();
-    // sp_SavePurchaseGRN takes legacy header inputs. We pass zero for the
-    // header-level discount/freight (the new format has them per-line) and
-    // patch the per-line GST / AIT / additional-discount columns in the
-    // follow-up UPDATE block below.
     const result = await pool.request()
       .input('PurchaseDate',   sql.DateTime,        PurchaseDate)
       .input('SupplierBillNo', sql.NVarChar(100),   SupplierBillNo)
@@ -34,7 +47,7 @@ exports.saveGRN = async (req, res) => {
       .input('NetDiscount',    sql.Decimal(18,2),   0)
       .input('FreightAmount',  sql.Decimal(18,2),   0)
       .input('ImagePath',      sql.NVarChar(sql.MAX), imagePath)
-      .input('ItemsJSON',      sql.NVarChar(sql.MAX), JSON.stringify(parsedItems))
+      .input('ItemsJSON',      sql.NVarChar(sql.MAX), JSON.stringify(spItems))
       .execute('sp_SavePurchaseGRN');
 
     const newId = result.recordset[0]?.NewPurchaseID;
