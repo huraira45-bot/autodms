@@ -27,19 +27,26 @@ function parseRange(req) {
 exports.stockMovement = async (req, res) => {
     try {
         const { from, to } = parseRange(req);
+        const search = (req.query.search || '').trim();
         const pool = await getPool();
 
         // Inflow = StockArrival rows + positive StockInOut rows (purchase, return-in)
         // Outflow = |negative StockInOut rows| (issue, sale)
+        const itemsReq = pool.request();
+        const itemsWhere = ['i.ItemStatus = 1'];
+        if (search) {
+            itemsReq.input('q', sql.NVarChar(200), `%${search}%`);
+            itemsWhere.push('(i.ItenName LIKE @q OR i.ManualNumber LIKE @q OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @q)');
+        }
         const [items, inflow, outflow] = await Promise.all([
-            pool.request().query(`
+            itemsReq.query(`
                 SELECT i.ItemId, i.ItemNumber, i.ItenName, i.ManualNumber,
-                       i.WeightedRate, i.ReOrderLevel,
+                       i.BinLocation, i.WeightedRate, i.ReOrderLevel,
                        w.WHDesc, c.CategoryName
                 FROM InventItems i
                 LEFT JOIN InventWareHouse w ON i.WHID = w.WHID
                 LEFT JOIN InventCategory  c ON i.CategoryID = c.CategoryID
-                WHERE i.ItemStatus = 1`),
+                WHERE ${itemsWhere.join(' AND ')}`),
             pool.request().input('from', sql.DateTime, from).input('to', sql.DateTime, to).query(`
                 SELECT ItemId, SUM(QtyIn) AS QtyIn, SUM(ValIn) AS ValIn FROM (
                     SELECT sd.ItemId,
@@ -72,19 +79,26 @@ exports.stockMovement = async (req, res) => {
         let rows = items.recordset.map(x => {
             const i = inMap.get(x.ItemId) || { qty: 0, val: 0 };
             const o = outMap.get(x.ItemId) || { qty: 0, val: 0 };
+            const balQty = i.qty - o.qty;
+            const balVal = i.val - o.val;
             return {
                 ItemId:    x.ItemId,
                 ItemCode:  x.ItemNumber != null ? String(x.ItemNumber) : '',
                 ItemName:  x.ItenName || '',
                 PartNumber: x.ManualNumber || '',
+                BinLocation: x.BinLocation || '',
                 Warehouse: x.WHDesc || '',
                 Category:  x.CategoryName || '',
                 Rate:      +Number(x.WeightedRate || 0).toFixed(2),
                 QtyIn:     +i.qty.toFixed(2),
                 QtyOut:    +o.qty.toFixed(2),
-                NetChange: +(i.qty - o.qty).toFixed(2),
+                // BalanceQty: net change in the period (in − out). Renamed from
+                // NetChange so the UI label reads as "Balance Quantity".
+                BalanceQty: +balQty.toFixed(2),
+                NetChange:  +balQty.toFixed(2),   // alias for legacy callers
                 ValIn:     +i.val.toFixed(2),
                 ValOut:    +o.val.toFixed(2),
+                TotalValue: +balVal.toFixed(2),   // ValIn − ValOut for the period
             };
         }).filter(r => r.QtyIn > 0 || r.QtyOut > 0);
         rows.sort((a, b) => (b.QtyIn + b.QtyOut) - (a.QtyIn + a.QtyOut));
@@ -93,8 +107,10 @@ exports.stockMovement = async (req, res) => {
             items: rows.length,
             qtyIn:  +rows.reduce((s, x) => s + x.QtyIn,  0).toFixed(2),
             qtyOut: +rows.reduce((s, x) => s + x.QtyOut, 0).toFixed(2),
+            balQty: +rows.reduce((s, x) => s + x.BalanceQty, 0).toFixed(2),
             valIn:  +rows.reduce((s, x) => s + x.ValIn,  0).toFixed(2),
             valOut: +rows.reduce((s, x) => s + x.ValOut, 0).toFixed(2),
+            totalValue: +rows.reduce((s, x) => s + x.TotalValue, 0).toFixed(2),
         };
 
         res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });

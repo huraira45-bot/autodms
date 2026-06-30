@@ -41,16 +41,20 @@ exports.createItem = async (req, res) => {
       .input('Remarks', sql.NVarChar(sql.MAX), Remarks || null)
       .execute('sp_InsertItem');
 
-    // SP doesn't support DepartmentID / JobTypeID / BinLocation — set via follow-up UPDATE
+    // SP doesn't support DepartmentID / JobTypeID / BinLocation / ReOrderLevel
+    // — set via follow-up UPDATE.
     const newId = result.recordset?.[0]?.NewItemId || result.recordset?.[0]?.ItemId;
-    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation)) {
+    const ReOrderLevel = req.body.ReOrderLevel;
+    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation || ReOrderLevel)) {
       await pool.request()
         .input('id', sql.Int, newId)
         .input('deptId', sql.Int, DepartmentID || null)
         .input('jobTypeId', sql.Int, req.body.JobTypeID || null)
         .input('bin', sql.NVarChar(50), BinLocation || null)
+        .input('reorder', sql.Int, ReOrderLevel ? parseInt(ReOrderLevel) : null)
         .query(`UPDATE InventItems
-                SET DepartmentID=@deptId, JobTypeID=@jobTypeId, BinLocation=@bin
+                SET DepartmentID=@deptId, JobTypeID=@jobTypeId,
+                    BinLocation=@bin, ReOrderLevel=@reorder
                 WHERE ItemId=@id`);
     }
 
@@ -64,7 +68,7 @@ exports.createItem = async (req, res) => {
 exports.updateItem = async (req, res) => {
   try {
     const { ItenName, ItemSalesPrice, ItemPurchasePrice, DepartmentID, JobTypeID,
-            CategoryID, BinLocation, UOMId, ItemBrandId, ItemNumber } = req.body;
+            CategoryID, BinLocation, UOMId, ItemBrandId, ItemNumber, ReOrderLevel } = req.body;
     const pool = await getPool();
     // Build dynamic SET so callers can omit fields they don't want to touch.
     // Sale price flows from InventItems.ItemSalesPrice -> Store Sale + Parts
@@ -97,6 +101,10 @@ exports.updateItem = async (req, res) => {
     }
     sets.push('BinLocation=@bin');
     r.input('bin', sql.NVarChar(50), BinLocation || null);
+    if (ReOrderLevel !== undefined) {
+      sets.push('ReOrderLevel=@reorder');
+      r.input('reorder', sql.Int, ReOrderLevel === '' || ReOrderLevel === null ? null : parseInt(ReOrderLevel));
+    }
     sets.push('DepartmentID=@deptId', 'JobTypeID=@jobTypeId');
     r.input('deptId', sql.Int, DepartmentID || null);
     r.input('jobTypeId', sql.Int, JobTypeID || null);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput } from 'lucide-react';
-import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls } from './ReportShell';
+import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls, DateInput } from './ReportShell';
 
 const firstOfMonthISO = () => {
     const d = new Date();
@@ -10,6 +10,20 @@ const firstOfMonthISO = () => {
 // =====================================================================
 // Stock Movement Register
 // =====================================================================
+const StockMovementControls = ({ params, updateParam }) => (
+    <>
+        <DateInput label="From" value={params.from} onChange={v => updateParam('from', v)} />
+        <DateInput label="To"   value={params.to}   onChange={v => updateParam('to', v)} />
+        <input
+            type="search"
+            placeholder="Search by part # or name…"
+            value={params.search || ''}
+            onChange={e => updateParam('search', e.target.value)}
+            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 220 }}
+        />
+    </>
+);
+
 export function StockMovement() {
     return (
         <ReportShell
@@ -17,8 +31,8 @@ export function StockMovement() {
             subtitle="Per-item inflow (GRN) and outflow (issues + sales) in the period."
             icon={ArrowDownUp}
             endpoint="parts/stock-movement"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO() }}
-            controls={PeriodControls}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
+            controls={StockMovementControls}
         >
             {(data) => (
                 <>
@@ -26,37 +40,47 @@ export function StockMovement() {
                         { label: 'Items moved',  value: fmtInt(data.totals.items) },
                         { label: 'Qty In',       value: fmt(data.totals.qtyIn) },
                         { label: 'Qty Out',      value: fmt(data.totals.qtyOut) },
+                        { label: 'Balance Qty',  value: fmt(data.totals.balQty) },
                         { label: 'Value In',     value: 'PKR ' + fmt(data.totals.valIn) },
-                        { label: 'Value Out',    value: 'PKR ' + fmt(data.totals.valOut), strong: true },
+                        { label: 'Value Out',    value: 'PKR ' + fmt(data.totals.valOut) },
+                        { label: 'Total Value',  value: 'PKR ' + fmt(data.totals.totalValue), strong: true },
                     ]} />
                     <div className="card" style={{ overflowX: 'auto' }}>
                         <table style={tableStyle}>
                             <thead>
                                 <tr style={trHeader}>
+                                    <TH align="right">#</TH>
                                     <TH>Item Code</TH><TH>Item Name</TH><TH>Part No</TH>
-                                    <TH>Category</TH><TH>Warehouse</TH>
+                                    <TH>Category</TH><TH>Location</TH><TH>Warehouse</TH>
                                     <TH align="right">Qty In</TH><TH align="right">Qty Out</TH>
-                                    <TH align="right">Net</TH><TH align="right">Rate</TH>
+                                    <TH align="right">Balance Quantity</TH>
+                                    <TH align="right">Rate</TH>
                                     <TH align="right">Value In</TH><TH align="right">Value Out</TH>
+                                    <TH align="right">Total Value</TH>
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={11}>No movement in this period.</Empty>}
-                                {data.rows.map(r => (
+                                {data.rows.length === 0 && <Empty cols={14}>No movement in this period.</Empty>}
+                                {data.rows.map((r, idx) => (
                                     <tr key={r.ItemId} style={trBody}>
+                                        <TD align="right" color="#94a3b8">{idx + 1}</TD>
                                         <TD mono>{r.ItemCode}</TD>
                                         <TD>{r.ItemName}</TD>
                                         <TD mono color="#64748b">{r.PartNumber}</TD>
                                         <TD>{r.Category}</TD>
+                                        <TD mono color="#64748b">{r.BinLocation}</TD>
                                         <TD>{r.Warehouse}</TD>
                                         <TD align="right" mono>{fmt(r.QtyIn)}</TD>
                                         <TD align="right" mono>{fmt(r.QtyOut)}</TD>
-                                        <TD align="right" mono color={r.NetChange >= 0 ? '#15803d' : '#b91c1c'} bold>
-                                            {fmt(r.NetChange)}
+                                        <TD align="right" mono color={r.BalanceQty >= 0 ? '#15803d' : '#b91c1c'} bold>
+                                            {fmt(r.BalanceQty)}
                                         </TD>
                                         <TD align="right" mono>{fmt(r.Rate)}</TD>
                                         <TD align="right" mono>{fmt(r.ValIn)}</TD>
                                         <TD align="right" mono>{fmt(r.ValOut)}</TD>
+                                        <TD align="right" mono bold color={r.TotalValue >= 0 ? '#15803d' : '#b91c1c'}>
+                                            {fmt(r.TotalValue)}
+                                        </TD>
                                     </tr>
                                 ))}
                             </tbody>

@@ -1052,7 +1052,7 @@ exports.getInventoryValuation = async (req, res) => {
 
         const [items, inflow, outflow] = await Promise.all([
             itemsReq.query(`
-                SELECT i.ItemId, i.ItemNumber, i.ItenName, i.ManualNumber, i.Remarks,
+                SELECT i.ItemId, i.ItemNumber, i.ItenName, i.ManualNumber, i.BinLocation,
                        i.WeightedRate, i.ReOrderLevel,
                        w.WHDesc, c.CategoryName, b.BrandName, u.UOMName
                 FROM InventItems i
@@ -1088,7 +1088,7 @@ exports.getInventoryValuation = async (req, res) => {
                 ItemCode:    x.ItemNumber != null ? String(x.ItemNumber) : '',
                 ItemName:    x.ItenName || '',
                 PartNumber:  x.ManualNumber || '',
-                BinLocation: x.Remarks || '',
+                BinLocation: x.BinLocation || '',
                 Warehouse:   x.WHDesc || '',
                 Category:    x.CategoryName || '',
                 Brand:       x.BrandName || '',

@@ -32,6 +32,7 @@ SELECT
     WeightedRate,
     WHID,
     BinLocation,
+    ReOrderLevel,
     ItemType,
     Make,
     ItemModel,

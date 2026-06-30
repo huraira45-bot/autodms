@@ -18,14 +18,15 @@ function csvEscape(v) {
 }
 
 function downloadCSV(rows, totals, asOf) {
-    const header = ['Item Code', 'Part #', 'Item Name', 'Bin', 'Warehouse', 'Category', 'UOM',
-                    'On Hand', 'Rate (PKR)', 'Value (PKR)', 'Reorder Level'];
-    const body = rows.map(r => [
-        r.ItemCode, r.PartNumber, r.ItemName, r.BinLocation, r.Warehouse,
-        r.Category, r.UOM,
+    const header = ['#', 'Item Code', 'Part #', 'Item Name', 'Category', 'Location', 'Warehouse', 'UOM',
+                    'On Hand', 'Unit Price (PKR)', 'Total Amount (PKR)', 'Reorder Level'];
+    const body = rows.map((r, i) => [
+        i + 1,
+        r.ItemCode, r.PartNumber, r.ItemName, r.Category, r.BinLocation, r.Warehouse,
+        r.UOM,
         r.OnHand, r.Rate, r.Value, r.ReOrderLevel
     ].map(csvEscape).join(','));
-    const footer = `,,,,,,Totals,${totals.totalQty},,${totals.totalValue},`;
+    const footer = `,,,,,,,Totals,${totals.totalQty},,${totals.totalValue},`;
     const csv = [header.join(','), ...body, footer].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -121,27 +122,31 @@ export function InventoryValuation() {
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                                 <thead>
                                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                                        <TH align="right">#</TH>
                                         <TH>Code</TH>
                                         <TH>Part #</TH>
                                         <TH>Item</TH>
-                                        <TH>Bin</TH>
+                                        <TH>Category</TH>
+                                        <TH>Location</TH>
                                         <TH>Warehouse</TH>
                                         <TH align="right">On Hand</TH>
-                                        <TH align="right">Rate</TH>
-                                        <TH align="right">Value (PKR)</TH>
+                                        <TH align="right">Unit Price</TH>
+                                        <TH align="right">Total Amount (PKR)</TH>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {data.rows.map(r => {
+                                    {data.rows.map((r, idx) => {
                                         const belowReorder = r.ReOrderLevel > 0 && r.OnHand <= r.ReOrderLevel;
                                         return (
                                             <tr key={r.ItemId} style={{
                                                 borderBottom: '1px solid #f1f5f9',
                                                 background: belowReorder ? '#fffbeb' : undefined,
                                             }}>
+                                                <TD align="right" color="#94a3b8">{idx + 1}</TD>
                                                 <TD mono color="#475569">{r.ItemCode}</TD>
                                                 <TD mono color="#64748b">{r.PartNumber}</TD>
                                                 <TD>{r.ItemName}</TD>
+                                                <TD color="#64748b">{r.Category}</TD>
                                                 <TD color="#64748b" mono>{r.BinLocation}</TD>
                                                 <TD color="#64748b">{r.Warehouse}</TD>
                                                 <TD align="right" bold color={belowReorder ? '#b45309' : undefined}>
@@ -155,7 +160,7 @@ export function InventoryValuation() {
                                 </tbody>
                                 <tfoot>
                                     <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
-                                        <td colSpan={5} style={{ padding: 12, fontWeight: 700 }}>
+                                        <td colSpan={7} style={{ padding: 12, fontWeight: 700 }}>
                                             Totals — {fmtInt(data.totals.items)} items
                                         </td>
                                         <TD align="right" bold>{fmt(data.totals.totalQty)}</TD>

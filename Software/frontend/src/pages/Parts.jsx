@@ -11,6 +11,7 @@ const emptyForm = {
   UOMId: '', WHID: '', BinLocation: '',
   ItemType: 'Part',
   ItemSalesPrice: '', ItemPurchasePrice: '',
+  ReOrderLevel: '',
 };
 
 export default function Parts() {
@@ -76,6 +77,7 @@ export default function Parts() {
       ItemType:          item.ItemType || 'Part',
       ItemSalesPrice:    item.ItemSalesPrice ?? '',
       ItemPurchasePrice: item.ItemPurchasePrice ?? '',
+      ReOrderLevel:      item.ReOrderLevel ?? '',
     });
     setShowForm(true);
   };
@@ -259,6 +261,13 @@ export default function Parts() {
                   <input type="number" step="0.01" value={formData.ItemPurchasePrice}
                          onChange={e => setFormData({ ...formData, ItemPurchasePrice: e.target.value })} />
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>Reorder Level</label>
+                <input type="number" min="0" step="1" value={formData.ReOrderLevel}
+                       placeholder="Alert when on-hand stock drops to this many units"
+                       onChange={e => setFormData({ ...formData, ReOrderLevel: e.target.value })} />
               </div>
 
               {editingId && (
