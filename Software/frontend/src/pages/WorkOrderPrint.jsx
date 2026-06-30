@@ -19,7 +19,18 @@ export default function WorkOrderPrint() {
     if (err) return <div style={{ padding: 40, color: '#b91c1c', fontFamily: 'Arial' }}>Cannot print: {err}</div>;
     if (!jc) return <div style={{ padding: 40, fontFamily: 'Arial' }}>Loading…</div>;
 
-    // Totals from labour + parts items
+    // Totals from labour + parts items.
+    //
+    // Tax breakdown (per Pakistan dealership convention):
+    //   * PST (Punjab Sales Tax) = applied to LABOUR only. The labour-line
+    //     TaxAmount is snapshotted at the configured PST rate (see
+    //     snapshotTax(..., pstRate) at save time), so summing it is the PST.
+    //   * GST (General Sales Tax) = applied to PARTS only. Parts-line
+    //     TaxAmount is snapshotted at the configured GST rate at issue time.
+    //
+    // The old print added both labour TaxAmount and parts TaxAmount under
+    // "GST" — which counted PST twice and made GST look non-zero on
+    // labour-only jobs.
     const labourGross = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.Price) || 0) * (Number(l.Quantity) || 1), 0);
     const labourDisc  = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.DiscAmt) || 0), 0);
     const labourNet   = labourGross - labourDisc;
@@ -27,11 +38,8 @@ export default function WorkOrderPrint() {
     const partsDisc   = 0;   // not tracked per-line in current schema
     const partsNet    = partsGross - partsDisc;
     const sublet      = (jc.SubletItems || []).reduce((s, x) => s + (Number(x.Amount) || 0), 0);
-    const pst         = Math.round(labourNet * 0.16 * 100) / 100;   // 16% PST on labour (Punjab) — TODO confirm rate
-    // GST = sum of TaxAmount on labour AND parts lines (stored per-line)
-    const gstLabour   = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.TaxAmount) || 0), 0);
-    const gstParts    = (jc.PartsItems  || []).reduce((s, p) => s + (Number(p.TaxAmount) || 0), 0);
-    const gst         = gstLabour + gstParts;
+    const pst         = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.TaxAmount) || 0), 0);
+    const gst         = (jc.PartsItems  || []).reduce((s, p) => s + (Number(p.TaxAmount) || 0), 0);
     const total       = labourNet + partsNet + sublet + pst + gst;
 
     return (
