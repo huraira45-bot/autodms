@@ -168,7 +168,7 @@ export default function PartsIssue() {
                 </tr></thead>
                 <tbody>{issuedParts.map(p => (
                   <tr key={p.StockIssueDetailID}>
-                    <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0'}}><strong>{p.ItemName}</strong> <span style={{fontSize:'0.8rem',color:'#64748b'}}>({p.ItemNumber})</span></td>
+                    <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0'}}><strong>{p.ItemName}</strong> <span style={{fontSize:'0.8rem',color:'#64748b'}}>({p.ItemNumber ?? p.ManualNumber ?? ''})</span></td>
                     <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0'}}>{p.IssueQuantity}</td>
                     <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0'}}>{parseFloat(p.ItemRate||0).toLocaleString()}</td>
                     <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0',fontWeight:600}}>{(parseFloat(p.IssueQuantity||0) * parseFloat(p.ItemRate||0)).toLocaleString()}</td>
@@ -215,7 +215,11 @@ export default function PartsIssue() {
                         placeholder="Search part by code or name…"
                         options={items
                           .filter(it => it.ItemType === 'Part')
-                          .map(it => ({ id: it.ItemId, label: it.ItenName, sub: `#${it.ItemNumber}${it.ManualNumber ? ' · ' + it.ManualNumber : ''}` }))}
+                          .map(it => {
+                            const code = it.ItemNumber ?? it.ManualNumber ?? '';
+                            const alt  = (it.ItemNumber && it.ManualNumber) ? ' · ' + it.ManualNumber : '';
+                            return { id: it.ItemId, label: it.ItenName, sub: code ? `#${code}${alt}` : '' };
+                          })}
                       />
                     </td>
                     <td style={{padding:'8px 12px',borderBottom:'1px solid #e2e8f0'}}><input type="number" value={item.Quantity} onChange={e => updateItem(i,'Quantity',e.target.value)} style={{width:'100%',padding:'8px',border:'1px solid #cbd5e1',borderRadius:'4px'}} /></td>

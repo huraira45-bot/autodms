@@ -518,7 +518,14 @@ export default function StoreSale() {
                   setCurrentItem({...currentItem, ItemID: id, SaleRate: part?.ItemSalesPrice || 0, PurRate: part?.ItemPurchasePrice || 0});
                 }}
                 placeholder="Search part by code or name…"
-                options={parts.map(p => ({ id: p.ItemId, label: p.ItenName, sub: `#${p.ItemNumber}${p.ManualNumber ? ' · ' + p.ManualNumber : ''}` }))}
+                options={parts.map(p => {
+                  // The legacy ItemNumber column is BIGINT (numeric codes from the
+                  // jobs.csv import); alphanumeric supplier-part codes like
+                  // "8511112-Y01" land in ManualNumber. Show whichever is set.
+                  const code = p.ItemNumber ?? p.ManualNumber ?? '';
+                  const alt  = (p.ItemNumber && p.ManualNumber) ? ' · ' + p.ManualNumber : '';
+                  return { id: p.ItemId, label: p.ItenName, sub: code ? `#${code}${alt}` : '' };
+                })}
               />
             </div>
             <div className="form-group" style={{ flex: 1 }}><label>Qty</label><input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({...currentItem, Qty: e.target.value})} /></div>

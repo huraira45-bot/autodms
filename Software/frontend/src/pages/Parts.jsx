@@ -54,7 +54,8 @@ export default function Parts() {
     if (!q) return items;
     return items.filter(i =>
       (i.ItemNumber != null && String(i.ItemNumber).toLowerCase().includes(q)) ||
-      (i.ItenName    && i.ItenName.toLowerCase().includes(q))
+      (i.ManualNumber       && String(i.ManualNumber).toLowerCase().includes(q)) ||
+      (i.ItenName           && i.ItenName.toLowerCase().includes(q))
     );
   }, [items, search]);
 
@@ -156,7 +157,7 @@ export default function Parts() {
                   <tr><td colSpan={canEdit ? 7 : 6} className="table-empty-row">No parts match this search.</td></tr>
                 ) : filtered.map(i => (
                   <tr key={i.ItemId} onClick={() => canEdit && startEdit(i)} style={{ cursor: canEdit ? 'pointer' : 'default' }}>
-                    <td><code>{i.ItemNumber ?? '—'}</code></td>
+                    <td><code>{i.ItemNumber ?? i.ManualNumber ?? '—'}</code></td>
                     <td>{i.ItenName}</td>
                     <td>{catName(i.CategoryID)}</td>
                     <td>{i.BinLocation || '—'}</td>

@@ -380,7 +380,11 @@ export default function GRN() {
                                     });
                                 }}
                                 placeholder="Search part by code or name…"
-                                options={parts.map(p => ({ id: p.ItemId, label: p.ItenName, sub: `#${p.ItemNumber}${p.ManualNumber ? ' · ' + p.ManualNumber : ''}` }))}
+                                options={parts.map(p => {
+                                    const code = p.ItemNumber ?? p.ManualNumber ?? '';
+                                    const alt  = (p.ItemNumber && p.ManualNumber) ? ' · ' + p.ManualNumber : '';
+                                    return { id: p.ItemId, label: p.ItenName, sub: code ? `#${code}${alt}` : '' };
+                                })}
                             />
                         </div>
                         <div className="form-group" style={{ margin: 0 }}>
