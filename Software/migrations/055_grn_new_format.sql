@@ -38,28 +38,56 @@ BEGIN
     PRINT 'Created GL 102005008 — ADVANCE TAX ON PARTS 236G';
 END
 
+-- ============================================================
+-- 2. Widen the RoleKey CHECK constraint to accept the two new keys
+--    (the constraint hardcodes the legal role-key whitelist; we drop
+--    + re-add with the new keys appended).
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name='CK_SystemAccounts_RoleKey')
+    ALTER TABLE dms_SystemAccounts DROP CONSTRAINT CK_SystemAccounts_RoleKey;
+GO
+
+ALTER TABLE dms_SystemAccounts ADD CONSTRAINT CK_SystemAccounts_RoleKey CHECK (
+    RoleKey IN (
+        'CASH_BOOK','GENERAL_CUSTOMER','GST_PAYABLE','INPUT_GST','PST_PAYABLE',
+        'POS_CLEARING','DEFAULT_DISCOUNT_GIVEN','ROUNDING_ADJUSTMENT',
+        'PURCHASE_RETURN_VARIANCE','CUSTOMER_ADVANCE_RECEIVED','SUPPLIER_ADVANCE_PAID',
+        'CHEQUES_ON_HAND','CHEQUES_ISSUED_UNCLEARED',
+        'VEHICLE_INVENTORY','BOOKING_RECEIVABLE','BOOKING_ADVANCE',
+        'BOOKING_VARIANT_RECEIVABLE','PREMIUM_DEFERRED',
+        'MASTER_VEHICLE_PAYABLE','MASTER_INCENTIVE_RECEIVABLE','STAFF_INCENTIVE_PAYABLE',
+        'VEHICLE_SALES_REVENUE','PREMIUM_INCOME','MASTER_INCENTIVE_INCOME',
+        'COGS_VEHICLES','STAFF_INCENTIVE_EXPENSE','SALES_DISCOUNT_GIVEN',
+        'INVENTORY_PARTS','PARTS_REVENUE','SERVICE_REVENUE','SUBLET_REVENUE',
+        'COGS_PARTS','SUBLET_COST','TRADE_DEBTORS','TRADE_CREDITORS',
+        -- migration 055 — new GRN format
+        'PARTS_DISCOUNT_RECEIVED','ADVANCE_TAX_236G_PARTS'
+    )
+);
+GO
+
 DECLARE @discRecvGLCAID INT = (SELECT GLCAID FROM GLChartOFAccount WHERE GLCode='401003003');
 DECLARE @ait236GLCAID   INT = (SELECT GLCAID FROM GLChartOFAccount WHERE GLCode='102005008');
 
 -- ============================================================
--- 2. System-account role bindings
+-- 3. System-account role bindings
 -- ============================================================
 IF NOT EXISTS (SELECT 1 FROM dms_SystemAccounts WHERE RoleKey='PARTS_DISCOUNT_RECEIVED')
 BEGIN
     INSERT INTO dms_SystemAccounts (RoleKey, GLCAID, AssignedByName, AssignedAt)
     VALUES ('PARTS_DISCOUNT_RECEIVED', @discRecvGLCAID, 'migration 055', GETDATE());
-    PRINT 'Bound role PARTS_DISCOUNT_RECEIVED → 401003003';
+    PRINT 'Bound role PARTS_DISCOUNT_RECEIVED -> 401003003';
 END
 
 IF NOT EXISTS (SELECT 1 FROM dms_SystemAccounts WHERE RoleKey='ADVANCE_TAX_236G_PARTS')
 BEGIN
     INSERT INTO dms_SystemAccounts (RoleKey, GLCAID, AssignedByName, AssignedAt)
     VALUES ('ADVANCE_TAX_236G_PARTS', @ait236GLCAID, 'migration 055', GETDATE());
-    PRINT 'Bound role ADVANCE_TAX_236G_PARTS → 102005008';
+    PRINT 'Bound role ADVANCE_TAX_236G_PARTS -> 102005008';
 END
 
 -- ============================================================
--- 3. New columns on data_PurchaseDetail
+-- 4. New columns on data_PurchaseDetail
 -- ============================================================
 IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='data_PurchaseDetail' AND COLUMN_NAME='AdditionalDiscountPct')
     ALTER TABLE data_PurchaseDetail ADD AdditionalDiscountPct NUMERIC(8,3) NULL;
@@ -71,7 +99,7 @@ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='data_P
     ALTER TABLE data_PurchaseDetail ADD AITAmount DECIMAL(18,2) NULL;
 
 -- ============================================================
--- 4. WIPE existing GRN data (owner-requested)
+-- 5. WIPE existing GRN data (owner-requested)
 -- ============================================================
 DECLARE @grnCount INT, @voucherCount INT, @arrivalCount INT;
 
@@ -84,7 +112,7 @@ PRINT 'Wiping ' + CAST(@grnCount AS NVARCHAR(20)) + ' GRN(s), '
     + CAST(@voucherCount AS NVARCHAR(20)) + ' GRN voucher(s), '
     + CAST(@arrivalCount AS NVARCHAR(20)) + ' linked stock arrival(s).';
 
--- 4a. GL vouchers from GRNs (header + detail + party-ledger)
+-- 5a. GL vouchers from GRNs (header + detail + party-ledger)
 DECLARE @grnVouchers TABLE (VoucherID INT);
 INSERT INTO @grnVouchers SELECT VoucherID FROM data_FinanceVoucherInfo WHERE SourceDocType='GRN';
 
@@ -98,7 +126,7 @@ WHERE VoucherID IN (SELECT VoucherID FROM @grnVouchers);
 DELETE FROM data_FinanceVoucherInfo
 WHERE VoucherID IN (SELECT VoucherID FROM @grnVouchers);
 
--- 4b. Stock arrivals (skip opening-stock manual arrivals)
+-- 5b. Stock arrivals (skip opening-stock manual arrivals)
 DECLARE @grnArrivals TABLE (ArrivalID INT);
 INSERT INTO @grnArrivals
 SELECT ArrivalID FROM data_StockArrivalInfo
@@ -111,7 +139,7 @@ WHERE ArrivalID IN (SELECT ArrivalID FROM @grnArrivals);
 DELETE FROM data_StockArrivalInfo
 WHERE ArrivalID IN (SELECT ArrivalID FROM @grnArrivals);
 
--- 4c. GRN headers + details
+-- 5c. GRN headers + details
 DELETE FROM data_PurchaseDetail;
 DELETE FROM data_PurchaseInfo;
 
