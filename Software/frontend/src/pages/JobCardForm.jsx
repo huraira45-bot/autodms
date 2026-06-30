@@ -604,7 +604,7 @@ export default function JobCardForm() {
           {/* Top row: Business Unit | Order Type | PM Type | Date In | RO Status | Promise Date | Service Advisor | Repeat RO */}
           <div style={{ ...S.groupBox }}>
             <div style={S.groupBody}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr', gap: 6 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6 }}>
                 <div style={S.field}>
                   <label style={S.label}>Business Unit</label>
                   <select style={S.select} value={form.JobTypeId} onChange={e => f('JobTypeId', e.target.value)} disabled={isEdit || disabled} required>
