@@ -70,14 +70,18 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         partyTagForInvoiceLeg = storeSale.PartyID;
     } else {
         customerSubsidiaryAccount = accounts.GENERAL_CUSTOMER;
+        // paymentSideAccount used to gate the receipt leg, but the receipt leg
+        // was removed (comment at the "NOTE" below) — Store Sale now posts only
+        // the invoice and the cashier records the receipt separately via
+        // Receive Payment → Walk-in deposit. So requiring a paymentBank /
+        // resolving a role here is dead validation that blocks Bank Transfer
+        // sales when the bank isn't yet registered in dms_BankAccounts.
+        // Keep the bank reference informational on the sale row.
         if (paymentMode === 'Bank Transfer') {
-            if (!paymentBank || !paymentBank.GLCAID) throw new Error('Bank Transfer requires a paymentBank account.');
-            paymentSideAccount = paymentBank;
+            paymentSideAccount = paymentBank || null;
         } else {
             const roleKey = PAYMENT_MODES[paymentMode];
-            if (!roleKey) throw new Error(`Unsupported payment mode: ${paymentMode}`);
-            paymentSideAccount = accounts[roleKey];
-            if (!paymentSideAccount) throw new Error(`Account for role ${roleKey} not resolved`);
+            paymentSideAccount = roleKey ? (accounts[roleKey] || null) : null;
         }
     }
 

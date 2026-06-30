@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Save, ShoppingCart, Percent, DollarSign, User, Truck, CreditCard, Printer, FileText, Search } from 'lucide-react';
+import { Plus, Trash2, Save, ShoppingCart, Percent, DollarSign, User, Truck, CreditCard, Printer, FileText, Search, Unlock } from 'lucide-react';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
-import { useCan } from '../context/AuthContext';
+import { useCan, useAuth } from '../context/AuthContext';
 import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
@@ -11,6 +11,8 @@ const API_BASE = '/api';
 export default function StoreSale() {
   const { notify, confirm } = useFeedback();
   const { canInsert, canEdit } = useCan('sales_store');
+  const { user, hasPermission } = useAuth();
+  const canUnfinalize = user?.groupId === 1 || hasPermission('admin_unfinalize');
   const [parties, setParties] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [parts, setParts] = useState([]);
@@ -274,6 +276,27 @@ export default function StoreSale() {
     } finally { setLoading(false); }
   };
 
+  const handleUnfinalize = async () => {
+    if (!editingId) return;
+    const ok = await confirm({
+      title: `Unfinalize sale ${invoiceNo || `#${editingId}`}?`,
+      message: 'The Store Sale GL voucher will be reversed and the sale becomes editable. Saving again will repost a fresh voucher with the new amounts.',
+      details: 'For admin use when a posted sale needs correction.',
+      confirmLabel: 'Unfinalize',
+      tone: 'warning',
+    });
+    if (!ok) return;
+    setLoading(true);
+    try {
+      await axios.post(`${API_BASE}/sales/store-sale/${editingId}/unfinalize`);
+      notify({ type: 'success', title: 'Sale unfinalized', message: 'You can now edit the sale.' });
+      // Reload the now-editable sale
+      await openSale(editingId);
+    } catch (err) {
+      notify({ type: 'error', title: 'Unfinalize failed', message: err.response?.data?.error || err.message });
+    } finally { setLoading(false); }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div className="card-header">
@@ -299,6 +322,11 @@ export default function StoreSale() {
           </button>
           {canInsert && <button className="btn-sm" onClick={startNew}><Plus size={14} /> New</button>}
           <button className="btn" onClick={() => isFinalizedEdit && editingId && window.open(`/store-sale/${editingId}/print`, '_blank')} style={{ background: '#0f766e', opacity: (isFinalizedEdit && editingId) ? 1 : 0.4, cursor: (isFinalizedEdit && editingId) ? 'pointer' : 'not-allowed' }} disabled={!(isFinalizedEdit && editingId)} title={(isFinalizedEdit && editingId) ? 'Open sale invoice print view' : 'Open a finalized sale to print'}><Printer size={16} /> Print</button>
+          {editingId && isFinalizedEdit && canUnfinalize && (
+            <button className="btn" onClick={handleUnfinalize} disabled={loading} style={{ background: '#b45309' }} title="Reverse the GL voucher and reopen the sale for editing">
+              <Unlock size={16} /> Unfinalize
+            </button>
+          )}
           {!disabled && (editingId ? canEdit : canInsert) && <button className="btn" onClick={handleSave} disabled={loading}><ShoppingCart size={18} /> {loading ? 'Processing...' : (editingId ? 'Save Changes' : 'Finalize Sale')}</button>}
         </div>
       </div>

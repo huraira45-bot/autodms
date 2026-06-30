@@ -977,6 +977,87 @@ exports.issuePartsToJobCard = async (req, res) => {
     } catch (err) { console.error(err); res.status(400).json({ error: err.message }); }
 };
 
+/**
+ * DELETE /api/workshop/parts-issue/line/:detailId
+ *
+ * Removes one issued line and reverses just that line's stock-out. Refuses
+ * if the underlying Job Card is finalized — once a JC is finalized, parts
+ * costs have flowed into the GL via the JC posting, so silently nuking a
+ * line here would leave the books wrong. (Unfinalize the JC via the approval
+ * workflow if a posted line genuinely needs to come back.)
+ *
+ * If the line was the only one in its parent issue, the issue header + the
+ * stock-out header are deleted too so we don't leave empty parents.
+ */
+exports.deletePartsIssueLine = async (req, res) => {
+    const detailId = parseInt(req.params.detailId);
+    if (!detailId) return res.status(400).json({ error: 'Invalid id.' });
+
+    try {
+        const pool = await getPool();
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            // Find the line + parent issue + check the JC isn't finalized.
+            const lineRes = await new sql.Request(tx)
+                .input('did', sql.Int, detailId)
+                .query(`SELECT d.StockIssueID, d.ItemId, d.Quantity,
+                               i.JobCardId, ISNULL(jc.IsFinalized,0) AS IsFinalized
+                        FROM data_StockIssuetoJobCardDetail d
+                        INNER JOIN data_StockIssuetoJobCard i ON i.StockIssueID = d.StockIssueID
+                        LEFT JOIN Addata_JobCardInfo jc       ON jc.JobCardId   = i.JobCardId
+                        WHERE d.StockIssueDetailID = @did`);
+            if (!lineRes.recordset.length) throw new Error('Issued line not found.');
+            const line = lineRes.recordset[0];
+            if (line.IsFinalized) {
+                const e = new Error('Job Card is finalized — cannot delete this line. Unfinalize the JC first.');
+                e.statusCode = 423; throw e;
+            }
+
+            // Reverse this line's stock-out. The parts-issue flow writes one
+            // data_StockInOutInfo per issue with one detail row per ItemId, so
+            // find the StockIOID for this issue and remove the matching ItemId
+            // detail row.
+            const ioRes = await new sql.Request(tx)
+                .input('iid', sql.Int, line.StockIssueID)
+                .query('SELECT StockIOID FROM data_StockInOutInfo WHERE IssuanceID=@iid');
+            for (const r of ioRes.recordset) {
+                await new sql.Request(tx)
+                    .input('ioId', sql.Int, r.StockIOID)
+                    .input('itemId', sql.Int, line.ItemId)
+                    .query('DELETE FROM data_StockInOutDetail WHERE StockIOID=@ioId AND ItemId=@itemId');
+            }
+
+            // Drop the detail row itself.
+            await new sql.Request(tx).input('did', sql.Int, detailId)
+                .query('DELETE FROM data_StockIssuetoJobCardDetail WHERE StockIssueDetailID=@did');
+
+            // If the issue is now empty, clean up its header + the stock-out
+            // header (so we don't leave orphans).
+            const remaining = await new sql.Request(tx)
+                .input('iid', sql.Int, line.StockIssueID)
+                .query('SELECT COUNT(*) AS n FROM data_StockIssuetoJobCardDetail WHERE StockIssueID=@iid');
+            if (remaining.recordset[0].n === 0) {
+                for (const r of ioRes.recordset) {
+                    await new sql.Request(tx).input('ioId', sql.Int, r.StockIOID)
+                        .query('DELETE FROM data_StockInOutInfo WHERE StockIOID=@ioId');
+                }
+                await new sql.Request(tx).input('iid', sql.Int, line.StockIssueID)
+                    .query('DELETE FROM data_StockIssuetoJobCard WHERE StockIssueID=@iid');
+            }
+
+            await tx.commit();
+            res.json({ message: 'Line deleted; stock restored.' });
+        } catch (e) {
+            try { await tx.rollback(); } catch {}
+            throw e;
+        }
+    } catch (err) {
+        console.error('deletePartsIssueLine:', err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
 // ============== RO COUNTERS (Admin) ==============
 exports.getROCounters = async (req, res) => {
     try {

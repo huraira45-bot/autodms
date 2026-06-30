@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Package, Search, Plus, Trash2, Save, Loader2, Printer } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { useCan } from '../context/AuthContext';
 import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api';
 
 export default function PartsIssue() {
-  const { notify } = useFeedback();
+  const { notify, confirm } = useFeedback();
+  const { canDelete } = useCan('workshop_parts_issue');
   const [jobCards, setJobCards] = useState([]);
   const [items, setItems] = useState([]);
   const [issuedParts, setIssuedParts] = useState([]);
@@ -60,6 +62,24 @@ export default function PartsIssue() {
   
   const totalNew = newItems.reduce((s, i) => s + (parseFloat(i.Quantity||0) * parseFloat(i.Rate||0)), 0);
   const totalIssued = issuedParts.reduce((s, i) => s + (parseFloat(i.IssueQuantity||0) * parseFloat(i.ItemRate||0)), 0);
+
+  const handleDeleteLine = async (line) => {
+    const ok = await confirm({
+      title: `Delete ${line.ItemName}?`,
+      message: `Remove this issued line and restore ${line.IssueQuantity} unit(s) back into stock.`,
+      details: 'Only allowed while the Job Card is not finalized.',
+      confirmLabel: 'Delete line',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await axios.delete(`${API}/workshop/parts-issue/line/${line.StockIssueDetailID}`);
+      notify({ type: 'success', title: 'Line deleted', message: `${line.ItemName} returned to stock.` });
+      selectJob(selectedJob); // refresh
+    } catch (err) {
+      notify({ type: 'error', title: 'Delete failed', message: err.response?.data?.error || err.message });
+    }
+  };
 
   const handleIssue = async () => {
     if (!selectedJob) {
@@ -144,6 +164,7 @@ export default function PartsIssue() {
                   <th style={{textAlign:'left',padding:'10px 16px',fontSize:'0.8rem',color:'#64748b',background:'#f1f5f9'}}>Qty</th>
                   <th style={{textAlign:'left',padding:'10px 16px',fontSize:'0.8rem',color:'#64748b',background:'#f1f5f9'}}>Rate</th>
                   <th style={{textAlign:'left',padding:'10px 16px',fontSize:'0.8rem',color:'#64748b',background:'#f1f5f9'}}>Total</th>
+                  {canDelete && <th className="no-print" style={{padding:'10px',background:'#f1f5f9',width:'48px'}}></th>}
                 </tr></thead>
                 <tbody>{issuedParts.map(p => (
                   <tr key={p.StockIssueDetailID}>
@@ -151,9 +172,21 @@ export default function PartsIssue() {
                     <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0'}}>{p.IssueQuantity}</td>
                     <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0'}}>{parseFloat(p.ItemRate||0).toLocaleString()}</td>
                     <td style={{padding:'10px 16px',borderBottom:'1px solid #e2e8f0',fontWeight:600}}>{(parseFloat(p.IssueQuantity||0) * parseFloat(p.ItemRate||0)).toLocaleString()}</td>
+                    {canDelete && (
+                      <td className="no-print" style={{padding:'10px',borderBottom:'1px solid #e2e8f0',textAlign:'center'}}>
+                        <button onClick={() => handleDeleteLine(p)} title="Delete this line and restore stock"
+                                style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',padding:4}}>
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}</tbody>
-                <tfoot><tr><td colSpan="3" style={{padding:'12px 16px',fontWeight:700,textAlign:'right'}}>Total Issued:</td><td style={{padding:'12px 16px',fontWeight:700,fontSize:'1.1rem'}}>PKR {totalIssued.toLocaleString()}</td></tr></tfoot>
+                <tfoot><tr>
+                  <td colSpan={canDelete ? 3 : 3} style={{padding:'12px 16px',fontWeight:700,textAlign:'right'}}>Total Issued:</td>
+                  <td style={{padding:'12px 16px',fontWeight:700,fontSize:'1.1rem'}}>PKR {totalIssued.toLocaleString()}</td>
+                  {canDelete && <td className="no-print"></td>}
+                </tr></tfoot>
               </table>
             </div>
           )}

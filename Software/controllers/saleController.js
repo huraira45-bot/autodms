@@ -272,10 +272,98 @@ exports.updateStoreSale = async (req, res) => {
         }
 
         await tx.commit();
-        res.json({ message: 'Store Sale updated.' });
+
+        // Re-finalize: after a successful edit, post a fresh SS voucher in a
+        // second transaction. Mirrors the saveStoreSale auto-finalize flow so
+        // an unfinalize -> edit -> save round-trip ends with a Posted voucher.
+        let voucherId = null;
+        const postTx = new sql.Transaction(pool);
+        await postTx.begin();
+        try {
+            await new sql.Request(postTx)
+                .input('id', sql.Int, id)
+                .input('by', sql.Int, req.user?.userId || null)
+                .input('byName', sql.NVarChar(100), req.user?.userName || '')
+                .query(`UPDATE data_StoreSaleInfo
+                        SET IsFinalized=1, FinalizedBy=@by, FinalizedByName=@byName, FinalizedAt=GETDATE()
+                        WHERE SaleID=@id`);
+            voucherId = await postStoreSaleVoucher(id, req.user, postTx);
+            await postTx.commit();
+        } catch (postErr) {
+            try { await postTx.rollback(); } catch {}
+            console.error('updateStoreSale re-finalize failed:', postErr);
+            return res.status(400).json({
+                error: 'Store Sale data saved but GL re-posting failed: ' + postErr.message,
+            });
+        }
+        res.json({ message: 'Store Sale updated.', VoucherID: voucherId });
     } catch (err) {
         try { await tx.rollback(); } catch {}
         console.error('updateStoreSale:', err);
         res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
+/**
+ * POST /api/sales/store-sale/:id/unfinalize
+ *
+ * Admin-only escape hatch. Reverses the GL effect of a finalized Store Sale
+ * so the user can edit it: hard-deletes the SS voucher (header + details +
+ * any party-ledger subsidiary rows) plus any POS-auto-settle CRV that was
+ * posted alongside it, then flips IsFinalized=0. The Store Sale's stock-out
+ * is left in place — the row still exists, the user is just editing it; the
+ * subsequent PUT path re-posts a fresh SS voucher when the user saves again.
+ */
+exports.unfinalizeStoreSale = async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id.' });
+
+    try {
+        const pool = await getPool();
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            // Make sure the sale exists + is currently finalized.
+            const hdr = await new sql.Request(tx)
+                .input('id', sql.Int, id)
+                .query('SELECT IsFinalized FROM data_StoreSaleInfo WITH (UPDLOCK, HOLDLOCK) WHERE SaleID=@id');
+            if (!hdr.recordset.length) throw new Error('Store Sale not found.');
+            if (!hdr.recordset[0].IsFinalized) throw new Error('Store Sale is not finalized.');
+
+            // Collect every voucher that was posted because of this sale: the
+            // SS voucher and any auto-settle CRV (POS sales create both).
+            const vRes = await new sql.Request(tx)
+                .input('id', sql.Int, id)
+                .query(`SELECT VoucherID FROM data_FinanceVoucherInfo
+                        WHERE SourceDocType IN ('STORE_SALE') AND SourceDocID = @id`);
+            const voucherIds = vRes.recordset.map(r => r.VoucherID);
+
+            for (const vid of voucherIds) {
+                await new sql.Request(tx).input('vid', sql.Int, vid)
+                    .query('DELETE FROM dms_PartyLedger WHERE VoucherID=@vid OR AllocatedToVoucherID=@vid');
+                await new sql.Request(tx).input('vid', sql.Int, vid)
+                    .query('DELETE FROM data_FinanceVoucherDetail WHERE VoucherID=@vid');
+                await new sql.Request(tx).input('vid', sql.Int, vid)
+                    .query('DELETE FROM data_FinanceVoucherInfo WHERE VoucherID=@vid');
+            }
+
+            // Flip the sale back to editable.
+            await new sql.Request(tx).input('id', sql.Int, id)
+                .query(`UPDATE data_StoreSaleInfo
+                        SET IsFinalized=0, FinalizedBy=NULL, FinalizedByName=NULL, FinalizedAt=NULL
+                        WHERE SaleID=@id`);
+
+            await tx.commit();
+            res.json({
+                message: 'Store Sale unfinalized. You can now edit it.',
+                vouchersReversed: voucherIds.length,
+            });
+        } catch (e) {
+            try { await tx.rollback(); } catch {}
+            throw e;
+        }
+    } catch (err) {
+        console.error('unfinalizeStoreSale:', err);
+        res.status(400).json({ error: err.message });
     }
 };

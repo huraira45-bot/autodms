@@ -70,7 +70,11 @@ async function resolvePaymentBank(storeSale, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, storeSale.PaymentBankID)
         .query('SELECT GLCAID FROM dms_BankAccounts WHERE GLCAID=@id AND IsActive=1');
-    if (!r.recordset.length) throw new Error('Bank account for Bank Transfer is not active or not configured.');
+    // Bank is informational only at finalize time (the receipt leg is posted
+    // separately through Receive Payment). Don't block finalize if the bank
+    // isn't currently registered as an active dms_BankAccounts row — keep
+    // the reference but skip the lookup result.
+    if (!r.recordset.length) return null;
     return { GLCAID: r.recordset[0].GLCAID };
 }
 
