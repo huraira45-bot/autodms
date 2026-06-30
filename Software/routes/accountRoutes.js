@@ -13,8 +13,14 @@ router.get(  '/coa',           requireAnyAccess(
                                 ), accountController.getCOA);
 router.post( '/coa',           requirePerm('finance_coa', 'insert'),  accountController.addAccount);
 
-// Banks (under accounting_setup)
-router.get(  '/banks',          requireAnyAccess('accounting_setup:view', 'finance_vouchers:view', 'payments', 'finance_cheques'), accountController.getBanks);
+// Banks (under accounting_setup). GET is also needed by Store Sale / SSR
+// forms (Bank Transfer payment mode picker) and the workshop side.
+router.get(  '/banks',          requireAnyAccess(
+                                    'accounting_setup:view', 'finance_vouchers:view',
+                                    'payments', 'finance_cheques',
+                                    'sales_store:view', 'sales_ssr:view',
+                                    'workshop_jobs:view',
+                                ), accountController.getBanks);
 router.get(  '/bank-configs',   requirePerm('accounting_setup', 'view'),  accountController.getBankConfigs);
 router.patch('/banks/:glcaid/toggle',  requirePerm('accounting_setup', 'edit'), accountController.toggleBank);
 router.patch('/banks/:glcaid/config',  requirePerm('accounting_setup', 'edit'), accountController.updateBankConfig);
