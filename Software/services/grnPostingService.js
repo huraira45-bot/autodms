@@ -10,8 +10,10 @@ const { buildGRNJournalLines } = require('../utils/grnJournalBuilder');
 
 async function resolveGRNAccounts(/* transaction */) {
     return {
-        INVENTORY_PARTS:  { GLCAID: await resolveRole('INVENTORY_PARTS') },
-        INPUT_GST:        { GLCAID: await resolveRole('INPUT_GST') },
+        INVENTORY_PARTS:           { GLCAID: await resolveRole('INVENTORY_PARTS') },
+        INPUT_GST:                 { GLCAID: await resolveRole('INPUT_GST') },
+        PARTS_DISCOUNT_RECEIVED:   { GLCAID: await resolveRole('PARTS_DISCOUNT_RECEIVED') },
+        ADVANCE_TAX_236G_PARTS:    { GLCAID: await resolveRole('ADVANCE_TAX_236G_PARTS') },
     };
 }
 
@@ -38,7 +40,10 @@ async function loadGRNData(purchaseId, transaction) {
     const lines = await new sql.Request(transaction)
         .input('id', sql.Int, purchaseId)
         .query(`SELECT PurchaseDetailID, ItemId, Quantity, ItemRate,
-                       TaxRate, TaxAmount, UnitLandedCost
+                       TaxRate, TaxAmount, UnitLandedCost,
+                       DiscountAmount,
+                       AdditionalDiscountAmount,
+                       AITAmount
                 FROM data_PurchaseDetail WHERE PurchaseID=@id`);
 
     return { grn: hdr.recordset[0], lines: lines.recordset };

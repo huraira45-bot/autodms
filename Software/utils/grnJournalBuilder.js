@@ -1,21 +1,24 @@
 /**
- * Pure journal-line builder for GRN (Goods Receipt Note) finalize.
- * Source contract: SYSTEM_DOCUMENTATION.md §14.7
+ * Pure journal-line builder for GRN finalize — new Master Motors format.
+ * Source contract: owner spec dated 2026-06-30 (sales-tax-invoice layout).
  *
- * No DB access. Returns a balanced 3-line voucher (or 4-line if there's a freight
- * payment leg — currently freight is part of the supplier invoice per Decision §14.7).
+ * Each line carries: gross retail, primary discount, additional discount,
+ * sales tax (GST), and AIT (advance income tax 236G). The voucher posts:
+ *
+ *   Dr Inventory — Parts            (sum of qty × Unit Retail; GROSS)
+ *   Dr Input GST                    (sum of TaxAmount per line)
+ *   Dr Advance Tax 236G             (sum of AITAmount per line)
+ *       Cr Discount Received Parts  (sum of DiscountAmount across lines)   ← entry 1
+ *       Cr Discount Received Parts  (sum of AdditionalDiscountAmount)      ← entry 2 (same account)
+ *       Cr Supplier A/P leaf        (balancing — = invoice "Value Inc. Sales Tax" total)
  *
  * Inputs:
- *   grn       — { PurchaseID, PurchaseVoucherNo, PartyID (supplier), FreightAmount,
- *                 NetDiscount (trade discount, post-tax), FreightTaxable }
- *   lines     — [{ ItemId, Quantity, ItemRate, TaxRate, TaxAmount, UnitLandedCost }]
- *   accounts  — { INVENTORY_PARTS, INPUT_GST } each { GLCAID }
- *   supplierGL — { GLCAID } — the supplier's own PartyGLID leaf (required).
- *                Each supplier carries its own A/P account in gen_PartiesInfo;
- *                we never fall back to a system-wide TRADE_CREDITORS bucket.
- *
- * Output:
- *   { header, lines, subsidiaryWrites, totals }
+ *   grn        — { PurchaseID, PurchaseVoucherNo, PartyID }
+ *   lines      — [{ ItemId, Quantity, ItemRate, TaxAmount, DiscountAmount,
+ *                   AdditionalDiscountAmount, AITAmount, UnitLandedCost }]
+ *   accounts   — { INVENTORY_PARTS, INPUT_GST,
+ *                  PARTS_DISCOUNT_RECEIVED, ADVANCE_TAX_236G_PARTS } each { GLCAID }
+ *   supplierGL — { GLCAID } — supplier's PartyGLID leaf (required).
  */
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -27,27 +30,37 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
     if (!supplierGL?.GLCAID) {
         throw new Error('Supplier has no GL account set (PartyGLID is null). Edit the supplier party and assign one.');
     }
-
-    // Aggregate from snapshot columns. Inventory debit = sum of (line.qty × line.UnitLandedCost).
-    // Input GST = sum of line TaxAmount (snapshot already accounts for freight-taxable split).
-    let inventoryDebit = 0;
-    let inputGSTTotal = 0;
-    let grossSubtotal = 0;
-
-    for (const l of lines) {
-        const qty = Number(l.Quantity) || 0;
-        const unitLanded = Number(l.UnitLandedCost) || 0;
-        const lineLanded = round2(qty * unitLanded);
-        inventoryDebit = round2(inventoryDebit + lineLanded);
-        inputGSTTotal = round2(inputGSTTotal + (Number(l.TaxAmount) || 0));
-        grossSubtotal = round2(grossSubtotal + qty * (Number(l.ItemRate) || 0));
+    if (!accounts.PARTS_DISCOUNT_RECEIVED?.GLCAID) {
+        throw new Error('PARTS_DISCOUNT_RECEIVED system account not configured. Map GL "DISCOUNT RECEIVED ON PARTS" in Accounting Setup.');
+    }
+    if (!accounts.ADVANCE_TAX_236G_PARTS?.GLCAID) {
+        throw new Error('ADVANCE_TAX_236G_PARTS system account not configured. Map GL "ADVANCE TAX ON PARTS 236G" in Accounting Setup.');
     }
 
-    // Supplier credit = inventory debit + input GST debit (balanced by definition)
-    const supplierCredit = round2(inventoryDebit + inputGSTTotal);
+    let inventoryDebit  = 0;   // Dr Inventory — gross retail per line
+    let inputGSTTotal   = 0;
+    let aitTotal        = 0;
+    let discountTotal   = 0;   // primary discount across lines
+    let addDiscountTotal = 0;  // additional discount across lines
 
-    if (inventoryDebit <= 0 && inputGSTTotal <= 0) {
-        // Empty GRN — nothing to post
+    for (const l of lines) {
+        const qty   = Number(l.Quantity) || 0;
+        const rate  = Number(l.ItemRate) || 0;
+        const gross = round2(qty * rate);
+        inventoryDebit   = round2(inventoryDebit + gross);
+        inputGSTTotal    = round2(inputGSTTotal + (Number(l.TaxAmount) || 0));
+        aitTotal         = round2(aitTotal + (Number(l.AITAmount) || 0));
+        discountTotal    = round2(discountTotal + (Number(l.DiscountAmount) || 0));
+        addDiscountTotal = round2(addDiscountTotal + (Number(l.AdditionalDiscountAmount) || 0));
+    }
+
+    // Supplier A/P = balancing leg = Value Inc. Sales Tax total from the invoice.
+    //               = Inventory(gross) + GST + AIT - Disc1 - Disc2
+    const supplierCredit = round2(
+        inventoryDebit + inputGSTTotal + aitTotal - discountTotal - addDiscountTotal
+    );
+
+    if (inventoryDebit <= 0 && inputGSTTotal <= 0 && aitTotal <= 0) {
         return {
             header: {
                 SourceDocType: 'GRN', SourceDocID: grn.PurchaseID,
@@ -55,7 +68,8 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
                 TotalAmount: 0,
             },
             lines: [], subsidiaryWrites: [],
-            totals: { inventoryDebit: 0, inputGSTTotal: 0, supplierCredit: 0, grossSubtotal: 0 },
+            totals: { inventoryDebit: 0, inputGSTTotal: 0, aitTotal: 0,
+                      discountTotal: 0, addDiscountTotal: 0, supplierCredit: 0 },
         };
     }
 
@@ -63,11 +77,11 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
     const subsidiaryWrites = [];
     const narrationRef = grn.PurchaseVoucherNo || `GRN-${grn.PurchaseID}`;
 
-    // (1) Dr Inventory — Parts (landed cost)
+    // (1) Dr Inventory — Parts (GROSS retail, no discount netting)
     journalLines.push({
         GLCAID: accounts.INVENTORY_PARTS.GLCAID,
         Debit: inventoryDebit, Credit: 0,
-        Narration: `Parts received (landed cost) — ${narrationRef}`,
+        Narration: `Parts received (gross) — ${narrationRef}`,
         PartyID: null, JobCardID: null,
     });
 
@@ -81,7 +95,37 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
         });
     }
 
-    // (3) Cr supplier A/P leaf (the supplier's own PartyGLID)
+    // (3) Dr Advance Tax 236G (claimable against future income tax)
+    if (aitTotal > 0) {
+        journalLines.push({
+            GLCAID: accounts.ADVANCE_TAX_236G_PARTS.GLCAID,
+            Debit: aitTotal, Credit: 0,
+            Narration: `Advance tax 236G on parts purchase — ${narrationRef}`,
+            PartyID: null, JobCardID: null,
+        });
+    }
+
+    // (4) Cr Discount Received on Parts — PRIMARY discount (1st entry)
+    if (discountTotal > 0) {
+        journalLines.push({
+            GLCAID: accounts.PARTS_DISCOUNT_RECEIVED.GLCAID,
+            Debit: 0, Credit: discountTotal,
+            Narration: `Trade discount on parts — ${narrationRef}`,
+            PartyID: null, JobCardID: null,
+        });
+    }
+
+    // (5) Cr Discount Received on Parts — ADDITIONAL discount (2nd entry, SAME account)
+    if (addDiscountTotal > 0) {
+        journalLines.push({
+            GLCAID: accounts.PARTS_DISCOUNT_RECEIVED.GLCAID,
+            Debit: 0, Credit: addDiscountTotal,
+            Narration: `Additional discount on parts — ${narrationRef}`,
+            PartyID: null, JobCardID: null,
+        });
+    }
+
+    // (6) Cr supplier A/P leaf — balancing entry
     journalLines.push({
         GLCAID: supplierGL.GLCAID,
         Debit: 0, Credit: supplierCredit,
@@ -95,8 +139,8 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
         Narration: `Supplier payable — ${narrationRef}`,
     });
 
-    // ---- Balance check ----
-    const totalDr = round2(journalLines.reduce((a, l) => a + (l.Debit || 0), 0));
+    // Balance check
+    const totalDr = round2(journalLines.reduce((a, l) => a + (l.Debit  || 0), 0));
     const totalCr = round2(journalLines.reduce((a, l) => a + (l.Credit || 0), 0));
     if (Math.abs(totalDr - totalCr) > 0.01) {
         throw new Error(`GRN journal not balanced: Dr ${totalDr} vs Cr ${totalCr}`);
@@ -112,52 +156,11 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
         lines: journalLines,
         subsidiaryWrites,
         totals: {
-            grossSubtotal,
-            inventoryDebit, inputGSTTotal, supplierCredit,
+            inventoryDebit, inputGSTTotal, aitTotal,
+            discountTotal, addDiscountTotal, supplierCredit,
             totalDr, totalCr,
         },
     };
 }
 
-/**
- * Calculates per-line tax + landed cost for a GRN, given its header + lines.
- * Used by the save controller to snapshot at save time (§14.4).
- *
- * Returns: [{ PurchaseDetailID, TaxRate, TaxAmount, UnitLandedCost }]
- *
- * Inputs:
- *   header    — { NetDiscount (trade discount), FreightAmount, FreightTaxable }
- *   lines     — [{ PurchaseDetailID, Quantity, ItemRate }]
- *   gstRate   — current GST rate (decimal)
- */
-function snapshotGRNLines({ header, lines, gstRate }) {
-    const grossSum = lines.reduce((s, l) => s + (Number(l.Quantity) || 0) * (Number(l.ItemRate) || 0), 0);
-    if (grossSum === 0) return lines.map(l => ({ PurchaseDetailID: l.PurchaseDetailID, TaxRate: gstRate, TaxAmount: 0, UnitLandedCost: 0 }));
-
-    const tradeDiscount = Number(header.NetDiscount) || 0;
-    const freightAmount = Number(header.FreightAmount) || 0;
-    const freightTaxable = !!header.FreightTaxable;
-
-    return lines.map(l => {
-        const qty = Number(l.Quantity) || 0;
-        const rate = Number(l.ItemRate) || 0;
-        const lineGross = qty * rate;
-        const ratio = lineGross / grossSum;
-        const discShare = round2(ratio * tradeDiscount);
-        const freightShare = round2(ratio * freightAmount);
-        // Inventory unit cost includes freight + minus discount share
-        const landedLineTotal = round2(lineGross - discShare + freightShare);
-        const unitLandedCost = qty > 0 ? round2(landedLineTotal / qty) : 0;
-        // GST: on (lineGross + freightShare if taxable). Discount is post-tax so doesn't reduce GST base.
-        const lineTaxableBase = round2(lineGross + (freightTaxable ? freightShare : 0));
-        const lineTax = round2(lineTaxableBase * gstRate / 100);
-        return {
-            PurchaseDetailID: l.PurchaseDetailID,
-            TaxRate: gstRate,
-            TaxAmount: lineTax,
-            UnitLandedCost: unitLandedCost,
-        };
-    });
-}
-
-module.exports = { buildGRNJournalLines, snapshotGRNLines, round2 };
+module.exports = { buildGRNJournalLines, round2 };

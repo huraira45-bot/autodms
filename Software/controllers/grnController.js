@@ -1,8 +1,6 @@
 const { sql, dbConfig, getPool } = require('../config/db');
 const multer = require('multer');
 const path = require('path');
-const { resolveRate } = require('./taxRatesController');
-const { snapshotGRNLines } = require('../utils/grnJournalBuilder');
 
 // Configure Multer for File Uploads
 const storage = multer.diskStorage({
@@ -16,27 +14,27 @@ exports.uploadMiddleware = upload.single('BillImage');
 exports.saveGRN = async (req, res) => {
   try {
     const {
-      PurchaseDate, SupplierBillNo, PartyID, WHID,
-      Remarks, NetDiscount, FreightAmount, FreightTaxable, Items
+      PurchaseDate, SupplierBillNo, PartyID, WHID, NTN, Remarks, Items,
     } = req.body;
 
-    // Parsed items if sent as string (multipart form)
     const parsedItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
     const imagePath = req.file ? req.file.path : null;
-    // FreightTaxable from form (may arrive as 'true'/'false' string in multipart) — default true per Decision #15
-    const freightTaxableFlag = (FreightTaxable === false || FreightTaxable === 'false' || FreightTaxable === '0') ? 0 : 1;
 
     const pool = await getPool();
+    // sp_SavePurchaseGRN takes legacy header inputs. We pass zero for the
+    // header-level discount/freight (the new format has them per-line) and
+    // patch the per-line GST / AIT / additional-discount columns in the
+    // follow-up UPDATE block below.
     const result = await pool.request()
-      .input('PurchaseDate', sql.DateTime, PurchaseDate)
-      .input('SupplierBillNo', sql.NVarChar(100), SupplierBillNo)
-      .input('PartyID', sql.Int, PartyID)
-      .input('WHID', sql.Int, WHID)
-      .input('Remarks', sql.NVarChar(sql.MAX), Remarks || '')
-      .input('NetDiscount', sql.Decimal(18,2), NetDiscount || 0)
-      .input('FreightAmount', sql.Decimal(18,2), FreightAmount || 0)
-      .input('ImagePath', sql.NVarChar(sql.MAX), imagePath)
-      .input('ItemsJSON', sql.NVarChar(sql.MAX), JSON.stringify(parsedItems))
+      .input('PurchaseDate',   sql.DateTime,        PurchaseDate)
+      .input('SupplierBillNo', sql.NVarChar(100),   SupplierBillNo)
+      .input('PartyID',        sql.Int,             PartyID)
+      .input('WHID',           sql.Int,             WHID)
+      .input('Remarks',        sql.NVarChar(sql.MAX), Remarks || '')
+      .input('NetDiscount',    sql.Decimal(18,2),   0)
+      .input('FreightAmount',  sql.Decimal(18,2),   0)
+      .input('ImagePath',      sql.NVarChar(sql.MAX), imagePath)
+      .input('ItemsJSON',      sql.NVarChar(sql.MAX), JSON.stringify(parsedItems))
       .execute('sp_SavePurchaseGRN');
 
     const newId = result.recordset[0]?.NewPurchaseID;
@@ -45,38 +43,47 @@ exports.saveGRN = async (req, res) => {
         .query("UPDATE dms_DocCounters SET CurrentCounter = CurrentCounter + 1 OUTPUT INSERTED.CurrentCounter WHERE DocType = 'GRN'");
       const counter = counterRes.recordset[0]?.CurrentCounter ?? 0;
       const voucherNo = `GRN-${String(counter).padStart(4, '0')}`;
-      // Follow-up UPDATE on header: voucher no, creator metadata, freight-taxable flag
+
+      // Follow-up UPDATE on header: voucher number + creator metadata.
+      // (FreightTaxable retained for legacy schema; not used by new format.)
       await pool.request()
         .input('id', sql.Int, newId)
         .input('no', sql.NVarChar(50), voucherNo)
         .input('by', sql.Int, req.user?.userId || null)
         .input('byName', sql.NVarChar(100), req.user?.userName || '')
-        .input('ft', sql.Bit, freightTaxableFlag)
-        .query('UPDATE data_PurchaseInfo SET PurchaseVoucherNo=@no, CreatedBy=@by, CreatedByName=@byName, FreightTaxable=@ft WHERE PurchaseID=@id');
+        .query(`UPDATE data_PurchaseInfo
+                SET PurchaseVoucherNo=@no, CreatedBy=@by, CreatedByName=@byName,
+                    FreightTaxable=0
+                WHERE PurchaseID=@id`);
 
-      // Snapshot per-line tax + landed cost per §14.4 / §14.7
-      try {
-        const gstRate = await resolveRate('GST');
-        const lines = await pool.request()
-          .input('id', sql.Int, newId)
-          .query('SELECT PurchaseDetailID, Quantity, ItemRate FROM data_PurchaseDetail WHERE PurchaseID=@id');
-        const header = {
-          NetDiscount: NetDiscount || 0,
-          FreightAmount: FreightAmount || 0,
-          FreightTaxable: freightTaxableFlag === 1,
-        };
-        const snaps = snapshotGRNLines({ header, lines: lines.recordset, gstRate });
-        for (const s of snaps) {
-          await pool.request()
-            .input('id',  sql.Int,           s.PurchaseDetailID)
-            .input('tr',  sql.Decimal(8,4),  s.TaxRate)
-            .input('ta',  sql.Decimal(18,2), s.TaxAmount)
-            .input('ulc', sql.Decimal(18,4), s.UnitLandedCost)
-            .query('UPDATE data_PurchaseDetail SET TaxRate=@tr, TaxAmount=@ta, UnitLandedCost=@ulc WHERE PurchaseDetailID=@id');
-        }
-      } catch (snapErr) {
-        // Snapshot is best-effort — log but don't fail the save. Finalize will re-verify.
-        console.warn('GRN tax snapshot failed (non-fatal):', snapErr.message);
+      // Per-line patch: the SP only persists base columns. Apply the
+      // user-entered GST / additional-discount / AIT directly per line.
+      // UnitLandedCost = gross unit retail (ItemRate) per the owner decision
+      // — discounts post separately to PARTS_DISCOUNT_RECEIVED rather than
+      // being netted out of inventory cost.
+      const linesRes = await pool.request()
+        .input('id', sql.Int, newId)
+        .query('SELECT PurchaseDetailID FROM data_PurchaseDetail WHERE PurchaseID=@id ORDER BY PurchaseDetailID');
+      const detailIds = linesRes.recordset.map(r => r.PurchaseDetailID);
+
+      for (let i = 0; i < parsedItems.length && i < detailIds.length; i++) {
+        const li = parsedItems[i] || {};
+        const did = detailIds[i];
+        const itemRate = Number(li.ItemRate) || 0;
+        await pool.request()
+          .input('id',   sql.Int,           did)
+          .input('tr',   sql.Decimal(8,4),  Number(li.TaxRate) || 0)
+          .input('ta',   sql.Decimal(18,2), Number(li.TaxAmount) || 0)
+          .input('ulc',  sql.Decimal(18,4), itemRate)
+          .input('addp', sql.Decimal(8,3),  Number(li.AdditionalDiscountPct) || 0)
+          .input('adda', sql.Decimal(18,2), Number(li.AdditionalDiscountAmount) || 0)
+          .input('ait',  sql.Decimal(18,2), Number(li.AITAmount) || 0)
+          .query(`UPDATE data_PurchaseDetail
+                  SET TaxRate=@tr, TaxAmount=@ta, UnitLandedCost=@ulc,
+                      AdditionalDiscountPct=@addp,
+                      AdditionalDiscountAmount=@adda,
+                      AITAmount=@ait
+                  WHERE PurchaseDetailID=@id`);
       }
     }
     res.status(201).json({ message: 'GRN Saved Successfully', data: result.recordset });
@@ -141,11 +148,9 @@ exports.updateGRN = async (req, res) => {
         }
 
         const {
-            PurchaseDate, SupplierBillNo, PartyID, WHID,
-            Remarks, NetDiscount, FreightAmount, FreightTaxable, Items
+            PurchaseDate, SupplierBillNo, PartyID, WHID, Remarks, Items,
         } = req.body;
         const parsedItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
-        const freightTaxableFlag = (FreightTaxable === false || FreightTaxable === 'false' || FreightTaxable === '0') ? 0 : 1;
 
         await new sql.Request(tx)
             .input('id',   sql.Int,            id)
@@ -154,13 +159,10 @@ exports.updateGRN = async (req, res) => {
             .input('pid',  sql.Int,            PartyID)
             .input('whid', sql.Int,            WHID)
             .input('rem',  sql.NVarChar(sql.MAX), Remarks || '')
-            .input('nd',   sql.Decimal(18,2),  NetDiscount || 0)
-            .input('fa',   sql.Decimal(18,2),  FreightAmount || 0)
-            .input('ft',   sql.Bit,            freightTaxableFlag)
             .query(`UPDATE data_PurchaseInfo
                     SET PurchaseDate=@pd, FBRInvoiceNumber=@sbn, PartyID=@pid,
                         WHID=@whid, Remarks=@rem,
-                        DiscountAmount=@nd, FreightAmount=@fa, FreightTaxable=@ft
+                        DiscountAmount=0, FreightAmount=0, FreightTaxable=0
                     WHERE PurchaseID=@id`);
 
         await new sql.Request(tx)
@@ -168,19 +170,30 @@ exports.updateGRN = async (req, res) => {
             .query('DELETE FROM data_PurchaseDetail WHERE PurchaseID=@id');
 
         for (const li of (parsedItems || [])) {
+            const itemRate = parseFloat(li.ItemRate) || 0;
             await new sql.Request(tx)
-                .input('pid',  sql.Int,            id)
-                .input('iid',  sql.Int,            parseInt(li.ItemId))
-                .input('qty',  sql.Decimal(18,3),  parseFloat(li.Quantity) || 0)
-                .input('rate', sql.Decimal(18,2),  parseFloat(li.ItemRate) || 0)
-                .input('dp',   sql.Decimal(18,2),  parseFloat(li.DiscountPercentage) || 0)
-                .input('da',   sql.Decimal(18,2),  parseFloat(li.DiscountAmount) || 0)
-                .input('na',   sql.Decimal(18,2),  parseFloat(li.NetAmount) || 0)
-                .input('sr',   sql.Decimal(18,2),  parseFloat(li.StockRate) || 0)
+                .input('pid',   sql.Int,            id)
+                .input('iid',   sql.Int,            parseInt(li.ItemId))
+                .input('qty',   sql.Decimal(18,3),  parseFloat(li.Quantity) || 0)
+                .input('rate',  sql.Decimal(18,2),  itemRate)
+                .input('dp',    sql.Decimal(8,3),   parseFloat(li.DiscountPercentage) || 0)
+                .input('da',    sql.Decimal(18,2),  parseFloat(li.DiscountAmount) || 0)
+                .input('na',    sql.Decimal(18,2),  parseFloat(li.NetAmount) || 0)
+                .input('sr',    sql.Decimal(18,2),  parseFloat(li.StockRate) || 0)
+                .input('tr',    sql.Decimal(8,4),   parseFloat(li.TaxRate) || 0)
+                .input('ta',    sql.Decimal(18,2),  parseFloat(li.TaxAmount) || 0)
+                .input('addp',  sql.Decimal(8,3),   parseFloat(li.AdditionalDiscountPct) || 0)
+                .input('adda',  sql.Decimal(18,2),  parseFloat(li.AdditionalDiscountAmount) || 0)
+                .input('ait',   sql.Decimal(18,2),  parseFloat(li.AITAmount) || 0)
+                .input('ulc',   sql.Decimal(18,4),  itemRate)
                 .query(`INSERT INTO data_PurchaseDetail
                             (PurchaseID, ItemId, Quantity, ItemRate,
-                             DiscountPercentage, DiscountAmount, NetAmount, StockRate)
-                        VALUES (@pid, @iid, @qty, @rate, @dp, @da, @na, @sr)`);
+                             DiscountPercentage, DiscountAmount, NetAmount, StockRate,
+                             TaxRate, TaxAmount,
+                             AdditionalDiscountPct, AdditionalDiscountAmount, AITAmount,
+                             UnitLandedCost)
+                        VALUES (@pid, @iid, @qty, @rate, @dp, @da, @na, @sr,
+                                @tr, @ta, @addp, @adda, @ait, @ulc)`);
         }
 
         await tx.commit();
