@@ -184,6 +184,24 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             notify({ type: 'warning', title: 'Voucher cannot be empty', message: 'Add at least one debit and credit line.' });
             return;
         }
+        // Every line needs an account. For CPV/CRV row 0 is the Cash Book and for
+        // BPV/BRV row 0 is a bank — if those didn't load (e.g. user role can't read
+        // /system-accounts), row 0's GLCAID stays empty and cash silently never
+        // posts. Catch that here with a clear message.
+        const missingIdx = items.findIndex(it => !it.GLCAID);
+        if (missingIdx >= 0) {
+            const isCashOrBankRow0 = missingIdx === 0 && (isFixedCash || isFixedBank);
+            notify({
+                type: 'warning',
+                title: 'Account missing',
+                message: isCashOrBankRow0
+                    ? (isFixedCash
+                        ? 'Cash Book account is not configured. Ask admin to assign CASH_BOOK in Accounting Setup.'
+                        : 'Bank account not selected on line 1. Pick a bank to continue.')
+                    : `Line ${missingIdx + 1} has no account selected.`,
+            });
+            return;
+        }
         setBusy(true); setMsg(null);
         try {
             let resultId, resultNo;

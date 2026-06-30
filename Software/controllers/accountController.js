@@ -370,6 +370,9 @@ exports.updateVoucher = async (req, res) => {
         if (dateErr) return res.status(400).json({ error: dateErr });
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
+        const badIdx = Items.findIndex(it => !it.GLCAID);
+        if (badIdx >= 0)
+            return res.status(400).json({ error: `Line ${badIdx + 1} is missing an account.` });
 
         const totalAmount = Items.reduce((s, i) => s + parseFloat(i.Debit || 0), 0);
         const totalCredit = Items.reduce((s, i) => s + parseFloat(i.Credit || 0), 0);
@@ -458,6 +461,17 @@ exports.saveVoucher = async (req, res) => {
         const { VoucherDate, VoucherTypeID, Remarks, Items } = req.body;
         const dateErr = checkVoucherDateIsToday(VoucherDate);
         if (dateErr) return res.status(400).json({ error: dateErr });
+        // Defensive guard: every line must have a GLCAID. A blank GLCAID slips through
+        // as a NULL into data_FinanceVoucherDetail and the line becomes invisible to
+        // every account-scoped report — for CPV/CRV that means the cash leg never
+        // shows up in the trial balance / cash ledger.
+        if (!Array.isArray(Items) || !Items.length) {
+            return res.status(400).json({ error: 'Voucher must have at least one line.' });
+        }
+        const badIdx = Items.findIndex(it => !it.GLCAID);
+        if (badIdx >= 0) {
+            return res.status(400).json({ error: `Line ${badIdx + 1} is missing an account.` });
+        }
         const totalAmount = Items.reduce((sum, i) => sum + parseFloat(i.Debit || 0), 0);
 
         const pool = await getPool();
