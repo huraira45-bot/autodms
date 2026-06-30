@@ -151,7 +151,9 @@ function buildGRNJournalLines({ grn, lines = [], accounts, supplierGL = null }) 
             SourceDocType: 'GRN',
             SourceDocID: grn.PurchaseID,
             Narration: `GRN finalize — ${narrationRef}`,
-            TotalAmount: supplierCredit,
+            // Voucher TotalAmount = total Dr (= total Cr). Reflects the full
+            // journal turnover, not just the supplier-payable balancing leg.
+            TotalAmount: totalDr,
         },
         lines: journalLines,
         subsidiaryWrites,
