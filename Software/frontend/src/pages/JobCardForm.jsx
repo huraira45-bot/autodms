@@ -151,6 +151,20 @@ export default function JobCardForm() {
         setTaxRates(rates);
         if (typesRes.data.length > 0) setForm(p => ({ ...p, JobTypeId: p.JobTypeId || typesRes.data[0].JobCardTypeId }));
 
+        // On NEW JC, lock Service Advisor to the logged-in user's linked
+        // employee. The whoever-opens-the-JC-is-the-advisor rule — and the
+        // <select> below disables the picker so they can't change it.
+        if (!isEdit && user?.employeeId) {
+          const me = (empRes.data || []).find(e => Number(e.EmployeeID) === Number(user.employeeId));
+          if (me) {
+            setForm(p => ({
+              ...p,
+              ServiceAdvisorID: String(me.EmployeeID),
+              ServiceAdvisor:   me.EmployeeName,
+            }));
+          }
+        }
+
         let careOffsList = [];
         try {
           const coRes = await axios.get(`${API_BASE}/care-offs/active`);
@@ -625,22 +639,33 @@ export default function JobCardForm() {
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>Service Advisor</label>
-                  <select
-                    style={S.select}
-                    value={form.ServiceAdvisorID || ''}
-                    onChange={e => {
-                      const selectedId = e.target.value;
-                      const picked = allEmployees.find(emp => String(emp.EmployeeID) === selectedId);
-                      f('ServiceAdvisorID', selectedId);
-                      f('ServiceAdvisor', picked ? picked.EmployeeName : '');
-                    }}
-                    disabled={disabled}
-                  >
-                    <option value="">— Select advisor —</option>
-                    {allEmployees.map(emp => (
-                      <option key={emp.EmployeeID} value={emp.EmployeeID}>{emp.EmployeeName}</option>
-                    ))}
-                  </select>
+                  {/* Locked to the logged-in user on new JCs (non-admin). Admin can
+                      still override. Once finalized the whole form is read-only. */}
+                  {(!isEdit && user?.groupId !== 1) ? (
+                    <input
+                      style={{ ...S.input, background: '#e8edf2' }}
+                      value={form.ServiceAdvisor || ''}
+                      readOnly
+                      title="Service Advisor is set to the user creating the job card."
+                    />
+                  ) : (
+                    <select
+                      style={S.select}
+                      value={form.ServiceAdvisorID || ''}
+                      onChange={e => {
+                        const selectedId = e.target.value;
+                        const picked = allEmployees.find(emp => String(emp.EmployeeID) === selectedId);
+                        f('ServiceAdvisorID', selectedId);
+                        f('ServiceAdvisor', picked ? picked.EmployeeName : '');
+                      }}
+                      disabled={disabled}
+                    >
+                      <option value="">— Select advisor —</option>
+                      {allEmployees.map(emp => (
+                        <option key={emp.EmployeeID} value={emp.EmployeeID}>{emp.EmployeeName}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>Repeat R.O.ID</label>
