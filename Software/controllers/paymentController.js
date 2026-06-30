@@ -312,33 +312,56 @@ exports.getStoreSaleBalance = async (req, res) => {
  */
 exports.getRecentForParty = async (req, res) => {
     try {
-        const partyId = parseInt(req.query.partyId);
+        const partyId = req.query.partyId ? parseInt(req.query.partyId) : null;
         const direction = (req.query.direction || 'receive').toLowerCase();
         const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-        if (!partyId) return res.status(400).json({ error: 'partyId is required.' });
+        // Default scope: if no partyId is given, return the LOGGED-IN user's
+        // recent receipts/payments across all parties. This is the "show me
+        // the receipts I posted" view the cashier wants on the Receive
+        // Payment screen when no party is selected yet.
+        const mine = !partyId;
 
         const types = direction === 'make' ? ['CPV', 'BPV'] : ['CRV', 'BRV'];
+        const typesIn = types.map(t => `'${t}'`).join(',');
 
         const pool = await getPool();
-        const r = await pool.request()
-            .input('pid', sql.Int, partyId)
-            .query(`
-                SELECT TOP ${limit}
-                       v.VoucherID, v.VoucherNo, v.VoucherDate, vt.Title AS VoucherType,
-                       v.TotalAmount, v.Remarks, v.Status,
-                       (SELECT SUM(ISNULL(d2.Debit,0)+ISNULL(d2.Credit,0))/2
-                          FROM data_FinanceVoucherDetail d2
-                          WHERE d2.VoucherID = v.VoucherID AND d2.PartyID = @pid) AS PartyAmount
-                FROM data_FinanceVoucherInfo v
-                JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+        const reqBuilder = pool.request();
+        let partyAmtExpr = 'NULL';
+        let whereClause;
+
+        if (mine) {
+            reqBuilder.input('uid', sql.Int, req.user?.userId || 0);
+            whereClause = `
                 WHERE v.Status IN ('Posted','Reversed')
-                  AND vt.Title IN (${types.map(t => `'${t}'`).join(',')})
+                  AND vt.Title IN (${typesIn})
+                  AND v.CreatedBy = @uid
+            `;
+        } else {
+            reqBuilder.input('pid', sql.Int, partyId);
+            partyAmtExpr = `(SELECT SUM(ISNULL(d2.Debit,0)+ISNULL(d2.Credit,0))/2
+                              FROM data_FinanceVoucherDetail d2
+                              WHERE d2.VoucherID = v.VoucherID AND d2.PartyID = @pid)`;
+            whereClause = `
+                WHERE v.Status IN ('Posted','Reversed')
+                  AND vt.Title IN (${typesIn})
                   AND EXISTS (
                       SELECT 1 FROM data_FinanceVoucherDetail d
                       WHERE d.VoucherID = v.VoucherID AND d.PartyID = @pid
                   )
-                ORDER BY v.VoucherDate DESC, v.VoucherID DESC
-            `);
+            `;
+        }
+
+        const r = await reqBuilder.query(`
+            SELECT TOP ${limit}
+                   v.VoucherID, v.VoucherNo, v.VoucherDate, vt.Title AS VoucherType,
+                   v.TotalAmount, v.Remarks, v.Status,
+                   v.SourceDocType, v.SourceDocID, v.CreatedByName,
+                   ${partyAmtExpr} AS PartyAmount
+            FROM data_FinanceVoucherInfo v
+            JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+            ${whereClause}
+            ORDER BY v.VoucherDate DESC, v.VoucherID DESC
+        `);
         res.json(r.recordset);
     } catch (err) {
         console.error('getRecentForParty:', err);

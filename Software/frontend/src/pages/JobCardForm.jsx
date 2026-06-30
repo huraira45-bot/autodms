@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Lock, Unlock, UserCircle, Loader2, Search, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
@@ -367,22 +367,26 @@ export default function JobCardForm() {
     setLabourItems(newItems);
   };
 
+  // Build the save payload from current state. Pure — used by both the
+  // manual save button and the auto-save hook below.
+  const buildSavePayload = () => ({
+    ...form,
+    LabourItems: labourItems,
+    Accessories: accessories,
+    DamageMarks: damageMarks,
+    VOCRemarks: JSON.stringify(vocChecks),
+    CareOffID: careOff?.CareOffID || null,
+    CareOffName: careOff?.EmployeeName || null,
+  });
+
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     if (!form.EndUserID) { flash('Please select a customer.', true); return; }
     if (!form.jobCode) { flash('Job Number is required.', true); return; }
     if (!kycCleared) { flash('Please acknowledge the KYC flag(s) on this chassis before saving.', true); return; }
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        LabourItems: labourItems,
-        Accessories: accessories,
-        DamageMarks: damageMarks,
-        VOCRemarks: JSON.stringify(vocChecks),
-        CareOffID: careOff?.CareOffID || null,
-        CareOffName: careOff?.EmployeeName || null,
-      };
+      const payload = buildSavePayload();
       if (isEdit) {
         payload.JobCardId = parseInt(id);
         await axios.post(`${API}/job-cards`, payload);
@@ -393,10 +397,58 @@ export default function JobCardForm() {
       }
     } catch (err) {
       const msg = err.response?.data?.error || err.message;
-      if (err.response?.status === 423) flash(msg, true);
-      else flash(msg, true);
+      flash(msg, true);
     } finally { setSaving(false); }
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Auto-save: debounce 2s after last edit, then send the same payload
+  // handleSubmit would build. Skips while loading, while saving, while the
+  // JC is finalized, until both minimum required fields (customer + job
+  // code) are filled, and when nothing has changed since the last save.
+  // Tracks the last-saved snapshot to avoid duplicate sends.
+  // ─────────────────────────────────────────────────────────────────────────
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle');   // idle | saving | saved | error | conflict
+  const [autoSaveFailures, setAutoSaveFailures] = useState(0);
+  const lastSavedSnapshotRef = useRef('');
+
+  useEffect(() => {
+    if (loading || saving || disabled) return;                // no save while loading / finalized
+    if (!form.EndUserID || !form.jobCode) return;             // need minimum fields
+    if (!kycCleared) return;                                  // KYC must be acknowledged
+
+    const snapshot = JSON.stringify(buildSavePayload());
+    if (snapshot === lastSavedSnapshotRef.current) return;    // nothing changed
+
+    setAutoSaveStatus('pending');
+    const timer = setTimeout(async () => {
+      setAutoSaveStatus('saving');
+      try {
+        const payload = buildSavePayload();
+        if (isEdit) {
+          payload.JobCardId = parseInt(id);
+          await axios.post(`${API}/job-cards`, payload);
+        } else {
+          const res = await axios.post(`${API}/job-cards`, payload);
+          // First save created the JC. Switch URL to /jobs/{newId} so subsequent
+          // auto-saves run in edit mode.
+          navigate(`/workshop/jobs/${res.data.JobCardId}`, { replace: true });
+        }
+        lastSavedSnapshotRef.current = snapshot;
+        setAutoSaveStatus('saved');
+        setAutoSaveFailures(0);
+      } catch (err) {
+        if (err.response?.status === 423) {
+          setAutoSaveStatus('conflict');                      // JC was finalized mid-edit
+        } else {
+          setAutoSaveStatus('error');
+          setAutoSaveFailures(c => c + 1);
+        }
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, labourItems, accessories, damageMarks, vocChecks, careOff, isEdit, id, loading, saving, disabled, kycCleared]);
 
   // Insurance tab — update a single row's % and recompute Dep Amount on the
   // GST-inclusive total (server does the same calc authoritatively on save).
@@ -523,6 +575,17 @@ export default function JobCardForm() {
 
   return (
     <div style={S.page}>
+      {/* Persistent banner when auto-save has failed repeatedly. */}
+      {autoSaveFailures >= 3 && autoSaveStatus === 'error' && (
+        <div className="no-print" style={{
+          background: '#fee2e2', color: '#7f1d1d', padding: '8px 14px',
+          fontSize: 12, fontWeight: 600, borderBottom: '1px solid #fecaca',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>⚠ Auto-save has failed {autoSaveFailures} times in a row. Your changes are not saved on the server.</span>
+          <button style={{ ...S.toolBtn, background: '#fff' }} onClick={handleSubmit} disabled={saving}>Retry now</button>
+        </div>
+      )}
       {/* Title bar */}
       <div style={S.titleBar}>
         🔧 Service → Repair Order Information
@@ -537,7 +600,39 @@ export default function JobCardForm() {
         <button style={{ ...S.toolBtn, opacity: nav.lastId ? 1 : 0.4 }} onClick={() => nav.lastId && navigate(`/workshop/jobs/${nav.lastId}`)} title="Last"><ChevronLast size={14} /></button>
         <div style={{ width: 1, background: '#9aaac0', height: 20, margin: '0 4px' }} />
         <button style={S.toolBtn} onClick={() => navigate('/workshop/jobs/new')}>📄 New</button>
-        {!disabled && <button style={S.toolBtn} onClick={handleSubmit} disabled={saving}>💾 {saving ? 'Saving…' : 'Save'}</button>}
+        {!disabled && <button style={S.toolBtn} onClick={handleSubmit} disabled={saving}>💾 {saving ? 'Saving…' : 'Save now'}</button>}
+        {/* Auto-save status indicator (Google Docs feel). */}
+        {!disabled && (
+          <span style={{
+            fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 3,
+            background: autoSaveStatus === 'saved'    ? '#dcfce7'
+                      : autoSaveStatus === 'saving'   ? '#fef3c7'
+                      : autoSaveStatus === 'pending'  ? '#e0f2fe'
+                      : autoSaveStatus === 'error'    ? '#fee2e2'
+                      : autoSaveStatus === 'conflict' ? '#ffe4e6'
+                      : '#f1f5f9',
+            color:     autoSaveStatus === 'saved'    ? '#166534'
+                      : autoSaveStatus === 'saving'   ? '#92400e'
+                      : autoSaveStatus === 'pending'  ? '#075985'
+                      : autoSaveStatus === 'error'    ? '#991b1b'
+                      : autoSaveStatus === 'conflict' ? '#9f1239'
+                      : '#475569',
+            border: '1px solid #cbd5e1',
+          }} title={
+            autoSaveStatus === 'conflict'
+              ? 'This Job Card was finalized in another session. Reload to continue editing.'
+              : autoSaveStatus === 'error'
+                ? 'Auto-save failed — your changes are not yet saved. Click "Save now" to retry.'
+                : 'Auto-saves 2 seconds after you stop typing.'
+          }>
+            {autoSaveStatus === 'saved'    ? '✓ Saved'
+            : autoSaveStatus === 'saving'   ? '… Saving'
+            : autoSaveStatus === 'pending'  ? '… Pending'
+            : autoSaveStatus === 'error'    ? '⚠ Save failed'
+            : autoSaveStatus === 'conflict' ? '⚠ Finalized — reload'
+            : 'Auto-save on'}
+          </span>
+        )}
         <button style={S.toolBtn} onClick={() => navigate('/workshop/jobs')}>✖ Close</button>
         <div style={{ width: 1, background: '#9aaac0', height: 20, margin: '0 4px' }} />
         {isEdit && (

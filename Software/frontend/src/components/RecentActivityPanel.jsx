@@ -18,6 +18,28 @@ const STATUS_COLOR = {
     Draft:    { bg: '#f1f5f9', col: '#475569' }
 };
 
+// Friendly labels for the SourceDocType column on the voucher header.
+// The user wants to see at a glance whether a posted receipt was against a
+// Job Card walk-in, a Store Sale, a JC depreciation receipt, etc.
+const SOURCE_LABEL = {
+    JOBCARD:            'Job Card',
+    JOBCARD_WALKIN:     'Walk-in JC',
+    JOBCARD_DEP:        'JC Dep.',
+    STORE_SALE:         'Store Sale',
+    SSR:                'Sale Return',
+    GRN:                'GRN',
+    GRTN:               'GRN Return',
+    POS_SETTLEMENT:     'POS',
+    SALES_BOOKING:      'Sales Bk.',
+    MANUAL:             'Manual',
+};
+const sourceTone = {
+    JOBCARD: '#dbeafe',           JOBCARD_WALKIN: '#dbeafe',     JOBCARD_DEP: '#fef3c7',
+    STORE_SALE: '#ccfbf1',        SSR: '#fee2e2',                GRN: '#ede9fe',
+    GRTN: '#fde2e2',              POS_SETTLEMENT: '#fce7f3',     SALES_BOOKING: '#dcfce7',
+    MANUAL: '#f1f5f9',
+};
+
 /**
  * Compact recent-activity sidebar. Used by Receive Payment / Make Payment / POS Settlement.
  *
@@ -52,8 +74,12 @@ export default function RecentActivityPanel({
     };
 
     useEffect(() => {
-        const enabled = params && Object.values(params).every(v => v !== undefined && v !== null && v !== '');
-        if (!enabled) { setRows([]); return; }
+        // The endpoint should decide what to return when optional params (like
+        // partyId) are missing — e.g. /payments/recent without partyId now
+        // returns the logged-in user's own receipts. Only skip when a truly
+        // required field signals "not enough info to fetch" via an explicit
+        // null params value.
+        if (!params) { setRows([]); return; }
         reload();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [JSON.stringify(params)]);
@@ -101,11 +127,22 @@ export default function RecentActivityPanel({
                                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = '#f8fafc'; }}
                                 onMouseLeave={e => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.background = 'transparent'; }}
                             >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 4 }}>
                                     <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#475569' }}>{r.VoucherNo}</span>
-                                    <span style={{ background: sc.bg, color: sc.col, padding: '1px 6px', borderRadius: 99, fontSize: '0.65rem', fontWeight: 700 }}>
-                                        {r.Status}
-                                    </span>
+                                    <div style={{ display: 'flex', gap: 4 }}>
+                                        {r.SourceDocType && (
+                                            <span style={{
+                                                background: sourceTone[r.SourceDocType] || '#f1f5f9',
+                                                color: '#334155', padding: '1px 6px', borderRadius: 99,
+                                                fontSize: '0.62rem', fontWeight: 700, letterSpacing: 0.2,
+                                            }}>
+                                                {SOURCE_LABEL[r.SourceDocType] || r.SourceDocType}
+                                            </span>
+                                        )}
+                                        <span style={{ background: sc.bg, color: sc.col, padding: '1px 6px', borderRadius: 99, fontSize: '0.65rem', fontWeight: 700 }}>
+                                            {r.Status}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <span style={{ color: '#64748b' }}>{new Date(r.VoucherDate).toLocaleDateString()}</span>

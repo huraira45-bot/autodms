@@ -878,11 +878,11 @@ export default function ReceivePayment() {
       </div>
       <div>
         <RecentActivityPanel
-          title="Recent Receipts"
+          title={selectedParty ? 'Recent Receipts (this party)' : 'Recent Receipts (you posted)'}
           endpoint="/payments/recent"
           params={{ partyId: selectedParty?.PartyID, direction: 'receive', limit: 12 }}
-          emptyMessage={mode === 'named' && !selectedParty ? 'Select a customer to see their recent receipts.' : 'No recent receipts.'}
-          amountField="PartyAmount"
+          emptyMessage="No recent receipts."
+          amountField={selectedParty ? 'PartyAmount' : 'TotalAmount'}
         />
       </div>
     </div>
