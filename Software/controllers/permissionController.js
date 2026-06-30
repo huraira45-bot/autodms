@@ -169,27 +169,40 @@ exports.createUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
-        const { GroupID, Active, Password, LinkedEmployeeID } = req.body;
+        const { UserName, GroupID, Active, Password, LinkedEmployeeID } = req.body;
         const pool = await getPool();
         const linkedEmp = LinkedEmployeeID ? parseInt(LinkedEmployeeID) : null;
 
+        // Username changes — guard against duplicates.
+        if (UserName && UserName.trim()) {
+            const dup = await pool.request()
+                .input('uname',  sql.NVarChar(100), UserName.trim())
+                .input('userId', sql.Int, userId)
+                .query('SELECT Userid FROM GLUser WHERE UserName=@uname AND Userid<>@userId');
+            if (dup.recordset.length) {
+                return res.status(409).json({ error: 'Username already exists' });
+            }
+        }
+
+        // Build the UPDATE dynamically so callers can omit fields they don't want
+        // to change. UserName is included when provided (non-empty); Password only
+        // when present.
+        const sets = ['GroupID=@groupId', 'Active=@active', 'LinkedEmployeeID=@linkedEmp'];
+        const r = pool.request()
+            .input('groupId',   sql.Int, parseInt(GroupID))
+            .input('active',    sql.Bit, Active ? 1 : 0)
+            .input('linkedEmp', sql.Int, linkedEmp)
+            .input('userId',    sql.Int, userId);
+        if (UserName && UserName.trim()) {
+            sets.push('UserName=@uname');
+            r.input('uname', sql.NVarChar(100), UserName.trim());
+        }
         if (Password) {
             const hash = await bcrypt.hash(Password, 10);
-            await pool.request()
-                .input('pwd', sql.NVarChar(200), hash)
-                .input('groupId', sql.Int, parseInt(GroupID))
-                .input('active', sql.Bit, Active ? 1 : 0)
-                .input('linkedEmp', sql.Int, linkedEmp)
-                .input('userId', sql.Int, userId)
-                .query('UPDATE GLUser SET UserPassword=@pwd, GroupID=@groupId, Active=@active, LinkedEmployeeID=@linkedEmp WHERE Userid=@userId');
-        } else {
-            await pool.request()
-                .input('groupId', sql.Int, parseInt(GroupID))
-                .input('active', sql.Bit, Active ? 1 : 0)
-                .input('linkedEmp', sql.Int, linkedEmp)
-                .input('userId', sql.Int, userId)
-                .query('UPDATE GLUser SET GroupID=@groupId, Active=@active, LinkedEmployeeID=@linkedEmp WHERE Userid=@userId');
+            sets.push('UserPassword=@pwd');
+            r.input('pwd', sql.NVarChar(200), hash);
         }
+        await r.query(`UPDATE GLUser SET ${sets.join(', ')} WHERE Userid=@userId`);
         res.json({ message: 'User updated' });
     } catch (err) {
         res.status(500).json({ error: 'Server error', details: err.message });

@@ -120,11 +120,9 @@ export default function UsersAdmin() {
                 <div style={overlay}>
                     <div style={modalBox}>
                         <h3 style={{marginBottom:16}}>{modal === 'create' ? 'Create User' : 'Edit User'}</h3>
-                        {modal === 'create' && (
-                            <Field label="Username">
-                                <input className="form-input" value={form.UserName} onChange={e => setForm({...form, UserName: e.target.value})} />
-                            </Field>
-                        )}
+                        <Field label="Username">
+                            <input className="form-input" value={form.UserName} onChange={e => setForm({...form, UserName: e.target.value})} />
+                        </Field>
                         <Field label="Role">
                             <select className="form-input" value={form.GroupID} onChange={e => setForm({...form, GroupID: parseInt(e.target.value)})}>
                                 <option value="">-- Select Role --</option>
