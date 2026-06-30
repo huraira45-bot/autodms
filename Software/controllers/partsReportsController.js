@@ -174,20 +174,24 @@ exports.partsSalesRegister = async (req, res) => {
     try {
         const { from, to } = parseRange(req);
         const pool = await getPool();
+        // AutoDMS store sales live in data_StoreSaleInfo / data_StoreSaleDetail
+        // (sp_SaveStoreSale writes them). The earlier query targeted the legacy
+        // FIS tables data_SaleInfo / data_SaleDetail which AutoDMS never writes
+        // to — that's why the report was always empty.
         const r = await pool.request()
             .input('from', sql.DateTime, from)
             .input('to',   sql.DateTime, to)
             .query(`
-                SELECT s.SaleID, s.SaleVoucherNo, s.SaleDate, s.NetAmount AS InvoiceNet,
-                       p.PartyName AS Customer,
-                       d.SaleDetailID, d.ItemId, i.ItemNumber AS ItemCode, i.ItenName AS ItemName,
-                       d.Quantity, d.ItemRate, d.NetAmount AS LineNet,
-                       (ISNULL(d.TaxOneAmount,0) + ISNULL(d.TaxTwoAmount,0)) AS Tax,
+                SELECT s.SaleID, s.InvoiceNo AS SaleVoucherNo, s.SaleDate, s.NetPayable AS InvoiceNet,
+                       ISNULL(p.PartyName, s.CustomerName) AS Customer,
+                       d.SaleDetailID, d.ItemID, i.ItemNumber AS ItemCode, i.ItenName AS ItemName,
+                       d.Quantity, d.SaleRate AS ItemRate, d.NetAmount AS LineNet,
+                       ISNULL(d.TaxAmount, 0) AS Tax,
                        d.DiscountAmount
-                FROM data_SaleDetail d
-                INNER JOIN data_SaleInfo s ON d.SaleID = s.SaleID
+                FROM data_StoreSaleDetail d
+                INNER JOIN data_StoreSaleInfo s ON d.SaleID = s.SaleID
                 LEFT JOIN gen_PartiesInfo p ON s.PartyID = p.PartyID
-                LEFT JOIN InventItems i    ON d.ItemId = i.ItemId
+                LEFT JOIN InventItems i     ON d.ItemID = i.ItemId
                 WHERE s.SaleDate BETWEEN @from AND @to
                 ORDER BY s.SaleDate DESC, s.SaleID DESC`);
 
