@@ -33,41 +33,57 @@ exports.addAccount = async (req, res) => {
         await transaction.begin();
 
         try {
-            let nextCode = '';
             const level = parseInt(GLLevel);
+            const lastPartLength = level === 2 ? 2 : 3;
 
-            if (level === 1) {
-                nextCode = ClassRoot.toString();
-            } else {
-                const result = await transaction.request()
-                    .input('parentLike', sql.NVarChar(50), `${ParentCode}%`)
-                    .input('level', sql.Int, level)
-                    .query('SELECT MAX(GLCode) as maxCode FROM GLChartOFAccount WHERE GLLevel = @level AND GLCode LIKE @parentLike');
-
-                const maxCode = result.recordset[0].maxCode;
-                if (!maxCode) {
-                    nextCode = ParentCode + (level === 2 ? '01' : '001');
+            // Race-safe next-code allocation: retry the MAX+1 → INSERT dance
+            // until it succeeds. The unique index on GLCode (migration 059)
+            // fails the INSERT if another admin grabs the same slot between
+            // our MAX read and INSERT — catch that and try the next suffix.
+            // Cap retries so we don't spin forever if the parent bucket is
+            // genuinely full.
+            let nextCode = '';
+            let created = false;
+            for (let attempt = 0; attempt < 20 && !created; attempt++) {
+                if (level === 1) {
+                    nextCode = ClassRoot.toString();
                 } else {
-                    const lastPartLength = level === 2 ? 2 : 3;
-                    const prefix = maxCode.substring(0, maxCode.length - lastPartLength);
-                    const suffix = parseInt(maxCode.substring(maxCode.length - lastPartLength)) + 1;
-                    nextCode = prefix + suffix.toString().padStart(lastPartLength, '0');
+                    const result = await transaction.request()
+                        .input('parentLike', sql.NVarChar(50), `${ParentCode}%`)
+                        .input('level', sql.Int, level)
+                        .query('SELECT MAX(GLCode) as maxCode FROM GLChartOFAccount WHERE GLLevel = @level AND GLCode LIKE @parentLike');
+                    const maxCode = result.recordset[0].maxCode;
+                    if (!maxCode) {
+                        nextCode = ParentCode + (level === 2 ? '01' : '001');
+                    } else {
+                        const prefix = maxCode.substring(0, maxCode.length - lastPartLength);
+                        const suffix = parseInt(maxCode.substring(maxCode.length - lastPartLength)) + 1 + attempt;
+                        nextCode = prefix + suffix.toString().padStart(lastPartLength, '0');
+                    }
+                }
+
+                try {
+                    await transaction.request()
+                        .input('GLTitle', sql.NVarChar(200), GLTitle)
+                        .input('GLCode', sql.NVarChar(50), nextCode)
+                        .input('GLLevel', sql.Int, level)
+                        .input('GLNature', sql.TinyInt, GLNature === 'Debit' ? 1 : 2)
+                        .input('GLType', sql.Int, 0)
+                        .input('isParent', sql.Int, isParent ? 1 : 0)
+                        .input('Companyid', sql.Int, 1)
+                        .input('Status', sql.Bit, 1)
+                        .input('AccountLevelOne', sql.NVarChar(50), '01')
+                        .input('ReadOnly', sql.Bit, 0)
+                        .query(`INSERT INTO GLChartOFAccount (GLTitle, GLCode, GLLevel, GLNature, GLType, isParent, Companyid, Status, AccountLevelOne, ReadOnly)
+                                VALUES (@GLTitle, @GLCode, @GLLevel, @GLNature, @GLType, @isParent, @Companyid, @Status, @AccountLevelOne, @ReadOnly)`);
+                    created = true;
+                } catch (insErr) {
+                    // 2601 = unique-index violation, 2627 = PK/UNIQUE-constraint violation
+                    if (insErr.number !== 2601 && insErr.number !== 2627) throw insErr;
+                    if (level === 1) throw insErr; // class roots can't retry — pick a different ClassRoot
                 }
             }
-
-            await transaction.request()
-                .input('GLTitle', sql.NVarChar(200), GLTitle)
-                .input('GLCode', sql.NVarChar(50), nextCode)
-                .input('GLLevel', sql.Int, level)
-                .input('GLNature', sql.TinyInt, GLNature === 'Debit' ? 1 : 2)
-                .input('GLType', sql.Int, 0)
-                .input('isParent', sql.Int, isParent ? 1 : 0)
-                .input('Companyid', sql.Int, 1)
-                .input('Status', sql.Bit, 1)
-                .input('AccountLevelOne', sql.NVarChar(50), '01')
-                .input('ReadOnly', sql.Bit, 0)
-                .query(`INSERT INTO GLChartOFAccount (GLTitle, GLCode, GLLevel, GLNature, GLType, isParent, Companyid, Status, AccountLevelOne, ReadOnly)
-                        VALUES (@GLTitle, @GLCode, @GLLevel, @GLNature, @GLType, @isParent, @Companyid, @Status, @AccountLevelOne, @ReadOnly)`);
+            if (!created) throw new Error(`Could not allocate a free GLCode under ${ParentCode} after 20 attempts.`);
 
             await transaction.commit();
             res.status(201).json({ message: 'Account Created', code: nextCode });

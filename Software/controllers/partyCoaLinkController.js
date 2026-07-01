@@ -150,35 +150,45 @@ exports.createCoaLeaf = async (req, res) => {
         const title = (req.body?.Title || party.PartyName || `Customer ${partyId}`).trim().slice(0, 200);
 
         // Allocate next L4 code under the parent, 001-899 only (9xx reserved).
-        const lastR = await new sql.Request(tx).query(`
-            SELECT MAX(TRY_CAST(SUBSTRING(GLCode, ${PARENT_GLCODE.length} + 1, 10) AS INT)) AS MaxSuffix
-            FROM GLChartOFAccount
-            WHERE GLCode LIKE '${PARENT_GLCODE}%' AND GLCode <> '${PARENT_GLCODE}'
-              AND LEN(GLCode) > ${PARENT_GLCODE.length}
-              AND TRY_CAST(SUBSTRING(GLCode, ${PARENT_GLCODE.length} + 1, 10) AS INT) < ${RESERVED_SUFFIX_FROM}`);
-        const nextSuffix = (Number(lastR.recordset[0].MaxSuffix) || 0) + 1;
-        if (nextSuffix >= RESERVED_SUFFIX_FROM) {
-            throw new Error(`No more customer slots under ${PARENT_GLCODE} (000-${RESERVED_SUFFIX_FROM - 1} exhausted).`);
-        }
-        const newCode = `${PARENT_GLCODE}${String(nextSuffix).padStart(3, '0')}`;
+        // Retry on unique-index violation so a concurrent linker can't slip a
+        // duplicate past us (migration 059 adds the unique index on GLCode).
+        let newCode = '';
+        let newGLCAID = 0;
+        for (let attempt = 0; attempt < 20 && !newGLCAID; attempt++) {
+            const lastR = await new sql.Request(tx).query(`
+                SELECT MAX(TRY_CAST(SUBSTRING(GLCode, ${PARENT_GLCODE.length} + 1, 10) AS INT)) AS MaxSuffix
+                FROM GLChartOFAccount
+                WHERE GLCode LIKE '${PARENT_GLCODE}%' AND GLCode <> '${PARENT_GLCODE}'
+                  AND LEN(GLCode) > ${PARENT_GLCODE.length}
+                  AND TRY_CAST(SUBSTRING(GLCode, ${PARENT_GLCODE.length} + 1, 10) AS INT) < ${RESERVED_SUFFIX_FROM}`);
+            const nextSuffix = (Number(lastR.recordset[0].MaxSuffix) || 0) + 1 + attempt;
+            if (nextSuffix >= RESERVED_SUFFIX_FROM) {
+                throw new Error(`No more customer slots under ${PARENT_GLCODE} (000-${RESERVED_SUFFIX_FROM - 1} exhausted).`);
+            }
+            newCode = `${PARENT_GLCODE}${String(nextSuffix).padStart(3, '0')}`;
 
-        // Insert the leaf, mirroring parent's classification fields
-        const ins = await new sql.Request(tx)
-            .input('code', sql.NVarChar(50),  newCode)
-            .input('ttl',  sql.NVarChar(200), title)
-            .input('typ',  sql.NVarChar(50),  parent.GLType)
-            .input('nat',  sql.NVarChar(50),  parent.GLNature)
-            .input('co',   sql.Int,           parent.Companyid)
-            .input('a1',   sql.NVarChar(50),  parent.AccountLevelOne)
-            .input('a2',   sql.NVarChar(50),  parent.AccountLevelTwo)
-            .input('a3',   sql.NVarChar(50),  parent.AccountlevelThree)
-            .query(`INSERT INTO GLChartOFAccount
-                        (GLCode, GLTitle, GLType, isParent, GLNature, Status, GLLevel, ReadOnly,
-                         Companyid, AccountLevelOne, AccountLevelTwo, AccountlevelThree, AccountLevelFour)
-                    OUTPUT INSERTED.GLCAID
-                    VALUES (@code, @ttl, @typ, 0, @nat, 1, 4, 0,
-                            @co, @a1, @a2, @a3, @code)`);
-        const newGLCAID = ins.recordset[0].GLCAID;
+            try {
+                const ins = await new sql.Request(tx)
+                    .input('code', sql.NVarChar(50),  newCode)
+                    .input('ttl',  sql.NVarChar(200), title)
+                    .input('typ',  sql.NVarChar(50),  parent.GLType)
+                    .input('nat',  sql.NVarChar(50),  parent.GLNature)
+                    .input('co',   sql.Int,           parent.Companyid)
+                    .input('a1',   sql.NVarChar(50),  parent.AccountLevelOne)
+                    .input('a2',   sql.NVarChar(50),  parent.AccountLevelTwo)
+                    .input('a3',   sql.NVarChar(50),  parent.AccountlevelThree)
+                    .query(`INSERT INTO GLChartOFAccount
+                                (GLCode, GLTitle, GLType, isParent, GLNature, Status, GLLevel, ReadOnly,
+                                 Companyid, AccountLevelOne, AccountLevelTwo, AccountlevelThree, AccountLevelFour)
+                            OUTPUT INSERTED.GLCAID
+                            VALUES (@code, @ttl, @typ, 0, @nat, 1, 4, 0,
+                                    @co, @a1, @a2, @a3, @code)`);
+                newGLCAID = ins.recordset[0].GLCAID;
+            } catch (insErr) {
+                if (insErr.number !== 2601 && insErr.number !== 2627) throw insErr;
+            }
+        }
+        if (!newGLCAID) throw new Error(`Could not allocate a free GLCode under ${PARENT_GLCODE} after 20 attempts.`);
 
         await new sql.Request(tx)
             .input('id', sql.Int, partyId)
