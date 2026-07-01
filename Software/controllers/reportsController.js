@@ -3,7 +3,12 @@
  * Source contract: SYSTEM_DOCUMENTATION.md §14.16.
  *
  * Conventions:
- *   - All reports query only Posted vouchers (Status='Posted'), never Drafts or Reversed.
+ *   - All balance-style reports filter Status='Posted' AND ReversesVoucherID IS NULL.
+ *     The status check excludes reversed originals (their Status flips to 'Reversed').
+ *     The ReversesVoucherID check excludes reversal mirrors (their Status is 'Posted'
+ *     but they carry a link to the original). Skipping only Status leaves the mirror
+ *     as a phantom one-sided entry — running balances inflate by 2× the original.
+ *   - Pure voucher-list views (Day Book) keep the mirror visible for audit.
  *   - Balances follow GL nature: Debit accounts (Assets, Expenses) → Debit − Credit;
  *     Credit accounts (Liabilities, Equity, Revenue) → Credit − Debit.
  *   - "As of <date>" reports include vouchers up to AND including the end date (23:59:59).
@@ -42,7 +47,8 @@ exports.getTrialBalance = async (req, res) => {
                            SUM(ISNULL(d.Credit, 0)) AS TotalCr
                     FROM data_FinanceVoucherDetail d
                     INNER JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
-                    WHERE v.Status = 'Posted' AND v.VoucherDate <= @asOf
+                    WHERE v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.VoucherDate <= @asOf
                     GROUP BY d.GLCAID
                 )
                 SELECT c.GLCAID, c.GLCode, c.GLTitle, c.GLLevel,
@@ -117,7 +123,8 @@ exports.getGLDetail = async (req, res) => {
                 SELECT ISNULL(SUM(d.Debit), 0) - ISNULL(SUM(d.Credit), 0) AS OpeningNetDr
                 FROM data_FinanceVoucherDetail d
                 INNER JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
-                WHERE d.GLCAID = @id AND v.Status = 'Posted' AND v.VoucherDate < @from
+                WHERE d.GLCAID = @id AND v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+                  AND v.VoucherDate < @from
             `);
         const openingNetDr = Number(openRes.recordset[0].OpeningNetDr) || 0;
 
@@ -136,7 +143,7 @@ exports.getGLDetail = async (req, res) => {
                 LEFT JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
                 LEFT JOIN gen_PartiesInfo p ON d.PartyID = p.PartyID
                 LEFT JOIN Addata_JobCardInfo j ON d.JobCardID = j.JobCardId
-                WHERE d.GLCAID = @id AND v.Status = 'Posted'
+                WHERE d.GLCAID = @id AND v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
                   AND v.VoucherDate BETWEEN @from AND @to
                 ORDER BY v.VoucherDate, v.VoucherID, d.VoucherDetailID
             `);
@@ -204,7 +211,8 @@ async function getPartyStatement(req, res, isSupplier) {
                 SELECT ISNULL(SUM(l.Debit),0) - ISNULL(SUM(l.Credit),0) AS OpeningNetDr
                 FROM dms_PartyLedger l
                 INNER JOIN data_FinanceVoucherInfo v ON l.VoucherID = v.VoucherID
-                WHERE l.PartyID = @pid AND v.Status='Posted' AND v.VoucherDate < @from
+                WHERE l.PartyID = @pid AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND v.VoucherDate < @from
             `);
         const openingNetDr = Number(openRes.recordset[0].OpeningNetDr) || 0;
 
@@ -223,7 +231,7 @@ async function getPartyStatement(req, res, isSupplier) {
                 LEFT JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
                 LEFT JOIN Addata_JobCardInfo j ON l.JobCardID = j.JobCardId
                 LEFT JOIN GLChartOFAccount c ON l.GLCAID = c.GLCAID
-                WHERE l.PartyID = @pid AND v.Status='Posted'
+                WHERE l.PartyID = @pid AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
                   AND v.VoucherDate BETWEEN @from AND @to
                 ORDER BY v.VoucherDate, v.VoucherID, l.LedgerID
             `);
@@ -305,7 +313,8 @@ exports.getDailyCashBook = async (req, res) => {
                 SELECT ISNULL(SUM(d.Debit),0) - ISNULL(SUM(d.Credit),0) AS OpeningNetDr
                 FROM data_FinanceVoucherDetail d
                 INNER JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
-                WHERE d.GLCAID=@id AND v.Status='Posted' AND v.VoucherDate < @from
+                WHERE d.GLCAID=@id AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND v.VoucherDate < @from
             `);
         const opening = Number(openRes.recordset[0].OpeningNetDr) || 0;
 
@@ -323,7 +332,7 @@ exports.getDailyCashBook = async (req, res) => {
                 LEFT JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
                 LEFT JOIN gen_PartiesInfo p ON d.PartyID = p.PartyID
                 LEFT JOIN Addata_JobCardInfo j ON d.JobCardID = j.JobCardId
-                WHERE d.GLCAID=@id AND v.Status='Posted'
+                WHERE d.GLCAID=@id AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
                   AND v.VoucherDate BETWEEN @from AND @to
                 ORDER BY v.VoucherDate, v.VoucherID, d.VoucherDetailID
             `);
@@ -368,7 +377,8 @@ async function getClassBalances(pool, asOf, classes) {
                        SUM(ISNULL(d.Credit,0)) AS TotalCr
                 FROM data_FinanceVoucherDetail d
                 INNER JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
-                WHERE v.Status='Posted' AND v.VoucherDate <= @asOf
+                WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND v.VoucherDate <= @asOf
                 GROUP BY d.GLCAID
             )
             SELECT c.GLCAID, c.GLCode, c.GLTitle, c.GLLevel,
@@ -615,7 +625,8 @@ async function agingReport(req, res, isReceivable) {
                 FROM dms_PartyLedger l
                 INNER JOIN data_FinanceVoucherInfo v ON l.VoucherID = v.VoucherID
                 INNER JOIN gen_PartiesInfo p ON l.PartyID = p.PartyID
-                WHERE v.Status='Posted' AND v.VoucherDate <= @asOf
+                WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND v.VoucherDate <= @asOf
             `);
         const rows = bucketAging(r.recordset, asOf, isReceivable);
 
@@ -632,7 +643,8 @@ async function agingReport(req, res, isReceivable) {
                     FROM data_FinanceVoucherDetail d
                     INNER JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
                     INNER JOIN GLChartOFAccount g ON d.GLCAID = g.GLCAID
-                    WHERE v.Status='Posted' AND v.VoucherDate <= @asOf
+                    WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.VoucherDate <= @asOf
                       AND LEFT(g.GLCode, 6) = '102006'
                       AND LEN(g.GLCode) > 6
                       AND NOT EXISTS (SELECT 1 FROM gen_PartiesInfo p WHERE p.PartyGLID = g.GLCAID)
@@ -717,7 +729,7 @@ async function roleAccountLines(roleKey, pool, from, to) {
             LEFT JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
             LEFT JOIN gen_PartiesInfo p ON d.PartyID = p.PartyID
             LEFT JOIN Addata_JobCardInfo j ON d.JobCardID = j.JobCardId
-            WHERE d.GLCAID=@id AND v.Status='Posted'
+            WHERE d.GLCAID=@id AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
               AND v.VoucherDate BETWEEN @from AND @to
             ORDER BY v.VoucherDate, v.VoucherID, d.VoucherDetailID
         `);
@@ -822,7 +834,8 @@ exports.getBankBalances = async (req, res) => {
                 JOIN GLChartOFAccount c ON b.GLCAID = c.GLCAID
                 LEFT JOIN data_FinanceVoucherDetail d ON d.GLCAID = b.GLCAID
                 LEFT JOIN data_FinanceVoucherInfo v ON d.VoucherID = v.VoucherID
-                    AND v.Status='Posted' AND v.VoucherDate <= @asOf
+                    AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                    AND v.VoucherDate <= @asOf
                 GROUP BY b.GLCAID, c.GLCode, c.GLTitle, b.IsActive
                 ORDER BY c.GLCode
             `);
@@ -905,7 +918,7 @@ exports.getSalesRegister = async (req, res) => {
                        v.CreatedByName
                 FROM data_FinanceVoucherInfo v
                 JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
-                WHERE v.Status='Posted'
+                WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
                   AND v.VoucherDate BETWEEN @from AND @to
                   AND vt.Title IN ('SI','SS','SSR')
                 ORDER BY v.VoucherDate, v.VoucherID
@@ -967,7 +980,7 @@ exports.getGrossMargin = async (req, res) => {
                 JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
                 LEFT JOIN Addata_JobCardInfo j ON v.SourceDocID = j.JobCardId
                 LEFT JOIN gen_PartiesInfo p ON j.PartyID = p.PartyID
-                WHERE v.Status='Posted'
+                WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
                   AND v.VoucherDate BETWEEN @from AND @to
                   AND vt.Title='SI'
             `);
@@ -1347,7 +1360,7 @@ exports.getTaxSummary = async (req, res) => {
                 LEFT JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
                 LEFT JOIN gen_PartiesInfo p ON d.PartyID = p.PartyID
                 LEFT JOIN Addata_JobCardInfo j ON d.JobCardID = j.JobCardId
-                WHERE d.GLCAID=@id AND v.Status='Posted'
+                WHERE d.GLCAID=@id AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
                   AND v.VoucherDate BETWEEN @from AND @to
                 ORDER BY v.VoucherDate, v.VoucherID, d.VoucherDetailID
             `);
