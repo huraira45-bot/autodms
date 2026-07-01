@@ -1372,7 +1372,7 @@ export default function JobCardForm() {
                         <tbody>{issuedParts.map((p, i) => (
                           <tr key={i} style={{ borderBottom: '1px solid #e8edf2' }}>
                             <td style={{ padding: '3px 8px' }}><strong>{p.ItemName}</strong></td>
-                            <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>{p.ItemNumber}</td>
+                            <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>{p.ItemNumber ?? p.ManualNumber ?? '—'}</td>
                             <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>#{p.IssueNo}</td>
                             <td style={{ padding: '3px 8px', textAlign: 'right' }}>{p.IssueQuantity}</td>
                             <td style={{ padding: '3px 8px', textAlign: 'right' }}>{parseFloat(p.ItemRate || 0).toLocaleString()}</td>

@@ -340,7 +340,7 @@ exports.getJobCardById = async (req, res) => {
             .input('id', sql.Int, req.params.id)
             .query(`SELECT sid.StockIssueDetailID, sid.ItemId, sid.Quantity, sid.StockRate, sid.ItemRate, sid.IssueQuantity,
                     sid.TaxRate, sid.TaxAmount,
-                    i.ItenName AS ItemName, i.ItemNumber, si.IssueDate, si.IssueNo
+                    i.ItenName AS ItemName, i.ItemNumber, i.ManualNumber, si.IssueDate, si.IssueNo
                     FROM data_StockIssuetoJobCardDetail sid
                     JOIN data_StockIssuetoJobCard si ON sid.StockIssueID = si.StockIssueID
                     LEFT JOIN InventItems i ON sid.ItemId = i.ItemId
@@ -1306,7 +1306,7 @@ exports.getJobCardInsurance = async (req, res) => {
         const partsRs = await pool.request().input('id', sql.Int, id).query(`
             SELECT 'Part' AS LineType,
                    sid.StockIssueDetailID AS LineRefID,
-                   i.ItemNumber           AS ItemNumber,
+                   COALESCE(CAST(i.ItemNumber AS NVARCHAR(50)), i.ManualNumber) AS ItemNumber,
                    i.ItenName             AS ItemName,
                    sid.IssueQuantity      AS Qty,
                    sid.ItemRate           AS Rate,
