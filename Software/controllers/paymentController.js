@@ -10,7 +10,7 @@ async function resolveAccounts() {
     // and credit GENERAL_CUSTOMER, tagged by JobCardID.
     const roles = ['CASH_BOOK', 'POS_CLEARING', 'CHEQUES_ON_HAND', 'CHEQUES_ISSUED_UNCLEARED',
                    'CUSTOMER_ADVANCE_RECEIVED', 'SUPPLIER_ADVANCE_PAID',
-                   'GENERAL_CUSTOMER'];
+                   'GENERAL_CUSTOMER', 'ROUNDING_ADJUSTMENT'];
     const out = {};
     for (const r of roles) out[r] = { GLCAID: await resolveRole(r) };
     return out;

@@ -38,6 +38,14 @@ const MODE_TO_ROLE = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+// A residual smaller than this (in PKR) is treated as a rounding gap and posted
+// to ROUNDING_ADJUSTMENT instead of Customer/Supplier Advance. Owner request
+// 2026-07-01: customers routinely pay whole rupees against paisa-precise
+// invoices, so the couple-rupee gap must not accumulate as a permanent advance
+// liability. Rs 10 covers rounding to nearest 5/10 without swallowing genuine
+// short-payment cases (those the operator can resolve by adjusting allocation).
+const ROUNDING_TOLERANCE = 10;
+
 function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = null, walkInSaleID = null, paymentLines = [], allocations = [], adjustments = [], accounts, partyGL = null, refNo = null }) {
     if (!accounts) throw new Error('accounts map required');
     if (direction !== 'receive' && direction !== 'make') {
@@ -169,21 +177,41 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
             }
         }
 
-        // (3) Cr Customer Advance Received for any excess (overpayment or pre-payment)
+        // (3) Excess handling.
+        //   Small gap (≤ ROUNDING_TOLERANCE) after allocation is treated as a
+        //   rounding-off and credited to ROUNDING_ADJUSTMENT (income). Only
+        //   applies when the customer paid against at least one invoice — a pure
+        //   deposit with no allocation is a real advance, not rounding.
+        //   Larger surplus is booked as Customer Advance Received.
         if (advanceAmount > 0) {
-            // Tag by PartyID (named customer) or JobCardID (walk-in deposit against specific RO)
-            journalLines.push({
-                GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
-                Debit: 0, Credit: advanceAmount,
-                Narration: partyId ? `Customer advance — ${ref}` : `Walk-in advance for JC #${walkInJobCardID} — ${ref}`,
-                PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
-            });
-            subsidiaryWrites.push({
-                GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
-                Debit: 0, Credit: advanceAmount,
-                PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
-                Narration: partyId ? `Customer advance — ${ref}` : `Walk-in advance for JC #${walkInJobCardID} — ${ref}`,
-            });
+            const isRoundingGap = allocations.length > 0 && advanceAmount <= ROUNDING_TOLERANCE;
+            if (isRoundingGap) {
+                if (!accounts.ROUNDING_ADJUSTMENT?.GLCAID) {
+                    throw new Error("ROUNDING_ADJUSTMENT system account is not mapped.");
+                }
+                journalLines.push({
+                    GLCAID: accounts.ROUNDING_ADJUSTMENT.GLCAID,
+                    Debit: 0, Credit: advanceAmount,
+                    Narration: `Rounding adjustment — ${ref}`,
+                    PartyID: null, JobCardID: null, AllocatedToVoucherID: null,
+                });
+                // No subsidiary write — rounding is a GL-only bucket, not a
+                // party-owed balance.
+            } else {
+                // Tag by PartyID (named customer) or JobCardID (walk-in deposit against specific RO)
+                journalLines.push({
+                    GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
+                    Debit: 0, Credit: advanceAmount,
+                    Narration: partyId ? `Customer advance — ${ref}` : `Walk-in advance for JC #${walkInJobCardID} — ${ref}`,
+                    PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
+                });
+                subsidiaryWrites.push({
+                    GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
+                    Debit: 0, Credit: advanceAmount,
+                    PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
+                    Narration: partyId ? `Customer advance — ${ref}` : `Walk-in advance for JC #${walkInJobCardID} — ${ref}`,
+                });
+            }
         }
     }
 
@@ -212,20 +240,36 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
             });
         }
 
-        // (2) Dr Supplier Advance Paid for excess (prepayment to supplier)
+        // (2) Excess handling.
+        //   Small gap (≤ ROUNDING_TOLERANCE) after allocation is a rounding-off
+        //   and Dr-ed to ROUNDING_ADJUSTMENT (expense). Larger surplus is booked
+        //   as Supplier Advance Paid.
         if (advanceAmount > 0) {
-            journalLines.push({
-                GLCAID: accounts.SUPPLIER_ADVANCE_PAID.GLCAID,
-                Debit: advanceAmount, Credit: 0,
-                Narration: `Supplier advance — ${ref}`,
-                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
-            });
-            subsidiaryWrites.push({
-                GLCAID: accounts.SUPPLIER_ADVANCE_PAID.GLCAID,
-                Debit: advanceAmount, Credit: 0,
-                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
-                Narration: `Supplier advance — ${ref}`,
-            });
+            const isRoundingGap = allocations.length > 0 && advanceAmount <= ROUNDING_TOLERANCE;
+            if (isRoundingGap) {
+                if (!accounts.ROUNDING_ADJUSTMENT?.GLCAID) {
+                    throw new Error("ROUNDING_ADJUSTMENT system account is not mapped.");
+                }
+                journalLines.push({
+                    GLCAID: accounts.ROUNDING_ADJUSTMENT.GLCAID,
+                    Debit: advanceAmount, Credit: 0,
+                    Narration: `Rounding adjustment — ${ref}`,
+                    PartyID: null, JobCardID: null, AllocatedToVoucherID: null,
+                });
+            } else {
+                journalLines.push({
+                    GLCAID: accounts.SUPPLIER_ADVANCE_PAID.GLCAID,
+                    Debit: advanceAmount, Credit: 0,
+                    Narration: `Supplier advance — ${ref}`,
+                    PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
+                });
+                subsidiaryWrites.push({
+                    GLCAID: accounts.SUPPLIER_ADVANCE_PAID.GLCAID,
+                    Debit: advanceAmount, Credit: 0,
+                    PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
+                    Narration: `Supplier advance — ${ref}`,
+                });
+            }
         }
 
         // (3) Cr payment-mode account per line.

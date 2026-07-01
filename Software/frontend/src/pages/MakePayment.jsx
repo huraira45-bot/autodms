@@ -337,7 +337,22 @@ export default function MakePayment() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <Stat label="Total paid" value={totalPayment} colour="#1e293b" />
           <Stat label="Allocated to bills" value={allocatedSum} colour="#dc2626" />
-          <Stat label={excess >= 0 ? 'To supplier advance (excess)' : 'Allocation OVER total!'} value={Math.abs(excess)} colour={excess < -0.005 ? '#ef4444' : (excess > 0 ? '#b45309' : '#94a3b8')} warn={excess < -0.005} />
+          <Stat
+            label={
+              excess < -0.005
+                ? 'Allocation OVER total!'
+                : (excess > 0 && excess <= 10 && allocatedSum > 0
+                    ? 'To rounding adjustment'
+                    : 'To supplier advance (excess)')
+            }
+            value={Math.abs(excess)}
+            colour={
+              excess < -0.005
+                ? '#ef4444'
+                : (excess > 0 && excess <= 10 && allocatedSum > 0 ? '#7c3aed' : (excess > 0 ? '#b45309' : '#94a3b8'))
+            }
+            warn={excess < -0.005}
+          />
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={lblStyle}>Narration / Memo</label>

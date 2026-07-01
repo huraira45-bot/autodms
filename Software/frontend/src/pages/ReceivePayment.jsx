@@ -856,9 +856,19 @@ export default function ReceivePayment() {
           <Stat label="Adjustments" value={adjustmentTotal} colour="#92400e" />
           <Stat label="Allocated to invoices" value={allocatedSum} colour="#16a34a" />
           <Stat
-            label={excess >= 0 ? 'To advance (excess)' : 'Allocation OVER total!'}
+            label={
+              excess < -0.005
+                ? 'Allocation OVER total!'
+                : (excess > 0 && excess <= 10 && allocatedSum > 0
+                    ? 'To rounding adjustment'
+                    : 'To advance (excess)')
+            }
             value={Math.abs(excess)}
-            colour={excess < -0.005 ? '#ef4444' : (excess > 0 ? '#1d4ed8' : '#94a3b8')}
+            colour={
+              excess < -0.005
+                ? '#ef4444'
+                : (excess > 0 && excess <= 10 && allocatedSum > 0 ? '#7c3aed' : (excess > 0 ? '#1d4ed8' : '#94a3b8'))
+            }
             warn={excess < -0.005}
           />
         </div>
