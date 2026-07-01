@@ -29,6 +29,9 @@ export function JobCardRegister() {
         if (params.paymentMode === 'cash')       parts.push('Payment: Cash (incl. POS & Bank Transfer)');
         else if (params.paymentMode === 'credit') parts.push('Payment: Credit');
         else                                      parts.push('Payment: All');
+        if (params.finalized === 'draft')       parts.push('Status: Draft only');
+        else if (params.finalized === 'all')     parts.push('Status: All (incl. Draft)');
+        else                                     parts.push('Status: Finalized only');
         return parts.join('  •  ');
     };
     return (
@@ -37,7 +40,7 @@ export function JobCardRegister() {
             subtitle="All workshop job cards in the period — customer, vehicle, advisor, labour/parts/sublet/total."
             icon={Wrench}
             endpoint="service/job-card-register"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '' }}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized' }}
             printFilterSummary={printFilterSummary}
             controls={({ params, updateParam }) => (
                 <>
@@ -61,6 +64,15 @@ export function JobCardRegister() {
                             <option value="">All</option>
                             <option value="cash">Cash (incl. POS &amp; Bank Transfer)</option>
                             <option value="credit">Credit</option>
+                        </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Status:
+                        <select value={params.finalized || 'finalized'} onChange={e => updateParam('finalized', e.target.value)}
+                            style={selectStyle}>
+                            <option value="finalized">Finalized only</option>
+                            <option value="draft">Draft only</option>
+                            <option value="all">All (incl. Draft)</option>
                         </select>
                     </label>
                 </>

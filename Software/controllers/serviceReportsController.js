@@ -52,6 +52,15 @@ exports.jobCardRegister = async (req, res) => {
             conds.push("j.Status = 'Credit'");
         }
 
+        // Finalized filter — default is 'finalized' so the report shows
+        // billing-quality rows only. Owner request 2026-07-01 (revenue reports
+        // should exclude open/draft JCs to avoid double-counting when the
+        // amounts settle at finalize).
+        const finalized = req.query.finalized || 'finalized';
+        if (finalized === 'finalized')       conds.push('j.IsFinalized = 1');
+        else if (finalized === 'draft')      conds.push('(j.IsFinalized IS NULL OR j.IsFinalized = 0)');
+        // finalized === 'all' → no filter
+
         const r = await rq.query(`
             SELECT j.JobCardId, j.JobCardNo, j.JobCardDate, j.Status,
                    j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter,
