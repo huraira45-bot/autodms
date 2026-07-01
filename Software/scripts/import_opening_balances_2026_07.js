@@ -14,6 +14,8 @@
  * Idempotent: refuses to run twice by looking for VoucherNo starting with
  * 'JV-OB-2026-07' in data_FinanceVoucherInfo. Run once per environment.
  */
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { sql, getPool } = require('../config/db');
 
 const CAPITAL_CODE = '301001001';
@@ -141,8 +143,8 @@ async function loadParent(request, code) {
     return r.recordset[0];
 }
 
-async function findExistingByCode(pool, code) {
-    const r = await pool.request()
+async function findExistingByCode(tx, code) {
+    const r = await new sql.Request(tx)
         .input('c', sql.NVarChar(50), code)
         .query('SELECT GLCAID, GLTitle FROM GLChartOFAccount WHERE GLCode=@c AND isParent=0');
     if (!r.recordset.length) throw new Error(`Explicit GLCode ${code} not found (or is a parent).`);
@@ -198,7 +200,9 @@ async function allocateNextLeaf(tx, parent, title) {
 }
 
 (async () => {
+    console.log('Connecting to database...');
     const pool = await getPool();
+    console.log('Connected.');
 
     // Idempotency guard
     const dup = await pool.request()
@@ -241,7 +245,7 @@ async function allocateNextLeaf(tx, parent, title) {
             let glcaid;
             let code;
             if (row.useExistingCode) {
-                glcaid = await findExistingByCode(pool, row.useExistingCode);
+                glcaid = await findExistingByCode(tx, row.useExistingCode);
                 code   = row.useExistingCode;
             } else {
                 const parent = parents[row.parent];
