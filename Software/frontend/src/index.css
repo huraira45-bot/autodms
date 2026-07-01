@@ -1740,7 +1740,12 @@ textarea:disabled,
   .print-header .meta {
     font-size: 9pt; color: #475569; margin-top: 4px;
     display: flex; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
   }
+  /* Hide the on-screen card-header on print — the print-header banner
+     already carries the title, subtitle, filters and timestamp, and the
+     card-header's leftover controls/buttons are stripped via .no-print. */
+  .print-header + .card-header { display: none !important; }
 
   /* Flatten chrome */
   .card {

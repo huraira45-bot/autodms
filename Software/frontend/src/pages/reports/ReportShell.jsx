@@ -15,7 +15,8 @@ export const fmtInt = (n) => Number(n || 0).toLocaleString('en-PK', { maximumFra
  * Children receive (data, params, setParams, reload).
  */
 export default function ReportShell({
-    title, subtitle, icon: Icon, endpoint, defaultParams = {}, controls, children
+    title, subtitle, icon: Icon, endpoint, defaultParams = {}, controls, children,
+    printFilterSummary,
 }) {
     const [params, setParams] = useState(defaultParams);
     const [data, setData]     = useState(null);
@@ -39,7 +40,9 @@ export default function ReportShell({
     const updateParam = (k, v) => setParams(p => ({ ...p, [k]: v }));
 
     const printedAt = new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
-    const filterSummary = formatFilterSummary(params);
+    const filterSummary = typeof printFilterSummary === 'function'
+        ? printFilterSummary(params)
+        : formatFilterSummary(params);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -83,11 +86,26 @@ function formatFilterSummary(params) {
 export function PrintHeader({ title, subtitle, printedAt, filterSummary }) {
     return (
         <div className="print-only print-header">
-            <h1>{title}</h1>
-            {subtitle && <div style={{ fontSize: '9pt', color: '#475569', marginTop: 2 }}>{subtitle}</div>}
-            <div className="meta">
-                <span>{filterSummary}</span>
-                <span>Printed: {printedAt}</span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                <div style={{ width: 74, height: 56, border: '1px solid #64748b', display: 'flex', flexDirection: 'column',
+                              alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ fontSize: 20, lineHeight: 1 }}>⌖</div>
+                    <div style={{ fontSize: '6pt', textAlign: 'center', marginTop: 2 }}>CHANGAN AUTO<br/>MULTAN</div>
+                </div>
+                <div style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: '14pt', fontWeight: 700 }}>CHANGAN MULTAN MOTORS</div>
+                    <div style={{ fontSize: '8pt', color: '#334155', marginTop: 1 }}>
+                        NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN.&nbsp;&nbsp;Phone#: 061-111-222-388
+                    </div>
+                </div>
+            </div>
+            <div style={{ borderTop: '1px solid #0f172a', marginTop: 6, paddingTop: 6 }}>
+                <h1>{title}</h1>
+                {subtitle && <div style={{ fontSize: '9pt', color: '#475569', marginTop: 2 }}>{subtitle}</div>}
+                <div className="meta">
+                    <span>{filterSummary}</span>
+                    <span>Printed: {printedAt}</span>
+                </div>
             </div>
         </div>
     );

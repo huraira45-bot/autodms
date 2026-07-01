@@ -17,6 +17,20 @@ export function JobCardRegister() {
         axios.get('/api/workshop/job-types').then(r => setJobTypes(r.data || [])).catch(() => {});
     }, []);
     const selectStyle = { padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' };
+    const printFilterSummary = (params) => {
+        const parts = [];
+        if (params.from && params.to) parts.push(`Period: ${params.from} → ${params.to}`);
+        if (params.businessType) {
+            const t = jobTypes.find(x => String(x.JobCardTypeId) === String(params.businessType));
+            parts.push(`Business Type: ${t ? `${t.CardCode} — ${t.Title}` : params.businessType}`);
+        } else {
+            parts.push('Business Type: All');
+        }
+        if (params.paymentMode === 'cash')       parts.push('Payment: Cash (incl. POS & Bank Transfer)');
+        else if (params.paymentMode === 'credit') parts.push('Payment: Credit');
+        else                                      parts.push('Payment: All');
+        return parts.join('  •  ');
+    };
     return (
         <ReportShell
             title="Job Card Register"
@@ -24,6 +38,7 @@ export function JobCardRegister() {
             icon={Wrench}
             endpoint="service/job-card-register"
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '' }}
+            printFilterSummary={printFilterSummary}
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
