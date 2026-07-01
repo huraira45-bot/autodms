@@ -35,31 +35,50 @@ exports.addAccount = async (req, res) => {
         try {
             const level = parseInt(GLLevel);
             const lastPartLength = level === 2 ? 2 : 3;
+            const suffixCap = Math.pow(10, lastPartLength); // 100 for L2, 1000 for L3/L4
 
-            // Race-safe next-code allocation: retry the MAX+1 → INSERT dance
-            // until it succeeds. The unique index on GLCode (migration 059)
-            // fails the INSERT if another admin grabs the same slot between
-            // our MAX read and INSERT — catch that and try the next suffix.
-            // Cap retries so we don't spin forever if the parent bucket is
-            // genuinely full.
+            // Race-safe next-code allocation: find the smallest unused suffix
+            // under the parent (fills gaps first — the parent may have holes
+            // from deletes or renames), INSERT, retry on unique-violation.
+            //
+            // Prior behaviour used MAX(GLCode)+1, which had two failure modes:
+            //   1. Race: two concurrent admins read the same MAX and both
+            //      INSERTed the same code — resolved earlier by the unique
+            //      index UX_GLChartOFAccount_GLCode (migration 059).
+            //   2. Overflow: when the last used suffix was 999, MAX+1 became
+            //      1000 and padStart(3) left it 4-wide, so the code became
+            //      e.g. 2010021000 (10 chars) instead of erroring. Owner
+            //      report 2026-07-01. Now we scan for gaps and refuse
+            //      overflow explicitly.
             let nextCode = '';
             let created = false;
             for (let attempt = 0; attempt < 20 && !created; attempt++) {
                 if (level === 1) {
                     nextCode = ClassRoot.toString();
                 } else {
-                    const result = await transaction.request()
-                        .input('parentLike', sql.NVarChar(50), `${ParentCode}%`)
+                    const gapRes = await transaction.request()
+                        .input('parent', sql.NVarChar(50), ParentCode)
                         .input('level', sql.Int, level)
-                        .query('SELECT MAX(GLCode) as maxCode FROM GLChartOFAccount WHERE GLLevel = @level AND GLCode LIKE @parentLike');
-                    const maxCode = result.recordset[0].maxCode;
-                    if (!maxCode) {
-                        nextCode = ParentCode + (level === 2 ? '01' : '001');
-                    } else {
-                        const prefix = maxCode.substring(0, maxCode.length - lastPartLength);
-                        const suffix = parseInt(maxCode.substring(maxCode.length - lastPartLength)) + 1 + attempt;
-                        nextCode = prefix + suffix.toString().padStart(lastPartLength, '0');
+                        .input('padLen', sql.Int, lastPartLength)
+                        .input('cap', sql.Int, suffixCap)
+                        .input('skip', sql.Int, attempt)
+                        .query(`
+                            SELECT v.number AS FreeSuffix
+                            FROM master.dbo.spt_values v
+                            WHERE v.type = 'P'
+                              AND v.number BETWEEN 1 AND @cap - 1
+                              AND NOT EXISTS (
+                                SELECT 1 FROM GLChartOFAccount c
+                                WHERE c.GLLevel = @level
+                                  AND c.GLCode = @parent + RIGHT(REPLICATE('0', @padLen) + CAST(v.number AS VARCHAR(4)), @padLen)
+                              )
+                            ORDER BY v.number
+                            OFFSET @skip ROWS FETCH NEXT 1 ROWS ONLY`);
+                    if (!gapRes.recordset.length) {
+                        throw new Error(`Parent ${ParentCode} is full — no free sub-codes under ${suffixCap}. Create a new parent instead.`);
                     }
+                    const suffix = gapRes.recordset[0].FreeSuffix;
+                    nextCode = ParentCode + suffix.toString().padStart(lastPartLength, '0');
                 }
 
                 try {
