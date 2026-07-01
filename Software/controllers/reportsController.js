@@ -387,11 +387,20 @@ async function getClassBalances(pool, asOf, classes) {
               AND ISNULL(b.TotalDr,0) + ISNULL(b.TotalCr,0) > 0
             ORDER BY c.GLCode
         `);
+    // Class-level totals use the CLASS direction (Assets/Expense are Dr; Liab/
+    // Equity/Revenue are Cr), not each account's individual GLNature. This way
+    // contra accounts — e.g. drawings under equity flagged as Dr-natured —
+    // reduce the class total instead of inflating it, and the balance sheet
+    // ties back to the trial balance even when accounts are misclassified.
+    const isDrClass = (cls) => cls === '1' || cls === '5';
     const grouped = {};
     for (const row of r.recordset) {
-        if (!grouped[row.ClassRoot]) grouped[row.ClassRoot] = { rows: [], total: 0 };
-        grouped[row.ClassRoot].rows.push(row);
-        grouped[row.ClassRoot].total += Number(row.Balance);
+        const cls = row.ClassRoot;
+        if (!grouped[cls]) grouped[cls] = { rows: [], total: 0 };
+        grouped[cls].rows.push(row);
+        const dr = Number(row.TotalDr) || 0;
+        const cr = Number(row.TotalCr) || 0;
+        grouped[cls].total += isDrClass(cls) ? (dr - cr) : (cr - dr);
     }
     return grouped;
 }
