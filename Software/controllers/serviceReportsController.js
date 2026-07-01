@@ -35,6 +35,15 @@ exports.jobCardRegister = async (req, res) => {
         if (req.query.status)    { rq.input('st', sql.NVarChar(30), req.query.status); conds.push('j.Status = @st'); }
         if (req.query.advisorId) { rq.input('ad', sql.Int, parseInt(req.query.advisorId)); conds.push('j.ServiceAdvisorID = @ad'); }
 
+        // Business-type filter: owner wants Cash / Credit split, with POS and
+        // Bank Transfer grouped under Cash (they settle to bank the same day
+        // and are treated as cash flow, not receivables).
+        if (req.query.businessType === 'cash') {
+            conds.push("j.Status IN ('Cash','POS','Bank Transfer')");
+        } else if (req.query.businessType === 'credit') {
+            conds.push("j.Status = 'Credit'");
+        }
+
         const r = await rq.query(`
             SELECT j.JobCardId, j.JobCardNo, j.JobCardDate, j.Status,
                    j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter,

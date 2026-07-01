@@ -17,8 +17,21 @@ export function JobCardRegister() {
             subtitle="All workshop job cards in the period — customer, vehicle, advisor, labour/parts/sublet/total."
             icon={Wrench}
             endpoint="service/job-card-register"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO() }}
-            controls={PeriodControls}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '' }}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PeriodControls params={params} updateParam={updateParam} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Business Type:
+                        <select value={params.businessType || ''} onChange={e => updateParam('businessType', e.target.value)}
+                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+                            <option value="">All</option>
+                            <option value="cash">Cash (incl. POS &amp; Bank Transfer)</option>
+                            <option value="credit">Credit</option>
+                        </select>
+                    </label>
+                </>
+            )}
         >
             {(data) => (
                 <>
