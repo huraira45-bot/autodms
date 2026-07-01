@@ -5,6 +5,23 @@ import axios from 'axios';
 const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const d   = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
 
+// VOCRemarks is stored as JSON.stringify({ item: true/false, ... }) by the
+// job-card form (see JobCardForm's vocChecks state). Print needs a comma list
+// of the checked items, not the raw JSON blob.
+function formatVOC(raw) {
+    if (!raw) return '';
+    try {
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj === 'object') {
+            return Object.entries(obj)
+                .filter(([, v]) => v)
+                .map(([k]) => k)
+                .join(', ');
+        }
+    } catch { /* not JSON — fall through and treat as free text */ }
+    return String(raw);
+}
+
 export default function WorkOrderPrint() {
     const { id } = useParams();
     const [jc, setJc] = useState(null);
@@ -125,7 +142,7 @@ export default function WorkOrderPrint() {
                         </td>
                         <td className="voc-cell" style={{ verticalAlign: 'top' }}>
                             <div className="sec-head"><b>Jobs Requested / Voice Of Customer</b></div>
-                            <div className="voc">{jc.VOCRemarks || jc.Remarks || ''}</div>
+                            <div className="voc">{formatVOC(jc.VOCRemarks) || jc.Remarks || ''}</div>
                             {jc.WACResults && (
                                 <>
                                     <div className="sec-head" style={{ marginTop: 6 }}><b>VOC Results</b></div>
