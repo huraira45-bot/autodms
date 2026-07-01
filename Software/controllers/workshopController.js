@@ -90,7 +90,7 @@ exports.getCustomerVehicles = async (req, res) => {
 
 exports.addCustomerVehicle = async (req, res) => {
     try {
-        const { RegistrationNo, ChasisNo, EngineNo, BrandName, VehicleModel } = req.body;
+        const { RegistrationNo, ChasisNo, EngineNo, BrandName, VehicleModel, VehicleColor } = req.body;
         const pool = await getPool();
         const result = await pool.request()
             .input('userId', sql.Int, req.params.id)
@@ -99,9 +99,10 @@ exports.addCustomerVehicle = async (req, res) => {
             .input('engine', sql.NVarChar(150), EngineNo)
             .input('brand', sql.NVarChar(150), BrandName)
             .input('model', sql.NVarChar(150), VehicleModel)
-            .query(`INSERT INTO WorkshopVehicles (EndUserID, RegistrationNo, ChasisNo, EngineNo, BrandName, VehicleModel)
+            .input('color', sql.NVarChar(100), VehicleColor || null)
+            .query(`INSERT INTO WorkshopVehicles (EndUserID, RegistrationNo, ChasisNo, EngineNo, BrandName, VehicleModel, VehicleColor)
                     OUTPUT INSERTED.*
-                    VALUES (@userId, @regNo, @chassis, @engine, @brand, @model)`);
+                    VALUES (@userId, @regNo, @chassis, @engine, @brand, @model, @color)`);
         res.status(201).json(result.recordset[0]);
     } catch (err) { res.status(400).json({ error: err.message }); }
 };

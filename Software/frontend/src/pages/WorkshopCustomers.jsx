@@ -13,7 +13,7 @@ export default function WorkshopCustomers() {
   const [showVehicleForm, setShowVehicleForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ CustomerName: '', PhoneNo: '', Email: '', CNIC: '', Address: '', DOB: '' });
-  const [vehicleForm, setVehicleForm] = useState({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '' });
+  const [vehicleForm, setVehicleForm] = useState({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '', VehicleColor: '' });
   const [saving, setSaving] = useState(false);
   
   // To hold vehicles for the currently editing customer
@@ -73,7 +73,7 @@ export default function WorkshopCustomers() {
       const regNo = vehicleForm.RegistrationNo;
       await axios.post(`${API}/customers/${editing}/vehicles`, vehicleForm);
       setShowVehicleForm(false);
-      setVehicleForm({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '' });
+      setVehicleForm({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '', VehicleColor: '' });
       // Refresh vehicles
       const res = await axios.get(`${API}/customers/${editing}/vehicles`);
       setCustomerVehicles(res.data);
@@ -155,7 +155,10 @@ export default function WorkshopCustomers() {
                         <div className="form-group"><label>Model</label><input type="text" value={vehicleForm.VehicleModel} onChange={e => setVehicleForm({...vehicleForm, VehicleModel: e.target.value})} /></div>
                         <div className="form-group"><label>Chassis No</label><input type="text" value={vehicleForm.ChasisNo} onChange={e => setVehicleForm({...vehicleForm, ChasisNo: e.target.value})} /></div>
                       </div>
-                      <div className="form-group" style={{marginBottom:'12px'}}><label>Engine No</label><input type="text" value={vehicleForm.EngineNo} onChange={e => setVehicleForm({...vehicleForm, EngineNo: e.target.value})} /></div>
+                      <div className="grid-2" style={{marginBottom:'12px'}}>
+                        <div className="form-group"><label>Engine No</label><input type="text" value={vehicleForm.EngineNo} onChange={e => setVehicleForm({...vehicleForm, EngineNo: e.target.value})} /></div>
+                        <div className="form-group"><label>Color</label><input type="text" value={vehicleForm.VehicleColor} onChange={e => setVehicleForm({...vehicleForm, VehicleColor: e.target.value})} placeholder="e.g. WHITE, GRAY, BLACK" /></div>
+                      </div>
                       <div style={{display:'flex',gap:'8px'}}>
                         <button type="submit" disabled={saving} className="btn" style={{flex:1}}>Save Vehicle</button>
                         <button type="button" onClick={() => setShowVehicleForm(false)} className="btn" style={{background:'#e2e8f0',color:'#475569'}}>Cancel</button>
@@ -167,7 +170,7 @@ export default function WorkshopCustomers() {
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.85rem'}}>
                       <thead>
                         <tr style={{background:'#f1f5f9',color:'#64748b',textAlign:'left'}}>
-                          <th style={{padding:'8px 12px'}}>Reg No</th><th style={{padding:'8px 12px'}}>Brand/Model</th><th style={{padding:'8px 12px'}}>Chassis/Engine</th>
+                          <th style={{padding:'8px 12px'}}>Reg No</th><th style={{padding:'8px 12px'}}>Brand/Model</th><th style={{padding:'8px 12px'}}>Color</th><th style={{padding:'8px 12px'}}>Chassis/Engine</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -175,6 +178,7 @@ export default function WorkshopCustomers() {
                           <tr key={v.VehicleID} style={{borderBottom:'1px solid #e2e8f0'}}>
                             <td style={{padding:'8px 12px',fontWeight:600}}>{v.RegistrationNo}</td>
                             <td style={{padding:'8px 12px'}}>{v.BrandName} {v.VehicleModel}</td>
+                            <td style={{padding:'8px 12px'}}>{v.VehicleColor || '—'}</td>
                             <td style={{padding:'8px 12px'}}><span style={{color:'#64748b'}}>C: {v.ChasisNo}</span><br/><span style={{color:'#64748b'}}>E: {v.EngineNo}</span></td>
                           </tr>
                         ))}
