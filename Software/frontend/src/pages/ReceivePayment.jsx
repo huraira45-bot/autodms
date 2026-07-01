@@ -134,7 +134,10 @@ export default function ReceivePayment() {
     const t = setTimeout(async () => {
       setWalkInSaleResolving(true);
       try {
-        const b = await axios.get(`/api/payments/storesale-balance/${parseInt(walkInSaleNumber)}`);
+        // Send the raw entry — backend accepts either SaleID (integer) or
+        // the InvoiceNo string like "SAL-00001". Trim + upper for tidy match.
+        const key = String(walkInSaleNumber).trim().toUpperCase();
+        const b = await axios.get(`/api/payments/storesale-balance/${encodeURIComponent(key)}`);
         setWalkInSaleResolved(b.data.sale);
         setWalkInSaleBalance(b.data);
       } catch (e) {
@@ -535,15 +538,15 @@ export default function ReceivePayment() {
               <div>
                 <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 2 }}>Sale Invoice Number</div>
                 <input
-                  type="number"
-                  placeholder="e.g. 1 (resolves SAL-00001)"
+                  type="text"
+                  placeholder="e.g. SAL-00001"
                   value={walkInSaleNumber}
                   onChange={e => setWalkInSaleNumber(e.target.value)}
                   style={inp}
                 />
               </div>
               <div style={{ fontSize: 11, color: '#64748b' }}>
-                Enter the SAL-NNNNN suffix as a number (e.g. 7 for SAL-00007).
+                Type the full invoice number (SAL-00001) or the internal Sale ID number.
               </div>
             </div>
             <div style={{ fontSize: 12, marginTop: 8, minHeight: 20 }}>

@@ -251,16 +251,28 @@ exports.getJobCardBalance = async (req, res) => {
 // Payment "Walk-in deposit against Store Sale" tab.
 exports.getStoreSaleBalance = async (req, res) => {
     try {
-        const saleId = parseInt(req.params.saleId);
-        if (!saleId) return res.status(400).json({ error: 'Valid saleId required.' });
+        // Accept either a SaleID (int primary key) or an InvoiceNo (e.g.
+        // "SAL-00001"). SaleID and the SAL-NNNNN suffix aren't the same value
+        // once data grows — the invoice number comes from a separate sequence
+        // and can diverge from the row's PK. Original endpoint only accepted
+        // SaleID, so users typing "1" for SAL-00001 could look up the wrong
+        // sale (or a nonexistent one). Owner report 2026-07-01.
+        const rawKey = String(req.params.saleId || '').trim();
+        if (!rawKey) return res.status(400).json({ error: 'Sale key required.' });
+        const asInt = /^\d+$/.test(rawKey) ? parseInt(rawKey) : null;
         const pool = await getPool();
 
         const saleRes = await pool.request()
-            .input('id', sql.Int, saleId)
-            .query(`SELECT SaleID, InvoiceNo, IsFinalized, PaymentMode, PartyID, NetPayable
-                    FROM data_StoreSaleInfo WHERE SaleID=@id`);
+            .input('id',  sql.Int,           asInt)
+            .input('inv', sql.NVarChar(50),  rawKey)
+            .query(`SELECT TOP 1 SaleID, InvoiceNo, IsFinalized, PaymentMode, PartyID, NetPayable
+                    FROM data_StoreSaleInfo
+                    WHERE (@id IS NOT NULL AND SaleID = @id)
+                       OR InvoiceNo = @inv
+                    ORDER BY SaleID DESC`);
         if (!saleRes.recordset.length) return res.status(404).json({ error: 'Store Sale not found.' });
         const sale = saleRes.recordset[0];
+        const saleId = sale.SaleID;
 
         const voucherRes = await pool.request()
             .input('id', sql.Int, saleId)
