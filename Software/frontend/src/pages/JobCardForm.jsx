@@ -671,7 +671,7 @@ export default function JobCardForm() {
         <span style={S.roLabel}>RO NO:</span>
         <input style={{ ...S.roInput, width: 100, background: '#e8f0fe', fontWeight: 700 }} value={form.JobCardNo || '(auto)'} readOnly />
         <span style={S.roLabel}>Job NO:</span>
-        <input style={{ ...S.roInput, width: 80 }} value={form.jobCode} onChange={e => !isEdit && f('jobCode', e.target.value)} readOnly={isEdit || disabled} placeholder="e.g. 28931" />
+        <input style={{ ...S.roInput, width: 80 }} value={form.jobCode} onChange={e => !disabled && f('jobCode', e.target.value)} readOnly={disabled} placeholder="e.g. 28931" />
         {createdByName && <span style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 4, color: '#2a5a8a', fontSize: 11 }}><UserCircle size={12} /> Created: <strong>{createdByName}</strong></span>}
         {isFinalized && finalizedByName && <span style={{ color: '#92400e', fontSize: 11 }}>| Finalized by: <strong>{finalizedByName}</strong>{finalizedAt ? ` on ${new Date(finalizedAt).toLocaleDateString()}` : ''}</span>}
       </div>
@@ -918,7 +918,7 @@ export default function JobCardForm() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                      {!isEdit && !disabled && <button type="button" onClick={() => { setSelectedCustomer(null); f('EndUserID', ''); }} style={{ ...S.toolBtn, fontSize: 10 }}>Change Customer</button>}
+                      {!disabled && <button type="button" onClick={() => { setSelectedCustomer(null); f('EndUserID', ''); }} style={{ ...S.toolBtn, fontSize: 10 }}>Change Customer</button>}
                       <button type="button" onClick={() => navigate('/workshop/customers')} style={{ ...S.toolBtn, fontSize: 10, color: '#2563eb' }}>✏ Edit Customer</button>
                     </div>
                   </div>

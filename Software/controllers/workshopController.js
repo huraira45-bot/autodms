@@ -427,6 +427,7 @@ exports.saveJobCard = async (req, res) => {
                 await transaction.request()
                     .input('id', sql.Int, JobCardId)
                     .input('jobCode', sql.NVarChar(50), jobCode)
+                    .input('endUserId', sql.Int, EndUserID || null)
                     .input('jobTypeId', sql.Int, JobTypeId)
                     .input('orderTypeId', sql.Int, OrderTypeId || null)
                     .input('regNo', sql.NVarChar(150), VehicleRegNo)
@@ -470,7 +471,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('confirmByName', sql.NVarChar(100), ConfirmByName || null)
                     .input('wacResults', sql.NVarChar(sql.MAX), WACResults || null)
                     .query(`UPDATE Addata_JobCardInfo SET
-                        jobCode=@jobCode, JobTypeId=@jobTypeId, OrderTypeId=@orderTypeId, VehicleRegNo=@regNo, ChasisNo=@chassis, EngineNo=@engine,
+                        jobCode=@jobCode, EndUserID=@endUserId, JobTypeId=@jobTypeId, OrderTypeId=@orderTypeId, VehicleRegNo=@regNo, ChasisNo=@chassis, EngineNo=@engine,
                         KiloMeter=@km, Millage=@millage, PromisedDate=@promised, Remarks=@remarks, Status=@payType, PaymentCO=@payCO, PaymentBankID=@payBankId,
                         FuelLevel=@fuel, VOCRemarks=@voc, CustomerType=@custType, PartyID=@partyId,
                         PMType=@pmType, ServiceAdvisor=@advisor, ServiceAdvisorID=@advisorId, RepeatROID=@repeatROID, BatteryNo=@batteryNo, VehicleColor=@color,
