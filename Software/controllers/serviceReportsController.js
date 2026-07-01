@@ -35,12 +35,20 @@ exports.jobCardRegister = async (req, res) => {
         if (req.query.status)    { rq.input('st', sql.NVarChar(30), req.query.status); conds.push('j.Status = @st'); }
         if (req.query.advisorId) { rq.input('ad', sql.Int, parseInt(req.query.advisorId)); conds.push('j.ServiceAdvisorID = @ad'); }
 
-        // Business-type filter: owner wants Cash / Credit split, with POS and
-        // Bank Transfer grouped under Cash (they settle to bank the same day
-        // and are treated as cash flow, not receivables).
-        if (req.query.businessType === 'cash') {
+        // Business Type filter — owner's terminology for gen_JobCardType
+        // (WR, FFS, SFS, PDS, PPM, B&P, GR, CT). Frontend passes the numeric
+        // JobCardTypeId picked from the dropdown.
+        if (req.query.businessType) {
+            rq.input('bt', sql.Int, parseInt(req.query.businessType));
+            conds.push('j.JobTypeId = @bt');
+        }
+
+        // Payment mode filter — Cash includes POS and Bank Transfer (owner
+        // treats them as same-day settled cash, not receivables). Credit
+        // stays separate.
+        if (req.query.paymentMode === 'cash') {
             conds.push("j.Status IN ('Cash','POS','Bank Transfer')");
-        } else if (req.query.businessType === 'credit') {
+        } else if (req.query.paymentMode === 'credit') {
             conds.push("j.Status = 'Credit'");
         }
 

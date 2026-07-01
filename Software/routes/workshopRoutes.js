@@ -14,8 +14,9 @@ router.post(  '/customers/:id/vehicles',    requirePerm('workshop_customers', 'i
 router.get(   '/parties',                   requireAnyAccess('workshop_jobs:view', 'crm_parties:view'), wc.getParties);
 
 // ── Job Types (workshop_settings) ──────────────────────────────────────────
-// GET is also needed by JobCardForm (Business Unit dropdown) — allow workshop_jobs:view too.
-router.get(   '/job-types',                 requireAnyAccess('workshop_settings:view', 'workshop_jobs:view'), wc.getJobCardTypes);
+// GET is also needed by JobCardForm (Business Unit dropdown) and by the JC
+// Register report's Business Type filter — allow any of these three views.
+router.get(   '/job-types',                 requireAnyAccess('workshop_settings:view', 'workshop_jobs:view', 'report:job_card_register'), wc.getJobCardTypes);
 router.post(  '/job-types',                 requirePerm('workshop_settings', 'insert'),  wc.saveJobCardType);
 router.delete('/job-types/:id',             requirePerm('workshop_settings', 'delete'),  wc.deleteJobCardType);
 router.patch( '/job-types/:id/manager',     requirePerm('workshop_settings', 'edit'),    wc.setJobCardTypeManager);

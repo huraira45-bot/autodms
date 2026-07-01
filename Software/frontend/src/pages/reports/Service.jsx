@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 import { Wrench, Activity, ShieldCheck, UserCog } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
 
@@ -11,20 +12,37 @@ const firstOfMonthISO = () => {
 // Job Card Register
 // =====================================================================
 export function JobCardRegister() {
+    const [jobTypes, setJobTypes] = useState([]);
+    useEffect(() => {
+        axios.get('/api/workshop/job-types').then(r => setJobTypes(r.data || [])).catch(() => {});
+    }, []);
+    const selectStyle = { padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' };
     return (
         <ReportShell
             title="Job Card Register"
             subtitle="All workshop job cards in the period — customer, vehicle, advisor, labour/parts/sublet/total."
             icon={Wrench}
             endpoint="service/job-card-register"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '' }}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '' }}
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
                         Business Type:
                         <select value={params.businessType || ''} onChange={e => updateParam('businessType', e.target.value)}
-                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+                            style={selectStyle}>
+                            <option value="">All</option>
+                            {jobTypes.map(t => (
+                                <option key={t.JobCardTypeId} value={t.JobCardTypeId}>
+                                    {t.CardCode} — {t.Title}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Payment:
+                        <select value={params.paymentMode || ''} onChange={e => updateParam('paymentMode', e.target.value)}
+                            style={selectStyle}>
                             <option value="">All</option>
                             <option value="cash">Cash (incl. POS &amp; Bank Transfer)</option>
                             <option value="credit">Credit</option>
