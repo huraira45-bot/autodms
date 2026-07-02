@@ -1,5 +1,5 @@
 /**
- * Owner import 2026-07-02: 5 parts opening stock, effects to Capital.
+ * Owner import 2026-06-30: 5 parts opening stock, effects to Capital.
  *
  * For each row:
  *   - If an InventItems row with matching ManualNumber (part number) exists,
@@ -8,12 +8,12 @@
  *   - Add the qty via a StockArrival document (mirrors the pattern from
  *     import_stock_opening.js).
  *
- * Then one balanced JV dated 2026-07-02:
+ * Then one balanced JV dated 2026-06-30:
  *   Dr 102001009 SPARE STOCKS         204,950.87
  *   Cr 301001001 CAPITAL ACCOUNT      204,950.87
  *
  * Idempotent: refuses to run twice by checking for a voucher already numbered
- * 'JV-OB-STK-2026-07-02'.
+ * 'JV-OB-STK-2026-06-30'.
  */
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
@@ -21,8 +21,8 @@ const { sql, getPool } = require('../config/db');
 
 const CAPITAL_CODE  = '301001001';
 const INVENTORY_CODE = '102001009';   // SPARE STOCKS
-const VOUCHER_PREFIX = 'JV-OB-STK-2026-07-02';
-const VOUCHER_DATE = new Date('2026-07-02T00:00:00');
+const VOUCHER_PREFIX = 'JV-OB-STK-2026-06-30';
+const VOUCHER_DATE = new Date('2026-06-30T00:00:00');   // 30 Jun 2026
 
 const ROWS = [
     { category: 'OIL & CHEMICAL',   partNo: 'CMGOI-TO002',      name: 'TRANSMISSION OIL OSHAN  (BOT 351 C4)',            location: 'A01 A 04 - A03', qty: 37, rate: 4898.94 },
@@ -134,8 +134,8 @@ const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
             .input('dt',  sql.DateTime, VOUCHER_DATE)
             .input('wh',  sql.Int,      whid)
             .input('cid', sql.Int,      1)
-            .input('rem', sql.NVarChar(sql.MAX), 'Opening stock 2026-07-02 (owner request)')
-            .input('mn',  sql.NVarChar(50), 'OPEN-STK-2026-07-02')
+            .input('rem', sql.NVarChar(sql.MAX), 'Opening stock 2026-06-30 (owner request)')
+            .input('mn',  sql.NVarChar(50), 'OPEN-STK-2026-06-30')
             .query(`INSERT INTO data_StockArrivalInfo
                         (ArrivalNo, ArrivalDate, ArrivalToWHID, CompanyID, isManual, Remarks, ManualNo, EntryUserDateTime)
                     OUTPUT INSERTED.ArrivalID
@@ -159,7 +159,7 @@ const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
             .input('vd',      sql.DateTime,         VOUCHER_DATE)
             .input('vno',     sql.NVarChar(50),     voucherNo)
             .input('vtId',    sql.Int,              jvTypeId)
-            .input('remarks', sql.NVarChar(sql.MAX),'Opening stock 2026-07-02 — 5 parts (owner request)')
+            .input('remarks', sql.NVarChar(sql.MAX),'Opening stock 2026-06-30 — 5 parts (owner request)')
             .input('total',   sql.Decimal(18,2),    totalValue)
             .input('src',     sql.NVarChar(20),     'VOUCHER')
             .input('cbyN',    sql.NVarChar(100),    'import_opening_stock_2026_07_02')
@@ -174,7 +174,7 @@ const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
         await new sql.Request(tx)
             .input('vid', sql.Int, voucherId)
             .input('gl',  sql.Int, inventoryGLCAID)
-            .input('nar', sql.NVarChar(sql.MAX), 'Opening stock — Spare parts inventory (5 parts, 2026-07-02)')
+            .input('nar', sql.NVarChar(sql.MAX), 'Opening stock — Spare parts inventory (5 parts, 2026-06-30)')
             .input('dr',  sql.Decimal(18,2), totalValue)
             .input('cr',  sql.Decimal(18,2), 0)
             .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
