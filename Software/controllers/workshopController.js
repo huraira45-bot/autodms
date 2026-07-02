@@ -258,7 +258,7 @@ exports.deleteOrderType = async (req, res) => {
 // ============== JOB CARDS ==============
 exports.getJobCards = async (req, res) => {
     try {
-        const { search, status } = req.query;
+        const { search, status, finalized } = req.query;
         const pool = await getPool();
         const request = pool.request();
         let query = 'SELECT * FROM vw_WorkshopJobCards';
@@ -267,7 +267,12 @@ exports.getJobCards = async (req, res) => {
             request.input('search', sql.NVarChar(200), `%${search}%`);
             conditions.push('(JobCardNo LIKE @search OR jobCode LIKE @search OR CustomerName LIKE @search OR VehicleRegNo LIKE @search OR ChasisNo LIKE @search)');
         }
-        if (status !== undefined && status !== '') {
+        // Owner ask 2026-07-01: the list should filter by Finalized / Not
+        // Finalized only (workflow JobStatus removed from UI). Legacy status
+        // param kept for any external caller still passing 0-4.
+        if (finalized === 'finalized')          conditions.push('IsFinalized = 1');
+        else if (finalized === 'not_finalized') conditions.push('(IsFinalized IS NULL OR IsFinalized = 0)');
+        else if (status !== undefined && status !== '') {
             request.input('status', sql.Int, parseInt(status));
             conditions.push('JobStatus = @status');
         }

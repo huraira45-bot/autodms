@@ -5,15 +5,21 @@ import { useNavigate } from 'react-router-dom';
 
 const API = '/api/workshop';
 
-const STATUS_COLORS = { 0:'#f59e0b', 1:'#3b82f6', 2:'#10b981', 3:'#8b5cf6', 4:'#64748b' };
-const STATUS_LABELS = { 0:'Open', 1:'In Progress', 2:'Ready', 3:'Invoiced', 4:'Closed' };
 const TYPE_STYLES = { 'WR':{bg:'#fef3c7',color:'#92400e'}, 'BP':{bg:'#dbeafe',color:'#1e40af'}, 'GR':{bg:'#d1fae5',color:'#065f46'} };
+
+// Owner ask 2026-07-01: the Status column and its filter should collapse
+// to just Finalized / Not Finalized — the workflow states (Open, In Progress,
+// Ready, Invoiced, Closed) that lived here were never tracked in practice.
+const FIN_BADGE = {
+    finalized:     { label: 'Finalized',     bg: '#d1fae5', color: '#065f46' },
+    not_finalized: { label: 'Not Finalized', bg: '#fef3c7', color: '#92400e' },
+};
 
 export default function JobCardList() {
   const [jobs, setJobs] = useState([]);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [finalizedFilter, setFinalizedFilter] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -24,20 +30,13 @@ export default function JobCardList() {
   const fetchJobs = async () => {
     try {
       let url = `${API}/job-cards?search=${debouncedSearch}`;
-      if (statusFilter !== '') url += `&status=${statusFilter}`;
+      if (finalizedFilter) url += `&finalized=${finalizedFilter}`;
       const res = await axios.get(url);
       setJobs(res.data);
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { fetchJobs(); }, [debouncedSearch, statusFilter]);
-
-  const updateStatus = async (id, status) => {
-    try {
-      await axios.patch(`${API}/job-cards/${id}/status`, { status });
-      fetchJobs();
-    } catch (err) { alert('Error: ' + err.message); }
-  };
+  useEffect(() => { fetchJobs(); }, [debouncedSearch, finalizedFilter]);
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
@@ -51,13 +50,10 @@ export default function JobCardList() {
           <Search size={18} style={{color:'#94a3b8'}} />
           <input style={{border:'none',outline:'none',flex:1,fontSize:'0.9rem',background:'transparent'}} placeholder="Search by RO#, Job No, Customer, Reg No... (e.g. 0042 or WR-0042)" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <select style={{height:'40px',padding:'0 12px',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'0.9rem',minWidth:'160px'}} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="">All Status</option>
-          <option value="0">Open</option>
-          <option value="1">In Progress</option>
-          <option value="2">Ready</option>
-          <option value="3">Invoiced</option>
-          <option value="4">Closed</option>
+        <select style={{height:'40px',padding:'0 12px',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'0.9rem',minWidth:'160px'}} value={finalizedFilter} onChange={e => setFinalizedFilter(e.target.value)}>
+          <option value="">All</option>
+          <option value="finalized">Finalized</option>
+          <option value="not_finalized">Not Finalized</option>
         </select>
       </div>
 
@@ -66,9 +62,10 @@ export default function JobCardList() {
         <div className="table-wrapper"><table>
           <thead><tr><th>RO #</th><th>Job #</th><th>Type</th><th>Customer</th><th>Cust. Type</th><th>Vehicle</th><th>Payment</th><th>Status</th><th>Date</th><th>Created By</th><th>Actions</th></tr></thead>
           <tbody>{jobs.length === 0 ? (
-            <tr><td colSpan="10" style={{textAlign:'center',padding:'40px',color:'#94a3b8'}}>No job cards found. Use "Create Job Card" from the sidebar to create one.</td></tr>
+            <tr><td colSpan="11" style={{textAlign:'center',padding:'40px',color:'#94a3b8'}}>No job cards found. Use "Create Job Card" from the sidebar to create one.</td></tr>
           ) : jobs.map(j => {
             const ts = TYPE_STYLES[j.JobTypeCode] || TYPE_STYLES['GR'];
+            const badge = j.IsFinalized ? FIN_BADGE.finalized : FIN_BADGE.not_finalized;
             return (
             <tr key={j.JobCardId}>
               <td><strong style={{fontFamily:'monospace',color:'var(--primary)'}}>{j.JobCardNo}</strong></td>
@@ -79,11 +76,9 @@ export default function JobCardList() {
               <td><span style={{fontFamily:'monospace',fontWeight:600}}>{j.VehicleRegNo}</span></td>
               <td><span style={{fontSize:'0.8rem',fontWeight:600,color:j.PaymentType==='Credit'?'#dc2626':j.PaymentType==='POS'?'#2563eb':'#16a34a'}}>{j.PaymentType||'Cash'}</span></td>
               <td>
-                <select value={j.JobStatus} onChange={e => !j.IsFinalized && updateStatus(j.JobCardId, parseInt(e.target.value))}
-                  disabled={!!j.IsFinalized}
-                  style={{padding:'4px 8px',borderRadius:'6px',border:`2px solid ${STATUS_COLORS[j.JobStatus]}`,fontWeight:600,fontSize:'0.8rem',color:STATUS_COLORS[j.JobStatus],background:'white',cursor:j.IsFinalized?'default':'pointer',opacity:j.IsFinalized?0.7:1}}>
-                  {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
+                <span style={{padding:'3px 10px',borderRadius:'99px',fontSize:'0.75rem',fontWeight:700,background:badge.bg,color:badge.color,whiteSpace:'nowrap'}}>
+                  {badge.label}
+                </span>
               </td>
               <td style={{fontSize:'0.85rem'}}>{j.CreatedAt ? new Date(j.CreatedAt).toLocaleDateString() : '—'}</td>
               <td style={{fontSize:'0.8rem',color:'#64748b'}}>{j.CreatedByName || '—'}</td>
