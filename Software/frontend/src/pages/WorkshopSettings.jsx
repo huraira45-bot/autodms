@@ -439,19 +439,12 @@ function JobTypeGLPicker({ jt, onSaved, notify }) {
     setBusy(false);
   };
 
-  // Owner ask 2026-07-02: hide the Receivable A/C summary line + picker when
-  // the mapping is a *custom* override (i.e. NOT our GENERAL_CUSTOMER default).
-  // Only show it when the mapping is default/blank, so admins never see a
-  // customised receivable that isn't actively editable.
-  const receivableIsDefault = !jt.ReceivableAccount ||
-        (generalCustomerId && Number(jt.ReceivableAccount) === Number(generalCustomerId));
-  const showReceivable = receivableIsDefault;
-  const hasMapping = jt.JobRevenueAccount || jt.PartsRevenueAccount || (jt.ReceivableAccount && showReceivable);
+  const hasMapping = jt.JobRevenueAccount || jt.PartsRevenueAccount || jt.ReceivableAccount;
   const summary = (
     <div style={{ fontSize: '0.72rem', color: '#475569' }}>
       {jt.JobRevenueCode && <div>Labour Rev: <code>{jt.JobRevenueCode}</code></div>}
       {jt.PartsRevenueCode && <div>Parts Rev: <code>{jt.PartsRevenueCode}</code></div>}
-      {jt.ReceivableCode && showReceivable && <div>Receivable: <code>{jt.ReceivableCode}</code></div>}
+      {jt.ReceivableCode && <div>Receivable: <code>{jt.ReceivableCode}</code></div>}
       {!hasMapping && <span style={{ fontStyle: 'italic', color: '#94a3b8' }}>(using system defaults)</span>}
     </div>
   );
@@ -498,19 +491,17 @@ function JobTypeGLPicker({ jt, onSaved, notify }) {
                 options={incomeAccts.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode, group: a.isParent ? 'Group accounts' : 'Detail accounts' }))}
                 placeholder="Use system default" />
             </div>
-            {showReceivable && (
-              <div style={{ marginTop: 12 }}>
-                <label style={lblStyle}>Receivable A/C (for walk-in customers on this business unit)</label>
-                <SearchableSelect
-                  value={form.ReceivableAccount}
-                  onChange={v => setForm(f => ({ ...f, ReceivableAccount: v }))}
-                  options={arAccts.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode, group: a._group }))}
-                  placeholder="Use system default (General Customer A/C)" />
-                <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
-                  Named-party JCs always post to the party's own GL; this only applies when there's no party.
-                </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={lblStyle}>Receivable A/C (for walk-in customers on this business unit)</label>
+              <SearchableSelect
+                value={form.ReceivableAccount}
+                onChange={v => setForm(f => ({ ...f, ReceivableAccount: v }))}
+                options={arAccts.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode, group: a._group }))}
+                placeholder="Use system default (General Customer A/C)" />
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
+                Named-party JCs always post to the party's own GL; this only applies when there's no party.
               </div>
-            )}
+            </div>
 
             <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={() => setOpen(false)} className="btn-sm">Cancel</button>
