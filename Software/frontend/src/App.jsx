@@ -95,7 +95,7 @@ import SalesInquiryQueue from './pages/sales/SalesInquiryQueue';
 import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
 // Module-scoped reports
-import { JobCardRegister, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
+import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary }       from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
@@ -216,6 +216,11 @@ function Sidebar({ onOpenCommand }) {
                 {canReport('job_card_register') && (
                     <NavLink to="/reports/service/job-card-register" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <FileBarChart size={20} /> Job Card Register
+                    </NavLink>
+                )}
+                {canReport('advisor_performance') && (
+                    <NavLink to="/reports/service/advisor-performance" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <FileBarChart size={20} /> Advisor Performance
                     </NavLink>
                 )}
                 {canReport('revenue_summary') && (
@@ -759,6 +764,7 @@ function AppShell() {
 
                     {/* Service (workshop) reports */}
                     <Route path="/reports/service/job-card-register"     element={<ProtectedRoute><JobCardRegister /></ProtectedRoute>} />
+                    <Route path="/reports/service/advisor-performance"   element={<ProtectedRoute><AdvisorPerformance /></ProtectedRoute>} />
                     <Route path="/reports/service/revenue-summary"       element={<ProtectedRoute><ServiceRevenueSummary /></ProtectedRoute>} />
                     <Route path="/reports/service/insurance-claims"      element={<ProtectedRoute><InsuranceClaims /></ProtectedRoute>} />
                     <Route path="/reports/service/mechanic-productivity" element={<ProtectedRoute><MechanicProductivity /></ProtectedRoute>} />

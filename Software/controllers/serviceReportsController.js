@@ -116,6 +116,80 @@ exports.jobCardRegister = async (req, res) => {
 };
 
 /**
+ * GET /reports/service/advisor-performance
+ *
+ * Work delivered by each Service Advisor across the period, optionally
+ * scoped to one Business Type (JobCardTypeId) and/or Payment mode.
+ * Group by advisor, sum labour/parts/sublet, count job cards.
+ * Owner request 2026-07-01.
+ *
+ * Filters: from, to, businessType (=JobCardTypeId), paymentMode (cash|credit),
+ * finalized (finalized|draft|all, default 'finalized').
+ */
+exports.advisorPerformance = async (req, res) => {
+    try {
+        const { from, to } = parseRange(req);
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+
+        const conds = ['j.JobCardDate BETWEEN @from AND @to'];
+        if (req.query.businessType) {
+            rq.input('bt', sql.Int, parseInt(req.query.businessType));
+            conds.push('j.JobTypeId = @bt');
+        }
+        if (req.query.paymentMode === 'cash') {
+            conds.push("j.Status IN ('Cash','POS','Bank Transfer')");
+        } else if (req.query.paymentMode === 'credit') {
+            conds.push("j.Status = 'Credit'");
+        }
+        const finalized = req.query.finalized || 'finalized';
+        if (finalized === 'finalized')  conds.push('j.IsFinalized = 1');
+        else if (finalized === 'draft') conds.push('(j.IsFinalized IS NULL OR j.IsFinalized = 0)');
+
+        const r = await rq.query(`
+            SELECT ISNULL(NULLIF(LTRIM(RTRIM(j.ServiceAdvisor)), ''), '(Unassigned)') AS Advisor,
+                   j.ServiceAdvisorID,
+                   COUNT(j.JobCardId) AS Cards,
+                   ISNULL(SUM(L.Lab),   0) AS Labour,
+                   ISNULL(SUM(P.Parts), 0) AS Parts,
+                   ISNULL(SUM(B.Sublet),0) AS Sublet
+            FROM Addata_JobCardInfo j
+            OUTER APPLY (SELECT SUM(ISNULL(d.Price,0)*ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0) + ISNULL(d.TaxAmount,0)) AS Lab
+                         FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId) L
+            OUTER APPLY (SELECT SUM(ISNULL(s.IssueQuantity,0) * ISNULL(s.ItemRate,0)) AS Parts
+                         FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId) P
+            OUTER APPLY (SELECT SUM(ISNULL(b.PayableAmount,0)) AS Sublet
+                         FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId) B
+            WHERE ${conds.join(' AND ')}
+            GROUP BY j.ServiceAdvisorID, LTRIM(RTRIM(j.ServiceAdvisor))
+            ORDER BY (ISNULL(SUM(L.Lab),0) + ISNULL(SUM(P.Parts),0) + ISNULL(SUM(B.Sublet),0)) DESC`);
+
+        const rows = r.recordset.map(x => ({
+            ServiceAdvisorID: x.ServiceAdvisorID,
+            Advisor:          x.Advisor,
+            Cards:            Number(x.Cards),
+            Labour:           +Number(x.Labour).toFixed(2),
+            Parts:            +Number(x.Parts).toFixed(2),
+            Sublet:           +Number(x.Sublet).toFixed(2),
+            Total:            +(Number(x.Labour) + Number(x.Parts) + Number(x.Sublet)).toFixed(2),
+        }));
+
+        const totals = {
+            advisors: rows.length,
+            cards:    rows.reduce((s, x) => s + x.Cards,  0),
+            labour:   +rows.reduce((s, x) => s + x.Labour, 0).toFixed(2),
+            parts:    +rows.reduce((s, x) => s + x.Parts,  0).toFixed(2),
+            sublet:   +rows.reduce((s, x) => s + x.Sublet, 0).toFixed(2),
+            total:    +rows.reduce((s, x) => s + x.Total,  0).toFixed(2),
+        };
+
+        res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
+    } catch (err) { console.error('advisorPerformance:', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
  * GET /reports/service/revenue-summary
  *
  * Service revenue by day in the period, split into Labour / Parts / Sublet.

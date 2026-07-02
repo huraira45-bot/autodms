@@ -130,6 +130,7 @@ const SECTIONS = [
         name: 'REPORTS — WORKSHOP / SERVICE',
         items: [
             { key: 'report:job_card_register',     label: 'Job Card Register',     kind: 'report' },
+            { key: 'report:advisor_performance',   label: 'Advisor Performance',   kind: 'report' },
             { key: 'report:revenue_summary',       label: 'Service Revenue Summary', kind: 'report' },
             { key: 'report:insurance_claims',      label: 'Insurance Claims',      kind: 'report' },
             { key: 'report:mechanic_productivity', label: 'Mechanic Productivity', kind: 'report' },

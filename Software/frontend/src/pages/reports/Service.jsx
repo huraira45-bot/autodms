@@ -123,6 +123,135 @@ export function JobCardRegister() {
 }
 
 // =====================================================================
+// Advisor Performance — work delivered per Service Advisor, filterable
+// by Business Type (Job Card Type) and Payment mode. Groups by advisor,
+// sums labour / parts / sublet, ranks by total revenue.
+// =====================================================================
+export function AdvisorPerformance() {
+    const [jobTypes, setJobTypes] = useState([]);
+    useEffect(() => {
+        axios.get('/api/workshop/job-types').then(r => setJobTypes(r.data || [])).catch(() => {});
+    }, []);
+    const selectStyle = { padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' };
+    const printFilterSummary = (params) => {
+        const parts = [];
+        if (params.from && params.to) parts.push(`Period: ${params.from} → ${params.to}`);
+        if (params.businessType) {
+            const t = jobTypes.find(x => String(x.JobCardTypeId) === String(params.businessType));
+            parts.push(`Business Type: ${t ? `${t.CardCode} — ${t.Title}` : params.businessType}`);
+        } else {
+            parts.push('Business Type: All');
+        }
+        if (params.paymentMode === 'cash')        parts.push('Payment: Cash (incl. POS & Bank Transfer)');
+        else if (params.paymentMode === 'credit')  parts.push('Payment: Credit');
+        else                                       parts.push('Payment: All');
+        if (params.finalized === 'draft')          parts.push('Status: Draft only');
+        else if (params.finalized === 'all')       parts.push('Status: All (incl. Draft)');
+        else                                       parts.push('Status: Finalized only');
+        return parts.join('  •  ');
+    };
+    return (
+        <ReportShell
+            title="Service Advisor Performance"
+            subtitle="Work delivered by each Service Advisor — cards handled, labour / parts / sublet revenue, filterable by business type and payment mode."
+            icon={UserCog}
+            endpoint="service/advisor-performance"
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized' }}
+            printFilterSummary={printFilterSummary}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PeriodControls params={params} updateParam={updateParam} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Business Type:
+                        <select value={params.businessType || ''} onChange={e => updateParam('businessType', e.target.value)}
+                            style={selectStyle}>
+                            <option value="">All</option>
+                            {jobTypes.map(t => (
+                                <option key={t.JobCardTypeId} value={t.JobCardTypeId}>
+                                    {t.CardCode} — {t.Title}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Payment:
+                        <select value={params.paymentMode || ''} onChange={e => updateParam('paymentMode', e.target.value)}
+                            style={selectStyle}>
+                            <option value="">All</option>
+                            <option value="cash">Cash (incl. POS &amp; Bank Transfer)</option>
+                            <option value="credit">Credit</option>
+                        </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Status:
+                        <select value={params.finalized || 'finalized'} onChange={e => updateParam('finalized', e.target.value)}
+                            style={selectStyle}>
+                            <option value="finalized">Finalized only</option>
+                            <option value="draft">Draft only</option>
+                            <option value="all">All (incl. Draft)</option>
+                        </select>
+                    </label>
+                </>
+            )}
+        >
+            {(data) => (
+                <>
+                    <SummaryBar items={[
+                        { label: 'Advisors', value: fmtInt(data.totals.advisors) },
+                        { label: 'Cards',    value: fmtInt(data.totals.cards) },
+                        { label: 'Labour',   value: 'PKR ' + fmt(data.totals.labour) },
+                        { label: 'Parts',    value: 'PKR ' + fmt(data.totals.parts) },
+                        { label: 'Sublet',   value: 'PKR ' + fmt(data.totals.sublet) },
+                        { label: 'Total',    value: 'PKR ' + fmt(data.totals.total), strong: true },
+                    ]} />
+                    <div className="card" style={{ overflowX: 'auto' }}>
+                        <table style={tableStyle}>
+                            <thead>
+                                <tr style={trHeader}>
+                                    <TH align="right">#</TH>
+                                    <TH>Service Advisor</TH>
+                                    <TH align="right">Cards</TH>
+                                    <TH align="right">Labour</TH>
+                                    <TH align="right">Parts</TH>
+                                    <TH align="right">Sublet</TH>
+                                    <TH align="right">Total</TH>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.rows.length === 0 && <Empty cols={7}>No work found in this period for the chosen filters.</Empty>}
+                                {data.rows.map((r, i) => (
+                                    <tr key={`${r.ServiceAdvisorID || 'null'}-${i}`} style={trBody}>
+                                        <TD align="right" color="#94a3b8">{i + 1}</TD>
+                                        <TD><strong>{r.Advisor}</strong></TD>
+                                        <TD align="right">{fmtInt(r.Cards)}</TD>
+                                        <TD align="right" mono>{fmt(r.Labour)}</TD>
+                                        <TD align="right" mono>{fmt(r.Parts)}</TD>
+                                        <TD align="right" mono>{fmt(r.Sublet)}</TD>
+                                        <TD align="right" mono bold>{fmt(r.Total)}</TD>
+                                    </tr>
+                                ))}
+                            </tbody>
+                            {data.rows.length > 0 && (
+                                <tfoot>
+                                    <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
+                                        <td colSpan={2} style={{ padding: 12, fontWeight: 700 }}>Totals</td>
+                                        <TD align="right" bold>{fmtInt(data.totals.cards)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.labour)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.parts)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.sublet)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.total)}</TD>
+                                    </tr>
+                                </tfoot>
+                            )}
+                        </table>
+                    </div>
+                </>
+            )}
+        </ReportShell>
+    );
+}
+
+// =====================================================================
 // Service Revenue Summary (per-day)
 // =====================================================================
 export function ServiceRevenueSummary() {
