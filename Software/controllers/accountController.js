@@ -115,6 +115,44 @@ exports.addAccount = async (req, res) => {
     }
 };
 
+/**
+ * PATCH /api/accounts/coa/:glcaid/title
+ * Rename an existing account. Only touches GLTitle — everything else (code,
+ * level, hierarchy, GLNature, isParent, ReadOnly) is immutable through this
+ * endpoint. Ledger references key off GLCAID, not GLTitle, so renaming is
+ * safe and doesn't affect balances or postings.
+ * Owner request 2026-07-02.
+ */
+exports.renameAccount = async (req, res) => {
+    try {
+        const glcaid = parseInt(req.params.glcaid);
+        if (!glcaid) return res.status(400).json({ error: 'Valid GLCAID required.' });
+        const title = String(req.body?.GLTitle || '').trim();
+        if (!title) return res.status(400).json({ error: 'GLTitle is required.' });
+        if (title.length > 200) return res.status(400).json({ error: 'GLTitle must be 200 characters or less.' });
+
+        const pool = await getPool();
+        // Refuse to touch a ReadOnly=1 system-seeded account — e.g. class roots.
+        const acc = await pool.request()
+            .input('id', sql.Int, glcaid)
+            .query('SELECT GLCAID, GLCode, GLTitle, ReadOnly FROM GLChartOFAccount WHERE GLCAID=@id');
+        if (!acc.recordset.length) return res.status(404).json({ error: 'Account not found.' });
+        if (acc.recordset[0].ReadOnly === 1) {
+            return res.status(423).json({ error: `${acc.recordset[0].GLCode} ${acc.recordset[0].GLTitle} is read-only and cannot be renamed.` });
+        }
+
+        await pool.request()
+            .input('id',  sql.Int, glcaid)
+            .input('ttl', sql.NVarChar(200), title)
+            .query('UPDATE GLChartOFAccount SET GLTitle=@ttl WHERE GLCAID=@id');
+
+        res.json({ message: 'Account renamed', GLCAID: glcaid, GLCode: acc.recordset[0].GLCode, GLTitle: title });
+    } catch (err) {
+        console.error('renameAccount:', err);
+        res.status(400).json({ error: 'Database Error', details: err.message });
+    }
+};
+
 exports.getCOA = async (req, res) => {
     try {
         const { level, parentCode, search } = req.query;

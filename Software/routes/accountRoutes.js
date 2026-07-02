@@ -12,6 +12,7 @@ router.get(  '/coa',           requireAnyAccess(
                                   'accounting_setup:view', 'payments',
                                 ), accountController.getCOA);
 router.post( '/coa',           requirePerm('finance_coa', 'insert'),  accountController.addAccount);
+router.patch('/coa/:glcaid/title', requirePerm('finance_coa', 'edit'), accountController.renameAccount);
 
 // Banks (under accounting_setup). GET is also needed by Store Sale / SSR
 // forms (Bank Transfer payment mode picker) and the workshop side.

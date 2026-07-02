@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, ChevronRight, ChevronDown, Landmark, X, Search, Loader2, Building } from 'lucide-react';
+import { Plus, ChevronRight, ChevronDown, Landmark, X, Search, Loader2, Building, Pencil, Check } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE = '/api';
 
@@ -42,10 +43,89 @@ const BankToggle = ({ acc }) => {
   );
 };
 
+// Inline rename button + editor for a single COA row. Only visible to users
+// with finance_coa:edit. Owner request 2026-07-02.
+const RenameControl = ({ acc, onRenamed }) => {
+  const { notify } = useFeedback();
+  const { hasPermission } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [val, setVal] = useState(acc.GLTitle || '');
+  if (!hasPermission || !hasPermission('finance_coa:edit')) return null;
+  const save = async (e) => {
+    e.stopPropagation();
+    const title = val.trim();
+    if (!title || title === acc.GLTitle) { setEditing(false); return; }
+    setBusy(true);
+    try {
+      const res = await axios.patch(`/api/accounts/coa/${acc.GLCAID}/title`, { GLTitle: title });
+      notify({ type: 'success', title: 'Account renamed', message: `${acc.GLCode} → ${res.data.GLTitle}` });
+      onRenamed(res.data.GLTitle);
+      setEditing(false);
+    } catch (err) {
+      notify({ type: 'error', title: 'Rename failed', message: err.response?.data?.error || err.message });
+    }
+    setBusy(false);
+  };
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
+        <input
+          autoFocus
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(e); if (e.key === 'Escape') { setEditing(false); setVal(acc.GLTitle || ''); } }}
+          style={{ padding: '2px 6px', border: '1px solid #94a3b8', borderRadius: 4, fontSize: 13, minWidth: 220 }}
+        />
+        <button disabled={busy} onClick={save} title="Save"
+          style={{ padding: '2px 6px', background: '#dcfce7', color: '#16a34a', border: '1px solid #86efac',
+                   borderRadius: 4, cursor: busy ? 'wait' : 'pointer' }}>
+          <Check size={12} />
+        </button>
+        <button disabled={busy} onClick={e => { e.stopPropagation(); setEditing(false); setVal(acc.GLTitle || ''); }} title="Cancel"
+          style={{ padding: '2px 6px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+                   borderRadius: 4, cursor: busy ? 'wait' : 'pointer' }}>
+          <X size={12} />
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); setEditing(true); setVal(acc.GLTitle || ''); }}
+      title="Rename account"
+      style={{ padding: '2px 6px', background: 'transparent', color: '#64748b', border: '1px solid transparent',
+               borderRadius: 4, cursor: 'pointer' }}
+    >
+      <Pencil size={12} />
+    </button>
+  );
+};
+
+// Flat row rendered in the Search Results panel. Same rename affordance
+// as the tree row, but no expand/collapse (search results are already flat).
+const SearchResultRow = ({ acc }) => {
+  const [title, setTitle] = useState(acc.GLTitle || '');
+  return (
+    <div className="coa-row">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span className="coa-code">{acc.GLCode}</span>
+        <span className="coa-title">{title}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <RenameControl acc={{ ...acc, GLTitle: title }} onRenamed={setTitle} />
+        <BankToggle acc={acc} />
+        <div className="coa-badge">{acc.GLNature}</div>
+      </div>
+    </div>
+  );
+};
+
 const AccountNode = ({ acc }) => {
   const [children, setChildren] = useState([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [title, setTitle] = useState(acc.GLTitle || '');
 
   const toggle = async () => {
     const canHaveChildren = acc.GLLevel < 5;
@@ -71,9 +151,10 @@ const AccountNode = ({ acc }) => {
             (isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />)
           ) : <div style={{ width: 16 }} />}
           <span className="coa-code">{acc.GLCode}</span>
-          <span className={`coa-title ${acc.GLLevel === 1 ? 'root' : ''}`}>{acc.GLTitle}</span>
+          <span className={`coa-title ${acc.GLLevel === 1 ? 'root' : ''}`}>{title}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <RenameControl acc={{ ...acc, GLTitle: title }} onRenamed={setTitle} />
           <BankToggle acc={acc} />
           <div className="coa-badge">{acc.GLNature}</div>
         </div>
@@ -183,18 +264,7 @@ export default function ChartOfAccounts() {
         
         <div className="coa-tree-container">
           {searchResults ? (
-            searchResults.map(acc => (
-              <div key={acc.GLCAID} className="coa-row">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span className="coa-code">{acc.GLCode}</span>
-                  <span className="coa-title">{acc.GLTitle}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <BankToggle acc={acc} />
-                  <div className="coa-badge">{acc.GLNature}</div>
-                </div>
-              </div>
-            ))
+            searchResults.map(acc => <SearchResultRow key={acc.GLCAID} acc={acc} />)
           ) : (
             roots.length > 0 ? roots.map(root => <AccountNode key={root.GLCAID} acc={root} />) : <p style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No accounts found. Create your first root account!</p>
           )}
