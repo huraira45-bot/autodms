@@ -68,6 +68,10 @@ export default function JobCardForm() {
   const [customerVehicles, setCustomerVehicles] = useState([]);
   const [issuedParts, setIssuedParts] = useState([]);
   const [subletItems, setSubletItems] = useState([]);
+  // Live JC balance — invoice total, amount paid, outstanding.
+  // Refreshed after finalize and whenever the JC is re-opened. Owner ask
+  // 2026-07-01: a finalized JC should show what the customer still owes.
+  const [balance, setBalance] = useState(null);
 
   // Insurance tab — claim header + per-part depreciation rows + payments
   const [insHeader, setInsHeader] = useState({
@@ -251,6 +255,16 @@ export default function JobCardForm() {
           setCreatedByName(jc.CreatedByName || '');
           setFinalizedByName(jc.FinalizedByName || '');
           setFinalizedAt(jc.FinalizedAt || null);
+
+          // JC live balance (invoice total / paid / outstanding). Only meaningful
+          // once the JC has been finalized (an SI voucher exists).
+          if (jc.IsFinalized) {
+            axios.get(`/api/payments/jobcard-balance/${id}`)
+                .then(r => setBalance(r.data))
+                .catch(() => setBalance(null));
+          } else {
+            setBalance(null);
+          }
           try {
             const navRes = await axios.get(`${API}/job-cards/${id}/navigation`);
             setNav(navRes.data);
@@ -500,6 +514,8 @@ export default function JobCardForm() {
     try {
       await axios.post(`/api/finalize/JOBCARD/${id}`);
       setIsFinalized(true);
+      // Fresh balance once the SI voucher has been posted
+      try { const r = await axios.get(`/api/payments/jobcard-balance/${id}`); setBalance(r.data); } catch {}
       flash('Job Card finalized.');
       notify({ type: 'success', title: 'Job Card finalized', message: 'The job card is now locked and posted.' });
     } catch (e) {
@@ -959,6 +975,27 @@ export default function JobCardForm() {
                     <div style={S.billField}><div style={{ fontSize: 10, color: '#64748b' }}>Labour</div><div style={S.billVal}>{totalLabour.toLocaleString()}</div></div>
                     <div style={S.billField}><div style={{ fontSize: 10, color: '#64748b' }}>Total</div><div style={{ ...S.billVal, fontWeight: 700 }}>{grandTotal.toLocaleString()}</div></div>
                   </div>
+                  {balance && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 3, marginTop: 3 }}>
+                      <div style={S.billField}>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>Invoice Total</div>
+                        <div style={S.billVal}>{Number(balance.invoiceTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      </div>
+                      <div style={S.billField}>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>Amount Paid</div>
+                        <div style={{ ...S.billVal, color: '#0284c7' }}>{Number(balance.paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      </div>
+                      <div style={S.billField}>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>Outstanding</div>
+                        <div style={{
+                          ...S.billVal, fontWeight: 700,
+                          color: (Number(balance.outstanding || 0) > 0.005) ? '#dc2626' : '#16a34a'
+                        }}>
+                          {Number(balance.outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={S.groupBox}>
