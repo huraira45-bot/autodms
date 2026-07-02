@@ -644,7 +644,11 @@ function AppShell() {
     const location = useLocation();
     // Print routes render bare — no sidebar, top bar, notification bell, etc.
     // so the document prints cleanly without app chrome.
-    const isPrintRoute = /\/print(?:\/|$|\?)/.test(location.pathname);
+    // Bare-shell print routes: no sidebar, no topbar, no breadcrumbs. Any
+    // path segment that starts with `print` or `credit-invoice` qualifies.
+    // Owner report 2026-07-02: Credit Invoice was rendering inside the
+    // main shell so print output carried the sidebar and breadcrumb strip.
+    const isPrintRoute = /\/(print|credit-invoice)(?:\/|$|\?)/.test(location.pathname);
 
     if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Loading…</div>;
     if (!user) return <Login />;
