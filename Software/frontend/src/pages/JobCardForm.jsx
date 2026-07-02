@@ -58,6 +58,13 @@ export default function JobCardForm() {
   const [activeTab, setActiveTab] = useState('General');
   const [kycCleared, setKycCleared] = useState(true);  // true when no flag exists; false if open flags require ack
   const [jobTypes, setJobTypes] = useState([]);
+  // GLCAID of the GENERAL_CUSTOMER system role. Used to detect whether the
+  // current business unit's Receivable A/C override is a real "different
+  // party" bucket (custom) or just the default General Customer. Owner ask
+  // 2026-07-02: if the BU points at a specific receivable (i.e. NOT General
+  // Customer), the JC always books to that party — no customer payment
+  // mode applies, so hide the Cash/Credit/POS/Bank Transfer picker.
+  const [generalCustomerId, setGeneralCustomerId] = useState(null);
   const [orderTypes, setOrderTypes] = useState([]);
   const [parties, setParties] = useState([]);
   const [banks, setBanks] = useState([]);
@@ -135,16 +142,20 @@ export default function JobCardForm() {
     const init = async () => {
       setLoading(true);
       try {
-        const [typesRes, partiesRes, itemsRes, otRes, empRes, banksRes, taxRes] = await Promise.all([
+        const [typesRes, partiesRes, itemsRes, otRes, empRes, banksRes, taxRes, saRes] = await Promise.all([
           axios.get(`${API}/job-types`),
           axios.get(`${API}/parties?business=WORKSHOP`),
           axios.get(`${API_BASE}/items`),
           axios.get(`${API}/order-types`),
           axios.get(`${API_BASE}/employees`).catch(() => ({ data: [] })),
           axios.get(`${API_BASE}/accounts/banks`).catch(() => ({ data: [] })),
-          axios.get(`${API_BASE}/tax-rates`).catch(() => ({ data: { current: [] } }))
+          axios.get(`${API_BASE}/tax-rates`).catch(() => ({ data: { current: [] } })),
+          axios.get(`${API_BASE}/system-accounts`).catch(() => ({ data: [] }))
         ]);
         setJobTypes(typesRes.data);
+        const saRoles = Array.isArray(saRes.data) ? saRes.data : (saRes.data?.roles || []);
+        const gc = saRoles.find(r => r.RoleKey === 'GENERAL_CUSTOMER');
+        if (gc?.GLCAID) setGeneralCustomerId(gc.GLCAID);
         setParties(partiesRes.data);
         setOrderTypes(otRes.data);
         setAllServices(itemsRes.data.filter(i => i.ItemType === 'Service'));
@@ -896,15 +907,45 @@ export default function JobCardForm() {
                     <div style={S.field}><label style={S.label}>Address</label><input style={S.input} value={selectedCustomer.Address || ''} readOnly /></div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 4, marginTop: 4 }}>
                       <div>
-                        {/* Payment */}
-                        <label style={S.label}>Payment Mode</label>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                          {['Cash', 'Credit', 'POS', 'Bank Transfer'].map(pt => (
-                            <label key={pt} style={{ ...S.chk, cursor: disabled ? 'default' : 'pointer' }}>
-                              <input type="radio" name="payType" value={pt} checked={form.PaymentType === pt} onChange={() => !disabled && f('PaymentType', pt)} /> {pt === 'POS' ? 'POS CLEAR' : pt}
-                            </label>
-                          ))}
-                        </div>
+                        {/* Payment mode — only visible when the current
+                            business unit uses General Customer as its
+                            receivable. If the BU has a custom Receivable A/C
+                            override (i.e. the JC always books against a
+                            specific counterparty like Master Changan), the
+                            customer never pays cash/credit/POS/BT so the
+                            picker is hidden and PaymentType is forced to
+                            Credit for posting continuity. Owner ask
+                            2026-07-02. */}
+                        {(() => {
+                            const currentJT = jobTypes.find(t => String(t.JobCardTypeId) === String(form.JobTypeId));
+                            const receivable = currentJT?.ReceivableAccount ?? null;
+                            const isCustomReceivable = receivable != null && generalCustomerId != null
+                                && Number(receivable) !== Number(generalCustomerId);
+                            if (isCustomReceivable) {
+                                if (form.PaymentType !== 'Credit') { f('PaymentType', 'Credit'); }
+                                return (
+                                    <div style={{ padding: '6px 10px', background: '#ecfeff', border: '1px solid #a5f3fc',
+                                                  borderRadius: 4, fontSize: 11, color: '#0e7490' }}>
+                                        Payment Mode is not applicable — {currentJT.CardCode} ({currentJT.Title}) books to
+                                        <code style={{ marginLeft: 4, background: '#cffafe', padding: '0 4px', borderRadius: 3 }}>
+                                            {currentJT.ReceivableCode || 'the mapped receivable'}
+                                        </code>, not a walk-in customer.
+                                    </div>
+                                );
+                            }
+                            return (
+                                <>
+                                    <label style={S.label}>Payment Mode</label>
+                                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        {['Cash', 'Credit', 'POS', 'Bank Transfer'].map(pt => (
+                                            <label key={pt} style={{ ...S.chk, cursor: disabled ? 'default' : 'pointer' }}>
+                                                <input type="radio" name="payType" value={pt} checked={form.PaymentType === pt} onChange={() => !disabled && f('PaymentType', pt)} /> {pt === 'POS' ? 'POS CLEAR' : pt}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </>
+                            );
+                        })()}
                         {form.PaymentType === 'Credit' && (
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 4, marginTop: 4 }}>
                             <div style={S.field}>
