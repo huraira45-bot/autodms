@@ -656,8 +656,22 @@ export default function JobCardForm() {
             style={{ ...S.toolBtn, color: '#0f766e', borderColor: '#0f766e',
                      opacity: isFinalized ? 1 : 0.4, cursor: isFinalized ? 'pointer' : 'not-allowed' }}
             disabled={!isFinalized}
-            title={isFinalized ? 'Open Work Order print view' : 'Finalize the Job Card before printing'}
-            onClick={() => isFinalized && window.open(`/workshop/jobs/${id}/print`, '_blank')}>
+            title={isFinalized ? 'Print — choose Work Order or Credit Invoice' : 'Finalize the Job Card before printing'}
+            onClick={async () => {
+                if (!isFinalized) return;
+                // Owner ask 2026-07-02: ask which document to print. Uses the
+                // feedback confirm dialog — 'Yes' opens the Credit Invoice
+                // layout (mirrors the sample PDF), 'Cancel' opens the standard
+                // Work Order.
+                const yes = await confirm({
+                    title: 'Print Credit Invoice?',
+                    message: 'Choose "Credit Invoice" to print the FBR-formatted invoice, or "Work Order" for the regular RO print.',
+                    confirmLabel: 'Credit Invoice',
+                    cancelLabel: 'Work Order',
+                });
+                const target = yes ? 'credit-invoice' : 'print';
+                window.open(`/workshop/jobs/${id}/${target}`, '_blank');
+            }}>
             <Printer size={12} /> Print
           </button>
         )}

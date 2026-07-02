@@ -28,6 +28,7 @@ import StoreSale          from './pages/StoreSale';
 import SSR                from './pages/SSR';
 import ChartOfAccounts    from './pages/ChartOfAccounts';
 import BusinessProfile    from './pages/BusinessProfile';
+import CreditInvoicePrint from './pages/CreditInvoicePrint';
 import VoucherEntry       from './pages/VoucherEntry';
 import WorkshopCustomers  from './pages/WorkshopCustomers';
 import JobCardList        from './pages/JobCardList';
@@ -654,6 +655,7 @@ function AppShell() {
                 <main style={{ background: 'white' }}>
                     <Routes>
                         <Route path="/workshop/jobs/:id/print" element={<WorkOrderPrint />} />
+                        <Route path="/workshop/jobs/:id/credit-invoice" element={<CreditInvoicePrint />} />
                         <Route path="/store-sale/:id/print"    element={<StoreSalePrint />} />
                         <Route path="/grn/:id/print"           element={<GRNPrint />} />
                         <Route path="/grtn/:id/print"          element={<GRTNPrint />} />
@@ -807,6 +809,9 @@ function AppShell() {
                     } />
                     <Route path="/workshop/jobs/:id/print" element={
                         <ProtectedRoute moduleKey="workshop_jobs"><WorkOrderPrint /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/jobs/:id/credit-invoice" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><CreditInvoicePrint /></ProtectedRoute>
                     } />
                     <Route path="/store-sale/:id/print" element={
                         <ProtectedRoute moduleKey="sales_store"><StoreSalePrint /></ProtectedRoute>
