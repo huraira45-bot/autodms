@@ -18,6 +18,7 @@ const MODULES = [
     { key: 'finance_coa',         label: 'Chart of Accounts',    section: 'FINANCE & ACCOUNTS' },
     { key: 'finance_vouchers',    label: 'Vouchers (CPV/CRV/BPV/BRV/JV)', section: 'FINANCE & ACCOUNTS' },
     { key: 'accounting_setup',    label: 'Accounting Setup',     section: 'FINANCE & ACCOUNTS' },
+    { key: 'settings_business_profile', label: 'Business Profile', section: 'FINANCE & ACCOUNTS' },
     { key: 'payments',            label: 'Receive / Make Payment', section: 'FINANCE & ACCOUNTS' },
     { key: 'finance_cheques',     label: 'Cheque Clearance',       section: 'FINANCE & ACCOUNTS' },
     { key: 'reports',             label: 'Financial Reports',      section: 'FINANCE & ACCOUNTS' },

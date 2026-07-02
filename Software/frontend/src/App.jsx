@@ -27,6 +27,7 @@ import GRTN               from './pages/GRTN';
 import StoreSale          from './pages/StoreSale';
 import SSR                from './pages/SSR';
 import ChartOfAccounts    from './pages/ChartOfAccounts';
+import BusinessProfile    from './pages/BusinessProfile';
 import VoucherEntry       from './pages/VoucherEntry';
 import WorkshopCustomers  from './pages/WorkshopCustomers';
 import JobCardList        from './pages/JobCardList';
@@ -351,6 +352,11 @@ function Sidebar({ onOpenCommand }) {
                         <Landmark size={20} /> Bank Accounts
                     </NavLink>
                     </>
+                )}
+                {hasModule('settings_business_profile') && (
+                    <NavLink to="/settings/business-profile" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <SettingsIcon size={20} /> Business Profile
+                    </NavLink>
                 )}
                 {hasModule('payments') && (
                     <>
@@ -715,6 +721,9 @@ function AppShell() {
                     } />
                     <Route path="/accounting/bank-accounts" element={
                         <ProtectedRoute moduleKey="accounting_setup"><BankAccounts /></ProtectedRoute>
+                    } />
+                    <Route path="/settings/business-profile" element={
+                        <ProtectedRoute moduleKey="settings_business_profile"><BusinessProfile /></ProtectedRoute>
                     } />
                     <Route path="/payments/receive" element={
                         <ProtectedRoute moduleKey="payments"><ReceivePayment /></ProtectedRoute>

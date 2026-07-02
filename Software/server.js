@@ -69,6 +69,7 @@ app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/pos-settlement', require('./routes/posSettlementRoutes'));
 app.use('/api/cheques', require('./routes/chequeRoutes'));
 app.use('/api/gatepass', require('./routes/gatePassRoutes'));
+app.use('/api/settings/business-profile', require('./routes/businessProfileRoutes'));
 app.use('/api/reports', require('./routes/reportsRoutes'));
 app.use('/api/reports/service', require('./routes/serviceReportsRoutes'));
 app.use('/api/reports/parts',   require('./routes/partsReportsRoutes'));
