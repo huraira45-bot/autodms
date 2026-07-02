@@ -4,7 +4,13 @@ import { Search, ShieldCheck, ShieldAlert, ArrowRight, Loader2, Printer, RotateC
 import { useFeedback } from '../context/FeedbackContext';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const dt  = (d) => d ? new Date(d).toLocaleString('en-PK') : '';
+// SQL Server stores GETDATE() in server-local time (Asia/Karachi), but the
+// mssql driver tags it 'Z' when serialising to JSON — JS then treats it as
+// UTC and shifts it +5h on display. Passing timeZone:'UTC' to toLocaleString
+// displays the literal wall-clock value the DB recorded, not the JS-shifted
+// one. Owner report 2026-07-02 (gate pass GP-0046 showed 8:12 pm instead
+// of ~3:12 pm).
+const dt  = (d) => d ? new Date(d).toLocaleString('en-PK', { timeZone: 'UTC' }) : '';
 
 const REASON_LABEL = {
     CREDIT_PARTY:       'Credit Party',
