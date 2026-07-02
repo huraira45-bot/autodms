@@ -912,15 +912,15 @@ export default function JobCardForm() {
                     <div style={S.field}><label style={S.label}>Address</label><input style={S.input} value={selectedCustomer.Address || ''} readOnly /></div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 4, marginTop: 4 }}>
                       <div>
-                        {/* Payment mode — only visible when the current
-                            business unit uses General Customer as its
-                            receivable. If the BU has a custom Receivable A/C
-                            override (i.e. the JC always books against a
-                            specific counterparty like Master Changan), the
-                            customer never pays cash/credit/POS/BT so the
-                            picker is hidden and PaymentType is forced to
-                            Credit for posting continuity. Owner ask
-                            2026-07-02. */}
+                        {/* Payment mode + Party — hidden together when the
+                            business unit has a Receivable A/C override that
+                            is NOT General Customer. In that case the JC
+                            always books against the counterparty that owns
+                            that receivable (Master Changan, an insurance
+                            company, etc.); the posting service auto-resolves
+                            the party at finalize (jobCardPostingService
+                            loadPartyForReceivableGL) so no user input is
+                            needed here. Owner ask 2026-07-02. */}
                         {(() => {
                             const currentJT = jobTypes.find(t => String(t.JobCardTypeId) === String(form.JobTypeId));
                             const receivable = currentJT?.ReceivableAccount ?? null;
@@ -928,13 +928,14 @@ export default function JobCardForm() {
                                 && Number(receivable) !== Number(generalCustomerId);
                             if (isCustomReceivable) {
                                 if (form.PaymentType !== 'Credit') { f('PaymentType', 'Credit'); }
+                                if (form.PartyID) { f('PartyID', ''); }
                                 return (
                                     <div style={{ padding: '6px 10px', background: '#ecfeff', border: '1px solid #a5f3fc',
                                                   borderRadius: 4, fontSize: 11, color: '#0e7490' }}>
-                                        Payment Mode is not applicable — {currentJT.CardCode} ({currentJT.Title}) books to
+                                        Payment Mode &amp; Party are not applicable — {currentJT.CardCode} ({currentJT.Title}) books to
                                         <code style={{ marginLeft: 4, background: '#cffafe', padding: '0 4px', borderRadius: 3 }}>
                                             {currentJT.ReceivableCode || 'the mapped receivable'}
-                                        </code>, not a walk-in customer.
+                                        </code>, no walk-in customer &amp; no party pick needed.
                                     </div>
                                 );
                             }
@@ -951,7 +952,14 @@ export default function JobCardForm() {
                                 </>
                             );
                         })()}
-                        {form.PaymentType === 'Credit' && (
+                        {form.PaymentType === 'Credit' && !(() => {
+                            // Hide the Party picker when the JC type auto-resolves
+                            // its counterparty from its own Receivable A/C.
+                            const currentJT = jobTypes.find(t => String(t.JobCardTypeId) === String(form.JobTypeId));
+                            const receivable = currentJT?.ReceivableAccount ?? null;
+                            return receivable != null && generalCustomerId != null
+                                && Number(receivable) !== Number(generalCustomerId);
+                        })() && (
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 4, marginTop: 4 }}>
                             <div style={S.field}>
                               <label style={S.label}>Party *</label>
