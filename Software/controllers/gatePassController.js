@@ -153,14 +153,32 @@ exports.list = async (req, res) => {
             .input('to',    sql.Date,         to   || null)
             .input('dt',    sql.NVarChar(20), docType || null)
             .input('q',     sql.NVarChar(100), q ? `%${q}%` : null)
-            .query(`SELECT TOP 500 *
-                    FROM dms_GatePasses
-                    WHERE (@from IS NULL OR IssuedAt >= @from)
-                      AND (@to   IS NULL OR IssuedAt <  DATEADD(day, 1, @to))
-                      AND (@dt   IS NULL OR DocType   = @dt)
-                      AND (@q    IS NULL OR GatePassNo LIKE @q OR CustomerName LIKE @q
-                                          OR VehicleRegNo LIKE @q OR VehicleChassis LIKE @q)
-                    ORDER BY IssuedAt DESC, GatePassID DESC`);
+            .query(`
+                SELECT TOP 500 g.*,
+                       -- JOBCARD enrichment (owner ask 2026-07-02 — print
+                       -- carries RO#, cust cell, biz unit, time-in, colour,
+                       -- pay mode with party, and advisor)
+                       j.JobCardNo         AS RONumber,
+                       j.EntryUserDateTime AS TimeIn,
+                       j.VehicleColor      AS VehicleColour,
+                       j.Status            AS PaymentMode,
+                       j.ServiceAdvisor    AS ServiceAdvisorName,
+                       t.Title             AS BusinessUnit,
+                       ISNULL(cu.PhoneNo, s.MobileNo) AS CustomerCell,
+                       p.PartyName         AS PartyName,
+                       s.InvoiceNo         AS InvoiceNo
+                FROM dms_GatePasses g
+                LEFT JOIN Addata_JobCardInfo j    ON g.DocType='JOBCARD'    AND j.JobCardId = g.DocID
+                LEFT JOIN gen_JobCardType   t     ON t.JobCardTypeId = j.JobTypeId
+                LEFT JOIN addata_CustomerInfo cu  ON cu.ProfileID = j.EndUserID
+                LEFT JOIN gen_PartiesInfo    p    ON p.PartyID   = j.PartyID
+                LEFT JOIN data_StoreSaleInfo s    ON g.DocType='STORE_SALE' AND s.SaleID    = g.DocID
+                WHERE (@from IS NULL OR g.IssuedAt >= @from)
+                  AND (@to   IS NULL OR g.IssuedAt <  DATEADD(day, 1, @to))
+                  AND (@dt   IS NULL OR g.DocType   = @dt)
+                  AND (@q    IS NULL OR g.GatePassNo LIKE @q OR g.CustomerName LIKE @q
+                                      OR g.VehicleRegNo LIKE @q OR g.VehicleChassis LIKE @q)
+                ORDER BY g.IssuedAt DESC, g.GatePassID DESC`);
         res.json(r.recordset);
     } catch (err) {
         console.error('gatePass.list:', err);
