@@ -225,8 +225,16 @@ exports.getJobCardBalance = async (req, res) => {
         const advance = parseFloat(advRes.recordset[0].AdvanceCredit) || 0;
 
         // Paid = (paid-at-finalize) + (separate payment vouchers allocated to SI) + (walk-in advances tagged to JC)
-        const paid = settledAtFinalize + allocated + advance;
+        // Cap the "paid" figure at invoiceTotal for display so an accidental double-
+        // posting (e.g. a manual BRV that credits Customer Advance while POS auto-
+        // settle already closed the AR — owner report 2026-07-01, JC 78) doesn't
+        // make the JC form show 2× the invoice as paid. Any true surplus is a
+        // separate `advanceOnFile` value the UI can show without conflating it
+        // with settlement of this specific invoice.
+        const rawPaid = settledAtFinalize + allocated + advance;
+        const paid = Math.min(rawPaid, invoiceTotal);
         const outstanding = Math.max(0, +(invoiceTotal - paid).toFixed(2));
+        const advanceOnFile = Math.max(0, +(rawPaid - invoiceTotal).toFixed(2));
 
         res.json({
             jobCard,
@@ -239,6 +247,7 @@ exports.getJobCardBalance = async (req, res) => {
             walkInAdvance: +advance.toFixed(2),
             paid: +paid.toFixed(2),
             outstanding,
+            advanceOnFile,
         });
     } catch (err) {
         console.error('getJobCardBalance error:', err);

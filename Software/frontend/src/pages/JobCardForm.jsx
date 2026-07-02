@@ -976,25 +976,34 @@ export default function JobCardForm() {
                     <div style={S.billField}><div style={{ fontSize: 10, color: '#64748b' }}>Total</div><div style={{ ...S.billVal, fontWeight: 700 }}>{grandTotal.toLocaleString()}</div></div>
                   </div>
                   {balance && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 3, marginTop: 3 }}>
-                      <div style={S.billField}>
-                        <div style={{ fontSize: 10, color: '#64748b' }}>Invoice Total</div>
-                        <div style={S.billVal}>{Number(balance.invoiceTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                      </div>
-                      <div style={S.billField}>
-                        <div style={{ fontSize: 10, color: '#64748b' }}>Amount Paid</div>
-                        <div style={{ ...S.billVal, color: '#0284c7' }}>{Number(balance.paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                      </div>
-                      <div style={S.billField}>
-                        <div style={{ fontSize: 10, color: '#64748b' }}>Outstanding</div>
-                        <div style={{
-                          ...S.billVal, fontWeight: 700,
-                          color: (Number(balance.outstanding || 0) > 0.005) ? '#dc2626' : '#16a34a'
-                        }}>
-                          {Number(balance.outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 3, marginTop: 3 }}>
+                        <div style={S.billField}>
+                          <div style={{ fontSize: 10, color: '#64748b' }}>Invoice Total</div>
+                          <div style={S.billVal}>{Number(balance.invoiceTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                        <div style={S.billField}>
+                          <div style={{ fontSize: 10, color: '#64748b' }}>Amount Paid</div>
+                          <div style={{ ...S.billVal, color: '#0284c7' }}>{Number(balance.paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                        <div style={S.billField}>
+                          <div style={{ fontSize: 10, color: '#64748b' }}>Outstanding</div>
+                          <div style={{
+                            ...S.billVal, fontWeight: 700,
+                            color: (Number(balance.outstanding || 0) > 0.005) ? '#dc2626' : '#16a34a'
+                          }}>
+                            {Number(balance.outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                      {Number(balance.advanceOnFile || 0) > 0.005 && (
+                        <div style={{ marginTop: 3, padding: '3px 6px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 3,
+                                      fontSize: 10, color: '#065f46', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Customer credit / advance on file:</span>
+                          <strong>{Number(balance.advanceOnFile).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
