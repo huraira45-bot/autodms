@@ -84,12 +84,11 @@ export default function GatePass() {
     };
 
     const printPass = (gp) => {
-        const w = window.open('', '_blank', 'width=1000,height=650');
+        const w = window.open('', '_blank', 'width=560,height=800');
         if (!w) return;
-        // Landscape gate pass with the fields the owner asked for (2026-07-02):
-        // RO#, cell #, vehicle #, business unit, time-in (JC creation) + time-out
-        // (gate-pass issue), vehicle colour, payment mode + party (for Credit),
-        // advisor name.
+        // Owner ask 2026-07-02: A5 portrait (half of A4) so the slip fits
+        // a receipt-sized printout. Two-column grid keeps every field but
+        // packs it into the narrower page.
         const isCredit = (gp.PaymentMode || '').toUpperCase() === 'CREDIT';
         const paymentDisplay = isCredit
             ? `Credit${gp.PartyName ? ' — ' + gp.PartyName : ''}`
@@ -97,25 +96,29 @@ export default function GatePass() {
         const ro = gp.RONumber || gp.InvoiceNo || `${gp.DocType} #${gp.DocID}`;
         w.document.write(`<html><head><title>${gp.GatePassNo}</title>
             <style>
-                @page { size: A4 landscape; margin: 0; }
+                @page { size: A5 portrait; margin: 0; }
                 @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
                 html,body{margin:0;padding:0;background:#fff;}
-                body{font-family:Arial;padding:10mm 14mm;box-sizing:border-box;width:297mm;min-height:210mm;}
-                .banner{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e40af;padding-bottom:8px;margin-bottom:12px;}
-                .banner .title{font-size:22pt;color:#1e40af;font-weight:800;}
-                .banner .sub{font-size:11pt;color:#334155;}
-                .banner .gpno{font-size:14pt;color:#1e40af;font-weight:700;font-family:monospace;}
-                .grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:0 24px;}
-                .cell{padding:6px 0;border-bottom:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:2px;}
-                .cell .lbl{color:#64748b;font-size:9pt;text-transform:uppercase;letter-spacing:0.4px;}
-                .cell .val{font-weight:600;font-size:12pt;color:#0f172a;}
-                .reason{margin:16px 0;padding:10px;background:#dcfce7;color:#166534;border-radius:6px;font-weight:700;text-align:center;font-size:12pt;}
-                .money{display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;margin-top:6px;}
-                .money .box{padding:8px 12px;background:#f1f5f9;border-radius:6px;text-align:center;}
-                .money .box .lbl{font-size:9pt;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;}
-                .money .box .val{font-size:14pt;font-weight:800;color:#1e293b;margin-top:2px;}
-                .sig{margin-top:28px;display:flex;justify-content:space-between;gap:36px;}
-                .sig div{flex:1;border-top:1px solid #475569;text-align:center;padding-top:6px;font-size:10pt;color:#475569;}
+                body{font-family:Arial;padding:6mm 8mm;box-sizing:border-box;width:148mm;min-height:210mm;font-size:9pt;}
+                .banner{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:8px;}
+                .banner .title{font-size:14pt;color:#1e40af;font-weight:800;}
+                .banner .sub{font-size:8.5pt;color:#334155;}
+                .banner .gpno{font-size:11pt;color:#1e40af;font-weight:700;font-family:monospace;}
+                .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
+                .cell{padding:4px 0;border-bottom:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:1px;}
+                .cell.full{grid-column:1 / -1;}
+                .cell .lbl{color:#64748b;font-size:7.5pt;text-transform:uppercase;letter-spacing:0.3px;}
+                .cell .val{font-weight:600;font-size:9.5pt;color:#0f172a;}
+                .reason{margin:8px 0;padding:6px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:700;text-align:center;font-size:10pt;}
+                .money{display:grid;grid-template-columns:repeat(2, 1fr);gap:6px;margin-top:6px;}
+                .money .box{padding:4px 8px;background:#f1f5f9;border-radius:4px;text-align:center;}
+                .money .box .lbl{font-size:7.5pt;color:#64748b;text-transform:uppercase;letter-spacing:0.3px;}
+                .money .box .val{font-size:10.5pt;font-weight:800;color:#1e293b;margin-top:1px;}
+                .modes{grid-column:1 / -1;background:#f1f5f9;padding:4px 8px;border-radius:4px;text-align:center;}
+                .modes .lbl{font-size:7.5pt;color:#64748b;text-transform:uppercase;letter-spacing:0.3px;}
+                .modes .val{font-weight:700;font-size:9.5pt;color:#1e293b;margin-top:1px;}
+                .sig{margin-top:14px;display:flex;justify-content:space-between;gap:14px;}
+                .sig div{flex:1;border-top:1px solid #475569;text-align:center;padding-top:4px;font-size:8pt;color:#475569;}
             </style></head><body>
             <div class="banner">
                 <div>
@@ -131,30 +134,33 @@ export default function GatePass() {
             <div class="grid">
                 <div class="cell"><span class="lbl">RO / Doc #</span><span class="val">${ro}</span></div>
                 <div class="cell"><span class="lbl">Business Unit</span><span class="val">${gp.BusinessUnit || '—'}</span></div>
-                <div class="cell"><span class="lbl">Service Advisor</span><span class="val">${gp.ServiceAdvisorName || '—'}</span></div>
 
                 <div class="cell"><span class="lbl">Customer</span><span class="val">${gp.CustomerName || '—'}</span></div>
                 <div class="cell"><span class="lbl">Cell #</span><span class="val">${gp.CustomerCell || '—'}</span></div>
-                <div class="cell"><span class="lbl">Payment</span><span class="val">${paymentDisplay}</span></div>
 
                 <div class="cell"><span class="lbl">Vehicle Reg #</span><span class="val">${gp.VehicleRegNo || '—'}</span></div>
                 <div class="cell"><span class="lbl">Vehicle Colour</span><span class="val">${gp.VehicleColour || '—'}</span></div>
-                <div class="cell"><span class="lbl">Chassis #</span><span class="val">${gp.VehicleChassis || '—'}</span></div>
+
+                <div class="cell full"><span class="lbl">Chassis #</span><span class="val">${gp.VehicleChassis || '—'}</span></div>
+
+                <div class="cell"><span class="lbl">Service Advisor</span><span class="val">${gp.ServiceAdvisorName || '—'}</span></div>
+                <div class="cell"><span class="lbl">Payment</span><span class="val">${paymentDisplay}</span></div>
 
                 <div class="cell"><span class="lbl">Time In (RO created)</span><span class="val">${dt(gp.TimeIn)}</span></div>
                 <div class="cell"><span class="lbl">Time Out (Gate Pass)</span><span class="val">${dt(gp.IssuedAt)}</span></div>
-                <div class="cell"><span class="lbl">Issued By</span><span class="val">${gp.IssuedByName || '—'}</span></div>
+
+                <div class="cell full"><span class="lbl">Issued By</span><span class="val">${gp.IssuedByName || '—'}</span></div>
             </div>
 
             <div class="money">
                 <div class="box"><div class="lbl">Amount Invoiced</div><div class="val">PKR ${fmt(gp.AmountInvoiced)}</div></div>
                 <div class="box"><div class="lbl">Amount Received</div><div class="val">PKR ${fmt(gp.AmountReceived)}</div></div>
-                <div class="box"><div class="lbl">Modes Used</div><div class="val" style="font-size:12pt">${gp.PaymentModes || '—'}</div></div>
+                <div class="modes"><div class="lbl">Modes Used</div><div class="val">${gp.PaymentModes || '—'}</div></div>
             </div>
 
             <div class="reason">${REASON_LABEL[gp.PassReason] || gp.PassReason}</div>
 
-            <div class="sig"><div>Customer Signature</div><div>Security / Gate</div><div>Authorized</div></div>
+            <div class="sig"><div>Customer</div><div>Security / Gate</div><div>Authorized</div></div>
             <script>window.onload=()=>setTimeout(()=>window.print(),200);</script>
             </body></html>`);
         w.document.close();
