@@ -21,6 +21,14 @@ export default function CreditInvoicePrint() {
     const [err, setErr] = useState(null);
 
     useEffect(() => {
+        // Blank the tab title before printing so browsers (Chrome, Edge)
+        // don't stamp "Job Card — AutoDMS" at the top of every printed page.
+        // A single space still shows something in the tab bar without
+        // dumping meaningful text on the printout. URL/date headers are
+        // separate; the user must uncheck "Headers and footers" in the
+        // print dialog to hide those.
+        const oldTitle = document.title;
+        document.title = ' ';
         Promise.all([
             axios.get(`/api/workshop/job-cards/${id}/print-data`),
             axios.get(`/api/workshop/job-cards/${id}/insurance`).catch(() => ({ data: null })),
@@ -33,6 +41,7 @@ export default function CreditInvoicePrint() {
             setTimeout(() => window.print(), 500);
         })
         .catch(e => setErr(e.response?.data?.error || e.message));
+        return () => { document.title = oldTitle; };
     }, [id]);
 
     if (err) return <div style={{ padding: 40, color: '#b91c1c', fontFamily: 'Arial' }}>Cannot print: {err}</div>;
