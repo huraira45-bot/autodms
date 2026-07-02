@@ -487,11 +487,27 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                                 ))}
                             </tbody>
                             <tfoot>
-                                <tr style={{ background: '#f8fafc', fontWeight: 700 }}>
-                                    <td colSpan={2}>Total</td>
-                                    <td style={{ textAlign: 'right' }}>{fmt(active.TotalAmount)}</td>
-                                    <td style={{ textAlign: 'right' }}>{fmt(active.TotalAmount)}</td>
-                                </tr>
+                                {(() => {
+                                    // Owner report 2026-07-02: the Total row was
+                                    // echoing header.TotalAmount for both columns
+                                    // (customer-facing invoice net of COGS), so
+                                    // vouchers with COGS lines (SI, GRN) appeared
+                                    // to under-total on both sides. Sum the actual
+                                    // detail lines so the number matches the
+                                    // ledger truth. Header TotalAmount is left as
+                                    // is because the Sales Register etc. rely on
+                                    // it representing the revenue slice only.
+                                    const dr = (active.lines || []).reduce((s, l) => s + (Number(l.Debit)  || 0), 0);
+                                    const cr = (active.lines || []).reduce((s, l) => s + (Number(l.Credit) || 0), 0);
+                                    const unbalanced = Math.abs(dr - cr) > 0.01;
+                                    return (
+                                        <tr style={{ background: '#f8fafc', fontWeight: 700 }}>
+                                            <td colSpan={2}>Total{unbalanced && <span style={{ color: '#dc2626', marginLeft: 6 }}>UNBALANCED</span>}</td>
+                                            <td style={{ textAlign: 'right', color: unbalanced ? '#dc2626' : undefined }}>{fmt(dr)}</td>
+                                            <td style={{ textAlign: 'right', color: unbalanced ? '#dc2626' : undefined }}>{fmt(cr)}</td>
+                                        </tr>
+                                    );
+                                })()}
                             </tfoot>
                         </table>
                     </div>
