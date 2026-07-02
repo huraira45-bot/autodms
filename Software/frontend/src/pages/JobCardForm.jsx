@@ -153,9 +153,14 @@ export default function JobCardForm() {
           axios.get(`${API_BASE}/system-accounts`).catch(() => ({ data: [] }))
         ]);
         setJobTypes(typesRes.data);
+        // /api/system-accounts returns [{ key, label, ..., assigned: { GLCAID, GLCode } }]
+        // (systemAccountsController.getRoles). Reach into `assigned` for the
+        // mapped GLCAID — my earlier lookup on `RoleKey` / top-level GLCAID
+        // never matched and left generalCustomerId null, so the hide check
+        // never fired. Owner report 2026-07-02.
         const saRoles = Array.isArray(saRes.data) ? saRes.data : (saRes.data?.roles || []);
-        const gc = saRoles.find(r => r.RoleKey === 'GENERAL_CUSTOMER');
-        if (gc?.GLCAID) setGeneralCustomerId(gc.GLCAID);
+        const gc = saRoles.find(r => r.key === 'GENERAL_CUSTOMER');
+        if (gc?.assigned?.GLCAID) setGeneralCustomerId(gc.assigned.GLCAID);
         setParties(partiesRes.data);
         setOrderTypes(otRes.data);
         setAllServices(itemsRes.data.filter(i => i.ItemType === 'Service'));
