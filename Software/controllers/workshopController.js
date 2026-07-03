@@ -257,9 +257,68 @@ exports.deleteOrderType = async (req, res) => {
 };
 
 // ============== JOB CARDS ==============
+// GET /api/workshop/vehicle-history?chassis=...&engine=...&regNo=...
+// Owner ask 2026-07-03: given a vehicle's identifiers, return every JC ever
+// posted against it (matched by ChasisNo OR EngineNo OR VehicleRegNo).
+// Used by the Vehicle History page and by a link on the JC form so the
+// operator can quickly see prior service on the same vehicle.
+exports.getVehicleHistory = async (req, res) => {
+    try {
+        const { chassis, engine, regNo, excludeJc } = req.query;
+        const norm = (v) => (v || '').trim();
+        const c = norm(chassis), e = norm(engine), r = norm(regNo);
+        if (!c && !e && !r) {
+            return res.status(400).json({ error: 'Provide at least one of chassis / engine / regNo.' });
+        }
+        const pool = await getPool();
+        const request = pool.request();
+        const preds = [];
+        if (c) { request.input('c', sql.NVarChar(200), c); preds.push('j.ChasisNo = @c'); }
+        if (e) { request.input('e', sql.NVarChar(200), e); preds.push('j.EngineNo = @e'); }
+        if (r) { request.input('r', sql.NVarChar(200), r); preds.push('j.VehicleRegNo = @r'); }
+        let where = '(' + preds.join(' OR ') + ')';
+        if (excludeJc) { request.input('ex', sql.Int, parseInt(excludeJc)); where += ' AND j.JobCardId <> @ex'; }
+        const q = await request.query(`
+            SELECT j.JobCardId, j.JobCardNo, j.jobCode, j.JobCardDate, j.IsFinalized,
+                   j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter AS Odometer,
+                   j.Status AS PaymentType, j.CustomerType, j.ServiceAdvisor,
+                   t.CardCode AS JobTypeCode, t.Title AS JobTypeName,
+                   c.endUserName AS CustomerName, c.PhoneNo AS CustomerPhone,
+                   p.PartyName,
+                   ISNULL((SELECT SUM(ISNULL(d.Price,0)*ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0)
+                                    + ISNULL(d.TaxAmount,0))
+                           FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourAmount,
+                   ISNULL((SELECT SUM(ISNULL(s.IssueQuantity,0) * ISNULL(s.ItemRate,0)
+                                    + ISNULL(s.TaxAmount,0))
+                           FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsAmount,
+                   ISNULL((SELECT SUM(ISNULL(b.PayableAmount,0) + ISNULL(b.TaxAmount,0))
+                           FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId), 0) AS SubletAmount
+            FROM Addata_JobCardInfo j
+            LEFT JOIN gen_JobCardType    t ON j.JobTypeId = t.JobCardTypeId
+            LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
+            LEFT JOIN gen_PartiesInfo     p ON j.PartyID   = p.PartyID
+            WHERE ${where}
+            ORDER BY j.JobCardDate DESC, j.JobCardId DESC`);
+        const rows = q.recordset.map(x => ({
+            ...x,
+            TotalAmount: +(Number(x.LabourAmount) + Number(x.PartsAmount) + Number(x.SubletAmount)).toFixed(2),
+        }));
+        res.json({
+            count: rows.length,
+            rows,
+            totals: {
+                labour: +rows.reduce((s, x) => s + Number(x.LabourAmount), 0).toFixed(2),
+                parts:  +rows.reduce((s, x) => s + Number(x.PartsAmount),  0).toFixed(2),
+                sublet: +rows.reduce((s, x) => s + Number(x.SubletAmount), 0).toFixed(2),
+                total:  +rows.reduce((s, x) => s + Number(x.TotalAmount),  0).toFixed(2),
+            },
+        });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
 exports.getJobCards = async (req, res) => {
     try {
-        const { search, status, finalized } = req.query;
+        const { search, status, finalized, businessType } = req.query;
         const pool = await getPool();
         const request = pool.request();
         let query = 'SELECT * FROM vw_WorkshopJobCards';
@@ -276,6 +335,11 @@ exports.getJobCards = async (req, res) => {
         else if (status !== undefined && status !== '') {
             request.input('status', sql.Int, parseInt(status));
             conditions.push('JobStatus = @status');
+        }
+        // Owner ask 2026-07-03: filter by Business Unit (JC Type).
+        if (businessType) {
+            request.input('bt', sql.Int, parseInt(businessType));
+            conditions.push('JobTypeId = @bt');
         }
         if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
         query += ' ORDER BY JobCardId DESC';

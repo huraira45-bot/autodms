@@ -20,7 +20,14 @@ export default function JobCardList() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [finalizedFilter, setFinalizedFilter] = useState('');
+  // Owner ask 2026-07-03: filter the list by Business Unit (JC Type).
+  const [businessType, setBusinessType] = useState('');
+  const [jobTypes, setJobTypes] = useState([]);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    axios.get(`${API}/job-types`).then(r => setJobTypes(r.data || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
@@ -31,12 +38,13 @@ export default function JobCardList() {
     try {
       let url = `${API}/job-cards?search=${debouncedSearch}`;
       if (finalizedFilter) url += `&finalized=${finalizedFilter}`;
+      if (businessType)    url += `&businessType=${businessType}`;
       const res = await axios.get(url);
       setJobs(res.data);
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { fetchJobs(); }, [debouncedSearch, finalizedFilter]);
+  useEffect(() => { fetchJobs(); }, [debouncedSearch, finalizedFilter, businessType]);
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
@@ -50,6 +58,14 @@ export default function JobCardList() {
           <Search size={18} style={{color:'#94a3b8'}} />
           <input style={{border:'none',outline:'none',flex:1,fontSize:'0.9rem',background:'transparent'}} placeholder="Search by RO#, Job No, Customer, Reg No... (e.g. 0042 or WR-0042)" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        <select style={{height:'40px',padding:'0 12px',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'0.9rem',minWidth:'200px'}} value={businessType} onChange={e => setBusinessType(e.target.value)}>
+          <option value="">All Business Units</option>
+          {jobTypes.map(t => (
+            <option key={t.JobCardTypeId} value={t.JobCardTypeId}>
+              {t.CardCode} — {t.Title}
+            </option>
+          ))}
+        </select>
         <select style={{height:'40px',padding:'0 12px',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'0.9rem',minWidth:'160px'}} value={finalizedFilter} onChange={e => setFinalizedFilter(e.target.value)}>
           <option value="">All</option>
           <option value="finalized">Finalized</option>

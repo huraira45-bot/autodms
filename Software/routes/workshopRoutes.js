@@ -30,6 +30,7 @@ router.delete('/order-types/:id',           requirePerm('workshop_settings', 'de
 
 // ── Job Cards (workshop_jobs) ──────────────────────────────────────────────
 router.get(   '/job-cards',                 requirePerm('workshop_jobs', 'view'),        wc.getJobCards);
+router.get(   '/vehicle-history',           requirePerm('workshop_jobs', 'view'),        wc.getVehicleHistory);
 router.get(   '/job-cards/resolve-ro',      requirePerm('workshop_jobs', 'view'),        wc.resolveByRO);
 router.get(   '/job-cards/:id/print-data',  requirePerm('workshop_jobs', 'view'),        wc.getJobCardPrintData);
 router.get(   '/job-cards/:id',             requirePerm('workshop_jobs', 'view'),        wc.getJobCardById);

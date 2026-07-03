@@ -65,6 +65,7 @@ import SSR                from './pages/SSR';
 import ChartOfAccounts    from './pages/ChartOfAccounts';
 import BusinessProfile    from './pages/BusinessProfile';
 import CreditInvoicePrint from './pages/CreditInvoicePrint';
+import VehicleHistory     from './pages/VehicleHistory';
 import VoucherEntry       from './pages/VoucherEntry';
 import WorkshopCustomers  from './pages/WorkshopCustomers';
 import JobCardList        from './pages/JobCardList';
@@ -205,6 +206,11 @@ function Sidebar({ onOpenCommand }) {
                 {hasModule('workshop_jobs') && (
                     <NavLink to="/workshop/jobs" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <ClipboardList size={20} /> Search Job Cards
+                    </NavLink>
+                )}
+                {hasModule('workshop_jobs') && (
+                    <NavLink to="/workshop/vehicle-history" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <Car size={20} /> Vehicle History
                     </NavLink>
                 )}
                 {hasModule('workshop_labour') && (
@@ -824,6 +830,9 @@ function AppShell() {
                     } />
                     <Route path="/workshop/jobs" element={
                         <ProtectedRoute moduleKey="workshop_jobs"><JobCardList /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/vehicle-history" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><VehicleHistory /></ProtectedRoute>
                     } />
                     <Route path="/workshop/jobs/new" element={
                         <ProtectedRoute moduleKey="workshop_jobs"><JobCardForm /></ProtectedRoute>

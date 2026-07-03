@@ -842,6 +842,24 @@ export default function JobCardForm() {
                   <label style={S.label}>Chassis #</label>
                   <input style={S.input} value={form.ChasisNo} onChange={e => f('ChasisNo', e.target.value)} />
                 </div>
+                {(form.ChasisNo || form.EngineNo || form.VehicleRegNo) && (
+                  <div style={{ padding: '4px 0' }}>
+                    <button type="button"
+                      onClick={() => {
+                        const qs = new URLSearchParams();
+                        if (form.VehicleRegNo) qs.set('regNo', form.VehicleRegNo);
+                        if (form.ChasisNo)     qs.set('chassis', form.ChasisNo);
+                        if (form.EngineNo)     qs.set('engine', form.EngineNo);
+                        if (isEdit && id)      qs.set('excludeJc', id);
+                        window.open(`/workshop/vehicle-history?${qs.toString()}`, '_blank');
+                      }}
+                      style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #7dd3fc',
+                               borderRadius: 4, padding: '4px 10px', cursor: 'pointer',
+                               fontSize: 11, fontWeight: 600 }}>
+                      🚗 View Vehicle History (prior JCs)
+                    </button>
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px', gap: 4 }}>
                   <div style={S.field}>
                     <label style={S.label}>Vehicle Type / Model</label>
