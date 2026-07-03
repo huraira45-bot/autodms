@@ -14,7 +14,7 @@ exports.getItems = async (req, res) => {
 exports.createItem = async (req, res) => {
   try {
     const {
-      CategoryID, ItemNumber, ItenName, UOMId, ItemBrandId,
+      CategoryID, ManualNumber, ItenName, UOMId, ItemBrandId,
       ItemSalesPrice, ItemPurchasePrice, ItemPurchaseGL, ItemSalesGL,
       WHID, ItemType, Make, ItemModel, Range, SerialNo, CompanyID, Remarks, DepartmentID,
       BinLocation,
@@ -23,7 +23,11 @@ exports.createItem = async (req, res) => {
     const pool = await getPool();
     const result = await pool.request()
       .input('CategoryID', sql.Int, CategoryID)
-      .input('ItemNumber', sql.BigInt, ItemNumber || null)
+      // Owner ask 2026-07-03: part numbers are alphanumeric (e.g. AA-12X-B),
+      // so we no longer force them into the legacy BIGINT ItemNumber column.
+      // The manual part code lives in InventItems.ManualNumber (NVARCHAR 100)
+      // and is written by the follow-up UPDATE below.
+      .input('ItemNumber', sql.BigInt, null)
       .input('ItenName', sql.NVarChar(200), ItenName)
       .input('UOMId', sql.Int, UOMId)
       .input('ItemBrandId', sql.Int, ItemBrandId || null)
@@ -42,19 +46,21 @@ exports.createItem = async (req, res) => {
       .execute('sp_InsertItem');
 
     // SP doesn't support DepartmentID / JobTypeID / BinLocation / ReOrderLevel
-    // — set via follow-up UPDATE.
+    // / ManualNumber — set via follow-up UPDATE.
     const newId = result.recordset?.[0]?.NewItemId || result.recordset?.[0]?.ItemId;
     const ReOrderLevel = req.body.ReOrderLevel;
-    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation || ReOrderLevel)) {
+    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation || ReOrderLevel || ManualNumber)) {
       await pool.request()
         .input('id', sql.Int, newId)
         .input('deptId', sql.Int, DepartmentID || null)
         .input('jobTypeId', sql.Int, req.body.JobTypeID || null)
         .input('bin', sql.NVarChar(50), BinLocation || null)
         .input('reorder', sql.Int, ReOrderLevel ? parseInt(ReOrderLevel) : null)
+        .input('manNo', sql.NVarChar(100), ManualNumber || null)
         .query(`UPDATE InventItems
                 SET DepartmentID=@deptId, JobTypeID=@jobTypeId,
-                    BinLocation=@bin, ReOrderLevel=@reorder
+                    BinLocation=@bin, ReOrderLevel=@reorder,
+                    ManualNumber=@manNo
                 WHERE ItemId=@id`);
     }
 
@@ -68,7 +74,7 @@ exports.createItem = async (req, res) => {
 exports.updateItem = async (req, res) => {
   try {
     const { ItenName, ItemSalesPrice, ItemPurchasePrice, DepartmentID, JobTypeID,
-            CategoryID, BinLocation, UOMId, ItemBrandId, ItemNumber, ReOrderLevel } = req.body;
+            CategoryID, BinLocation, UOMId, ItemBrandId, ManualNumber, ReOrderLevel } = req.body;
     const pool = await getPool();
     // Build dynamic SET so callers can omit fields they don't want to touch.
     // Sale price flows from InventItems.ItemSalesPrice -> Store Sale + Parts
@@ -95,9 +101,12 @@ exports.updateItem = async (req, res) => {
       sets.push('ItemBrandId=@brandId');
       r.input('brandId', sql.Int, parseInt(ItemBrandId));
     }
-    if (ItemNumber !== undefined) {
-      sets.push('ItemNumber=@itemNo');
-      r.input('itemNo', sql.BigInt, ItemNumber || null);
+    // Owner ask 2026-07-03: Part No is alphanumeric — save to ManualNumber
+    // (NVARCHAR 100). The legacy BIGINT ItemNumber column is left untouched
+    // so existing rows keep displaying (COALESCE(ManualNumber, ItemNumber)).
+    if (ManualNumber !== undefined) {
+      sets.push('ManualNumber=@manNo');
+      r.input('manNo', sql.NVarChar(100), ManualNumber || null);
     }
     sets.push('BinLocation=@bin');
     r.input('bin', sql.NVarChar(50), BinLocation || null);

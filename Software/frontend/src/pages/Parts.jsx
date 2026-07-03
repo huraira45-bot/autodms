@@ -7,7 +7,7 @@ import { useFeedback } from '../context/FeedbackContext';
 const API_BASE = '/api';
 
 const emptyForm = {
-  ItemNumber: '', ItenName: '', CategoryID: '', ItemBrandId: '',
+  ManualNumber: '', ItenName: '', CategoryID: '', ItemBrandId: '',
   UOMId: '', WHID: '', BinLocation: '',
   ItemType: 'Part',
   ItemSalesPrice: '', ItemPurchasePrice: '',
@@ -68,7 +68,7 @@ export default function Parts() {
   const startEdit = (item) => {
     setEditingId(item.ItemId);
     setFormData({
-      ItemNumber:        item.ItemNumber ?? '',
+      ManualNumber:      item.ManualNumber ?? (item.ItemNumber != null ? String(item.ItemNumber) : ''),
       ItenName:          item.ItenName ?? '',
       CategoryID:        item.CategoryID ?? '',
       ItemBrandId:       item.ItemBrandId ?? '',
@@ -157,7 +157,7 @@ export default function Parts() {
                   <tr><td colSpan={canEdit ? 7 : 6} className="table-empty-row">No parts match this search.</td></tr>
                 ) : filtered.map(i => (
                   <tr key={i.ItemId} onClick={() => canEdit && startEdit(i)} style={{ cursor: canEdit ? 'pointer' : 'default' }}>
-                    <td><code>{i.ItemNumber ?? i.ManualNumber ?? '—'}</code></td>
+                    <td><code>{i.ManualNumber ?? i.ItemNumber ?? '—'}</code></td>
                     <td>{i.ItenName}</td>
                     <td>{catName(i.CategoryID)}</td>
                     <td>{i.BinLocation || '—'}</td>
@@ -199,8 +199,9 @@ export default function Parts() {
 
               <div className="form-group">
                 <label>Part Number / Barcode</label>
-                <input value={formData.ItemNumber}
-                       onChange={e => setFormData({ ...formData, ItemNumber: e.target.value })} />
+                <input value={formData.ManualNumber}
+                       onChange={e => setFormData({ ...formData, ManualNumber: e.target.value })}
+                       placeholder="Any alphanumeric — e.g. AA-12X-B" />
               </div>
 
               <div className="form-group">

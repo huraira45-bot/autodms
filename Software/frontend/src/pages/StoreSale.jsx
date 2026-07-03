@@ -117,10 +117,13 @@ export default function StoreSale() {
         const rate = Number(it.SaleRate) || 0;
         const taxAmt = Number(it.TaxAmount) || 0;
         const discAmt = Number(it.DiscountAmount) || 0;
+        const master = parts.find(p => p.ItemId == it.ItemID);
         return {
-          ItemID:   it.ItemID,
-          ItenName: it.ItenName,
-          Qty:      qty,
+          ItemID:       it.ItemID,
+          ItenName:     it.ItenName,
+          ItemNumber:   master?.ItemNumber,
+          ManualNumber: master?.ManualNumber,
+          Qty:          qty,
           SaleRate: rate,
           PurRate:  Number(it.PurchaseRate) || 0,
           TaxPercent: Number(it.TaxPercent) || 0,
@@ -200,12 +203,14 @@ export default function StoreSale() {
 
     const newItem = {
       ...currentItem,
-      ItenName:   part?.ItenName,
-      IsGST:      isGST,
-      TaxPercent: taxPct,
-      TaxAmt:     taxAmt,
-      DiscAmt:    discAmt,
-      NetAmt:     netAmt,
+      ItenName:     part?.ItenName,
+      ItemNumber:   part?.ItemNumber,
+      ManualNumber: part?.ManualNumber,
+      IsGST:        isGST,
+      TaxPercent:   taxPct,
+      TaxAmt:       taxAmt,
+      DiscAmt:      discAmt,
+      NetAmt:       netAmt,
     };
 
     setLineItems([...lineItems, newItem]);
@@ -335,7 +340,10 @@ export default function StoreSale() {
             <FileText size={14} /> {showList ? 'Hide list' : 'Previous Sales'}
           </button>
           {canInsert && <button className="btn-sm" onClick={startNew}><Plus size={14} /> New</button>}
-          <button className="btn" onClick={() => isFinalizedEdit && editingId && window.open(`/store-sale/${editingId}/print`, '_blank')} style={{ background: '#0f766e', opacity: (isFinalizedEdit && editingId) ? 1 : 0.4, cursor: (isFinalizedEdit && editingId) ? 'pointer' : 'not-allowed' }} disabled={!(isFinalizedEdit && editingId)} title={(isFinalizedEdit && editingId) ? 'Open sale invoice print view' : 'Open a finalized sale to print'}><Printer size={16} /> Print</button>
+          {/* Owner ask 2026-07-03: print should be available as soon as the sale
+              is saved (both drafts and finalized). A draft print is watermarked
+              on the print view; a finalized print is the customer invoice. */}
+          <button className="btn" onClick={() => editingId && window.open(`/store-sale/${editingId}/print`, '_blank')} style={{ background: '#0f766e', opacity: editingId ? 1 : 0.4, cursor: editingId ? 'pointer' : 'not-allowed' }} disabled={!editingId} title={editingId ? (isFinalizedEdit ? 'Open sale invoice print view' : 'Open draft sale print view') : 'Save the sale first to print'}><Printer size={16} /> Print</button>
           {editingId && isFinalizedEdit && canUnfinalize && (
             <button className="btn" onClick={handleUnfinalize} disabled={loading} style={{ background: '#b45309' }} title="Reverse the GL voucher and reopen the sale for editing">
               <Unlock size={16} /> Unfinalize
@@ -519,11 +527,11 @@ export default function StoreSale() {
                 }}
                 placeholder="Search part by code or name…"
                 options={parts.map(p => {
-                  // The legacy ItemNumber column is BIGINT (numeric codes from the
-                  // jobs.csv import); alphanumeric supplier-part codes like
-                  // "8511112-Y01" land in ManualNumber. Show whichever is set.
-                  const code = p.ItemNumber ?? p.ManualNumber ?? '';
-                  const alt  = (p.ItemNumber && p.ManualNumber) ? ' · ' + p.ManualNumber : '';
+                  // Owner ask 2026-07-03: new parts save alphanumeric codes to
+                  // ManualNumber and leave ItemNumber (BIGINT) NULL. Prefer
+                  // ManualNumber; fall back to legacy ItemNumber for old rows.
+                  const code = p.ManualNumber ?? p.ItemNumber ?? '';
+                  const alt  = (p.ManualNumber && p.ItemNumber) ? ' · ' + p.ItemNumber : '';
                   return { id: p.ItemId, label: p.ItenName, sub: code ? `#${code}${alt}` : '' };
                 })}
               />
@@ -572,11 +580,12 @@ export default function StoreSale() {
         <div className="table-wrapper" style={{ marginTop: '24px' }}>
           <table>
             <thead>
-              <tr><th>Part Description</th><th>Qty</th><th>Rate</th><th>Tax</th><th>Disc.</th><th>Total</th><th></th></tr>
+              <tr><th>Part #</th><th>Part Description</th><th>Qty</th><th>Rate</th><th>Tax</th><th>Disc.</th><th>Total</th><th></th></tr>
             </thead>
             <tbody>
               {lineItems.map((item, idx) => (
                 <tr key={idx}>
+                  <td style={{ fontFamily: 'monospace', color: '#64748b' }}>{item.ManualNumber || item.ItemNumber || '—'}</td>
                   <td style={{ fontWeight: '500' }}>{item.ItenName}</td>
                   <td>{item.Qty}</td><td>{item.SaleRate.toLocaleString()}</td>
                   <td style={{ color: 'var(--danger)' }}>+{item.TaxAmt.toFixed(2)}</td>

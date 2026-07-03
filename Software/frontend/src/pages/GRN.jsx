@@ -149,16 +149,21 @@ export default function GRN() {
                 NTN:            d.PartyNTN || d.NTN || '',
                 Remarks:        d.Remarks || '',
             });
-            setLineItems((d.Items || []).map(it => computeLine({
-                ItemID:                it.ItemId,
-                ItenName:              it.ItenName,
-                Qty:                   Number(it.Quantity) || 0,
-                ItemRate:              Number(it.ItemRate) || 0,
-                DiscountPct:           Number(it.DiscountPercentage) || 0,
-                AdditionalDiscountPct: Number(it.AdditionalDiscountPct) || 0,
-                TaxRate:               Number(it.TaxRate) || 0,
-                AITAmount:             Number(it.AITAmount) || 0,
-            })));
+            setLineItems((d.Items || []).map(it => {
+                const master = parts.find(p => p.ItemId == it.ItemId);
+                return computeLine({
+                    ItemID:                it.ItemId,
+                    ItenName:              it.ItenName,
+                    ItemNumber:            master?.ItemNumber,
+                    ManualNumber:          master?.ManualNumber,
+                    Qty:                   Number(it.Quantity) || 0,
+                    ItemRate:              Number(it.ItemRate) || 0,
+                    DiscountPct:           Number(it.DiscountPercentage) || 0,
+                    AdditionalDiscountPct: Number(it.AdditionalDiscountPct) || 0,
+                    TaxRate:               Number(it.TaxRate) || 0,
+                    AITAmount:             Number(it.AITAmount) || 0,
+                });
+            }));
             setSuccess('');
         } catch (err) {
             notify({ type: 'error', title: 'Open failed', message: err.response?.data?.error || err.message });
@@ -172,7 +177,12 @@ export default function GRN() {
             return;
         }
         const part = parts.find(p => p.ItemId == currentItem.ItemID);
-        const line = computeLine({ ...currentItem, ItenName: part?.ItenName, ItemNumber: part?.ItemNumber });
+        const line = computeLine({
+            ...currentItem,
+            ItenName:     part?.ItenName,
+            ItemNumber:   part?.ItemNumber,
+            ManualNumber: part?.ManualNumber,
+        });
         setLineItems([...lineItems, line]);
         setCurrentItem(emptyEntry);
     };
@@ -309,9 +319,11 @@ export default function GRN() {
                 </div>
                 <div className="no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {editingId && canInsert && <button className="btn-sm" onClick={startNew}><Plus size={14} /> New</button>}
-                    <button className="btn" onClick={() => isFinalizedEdit && editingId && window.open(`/grn/${editingId}/print`, '_blank')}
-                        style={{ background: '#0f766e', opacity: (isFinalizedEdit && editingId) ? 1 : 0.4, cursor: (isFinalizedEdit && editingId) ? 'pointer' : 'not-allowed' }}
-                        disabled={!(isFinalizedEdit && editingId)}><Printer size={16} /> Print</button>
+                    {/* Owner ask 2026-07-03: allow draft prints too, not just finalized. */}
+                    <button className="btn" onClick={() => editingId && window.open(`/grn/${editingId}/print`, '_blank')}
+                        style={{ background: '#0f766e', opacity: editingId ? 1 : 0.4, cursor: editingId ? 'pointer' : 'not-allowed' }}
+                        title={editingId ? (isFinalizedEdit ? 'Print GRN invoice' : 'Print draft GRN') : 'Save the GRN first to print'}
+                        disabled={!editingId}><Printer size={16} /> Print</button>
                     {!disabled && (editingId ? canEdit : canInsert) && (
                         <button className="btn" onClick={handleSave} disabled={loading}>
                             <Save size={18} /> {loading ? 'Saving…' : (editingId ? 'Save Changes' : 'Save GRN')}
@@ -381,8 +393,10 @@ export default function GRN() {
                                 }}
                                 placeholder="Search part by code or name…"
                                 options={parts.map(p => {
-                                    const code = p.ItemNumber ?? p.ManualNumber ?? '';
-                                    const alt  = (p.ItemNumber && p.ManualNumber) ? ' · ' + p.ManualNumber : '';
+                                    // Prefer the user-typed ManualNumber (alphanumeric) over the
+                                    // legacy BIGINT ItemNumber. Show the other in parentheses if both exist.
+                                    const code = p.ManualNumber ?? p.ItemNumber ?? '';
+                                    const alt  = (p.ManualNumber && p.ItemNumber) ? ' · ' + p.ItemNumber : '';
                                     return { id: p.ItemId, label: p.ItenName, sub: code ? `#${code}${alt}` : '' };
                                 })}
                             />
@@ -446,7 +460,7 @@ export default function GRN() {
                                 {lineItems.map((l, idx) => (
                                     <tr key={idx}>
                                         <td style={td}>{idx + 1}</td>
-                                        <td style={{ ...tdL, fontFamily: 'monospace', color: '#64748b' }}>{l.ItemNumber || '—'}</td>
+                                        <td style={{ ...tdL, fontFamily: 'monospace', color: '#64748b' }}>{l.ManualNumber || l.ItemNumber || '—'}</td>
                                         <td style={tdL}>{l.ItenName}</td>
                                         <td style={td}>{l.Qty}</td>
                                         <td style={td}>{fmt(l.ItemRate)}</td>
