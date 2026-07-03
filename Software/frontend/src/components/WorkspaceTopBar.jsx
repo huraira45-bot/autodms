@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Bell, Menu } from 'lucide-react';
+import { Search, Bell, Menu, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const EXACT_TITLES = {
@@ -204,12 +204,17 @@ export default function WorkspaceTopBar({ onOpenCommand, onToggleSidebar }) {
                 <div className="erp-topbar-user" title={user?.groupTitle || ''}>
                     <span className="avatar">{initials}</span>
                     <span>{user?.userName || 'User'}</span>
-                    <button type="button" onClick={logout}
-                        style={{ background: 'transparent', border: 'none', color: 'var(--erp-text-muted)', cursor: 'pointer', padding: 2, marginLeft: 2 }}
-                        title="Log out">
-                        ×
-                    </button>
                 </div>
+                {/* Owner ask 2026-07-04: prominent Sign Out button in the
+                    top bar. The tiny "×" beside the user chip earlier was
+                    hard to notice. */}
+                <button type="button" onClick={logout}
+                    className="erp-topbar-icon"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 8, width: 'auto' }}
+                    title="Sign out">
+                    <LogOut size={14} />
+                    <span style={{ fontSize: 12 }}>Sign out</span>
+                </button>
             </div>
         </header>
     );

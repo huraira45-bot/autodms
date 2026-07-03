@@ -22,6 +22,7 @@ const requireAny = (...keys) => (req, res, next) => {
 
 // --- Complaint list / stats / detail ---
 router.get('/complaints/stats',          requireAny('cro_workspace','cro_admin','cro_dept_responder','cro_reports'), comp.stats);
+router.get('/complaints/scope',          requireAny('cro_workspace','cro_admin','cro_dept_responder','cro_reports'), comp.scope);
 router.get('/complaints',                requireAny('cro_workspace','cro_admin','cro_dept_responder','cro_reports'), comp.list);
 router.get('/complaints/:id',            requireAny('cro_workspace','cro_admin','cro_dept_responder','cro_reports'), comp.get);
 

@@ -58,8 +58,26 @@ export default function CROWorkspace() {
     const [statusFilter, setStatusFilter] = useState('');
     const [search, setSearch] = useState('');
     const [assignedToMe, setAssignedToMe] = useState(false);
+    // Owner ask 2026-07-04: department managers should default to seeing
+    // every complaint routed to their department; non-managers stick with
+    // "assigned to me". Manager status comes from /api/cro/complaints/scope.
+    const [scope, setScope] = useState({ isManager: false, managedDepartmentIds: [], employeeId: null });
+    const [myDept, setMyDept] = useState(false);
     const [loading, setLoading] = useState(false);
     const [showNew, setShowNew] = useState(false);
+
+    // Bootstrap: figure out whether the logged-in user manages a department.
+    // Sets sensible defaults — managers land on "My Department", others on
+    // "Assigned to me".
+    useEffect(() => {
+        axios.get(`${API_BASE}/cro/complaints/scope`)
+            .then(r => {
+                setScope(r.data || { isManager: false });
+                if (r.data?.isManager) setMyDept(true);
+                else setAssignedToMe(true);
+            })
+            .catch(() => setAssignedToMe(true));
+    }, []);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -68,6 +86,7 @@ export default function CROWorkspace() {
             if (statusFilter)  params.status = statusFilter;
             if (search)        params.search = search;
             if (assignedToMe)  params.assignedToMe = 1;
+            if (myDept)        params.myDept      = 1;
             const [r1, r2] = await Promise.all([
                 axios.get(`${API_BASE}/cro/complaints`, { params }),
                 axios.get(`${API_BASE}/cro/complaints/stats`)
@@ -76,7 +95,7 @@ export default function CROWorkspace() {
             setStats(r2.data);
         } catch (err) { console.error(err); }
         setLoading(false);
-    }, [statusFilter, search, assignedToMe]);
+    }, [statusFilter, search, assignedToMe, myDept]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -130,6 +149,16 @@ export default function CROWorkspace() {
                     <input type="checkbox" checked={assignedToMe} onChange={e => setAssignedToMe(e.target.checked)} />
                     Assigned to me
                 </label>
+                {/* Owner ask 2026-07-04: department managers see their whole
+                    department's queue by default; hidden for non-managers so
+                    only their own cases are visible. */}
+                {scope.isManager && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}
+                        title="Every complaint routed to a department you manage">
+                        <input type="checkbox" checked={myDept} onChange={e => setMyDept(e.target.checked)} />
+                        My Department
+                    </label>
+                )}
                 <div style={{ marginLeft: 'auto', color: '#64748b', fontSize: '0.85rem' }}>{rows.length} complaints</div>
             </div>
 

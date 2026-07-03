@@ -31,6 +31,39 @@ const VALID_VERDICTS = new Set(['Satisfied', 'NotSatisfied', 'NoResponse']);
 
 // Helpers live in services/croComplaintService.js (shared with crdController bridge).
 
+// Look up which department(s) the logged-in user manages. Owner ask
+// 2026-07-04: a department manager should see every complaint routed to
+// their department; a regular user should only see complaints assigned
+// to themselves. This function returns [] if the caller isn't listed as
+// the manager of any row in gen_DepartmentInfo — they are treated as a
+// non-manager.
+async function getManagedDepartmentIds(employeeId) {
+    if (!employeeId) return [];
+    const pool = await getPool();
+    const r = await pool.request()
+        .input('emp', sql.Int, employeeId)
+        .query('SELECT DepartmentID FROM gen_DepartmentInfo WHERE ManagerEmployeeID = @emp');
+    return r.recordset.map(x => x.DepartmentID);
+}
+
+// GET /api/cro/scope — tiny endpoint the CRO Workspace calls on load to
+// find out whether to show the "My Department" toggle and what the default
+// view for this user should be.
+exports.scope = async (req, res) => {
+    try {
+        const employeeId = req.user?.employeeId || null;
+        const managedDepartmentIds = await getManagedDepartmentIds(employeeId);
+        res.json({
+            employeeId,
+            isManager: managedDepartmentIds.length > 0,
+            managedDepartmentIds,
+        });
+    } catch (err) {
+        console.error('CRO scope:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 // ---- Public endpoints ------------------------------------------------------
 
 // GET /api/cro/complaints — list with optional filters
@@ -54,6 +87,21 @@ exports.list = async (req, res) => {
         if (req.query.deptId) {
             r.input('dpt', sql.Int, parseInt(req.query.deptId));
             conds.push('c.AssignedDepartmentID = @dpt');
+        }
+        // Owner ask 2026-07-04: `myDept=1` scopes the list to complaints
+        // routed to any department the logged-in user manages. If the user
+        // manages no department, the filter returns an empty result set
+        // (safe default — non-managers can't peek into other teams).
+        if (req.query.myDept === '1' || req.query.myDept === 'true') {
+            const managed = await getManagedDepartmentIds(req.user?.employeeId);
+            if (!managed.length) {
+                // Force an impossible predicate so the query still runs but
+                // returns 0 rows.
+                conds.push('1 = 0');
+            } else {
+                const csv = managed.map(id => parseInt(id)).join(',');
+                conds.push(`c.AssignedDepartmentID IN (${csv})`);
+            }
         }
         if (req.query.partyId) {
             r.input('pty', sql.Int, parseInt(req.query.partyId));
