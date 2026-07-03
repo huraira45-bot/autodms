@@ -346,8 +346,18 @@ export default function CRDFollowUps() {
     // week" and work that batch instead of scrolling the full queue.
     const [closedFrom, setClosedFrom] = useState('');
     const [closedTo,   setClosedTo]   = useState('');
+    // Owner ask 2026-07-04: Business Unit filter (JobCardTypeId).
+    const [businessType, setBusinessType] = useState('');
+    const [jobTypes, setJobTypes] = useState([]);
     const [loading, setLoading] = useState(false);
     const [openItem, setOpenItem] = useState(null);
+
+    // JC Types are static per session — fetch once.
+    useEffect(() => {
+        axios.get(`${API_BASE}/workshop/job-types`)
+            .then(r => setJobTypes(r.data || []))
+            .catch(() => {});
+    }, []);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -357,6 +367,7 @@ export default function CRDFollowUps() {
             if (search) params.search = search;
             if (closedFrom) params.closedFrom = closedFrom;
             if (closedTo)   params.closedTo   = closedTo;
+            if (businessType) params.businessType = businessType;
             const [r1, r2] = await Promise.all([
                 axios.get(`${API_BASE}/crd/follow-ups`, { params }),
                 axios.get(`${API_BASE}/crd/follow-ups/stats`)
@@ -365,7 +376,7 @@ export default function CRDFollowUps() {
             setStats(r2.data);
         } catch (err) { console.error(err); }
         setLoading(false);
-    }, [statusFilter, search, closedFrom, closedTo]);
+    }, [statusFilter, search, closedFrom, closedTo, businessType]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -409,6 +420,17 @@ export default function CRDFollowUps() {
                     <option value="Closed">Closed</option>
                 </select>
 
+                {/* Owner ask 2026-07-04: Business Unit filter (JobCardType). */}
+                <select value={businessType} onChange={e => setBusinessType(e.target.value)}
+                    style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 180 }}>
+                    <option value="">All Business Units</option>
+                    {jobTypes.map(t => (
+                        <option key={t.JobCardTypeId} value={t.JobCardTypeId}>
+                            {t.CardCode} — {t.Title}
+                        </option>
+                    ))}
+                </select>
+
                 {/* Owner ask 2026-07-04: JC-closed date range. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: '#475569' }}>
                     <span style={{ fontWeight: 600 }}>JC Closed:</span>
@@ -446,6 +468,7 @@ export default function CRDFollowUps() {
                                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Customer</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Job Card</th>
+                                    <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Business Unit</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Vehicle</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Phone</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>JC Closed</th>
@@ -490,6 +513,11 @@ export default function CRDFollowUps() {
                                                         <ExternalLink size={13} />
                                                     </a>
                                                 </span>
+                                            </td>
+                                            <td style={{ padding: '10px 12px', fontSize: '0.82rem' }}>
+                                                {r.BusinessCode
+                                                    ? <span title={r.BusinessTitle} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, background: '#eef2f6', color: '#0f172a', fontWeight: 600 }}>{r.BusinessCode}</span>
+                                                    : <span style={{ color: '#94a3b8' }}>—</span>}
                                             </td>
                                             <td style={{ padding: '10px 12px' }}>{r.VehicleRegNo || '—'}</td>
                                             <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '0.85rem' }}>

@@ -20,7 +20,7 @@ const OVERDUE_GRACE_DAYS = 3;
 
 exports.list = async (req, res) => {
     try {
-        const { status, assignedTo, dueBy, search, closedFrom, closedTo } = req.query;
+        const { status, assignedTo, dueBy, search, closedFrom, closedTo, businessType } = req.query;
         const pool = await getPool();
         const r = pool.request();
         const conds = [];
@@ -38,6 +38,12 @@ exports.list = async (req, res) => {
             r.input('ct', sql.Date, new Date(closedTo));
             conds.push('CAST(j.FinalizedAt AS DATE) <= @ct');
         }
+        // Owner ask 2026-07-04: filter by JC Business Unit (JobTypeId) so
+        // CRD can process, e.g., only General Repair follow-ups today.
+        if (businessType) {
+            r.input('bt', sql.Int, parseInt(businessType));
+            conds.push('j.JobTypeId = @bt');
+        }
         if (search) {
             r.input('q', sql.NVarChar(200), `%${search}%`);
             conds.push('(f.CustomerName LIKE @q OR f.PhoneOne LIKE @q OR f.VehicleRegNo LIKE @q OR j.JobCardNo LIKE @q)');
@@ -47,6 +53,7 @@ exports.list = async (req, res) => {
         const result = await r.query(`
             SELECT f.FollowUpID, f.JobCardID, j.JobCardNo, j.Status AS PaymentType,
                    j.FinalizedAt AS JobClosedAt,
+                   j.JobTypeId, t.CardCode AS BusinessCode, t.Title AS BusinessTitle,
                    f.CustomerName, f.PhoneOne, f.VehicleRegNo,
                    f.PartyID, p.PartyName,
                    f.DueDate, f.Status, f.Outcome, f.Notes,
@@ -57,6 +64,7 @@ exports.list = async (req, res) => {
                    DATEDIFF(day, f.DueDate, CAST(GETDATE() AS DATE)) AS DaysOverdue
             FROM dms_CRDFollowUps f
             LEFT JOIN Addata_JobCardInfo j ON f.JobCardID = j.JobCardId
+            LEFT JOIN gen_JobCardType t    ON j.JobTypeId = t.JobCardTypeId
             LEFT JOIN gen_PartiesInfo p    ON f.PartyID = p.PartyID
             LEFT JOIN dms_CRO_Complaints lc ON f.LinkedComplaintID = lc.ComplaintID
             ${where}
