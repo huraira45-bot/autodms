@@ -175,7 +175,7 @@ export default function CreditInvoicePrint() {
                         <td>{jc.VehicleModel || jc.VehicleName || '—'}</td>
                         <td>{jc.VehicleRegNo || '—'}</td>
                         <td>{jc.EngineNo || '—'}</td>
-                        <td>{jc.KiloMeter || jc.KM || '—'}</td>
+                        <td>{jc.Odometer || jc.KiloMeter || jc.KM || '—'}</td>
                         <td>{jc.ChasisNo || jc.ChassisNo || '—'}</td>
                         <td>{jc.VehicleColor || '—'}</td>
                     </tr>
