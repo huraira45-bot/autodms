@@ -138,7 +138,10 @@ exports.savePartyBusinessAccess = async (req, res) => {
         const partyId = parseInt(req.body.PartyID);
         const keys = Array.isArray(req.body.BusinessKeys) ? req.body.BusinessKeys : [];
         if (!Number.isFinite(partyId)) return res.status(400).json({ error: 'PartyID required' });
-        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET']);
+        // Owner ask 2026-07-04: PAINT_LAB is the new business option so paint
+        // suppliers can be exposed in Paint GRN without polluting the spare-parts
+        // GRN party dropdown.
+        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET', 'PAINT_LAB']);
         for (const k of keys) {
             if (!valid.has(k)) return res.status(400).json({ error: `Invalid BusinessKey: ${k}` });
         }

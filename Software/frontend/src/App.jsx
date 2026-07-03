@@ -6,7 +6,8 @@ import {
     CreditCard, Wallet, Receipt, ArrowLeftRight, ClipboardList, UserCircle,
     BoxSelect, PlusCircle, ExternalLink, SlidersHorizontal, LogOut, ShieldCheck, UsersRound, Unlock, UserCheck,
     FileBarChart, ListChecks, Headphones, UserCog, Truck, Percent, Bell, MessageSquare, Megaphone, Layers, Ban, Search,
-    TrendingUp, ChevronDown, ChevronRight as ChevronRightIcon
+    TrendingUp, ChevronDown, ChevronRight as ChevronRightIcon,
+    Paintbrush,
 } from 'lucide-react';
 
 // Collapsible sidebar section — clicking the header toggles the child
@@ -57,6 +58,11 @@ import Vehicles           from './pages/Vehicles';
 import Parts              from './pages/Parts';
 import Services           from './pages/Services';
 import InventorySettings  from './pages/InventorySettings';
+// Paint Lab (owner ask 2026-07-04) — separate paint inventory + costing module
+import PaintDashboard     from './pages/paint/PaintDashboard';
+import PaintItems         from './pages/paint/PaintItems';
+import PaintSettings      from './pages/paint/PaintSettings';
+import PaintPlaceholder   from './pages/paint/PaintPlaceholder';
 import GRN                from './pages/GRN';
 import GRTN               from './pages/GRTN';
 import StoreSale          from './pages/StoreSale';
@@ -353,6 +359,45 @@ function Sidebar() {
                         <Database size={20} /> Parts Config
                     </NavLink>
                 )}
+                </NavSection>
+
+                {/* Paint Lab — separate internal paint inventory + costing (owner ask 2026-07-04) */}
+                <NavSection title="PAINT LAB">
+                    {hasModule('paint_lab_dashboard') && (
+                        <NavLink to="/paint/dashboard" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <Paintbrush size={20} /> Paint Dashboard
+                        </NavLink>
+                    )}
+                    {hasModule('paint_lab_items') && (
+                        <NavLink to="/paint/items" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <Layers size={20} /> Paint Items
+                        </NavLink>
+                    )}
+                    {hasModule('paint_lab_grn') && (
+                        <NavLink to="/paint/grn" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <FileInput size={20} /> Paint GRN
+                        </NavLink>
+                    )}
+                    {hasModule('paint_lab_grtn') && (
+                        <NavLink to="/paint/grtn" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <Undo2 size={20} /> Paint GRTN
+                        </NavLink>
+                    )}
+                    {hasModule('paint_lab_issue') && (
+                        <NavLink to="/paint/issue" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <ClipboardList size={20} /> Paint Issue
+                        </NavLink>
+                    )}
+                    {hasModule('paint_lab_reports') && (
+                        <NavLink to="/paint/reports" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <FileBarChart size={20} /> Paint Reports
+                        </NavLink>
+                    )}
+                    {hasModule('paint_lab_settings') && (
+                        <NavLink to="/paint/settings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                            <SlidersHorizontal size={20} /> Paint Settings
+                        </NavLink>
+                    )}
                 </NavSection>
 
                 {/* Finance */}
@@ -914,6 +959,39 @@ function AppShell() {
                     } />
                     <Route path="/inventory-settings" element={
                         <ProtectedRoute moduleKey="inventory_settings"><InventorySettings /></ProtectedRoute>
+                    } />
+
+                    {/* Paint Lab (owner ask 2026-07-04) — Phase 0 wires master
+                        data + settings. GRN/GRTN/Issue/Reports show a
+                        placeholder page until their phase ships. */}
+                    <Route path="/paint/dashboard" element={
+                        <ProtectedRoute moduleKey="paint_lab_dashboard"><PaintDashboard /></ProtectedRoute>
+                    } />
+                    <Route path="/paint/items" element={
+                        <ProtectedRoute moduleKey="paint_lab_items"><PaintItems /></ProtectedRoute>
+                    } />
+                    <Route path="/paint/grn" element={
+                        <ProtectedRoute moduleKey="paint_lab_grn">
+                            <PaintPlaceholder title="Paint GRN" subtitle="Paint receiving from supplier." phase="Phase 1" />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/paint/grtn" element={
+                        <ProtectedRoute moduleKey="paint_lab_grtn">
+                            <PaintPlaceholder title="Paint GRTN" subtitle="Supplier return, referencing an original Paint GRN." phase="Phase 2" />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/paint/issue" element={
+                        <ProtectedRoute moduleKey="paint_lab_issue">
+                            <PaintPlaceholder title="Paint Issue" subtitle="Internal paint issue to a Job Card. Not billed to the customer." phase="Phase 3" />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/paint/reports" element={
+                        <ProtectedRoute moduleKey="paint_lab_reports">
+                            <PaintPlaceholder title="Paint Reports" subtitle="Stock balance, ledger, purchase, consumption reports." phase="Phase 4" />
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/paint/settings" element={
+                        <ProtectedRoute moduleKey="paint_lab_settings"><PaintSettings /></ProtectedRoute>
                     } />
 
                     <Route path="/customers" element={
