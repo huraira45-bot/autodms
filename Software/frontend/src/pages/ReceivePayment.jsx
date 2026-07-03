@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Receipt, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Wallet, Printer } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
+import SearchableSelect from '../components/SearchableSelect';
 
 // Receive Payment from customers.
 // Workflow per §14.11: pick party (or walk-in JC) → see outstanding invoices + advance balance →
@@ -764,15 +765,14 @@ export default function ReceivePayment() {
               </div>
               <div>
                 <label style={lblStyle}>{needsBank ? (isCheque ? 'Deposit Bank *' : 'Bank Account *') : <span style={{ color: '#cbd5e1' }}>—</span>}</label>
-                <select
+                <SearchableSelect
                   value={p.BankGLCAID}
-                  onChange={e => updatePaymentLine(i, 'BankGLCAID', e.target.value)}
+                  onChange={v => updatePaymentLine(i, 'BankGLCAID', v)}
                   disabled={!needsBank}
-                  style={{ ...inp, background: !needsBank ? '#f8fafc' : 'white' }}
-                >
-                  <option value="">Pick bank...</option>
-                  {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
-                </select>
+                  placeholder="Pick bank…"
+                  title="Pick Bank Account"
+                  options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                />
               </div>
               <div>
                 {paymentLines.length > 1 && (

@@ -323,13 +323,16 @@ export default function SSR() {
             <div className="form-group"><label>Return Date</label><input type="date" value={header.ReturnDate} onChange={e => setHeader({...header, ReturnDate: e.target.value})} /></div>
             <div className="form-group">
               <label>Link Original Invoice</label>
-              <select value={header.OriginalSaleID} onChange={e => {
-                const sale = sales.find(s => s.SaleID == e.target.value);
-                setHeader({...header, OriginalSaleID: e.target.value, PartyID: sale?.PartyID || '', CustomerName: sale?.CustomerName || ''});
-              }}>
-                <option value="">No Link (Manual Return)</option>
-                {sales.map(s => <option key={s.SaleID} value={s.SaleID}>{s.InvoiceNo} - {s.CustomerName}</option>)}
-              </select>
+              <SearchableSelect
+                value={header.OriginalSaleID}
+                onChange={v => {
+                  const sale = sales.find(s => String(s.SaleID) === String(v));
+                  setHeader({...header, OriginalSaleID: v, PartyID: sale?.PartyID || '', CustomerName: sale?.CustomerName || ''});
+                }}
+                placeholder="No Link (Manual Return)"
+                title="Pick Original Sale Invoice"
+                options={sales.map(s => ({ id: s.SaleID, label: s.CustomerName || '(no customer)', sub: s.InvoiceNo }))}
+              />
             </div>
           </div>
           <div className="form-group"><label>Customer Name *</label><input type="text" value={header.CustomerName} onChange={e => setHeader({...header, CustomerName: e.target.value})} /></div>
@@ -399,9 +402,13 @@ export default function SSR() {
             </div>
             <div className="form-group" style={{ flex: 2 }}>
               <label>Restock Into</label>
-              <select value={currentItem.WHID} onChange={e => setCurrentItem({...currentItem, WHID: e.target.value})}>
-                {warehouses.map(w => <option key={w.WHID} value={w.WHID}>{w.WHDesc}</option>)}
-              </select>
+              <SearchableSelect
+                value={currentItem.WHID}
+                onChange={v => setCurrentItem({...currentItem, WHID: v})}
+                placeholder="Pick warehouse…"
+                title="Pick Restocking Warehouse"
+                options={warehouses.map(w => ({ id: w.WHID, label: w.WHDesc }))}
+              />
             </div>
             <button className="btn btn-add" style={{ flex: 1, alignSelf: 'flex-end', height: '42px', background: '#f59e0b' }} type="button" onClick={addLineItem}><Plus size={20} /> Add to Return</button>
           </div>

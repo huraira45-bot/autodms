@@ -313,10 +313,13 @@ export default function Customers() {
                                     </div>
                                     <div className="form-group">
                                         <label>Party Group</label>
-                                        <select value={form.PartyGroupID} onChange={e => update('PartyGroupID', e.target.value)}>
-                                            <option value="">(none)</option>
-                                            {groups.map(g => <option key={g.PartyGroupID} value={g.PartyGroupID}>{g.GroupName}</option>)}
-                                        </select>
+                                        <SearchableSelect
+                                            value={form.PartyGroupID}
+                                            onChange={v => update('PartyGroupID', v)}
+                                            placeholder="(none)"
+                                            title="Pick Party Group"
+                                            options={groups.map(g => ({ id: g.PartyGroupID, label: g.GroupName }))}
+                                        />
                                         <small style={{ color: '#64748b' }}>Use for grouping multi-branch parties (e.g. EFU Central / South).</small>
                                     </div>
                                     <div className="form-group">

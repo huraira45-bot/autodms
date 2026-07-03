@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Send, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Printer } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
+import SearchableSelect from '../components/SearchableSelect';
 
 // Make Payment to suppliers. Symmetric to Receive Payment.
 // Workflow per §14.11: pick supplier → see outstanding bills + advance balance →
@@ -296,10 +297,14 @@ export default function MakePayment() {
               </div>
               <div>
                 <label style={lblStyle}>{needsBank ? (isCheque ? 'Drawn-On Bank *' : 'Bank Account *') : <span style={{ color: '#cbd5e1' }}>—</span>}</label>
-                <select value={p.BankGLCAID} onChange={e => updatePaymentLine(i, 'BankGLCAID', e.target.value)} disabled={!needsBank} style={{ ...inp, background: !needsBank ? '#f8fafc' : 'white' }}>
-                  <option value="">Pick bank...</option>
-                  {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
-                </select>
+                <SearchableSelect
+                  value={p.BankGLCAID}
+                  onChange={v => updatePaymentLine(i, 'BankGLCAID', v)}
+                  disabled={!needsBank}
+                  placeholder="Pick bank…"
+                  title="Pick Bank Account"
+                  options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                />
               </div>
               <div>
                 {paymentLines.length > 1 && <button onClick={() => removePaymentLine(i)} style={{ ...iconBtn, color: '#ef4444' }}><Trash2 size={16} /></button>}

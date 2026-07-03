@@ -5,6 +5,7 @@ import { useFeedback } from '../context/FeedbackContext';
 import GLAccountPicker from '../components/GLAccountPicker';
 import Can from '../components/Can';
 import { useCan } from '../context/AuthContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
@@ -172,19 +173,25 @@ export default function Employees() {
               </div>
               <div className="form-group">
                 <label>Business Unit (Department) *</label>
-                <select required value={formData.DepartmentID} onChange={e => setFormData({...formData, DepartmentID: e.target.value})}>
-                  <option value="" disabled>Select a department...</option>
-                  {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
-                </select>
+                <SearchableSelect
+                  value={formData.DepartmentID}
+                  onChange={v => setFormData({...formData, DepartmentID: v})}
+                  placeholder="Select department…"
+                  title="Pick Department"
+                  options={departments.map(d => ({ id: d.DepartmentID, label: d.DepartmentName }))}
+                />
               </div>
 
               {/* Row 7 */}
               <div className="form-group">
                 <label>Designation *</label>
-                <select required value={formData.DesignationID} onChange={e => setFormData({...formData, DesignationID: e.target.value})}>
-                  <option value="" disabled>Select a designation...</option>
-                  {designations.map(d => <option key={d.DesignationID} value={d.DesignationID}>{d.DesignationName}</option>)}
-                </select>
+                <SearchableSelect
+                  value={formData.DesignationID}
+                  onChange={v => setFormData({...formData, DesignationID: v})}
+                  placeholder="Select designation…"
+                  title="Pick Designation"
+                  options={designations.map(d => ({ id: d.DesignationID, label: d.DesignationName }))}
+                />
               </div>
               <div className="form-group">
                 <label>Machine ID (Biometric)</label>

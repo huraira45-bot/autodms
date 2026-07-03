@@ -7,6 +7,7 @@ import axios from 'axios';
 import { TrendingUp, Plus, RefreshCw, Loader2, Pencil, Trash2, Power } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
+import SearchableSelect from '../../components/SearchableSelect';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -197,10 +198,14 @@ function PolicyEditor({ item, onClose, onSaved }) {
                 </select>
             </Field>
             <Field label="Applies to Variant (optional — leave blank for all variants)">
-                <select value={variantId} onChange={e => setVariantId(e.target.value)} disabled={!isNew} style={inputStyle}>
-                    <option value="">— All variants (global default) —</option>
-                    {variants.map(v => <option key={v.VariantID} value={v.VariantID}>{v.VariantCode} — {v.VariantName}</option>)}
-                </select>
+                <SearchableSelect
+                    value={variantId}
+                    onChange={setVariantId}
+                    disabled={!isNew}
+                    placeholder="— All variants (global default) —"
+                    title="Pick Variant"
+                    options={variants.map(v => ({ id: v.VariantID, label: v.VariantName, sub: v.VariantCode }))}
+                />
             </Field>
             <div style={{ padding: 6, fontSize: '0.7rem', color: '#94a3b8' }}>
                 Tip: per-variant policies take precedence over global ones for the same employee. Use this when one variant should pay a different rate than the rest.

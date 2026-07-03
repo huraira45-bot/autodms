@@ -245,17 +245,23 @@ export default function GRTN() {
           <div className="grid-2">
             <div className="form-group">
               <label>Supplier / Party *</label>
-              <select value={header.PartyID} onChange={e => setHeader({...header, PartyID: e.target.value})}>
-                <option value="">Select Supplier...</option>
-                {parties.map(p => <option key={p.PartyID} value={p.PartyID}>{p.PartyName}</option>)}
-              </select>
+              <SearchableSelect
+                value={header.PartyID}
+                onChange={v => setHeader({...header, PartyID: v})}
+                placeholder="Select supplier…"
+                title="Pick Supplier"
+                options={parties.map(p => ({ id: p.PartyID, label: p.PartyName }))}
+              />
             </div>
             <div className="form-group">
               <label>From Store *</label>
-              <select value={header.WHID} onChange={e => setHeader({...header, WHID: e.target.value})}>
-                <option value="">Select Warehouse...</option>
-                {warehouses.map(w => <option key={w.WHID} value={w.WHID}>{w.WHDesc}</option>)}
-              </select>
+              <SearchableSelect
+                value={header.WHID}
+                onChange={v => setHeader({...header, WHID: v})}
+                placeholder="Select warehouse…"
+                title="Pick Warehouse"
+                options={warehouses.map(w => ({ id: w.WHID, label: w.WHDesc }))}
+              />
             </div>
             <div className="form-group">
               <label>Return Date</label>

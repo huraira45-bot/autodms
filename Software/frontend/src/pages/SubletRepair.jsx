@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { ExternalLink, Search, Plus, Trash2, Save, Loader2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit2, Lock, Printer } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api/workshop';
 
@@ -314,15 +315,13 @@ export default function SubletRepair() {
                 </div>
                 <div className="form-group">
                   <label>Vendor Party {form.PaymentType === 'Credit' ? '*' : '(optional)'}</label>
-                  <select value={form.VendorID || ''}
-                    onChange={e => setForm({ ...form, VendorID: e.target.value })}
-                    required={form.PaymentType === 'Credit'}
-                    style={{ width: '100%' }}>
-                    <option value="">— Select vendor —</option>
-                    {subletVendors.map(v => (
-                      <option key={v.PartyID} value={v.PartyID}>{v.PartyName}{v.PhoneOne ? ` (${v.PhoneOne})` : ''}</option>
-                    ))}
-                  </select>
+                  <SearchableSelect
+                    value={form.VendorID || ''}
+                    onChange={v => setForm({ ...form, VendorID: v })}
+                    placeholder="— Select vendor —"
+                    title="Pick Sublet Vendor"
+                    options={subletVendors.map(v => ({ id: v.PartyID, label: v.PartyName, sub: v.PhoneOne || '' }))}
+                  />
                   {form.PaymentType === 'Credit' && subletVendors.length === 0 && (
                     <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>
                       No vendors are mapped to "Sublet" business yet. Go to <strong>Parties ▸ Party Business Access</strong> to grant access.

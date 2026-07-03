@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { TrendingUp, Wallet, Clock, Plus, X, FileCheck2, RotateCcw, Loader2, ReceiptText } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
+import SearchableSelect from '../../components/SearchableSelect';
 
 const API = '';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -279,10 +280,13 @@ function ReceiptModal({ accrual, onClose, onSaved }) {
                     <span>Outstanding <strong>PKR {fmt(outstanding)}</strong></span>
                 </div>
                 <Row label="Bank Account *">
-                    <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)} style={input}>
-                        <option value="">— Pick the bank that received the funds —</option>
-                        {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} · {b.GLTitle}</option>)}
-                    </select>
+                    <SearchableSelect
+                        value={bankAccountId}
+                        onChange={setBankAccountId}
+                        placeholder="— Pick the bank that received the funds —"
+                        title="Pick Bank Account"
+                        options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                    />
                 </Row>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <Row label="Gross Amount (PKR) *">

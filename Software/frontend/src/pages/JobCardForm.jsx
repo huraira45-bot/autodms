@@ -7,6 +7,7 @@ import KYCBanner from '../components/KYCBanner';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
 import { fmtDate } from '../utils/datetime';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api/workshop';
 const API_BASE = '/api';
@@ -749,17 +750,24 @@ export default function JobCardForm() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6 }}>
                 <div style={S.field}>
                   <label style={S.label}>Business Unit</label>
-                  <select style={S.select} value={form.JobTypeId} onChange={e => f('JobTypeId', e.target.value)} disabled={isEdit || disabled} required>
-                    <option value="">Select...</option>
-                    {jobTypes.map(t => <option key={t.JobCardTypeId} value={t.JobCardTypeId}>{t.Title} ({t.CardCode})</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.JobTypeId}
+                    onChange={v => f('JobTypeId', v)}
+                    disabled={isEdit || disabled}
+                    placeholder="Select business unit…"
+                    title="Pick Business Unit"
+                    options={jobTypes.map(t => ({ id: t.JobCardTypeId, label: t.Title, sub: t.CardCode }))}
+                  />
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>Order Type</label>
-                  <select style={S.select} value={form.OrderTypeId} onChange={e => f('OrderTypeId', e.target.value)}>
-                    <option value="">Select...</option>
-                    {orderTypes.map(o => <option key={o.OrderTypeId} value={o.OrderTypeId}>{o.OrderTypeName}</option>)}
-                  </select>
+                  <SearchableSelect
+                    value={form.OrderTypeId}
+                    onChange={v => f('OrderTypeId', v)}
+                    placeholder="Select order type…"
+                    title="Pick Order Type"
+                    options={orderTypes.map(o => ({ id: o.OrderTypeId, label: o.OrderTypeName }))}
+                  />
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>PM Type</label>
@@ -791,22 +799,18 @@ export default function JobCardForm() {
                       title="Service Advisor is set to the user creating the job card."
                     />
                   ) : (
-                    <select
-                      style={S.select}
+                    <SearchableSelect
                       value={form.ServiceAdvisorID || ''}
-                      onChange={e => {
-                        const selectedId = e.target.value;
-                        const picked = allEmployees.find(emp => String(emp.EmployeeID) === selectedId);
+                      onChange={selectedId => {
+                        const picked = allEmployees.find(emp => String(emp.EmployeeID) === String(selectedId));
                         f('ServiceAdvisorID', selectedId);
                         f('ServiceAdvisor', picked ? picked.EmployeeName : '');
                       }}
                       disabled={disabled}
-                    >
-                      <option value="">— Select advisor —</option>
-                      {allEmployees.map(emp => (
-                        <option key={emp.EmployeeID} value={emp.EmployeeID}>{emp.EmployeeName}</option>
-                      ))}
-                    </select>
+                      placeholder="— Select advisor —"
+                      title="Pick Service Advisor"
+                      options={allEmployees.map(emp => ({ id: emp.EmployeeID, label: emp.EmployeeName }))}
+                    />
                   )}
                 </div>
                 <div style={S.field}>
@@ -894,13 +898,17 @@ export default function JobCardForm() {
                 {!isEdit && customerVehicles.length > 0 && (
                   <div style={{ marginTop: 4 }}>
                     <label style={{ ...S.label, color: '#1a6a3a' }}>Select Saved Vehicle</label>
-                    <select style={S.select} value={form.VehicleRegNo} onChange={e => {
-                      const v = customerVehicles.find(cv => cv.RegistrationNo === e.target.value);
-                      if (v) setForm(p => ({ ...p, VehicleRegNo: v.RegistrationNo || '', ChasisNo: v.ChasisNo || '', EngineNo: v.EngineNo || '', VersionCode: v.VehicleModel || '' }));
-                    }}>
-                      <option value="">-- Choose --</option>
-                      {customerVehicles.map(v => <option key={v.VehicleID} value={v.RegistrationNo}>{v.RegistrationNo} - {v.BrandName} {v.VehicleModel}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={form.VehicleRegNo}
+                      onChange={regNo => {
+                        const v = customerVehicles.find(cv => cv.RegistrationNo === regNo);
+                        if (v) setForm(p => ({ ...p, VehicleRegNo: v.RegistrationNo || '', ChasisNo: v.ChasisNo || '', EngineNo: v.EngineNo || '', VersionCode: v.VehicleModel || '' }));
+                        else setForm(p => ({ ...p, VehicleRegNo: '' }));
+                      }}
+                      placeholder="-- Choose saved vehicle --"
+                      title="Pick a saved vehicle"
+                      options={customerVehicles.map(v => ({ id: v.RegistrationNo, label: `${v.BrandName || ''} ${v.VehicleModel || ''}`.trim(), sub: v.RegistrationNo }))}
+                    />
                   </div>
                 )}
               </div>
@@ -982,10 +990,13 @@ export default function JobCardForm() {
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 4, marginTop: 4 }}>
                             <div style={S.field}>
                               <label style={S.label}>Party *</label>
-                              <select style={S.select} value={form.PartyID} onChange={e => f('PartyID', e.target.value)} required>
-                                <option value="">Select Party...</option>
-                                {parties.map(p => <option key={p.PartyID} value={p.PartyID}>{p.PartyName}</option>)}
-                              </select>
+                              <SearchableSelect
+                                value={form.PartyID}
+                                onChange={v => f('PartyID', v)}
+                                placeholder="Select party…"
+                                title="Pick Party"
+                                options={parties.map(p => ({ id: p.PartyID, label: p.PartyName }))}
+                              />
                             </div>
                             <div style={S.field}>
                               <label style={S.label}>C/O</label>
@@ -997,10 +1008,13 @@ export default function JobCardForm() {
                           <div style={{ marginTop: 4 }}>
                             <div style={S.field}>
                               <label style={S.label}>Bank Account *</label>
-                              <select style={S.select} value={form.PaymentBankID} onChange={e => f('PaymentBankID', e.target.value)} required>
-                                <option value="">Select Bank...</option>
-                                {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
-                              </select>
+                              <SearchableSelect
+                                value={form.PaymentBankID}
+                                onChange={v => f('PaymentBankID', v)}
+                                placeholder="Select bank…"
+                                title="Pick Bank Account"
+                                options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                              />
                               {banks.length === 0 && (
                                 <span style={{ fontSize: 10, color: '#a16207', marginTop: 2, display: 'block' }}>
                                   No banks configured. Mark accounts as banks in Chart of Accounts.
@@ -1105,17 +1119,23 @@ export default function JobCardForm() {
                 <div style={S.groupBody}>
                   <div style={S.field}>
                     <label style={S.label}>Authorize Discount</label>
-                    <select style={S.select} value={careOff?.CareOffID || ''}
-                      onChange={e => {
-                        const sel = careOffs.find(c => c.CareOffID === parseInt(e.target.value));
+                    <SearchableSelect
+                      value={careOff?.CareOffID || ''}
+                      onChange={id => {
+                        const sel = careOffs.find(c => String(c.CareOffID) === String(id));
                         handleCareOffChange(sel || null);
-                      }}>
-                      <option value="">None (no discount)</option>
-                      {careOff && careOff.IsActive === false && (
-                        <option value={careOff.CareOffID} disabled style={{ color: '#b91c1c' }}>{careOff.EmployeeName} (inactive)</option>
-                      )}
-                      {careOffs.map(c => <option key={c.CareOffID} value={c.CareOffID}>{c.EmployeeName} ({c.MaxDiscountPct}%)</option>)}
-                    </select>
+                      }}
+                      placeholder="None (no discount)"
+                      title="Pick Care-Off / Discount Authoriser"
+                      options={[
+                        // Preserve the currently-attached-but-inactive Care-Off
+                        // as a picker option so the user can see who's set.
+                        ...(careOff && careOff.IsActive === false
+                            ? [{ id: careOff.CareOffID, label: `${careOff.EmployeeName} (inactive)`, sub: '⚠' }]
+                            : []),
+                        ...careOffs.map(c => ({ id: c.CareOffID, label: c.EmployeeName, sub: `${c.MaxDiscountPct}%` })),
+                      ]}
+                    />
                     {careOff && careOff.IsActive === false && (
                       <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>⚠ Care-Off is inactive — assign an active one</div>
                     )}

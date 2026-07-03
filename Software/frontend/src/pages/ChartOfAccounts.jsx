@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Plus, ChevronRight, ChevronDown, Landmark, X, Search, Loader2, Building, Pencil, Check } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import { useAuth } from '../context/AuthContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
@@ -305,17 +306,14 @@ export default function ChartOfAccounts() {
                 </div>
               ) : (
                 <div className="form-group">
-                  <label>Search & Select Parent {loadingParents && <Loader2 size={12} className="animate-spin" style={{display:'inline'}} />}</label>
-                  <div className="parent-search-container">
-                    <input type="text" placeholder="Type name or code to search..." value={parentSearch} onChange={handleParentSearchChange} className="parent-search-input" />
-                    <select required value={newAcc.ParentCode} onChange={e => setNewAcc({...newAcc, ParentCode: e.target.value})} className="parent-select">
-                      <option value="">{loadingParents ? 'Searching...' : 'Select Parent...'}</option>
-                      {allParents.map(p => (
-                        <option key={p.GLCAID} value={p.GLCode}>{p.GLCode} - {p.GLTitle}</option>
-                      ))}
-                    </select>
-                    {allParents.length === 0 && !loadingParents && parentSearch && <p className="hint-text error">No matches found.</p>}
-                  </div>
+                  <label>Search &amp; Select Parent {loadingParents && <Loader2 size={12} className="animate-spin" style={{display:'inline'}} />}</label>
+                  <SearchableSelect
+                    value={newAcc.ParentCode}
+                    onChange={v => setNewAcc({...newAcc, ParentCode: v})}
+                    placeholder={loadingParents ? 'Searching…' : 'Select parent account…'}
+                    title="Pick Parent Account"
+                    options={allParents.map(p => ({ id: p.GLCode, label: p.GLTitle, sub: p.GLCode }))}
+                  />
                 </div>
               )}
 

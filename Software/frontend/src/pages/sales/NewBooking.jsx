@@ -14,6 +14,7 @@ import axios from 'axios';
 import { ArrowLeft, Loader2, Search, AlertTriangle, Car, User, UserPlus, XCircle, Headphones } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { inputStyle, Field, Err, FlashMsg, Shell, Actions } from './VehicleModelsAdmin';
+import SearchableSelect from '../../components/SearchableSelect';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -253,16 +254,23 @@ export default function NewBooking() {
                 <h3 style={{ marginTop: 0, fontSize: '1rem' }}><Car size={16} style={{ display: 'inline', verticalAlign: 'middle' }} /> Vehicle</h3>
                 <div style={{ display: 'flex', gap: 10 }}>
                     <Field label="Model" flex>
-                        <select value={modelId} onChange={e => setModelId(e.target.value)} style={inputStyle}>
-                            <option value="">— Pick model —</option>
-                            {models.map(m => <option key={m.ModelID} value={m.ModelID}>{m.ModelCode} — {m.ModelName}</option>)}
-                        </select>
+                        <SearchableSelect
+                            value={modelId}
+                            onChange={setModelId}
+                            placeholder="— Pick model —"
+                            title="Pick Model"
+                            options={models.map(m => ({ id: m.ModelID, label: m.ModelName, sub: m.ModelCode }))}
+                        />
                     </Field>
                     <Field label="Variant" flex>
-                        <select value={variantId} onChange={e => setVariantId(e.target.value)} disabled={!modelId} style={inputStyle}>
-                            <option value="">— Pick variant —</option>
-                            {variants.map(v => <option key={v.VariantID} value={v.VariantID}>{v.VariantCode} — {v.VariantName}</option>)}
-                        </select>
+                        <SearchableSelect
+                            value={variantId}
+                            onChange={setVariantId}
+                            disabled={!modelId}
+                            placeholder="— Pick variant —"
+                            title="Pick Variant"
+                            options={variants.map(v => ({ id: v.VariantID, label: v.VariantName, sub: v.VariantCode }))}
+                        />
                     </Field>
                 </div>
 

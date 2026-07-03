@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Wrench, Plus, Edit, X, Search, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import { EmptyState } from '../components/UXPrimitives';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
@@ -207,18 +208,13 @@ export default function LabourServices() {
             <form onSubmit={handleSubmit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="form-group">
                 <label>Business Type *</label>
-                <select
-                  required
+                <SearchableSelect
                   value={form.JobTypeID}
-                  onChange={e => setForm({ ...form, JobTypeID: e.target.value })}
-                >
-                  <option value="" disabled>Select business type...</option>
-                  {jobTypes.map(jt => (
-                    <option key={jt.JobCardTypeId} value={jt.JobCardTypeId}>
-                      {jt.CardCode} — {jt.Title}
-                    </option>
-                  ))}
-                </select>
+                  onChange={v => setForm({ ...form, JobTypeID: v })}
+                  placeholder="Select business type…"
+                  title="Pick Business Type"
+                  options={jobTypes.map(jt => ({ id: jt.JobCardTypeId, label: jt.Title, sub: jt.CardCode }))}
+                />
               </div>
               <div className="form-group">
                 <label>Service / Labour Description *</label>

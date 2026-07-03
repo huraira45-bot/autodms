@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Car, Plus } from 'lucide-react';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
@@ -82,14 +83,22 @@ export default function Vehicles() {
               <div className="form-group"><label>Model *</label><input required value={formData.ItemModel} onChange={e=>setFormData({...formData, ItemModel:e.target.value})}/></div>
               <div className="form-group"><label>Chassis/Serial No *</label><input required value={formData.SerialNo} onChange={e=>setFormData({...formData, SerialNo:e.target.value})}/></div>
               <div className="form-group"><label>Category</label>
-                <select value={formData.CategoryID} onChange={e=>setFormData({...formData, CategoryID:e.target.value})}>
-                  <option value="">Select...</option>{categories.map(c=><option key={c.CategoryID} value={c.CategoryID}>{c.CategoryName}</option>)}
-                </select>
+                <SearchableSelect
+                  value={formData.CategoryID}
+                  onChange={v=>setFormData({...formData, CategoryID:v})}
+                  placeholder="Select category…"
+                  title="Pick Category"
+                  options={categories.map(c => ({ id: c.CategoryID, label: c.CategoryName }))}
+                />
               </div>
               <div className="form-group"><label>Warehouse</label>
-                <select value={formData.WHID} onChange={e=>setFormData({...formData, WHID:e.target.value})}>
-                  <option value="">Select...</option>{warehouses.map(w=><option key={w.WHID} value={w.WHID}>{w.WHDesc}</option>)}
-                </select>
+                <SearchableSelect
+                  value={formData.WHID}
+                  onChange={v=>setFormData({...formData, WHID:v})}
+                  placeholder="Select warehouse…"
+                  title="Pick Warehouse"
+                  options={warehouses.map(w => ({ id: w.WHID, label: w.WHDesc }))}
+                />
               </div>
               <div className="form-group"><label>Sales Price</label><input type="number" value={formData.ItemSalesPrice} onChange={e=>setFormData({...formData, ItemSalesPrice:e.target.value})}/></div>
               <button type="submit" className="btn" style={{width:'100%', marginTop:'16px'}}>Save Vehicle</button>

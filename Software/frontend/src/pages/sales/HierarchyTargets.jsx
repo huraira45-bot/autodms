@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Users, Target, Plus, X, Loader2, UserMinus } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
+import SearchableSelect from '../../components/SearchableSelect';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
@@ -192,10 +193,13 @@ function AssignModal({ employees, onClose, onSaved }) {
 
     return <Modal title="Assign Hierarchy Role" onClose={onClose}>
         <Row label="Employee *">
-            <select value={empId} onChange={e => setEmpId(e.target.value)} style={input}>
-                <option value="">— Pick —</option>
-                {employees.map(e => <option key={e.EmployeeID} value={e.EmployeeID}>{e.EmployeeName} ({e.EmployeeCode})</option>)}
-            </select>
+            <SearchableSelect
+                value={empId}
+                onChange={setEmpId}
+                placeholder="— Pick employee —"
+                title="Pick Employee"
+                options={employees.map(e => ({ id: e.EmployeeID, label: e.EmployeeName, sub: e.EmployeeCode }))}
+            />
         </Row>
         <Row label="Hierarchy Role *">
             <select value={role} onChange={e => setRole(e.target.value)} style={input}>
@@ -232,10 +236,13 @@ function TargetModal({ employees, onClose, onSaved }) {
 
     return <Modal title="Set Sales Target" onClose={onClose}>
         <Row label="Employee *">
-            <select value={empId} onChange={e => setEmpId(e.target.value)} style={input}>
-                <option value="">— Pick —</option>
-                {employees.map(e => <option key={e.EmployeeID} value={e.EmployeeID}>{e.EmployeeName} ({e.EmployeeCode})</option>)}
-            </select>
+            <SearchableSelect
+                value={empId}
+                onChange={setEmpId}
+                placeholder="— Pick employee —"
+                title="Pick Employee"
+                options={employees.map(e => ({ id: e.EmployeeID, label: e.EmployeeName, sub: e.EmployeeCode }))}
+            />
         </Row>
         <Row label="Period">
             <select value={periodType} onChange={e => setPeriodType(e.target.value)} style={input}>

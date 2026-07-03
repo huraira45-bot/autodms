@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import SearchableSelect from '../../components/SearchableSelect';
 
 const emptyForm = { UserName: '', Password: '', GroupID: '', Active: true, LinkedEmployeeID: '' };
 
@@ -124,20 +125,22 @@ export default function UsersAdmin() {
                             <input className="form-input" value={form.UserName} onChange={e => setForm({...form, UserName: e.target.value})} />
                         </Field>
                         <Field label="Role">
-                            <select className="form-input" value={form.GroupID} onChange={e => setForm({...form, GroupID: parseInt(e.target.value)})}>
-                                <option value="">-- Select Role --</option>
-                                {roles.map(r => <option key={r.GroupID} value={r.GroupID}>{r.GroupTitle}</option>)}
-                            </select>
+                            <SearchableSelect
+                                value={form.GroupID}
+                                onChange={v => setForm({...form, GroupID: v ? parseInt(v) : ''})}
+                                placeholder="-- Select Role --"
+                                title="Pick Role"
+                                options={roles.map(r => ({ id: r.GroupID, label: r.GroupTitle }))}
+                            />
                         </Field>
                         <Field label="Linked Employee (optional — for attributing JC actions, escalations, etc.)">
-                            <select className="form-input" value={form.LinkedEmployeeID} onChange={e => setForm({...form, LinkedEmployeeID: e.target.value})}>
-                                <option value="">— Not linked —</option>
-                                {employees.map(emp => (
-                                    <option key={emp.EmployeeID} value={emp.EmployeeID}>
-                                        {emp.EmployeeName}{emp.DepartmentName ? ` (${emp.DepartmentName})` : ''}
-                                    </option>
-                                ))}
-                            </select>
+                            <SearchableSelect
+                                value={form.LinkedEmployeeID}
+                                onChange={v => setForm({...form, LinkedEmployeeID: v})}
+                                placeholder="— Not linked —"
+                                title="Pick Linked Employee"
+                                options={employees.map(emp => ({ id: emp.EmployeeID, label: emp.EmployeeName, sub: emp.DepartmentName || '' }))}
+                            />
                         </Field>
                         {modal === 'create' && (
                             <Field label="Password">

@@ -18,6 +18,7 @@ import { useFeedback } from '../../context/FeedbackContext';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
+import SearchableSelect from '../../components/SearchableSelect';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -540,14 +541,18 @@ function AllocateModal({ booking, onClose, onSaved }) {
                     ) : (
                         <>
                             <Field label="Chassis *">
-                                <select value={vehicleId} onChange={e => setVehicleId(e.target.value)} style={inputStyle} disabled={blocking}>
-                                    <option value="">— Pick chassis —</option>
-                                    {vehicles.map(v => (
-                                        <option key={v.VehicleID} value={v.VehicleID}>
-                                            {v.ChasisNo} · {v.Color || 'no color'} · {v.AllocationType} · {v.Location || ''}
-                                        </option>
-                                    ))}
-                                </select>
+                                <SearchableSelect
+                                    value={vehicleId}
+                                    onChange={setVehicleId}
+                                    disabled={blocking}
+                                    placeholder="— Pick chassis —"
+                                    title="Pick Chassis / Vehicle"
+                                    options={vehicles.map(v => ({
+                                        id: v.VehicleID,
+                                        label: `${v.Color || 'no color'} · ${v.AllocationType} · ${v.Location || ''}`.trim(),
+                                        sub: v.ChasisNo,
+                                    }))}
+                                />
                             </Field>
                             <Field label="Notes (optional)">
                                 <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} disabled={blocking} style={{ ...inputStyle, resize: 'vertical' }} />
@@ -609,10 +614,13 @@ function PayMasterModal({ booking, onClose, onSaved }) {
             </div>
             {mode === 'Bank' && (
                 <Field label="From bank *">
-                    <select value={bankId} onChange={e => setBankId(e.target.value)} style={inputStyle}>
-                        <option value="">— Pick a bank —</option>
-                        {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} · {b.GLTitle}</option>)}
-                    </select>
+                    <SearchableSelect
+                        value={bankId}
+                        onChange={setBankId}
+                        placeholder="— Pick a bank —"
+                        title="Pick Bank"
+                        options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                    />
                 </Field>
             )}
             <div style={{ display: 'flex', gap: 10 }}>
@@ -811,14 +819,13 @@ function PaymentModal({ booking, onClose, onSaved }) {
             {/* Bank dropdown — appears whenever the payment lands in a bank (transfer / cheque / POS / pay-order) */}
             {needsBank && (
                 <Field label={mode === 'POS' ? 'POS terminal bank account *' : mode === 'Cheque' ? 'Bank account this cheque is deposited into *' : path === 'PayOrder' ? 'Bank that issued the Pay Order *' : 'Bank account receiving the transfer *'}>
-                    <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)} style={inputStyle}>
-                        <option value="">— Pick a bank account —</option>
-                        {banks.map(b => (
-                            <option key={b.GLCAID} value={b.GLCAID}>
-                                {b.GLCode} — {b.GLTitle}
-                            </option>
-                        ))}
-                    </select>
+                    <SearchableSelect
+                        value={bankAccountId}
+                        onChange={setBankAccountId}
+                        placeholder="— Pick a bank account —"
+                        title="Pick Bank Account"
+                        options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                    />
                     {banks.length === 0 && (
                         <div style={{ fontSize: '0.72rem', color: '#b45309', marginTop: 4 }}>
                             No active bank accounts. Admin must mark COA leaf accounts as banks under <strong>Accounting › Banks</strong> first.
@@ -1007,15 +1014,17 @@ function CoaLinkModal({ partyId, partyName, onClose, onSaved }) {
             {tab === 'existing' && (
                 <>
                     <Field label="Available leaves under 201002">
-                        <select value={selected} onChange={e => setSelected(e.target.value)} style={inputStyle}>
-                            <option value="">— Pick a leaf —</option>
-                            {leaves.map(l => (
-                                <option key={l.GLCAID} value={l.GLCAID} disabled={!!l.LinkedPartyID}>
-                                    {l.GLCode} · {l.GLTitle}
-                                    {l.LinkedPartyID ? ` (taken by ${l.LinkedPartyName})` : ''}
-                                </option>
-                            ))}
-                        </select>
+                        <SearchableSelect
+                            value={selected}
+                            onChange={setSelected}
+                            placeholder="— Pick a leaf —"
+                            title="Pick GL Leaf"
+                            options={leaves.map(l => ({
+                                id: l.GLCAID,
+                                label: l.GLTitle + (l.LinkedPartyID ? ` (taken by ${l.LinkedPartyName})` : ''),
+                                sub: l.GLCode,
+                            }))}
+                        />
                     </Field>
                     <Actions onCancel={onClose} onConfirm={linkExisting} confirmLabel="Link" busy={busy} disabled={!selected} />
                 </>
