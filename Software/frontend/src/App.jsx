@@ -143,11 +143,24 @@ import CommandPalette       from './components/CommandPalette';
 import WorkspaceTopBar      from './components/WorkspaceTopBar';
 import { FeedbackProvider } from './components/FeedbackProvider';
 
-function ProtectedRoute({ moduleKey, action = 'view', children }) {
+function ProtectedRoute({ moduleKey, anyModules, action = 'view', children }) {
     const { user, loading, hasModule, hasPermission } = useAuth();
     if (loading) return null;
     if (!user) return <Navigate to="/login" replace />;
-    if (moduleKey) {
+    // `anyModules` = ['cro_workspace','cro_dept_responder','cro_admin'] etc.
+    // Pass when a screen is reachable via multiple roles (owner ask 2026-07-04
+    // for the CRO Workspace: an advisor granted only cro_dept_responder must
+    // still be able to land on the page — the server further scopes what
+    // they can actually see).
+    if (anyModules && anyModules.length) {
+        if (!anyModules.some(k => hasModule(k))) {
+            return (
+                <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
+                    You do not have permission to access this module.
+                </div>
+            );
+        }
+    } else if (moduleKey) {
         // Try the granular permission first; fall back to legacy module check
         // for workflow/report keys that have no action suffix. The final
         // hasModule() fallback covers bundle-style keys like 'reports' that
@@ -461,9 +474,15 @@ function Sidebar() {
                         <Headphones size={20} /> Follow-Ups
                     </NavLink>
                 )}
-                {hasModule('cro_workspace') && (
+                {/* Owner ask 2026-07-04: advisors with only cro_dept_responder
+                    must see this link so they can find their assigned
+                    complaints. Label flips to "My Complaints" for that role
+                    (matches the page title) — CRO desk still sees the full
+                    "CRO Workspace" label. */}
+                {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_dept_responder')) && (
                     <NavLink to="/cro/workspace" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
-                        <Headphones size={20} /> CRO Workspace
+                        <Headphones size={20} />
+                        {(hasModule('cro_workspace') || hasModule('cro_admin')) ? 'CRO Workspace' : 'My Complaints'}
                     </NavLink>
                 )}
                 {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_reports')) && (
@@ -907,10 +926,10 @@ function AppShell() {
                         <ProtectedRoute moduleKey="crd_followups"><CRDFollowUps /></ProtectedRoute>
                     } />
                     <Route path="/cro/workspace" element={
-                        <ProtectedRoute moduleKey="cro_workspace"><CROWorkspace /></ProtectedRoute>
+                        <ProtectedRoute anyModules={['cro_workspace', 'cro_admin', 'cro_dept_responder']}><CROWorkspace /></ProtectedRoute>
                     } />
                     <Route path="/cro/complaints/:id" element={
-                        <ProtectedRoute moduleKey="cro_workspace"><ComplaintDetail /></ProtectedRoute>
+                        <ProtectedRoute anyModules={['cro_workspace', 'cro_admin', 'cro_dept_responder']}><ComplaintDetail /></ProtectedRoute>
                     } />
                     <Route path="/cro/surveys" element={
                         <ProtectedRoute><SurveysAdmin /></ProtectedRoute>
