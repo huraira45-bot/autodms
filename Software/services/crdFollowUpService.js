@@ -9,7 +9,10 @@
  */
 const { sql, getPool } = require('../config/db');
 
-const DEFAULT_FOLLOWUP_DAYS = 1;
+// Owner ask 2026-07-04: give the customer a few days after delivery to
+// use the service before the CRD call — a next-day call feels intrusive.
+// Deadline now starts 4 days after JC finalization.
+const DEFAULT_FOLLOWUP_DAYS = 4;
 
 async function createFollowUpForJobCard(jobCardId, userInfo) {
     try {

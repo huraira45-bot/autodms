@@ -340,6 +340,11 @@ export default function CRDFollowUps() {
     const [stats, setStats] = useState({});
     const [statusFilter, setStatusFilter] = useState('Pending');
     const [search, setSearch] = useState('');
+    // Owner ask 2026-07-04: filter follow-ups by the underlying Job Card's
+    // finalize (close) date so CRD can pull, say, "every JC closed last
+    // week" and work that batch instead of scrolling the full queue.
+    const [closedFrom, setClosedFrom] = useState('');
+    const [closedTo,   setClosedTo]   = useState('');
     const [loading, setLoading] = useState(false);
     const [openItem, setOpenItem] = useState(null);
 
@@ -349,6 +354,8 @@ export default function CRDFollowUps() {
             const params = {};
             if (statusFilter) params.status = statusFilter;
             if (search) params.search = search;
+            if (closedFrom) params.closedFrom = closedFrom;
+            if (closedTo)   params.closedTo   = closedTo;
             const [r1, r2] = await Promise.all([
                 axios.get(`${API_BASE}/crd/follow-ups`, { params }),
                 axios.get(`${API_BASE}/crd/follow-ups/stats`)
@@ -357,7 +364,7 @@ export default function CRDFollowUps() {
             setStats(r2.data);
         } catch (err) { console.error(err); }
         setLoading(false);
-    }, [statusFilter, search]);
+    }, [statusFilter, search, closedFrom, closedTo]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -365,7 +372,7 @@ export default function CRDFollowUps() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ErpControlPanel
                 title="CRD Follow-Ups"
-                subtitle="Customer satisfaction queue — auto-created when a Job Card is finalized (due next day)."
+                subtitle="Customer satisfaction queue — auto-created when a Job Card is finalized (due 4 days later)."
                 actions={
                     <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
@@ -400,6 +407,25 @@ export default function CRDFollowUps() {
                     <option value="NoResponse">No Response</option>
                     <option value="Closed">Closed</option>
                 </select>
+
+                {/* Owner ask 2026-07-04: JC-closed date range. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: '#475569' }}>
+                    <span style={{ fontWeight: 600 }}>JC Closed:</span>
+                    <input type="date" value={closedFrom} onChange={e => setClosedFrom(e.target.value)}
+                        style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem' }} />
+                    <span>→</span>
+                    <input type="date" value={closedTo} onChange={e => setClosedTo(e.target.value)}
+                        style={{ padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.8rem' }} />
+                    {(closedFrom || closedTo) && (
+                        <button type="button"
+                            onClick={() => { setClosedFrom(''); setClosedTo(''); }}
+                            style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.85rem' }}
+                            title="Clear date range">
+                            ×
+                        </button>
+                    )}
+                </div>
+
                 <div style={{ marginLeft: 'auto', color: '#64748b', fontSize: '0.85rem' }}>{rows.length} follow-ups</div>
             </div>
 
@@ -421,6 +447,7 @@ export default function CRDFollowUps() {
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Job Card</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Vehicle</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Phone</th>
+                                    <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>JC Closed</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Due</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Status</th>
                                     <th style={{ padding: 10, textAlign: 'left', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Outcome</th>
@@ -449,6 +476,9 @@ export default function CRDFollowUps() {
                                             <td style={{ padding: '10px 12px' }}>{r.VehicleRegNo || '—'}</td>
                                             <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
                                                 {r.PhoneOne ? <a href={`tel:${r.PhoneOne}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--primary)' }}>{r.PhoneOne}</a> : '—'}
+                                            </td>
+                                            <td style={{ padding: '10px 12px', fontSize: '0.82rem', color: '#475569' }}>
+                                                {r.JobClosedAt ? new Date(r.JobClosedAt).toLocaleDateString() : '—'}
                                             </td>
                                             <td style={{ padding: '10px 12px' }}>
                                                 {new Date(r.DueDate).toLocaleDateString()}

@@ -15,13 +15,24 @@ const VALID_OUTCOMES = new Set(['Satisfied', 'Complaint', 'NeedsAttention', 'NoA
 // GET /api/crd/follow-ups?status=&assignedTo=&dueBy=&search=
 exports.list = async (req, res) => {
     try {
-        const { status, assignedTo, dueBy, search } = req.query;
+        const { status, assignedTo, dueBy, search, closedFrom, closedTo } = req.query;
         const pool = await getPool();
         const r = pool.request();
         const conds = [];
         if (status)     { r.input('s',   sql.NVarChar(20), status);     conds.push('f.Status = @s'); }
         if (assignedTo) { r.input('a',   sql.Int,          parseInt(assignedTo)); conds.push('f.AssignedTo = @a'); }
         if (dueBy)      { r.input('due', sql.Date,         new Date(dueBy)); conds.push('f.DueDate <= @due'); }
+        // Owner ask 2026-07-04: filter by the JOB CARD's finalize (close)
+        // date so CRD can pull, say, "every JC closed last week" and work
+        // that batch instead of scrolling the full pending queue.
+        if (closedFrom) {
+            r.input('cf', sql.Date, new Date(closedFrom));
+            conds.push('CAST(j.FinalizedAt AS DATE) >= @cf');
+        }
+        if (closedTo) {
+            r.input('ct', sql.Date, new Date(closedTo));
+            conds.push('CAST(j.FinalizedAt AS DATE) <= @ct');
+        }
         if (search) {
             r.input('q', sql.NVarChar(200), `%${search}%`);
             conds.push('(f.CustomerName LIKE @q OR f.PhoneOne LIKE @q OR f.VehicleRegNo LIKE @q OR j.JobCardNo LIKE @q)');
@@ -30,6 +41,7 @@ exports.list = async (req, res) => {
 
         const result = await r.query(`
             SELECT f.FollowUpID, f.JobCardID, j.JobCardNo, j.Status AS PaymentType,
+                   j.FinalizedAt AS JobClosedAt,
                    f.CustomerName, f.PhoneOne, f.VehicleRegNo,
                    f.PartyID, p.PartyName,
                    f.DueDate, f.Status, f.Outcome, f.Notes,
