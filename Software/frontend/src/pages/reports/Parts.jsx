@@ -33,6 +33,7 @@ export function StockMovement() {
             endpoint="parts/stock-movement"
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
             controls={StockMovementControls}
+            superWide
         >
             {(data) => (
                 <>

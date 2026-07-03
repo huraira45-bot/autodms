@@ -18,11 +18,15 @@ export const fmtInt = (n) => Number(n || 0).toLocaleString('en-PK', { maximumFra
 export default function ReportShell({
     title, subtitle, icon: Icon, endpoint, defaultParams = {}, controls, children,
     printFilterSummary,
-    // Owner ask 2026-07-03: wide reports (JC Register etc.) were clipping the
-    // rightmost columns because the print CSS forces A4 portrait. Opt-in
-    // landscape via this prop; ReportShell just adds a class that the
-    // print CSS uses to reassign the @page rule.
-    landscape = false,
+    // Owner ask 2026-07-04: NO report may print with clipped columns. Landscape
+    // is now the default for every report — it's the world-class norm for
+    // accounting/inventory PDFs and gives the table 297mm of horizontal room.
+    // Pass `landscape={false}` explicitly on the rare very-narrow report
+    // (Financials trial-balance-style pages) if portrait is preferred.
+    landscape = true,
+    // `superWide` marks reports with 12+ columns where 8pt isn't small enough
+    // to fit landscape. Applies a 7.5pt/2pt-padding CSS variant.
+    superWide = false,
 }) {
     const [params, setParams] = useState(defaultParams);
     const [data, setData]     = useState(null);
@@ -59,8 +63,13 @@ export default function ReportShell({
         return () => document.body.classList.remove('print-landscape');
     }, [landscape]);
 
+    const wrapperClass = [
+        landscape ? 'report-landscape' : null,
+        superWide ? 'report-super-wide' : null,
+    ].filter(Boolean).join(' ');
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className={landscape ? 'report-landscape' : undefined}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className={wrapperClass || undefined}>
             <PrintHeader title={title} subtitle={subtitle} printedAt={printedAt} filterSummary={filterSummary} />
             <div className="erp-control-panel no-print">
                 <div style={{ marginRight: 'auto' }}>

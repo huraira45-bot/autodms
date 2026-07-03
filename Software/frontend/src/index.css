@@ -2315,26 +2315,42 @@ textarea:disabled,
     width: 297mm !important;
     max-width: 297mm !important;
   }
-  /* Some report tables live inside a card with overflow-x:auto for on-screen
-     horizontal scrolling. That collapses the printed width — force cards to
-     let the table expand. */
-  body.print-landscape .card,
-  body.print-landscape .card > div,
-  body.print-landscape .table-wrapper {
+  /* CRITICAL — kill every scroll/overflow container on report pages so no
+     column can ever be clipped in print (owner ask 2026-07-04). Report
+     tables sit inside on-screen wrappers with `overflow-x: auto` for the
+     horizontal scroll bar; in print that collapses the visible width to
+     the container width and hides right-side columns. Force everything
+     to overflow: visible AND clear any fixed widths. Applies to both
+     landscape AND portrait. */
+  .card,
+  .card > div,
+  .table-wrapper,
+  [style*="overflow-x"],
+  [style*="overflowX"] {
     overflow: visible !important;
     max-width: none !important;
     width: auto !important;
   }
-  /* Shrink to fit at landscape too — wide multi-column reports look better
-     at 8pt so column headers don't wrap. */
+  /* Landscape defaults: 8pt tables with tight padding. Column headers
+     rarely wrap at this size. */
   body.print-landscape table { font-size: 8pt !important; table-layout: auto !important; }
-  body.print-landscape th, body.print-landscape td { padding: 3px 5px !important; }
+  body.print-landscape th, body.print-landscape td { padding: 2.5pt 4pt !important; }
+  /* Report-super-wide auto-shrink for 12+ column reports (Stock Movement,
+     JC Register with all metrics, etc.). Opt-in via `report-super-wide` on
+     the ReportShell wrapper. Not strictly required — the general 8pt
+     landscape rules above are already enough for 10-11 columns. */
+  body.print-landscape .report-super-wide table { font-size: 7.5pt !important; }
+  body.print-landscape .report-super-wide th,
+  body.print-landscape .report-super-wide td { padding: 2pt 3pt !important; }
+  /* Long text columns (item names, party names) may wrap to avoid pushing
+     numeric columns off the right edge. */
+  body.print-landscape table { word-break: normal; overflow-wrap: anywhere; }
 
-  /* Tables shouldn't overflow A4 width — fall back to wrapping rather than scroll */
+  /* Table page-break defaults. tfoot uses table-row-group (further down)
+     so grand totals appear once at the end, not repeated per page. */
   table { page-break-inside: auto; }
   tr    { page-break-inside: avoid; page-break-after: auto; }
   thead { display: table-header-group; }
-  tfoot { display: table-footer-group; }
   img, svg { max-width: 100%; height: auto; }
 
   /* Strip the app shell entirely (old + new class names) */
@@ -2510,11 +2526,16 @@ textarea:disabled,
      bottom of every page (frontend.pdf 2026-07-03). Switch to
      `table-row-group` so tfoot is treated like a plain last row and
      appears exactly once at the end of the report. */
+  /* Every printed table fills exactly the printable page width and never
+     overflows the right margin (owner ask 2026-07-04: no clipped columns). */
   table {
     width: 100% !important;
+    max-width: 100% !important;
     font-size: 8.5pt !important;
     border-collapse: collapse !important;
     font-variant-numeric: tabular-nums;
+    word-break: normal;
+    overflow-wrap: anywhere;
   }
   thead { display: table-header-group; }   /* column headers repeat on each page */
   tfoot { display: table-row-group; }      /* grand totals appear ONCE at the end */
