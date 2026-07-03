@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, Children } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
     Car, Users, Building, Settings as SettingsIcon, LayoutDashboard, Database,
@@ -6,8 +6,44 @@ import {
     CreditCard, Wallet, Receipt, ArrowLeftRight, ClipboardList, UserCircle,
     BoxSelect, PlusCircle, ExternalLink, SlidersHorizontal, LogOut, ShieldCheck, UsersRound, Unlock, UserCheck,
     FileBarChart, ListChecks, Headphones, UserCog, Truck, Percent, Bell, MessageSquare, Megaphone, Layers, Ban, Search,
-    TrendingUp
+    TrendingUp, ChevronDown, ChevronRight as ChevronRightIcon
 } from 'lucide-react';
+
+// Collapsible sidebar section — clicking the header toggles the child
+// NavLinks in / out. Open state is remembered per-title in localStorage so
+// the sidebar comes back the way the user left it after refresh. Only
+// renders the header when at least one child is actually going to show
+// (children that would evaluate to falsy are automatically filtered).
+// Owner ask 2026-07-03.
+function NavSection({ title, children }) {
+    const visibleChildren = Children.toArray(children).filter(c => c && c !== false);
+    if (visibleChildren.length === 0) return null;
+    const storageKey = 'sidebarSec:' + title;
+    const [open, setOpen] = useState(() => {
+        const stored = localStorage.getItem(storageKey);
+        return stored === null ? true : stored === '1';
+    });
+    const toggle = () => {
+        setOpen(v => {
+            const next = !v;
+            try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch {}
+            return next;
+        });
+    };
+    return (
+        <>
+            <button type="button" onClick={toggle} className="nav-section nav-section-toggle"
+                    aria-expanded={open}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                             width: '100%', border: 'none', background: 'transparent',
+                             cursor: 'pointer', textAlign: 'left', padding: '4px 12px' }}>
+                <span>{title}</span>
+                {open ? <ChevronDown size={12} /> : <ChevronRightIcon size={12} />}
+            </button>
+            {open && visibleChildren}
+        </>
+    );
+}
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { isDemoMode } from './demoMode';
@@ -154,13 +190,8 @@ function Sidebar({ onOpenCommand }) {
                 </NavLink>
 
                 {/* Workshop */}
-                {(hasModule('workshop_customers') || hasModule('workshop_jobs') || hasModule('workshop_labour') ||
-                  hasModule('workshop_sublet') || hasModule('workshop_parts_issue') || hasModule('workshop_settings') ||
-                  hasModule('workshop_careoff') || hasModule('workshop_accessories') || hasModule('workshop_controller') ||
-                  hasModule('workshop_gatepass') ||
-                  anyReport('job_card_register','revenue_summary','insurance_claims','mechanic_productivity')) && (
-                    <div className="nav-section">WORKSHOP & SERVICE</div>
-                )}
+                <NavSection title="WORKSHOP & SERVICE">
+
                 {hasModule('workshop_customers') && (
                     <NavLink to="/workshop/customers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <UserCircle size={20} /> Workshop Customers
@@ -241,14 +272,11 @@ function Sidebar({ onOpenCommand }) {
                         <FileBarChart size={20} /> Mechanic Productivity
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* Parts & Inventory */}
-                {(hasModule('parts_spare') || hasModule('procurement_grn') || hasModule('procurement_grtn') ||
-                  hasModule('sales_store') || hasModule('sales_ssr') || hasModule('workshop_parts_issue') ||
-                  hasModule('inventory_settings') ||
-                  anyReport('inventory_valuation','stock_movement','reorder_alert','parts_sales_register','purchase_summary')) && (
-                    <div className="nav-section">PARTS & INVENTORY</div>
-                )}
+                <NavSection title="PARTS & INVENTORY">
+
                 {hasModule('parts_spare') && (
                     <NavLink to="/parts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <Package size={20} /> Spare Parts
@@ -309,12 +337,11 @@ function Sidebar({ onOpenCommand }) {
                         <Database size={20} /> Parts Config
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* Finance */}
-                {(hasModule('finance_coa') || hasModule('finance_vouchers') || hasModule('accounting_setup') ||
-                  hasModule('payments') || hasModule('finance_cheques')) && (
-                    <div className="nav-section">FINANCE & ACCOUNTS</div>
-                )}
+                <NavSection title="FINANCE & ACCOUNTS">
+
                 {hasModule('finance_coa') && (
                     <NavLink to="/coa" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <Landmark size={20} /> Chart of Accounts
@@ -378,16 +405,10 @@ function Sidebar({ onOpenCommand }) {
                         <Receipt size={20} /> Cheque Clearance
                     </NavLink>
                 )}
-                {anyReport(
-                    'trial_balance','gl_detail','pnl','balance_sheet','day_book',
-                    'customer_statement','supplier_statement','receivables_aging','payables_aging',
-                    'insurance_aging','walkin_outstanding','daily_cash_book','bank_balances',
-                    'pos_pending','cheques_on_hand','tax_summary','tax_rate_history',
-                    'sales_register','gross_margin','discount_given','inventory_valuation',
-                    'gencust_reconciliation','voucher_audit','system_account_audit',
-                ) && (
-                    <div className="nav-section">ACCOUNT REPORTS</div>
-                )}
+                </NavSection>
+
+                <NavSection title="ACCOUNT REPORTS">
+
                 {canReport('trial_balance')         && <NavLink to="/reports/trial-balance"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><FileBarChart size={20} /> Trial Balance</NavLink>}
                 {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
                 {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
@@ -412,11 +433,11 @@ function Sidebar({ onOpenCommand }) {
                 {canReport('gencust_reconciliation')&& <NavLink to="/reports/gencust-reconciliation" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Gen-Customer Recon</NavLink>}
                 {canReport('voucher_audit')         && <NavLink to="/reports/voucher-audit"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Voucher Audit Trail</NavLink>}
                 {canReport('system_account_audit') && <NavLink to="/reports/system-account-audit" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ShieldCheck size={20} /> System Account Audit</NavLink>}
+                </NavSection>
 
                 {/* Parties master (accounting side — AR/AP master) */}
-                {(hasModule('crm_parties') || hasModule('crm_party_access')) && (
-                    <div className="nav-section">PARTIES</div>
-                )}
+                <NavSection title="PARTIES">
+
                 {hasModule('crm_parties') && (
                     <NavLink to="/customers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <Building size={20} /> Credit Parties
@@ -427,11 +448,11 @@ function Sidebar({ onOpenCommand }) {
                         <ShieldCheck size={20} /> Party Business Access
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* Customer Relation (CRM + CRO) */}
-                {(hasModule('crd_followups') || hasModule('cro_workspace')) && (
-                    <div className="nav-section">CUSTOMER RELATION</div>
-                )}
+                <NavSection title="CUSTOMER RELATION">
+
                 {hasModule('crd_followups') && (
                     <NavLink to="/crd/follow-ups" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <Headphones size={20} /> Follow-Ups
@@ -472,17 +493,11 @@ function Sidebar({ onOpenCommand }) {
                         <Megaphone size={20} /> Campaigns
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* New Vehicle Sales */}
-                {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') ||
-                  hasModule('sales_admin_settings') || hasModule('sales_admin_pricing') ||
-                  hasModule('sales_master_settlement') || hasModule('sales_recovery') ||
-                  hasModule('sales_hierarchy') || hasModule('sales_reports') ||
-                  anyReport('booking_register','vehicle_inventory','executive_performance',
-                            'customer_advances_aging','booking_pipeline','master_invoice_aging',
-                            'incentive_receivable_aging')) && (
-                    <div className="nav-section">NEW VEHICLE SALES</div>
-                )}
+                <NavSection title="NEW VEHICLE SALES">
+
                 {(hasModule('sales_admin_settings') || hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
                     <NavLink to="/sales/models" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <Car size={20} /> Vehicle Models
@@ -577,11 +592,11 @@ function Sidebar({ onOpenCommand }) {
                         <FileBarChart size={20} /> Customer Advances Aging
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* HR */}
-                {(hasModule('hr_employees') || hasModule('hr_settings')) && (
-                    <div className="nav-section">ADMIN & HR</div>
-                )}
+                <NavSection title="ADMIN & HR">
+
                 {hasModule('hr_employees') && (
                     <NavLink to="/employees" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <Users size={20} /> Employees
@@ -592,11 +607,11 @@ function Sidebar({ onOpenCommand }) {
                         <SettingsIcon size={20} /> HR Config
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* Admin */}
-                {(hasModule('admin_users') || hasModule('admin_permissions')) && (
-                    <div className="nav-section">ADMINISTRATION</div>
-                )}
+                <NavSection title="ADMINISTRATION">
+
                 {hasModule('admin_users') && (
                     <NavLink to="/admin/users" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <UsersRound size={20} /> User Management
@@ -607,16 +622,16 @@ function Sidebar({ onOpenCommand }) {
                         <ShieldCheck size={20} /> Role Permissions
                     </NavLink>
                 )}
+                </NavSection>
 
                 {/* Workflow */}
-                {(hasModule('am_approve') || hasModule('admin_unfinalize')) && (
-                    <>
-                        <div className="nav-section">WORKFLOW</div>
+                <NavSection title="WORKFLOW">
+                    {(hasModule('am_approve') || hasModule('admin_unfinalize')) && (
                         <NavLink to="/unfinalize-requests" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                             <Unlock size={20} /> Unfinalize Requests
                         </NavLink>
-                    </>
-                )}
+                    )}
+                </NavSection>
             </nav>
 
             {/* User info + logout at bottom */}
