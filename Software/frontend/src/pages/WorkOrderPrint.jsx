@@ -6,20 +6,43 @@ const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits:
 const d   = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
 
 // VOCRemarks is stored as JSON.stringify({ item: true/false, ... }) by the
-// job-card form (see JobCardForm's vocChecks state). Print needs a comma list
-// of the checked items, not the raw JSON blob.
-function formatVOC(raw) {
-    if (!raw) return '';
+// job-card form (see JobCardForm's vocChecks state).
+// Owner report 2026-07-03: the print was rendering a comma list of only the
+// ticked items, which looked "empty" when nothing was saved AND obscured
+// which items were left unchecked. Render the full 8-item checklist with
+// ✓ / ☐ marks so both the ticked and unticked state show explicitly,
+// matching the JC form's visual layout.
+const VOC_PRE_DELIVERY = ['Cleanliness', 'Mirror Position', 'Courtesy Item Removal', 'Clock Adjustment'];
+const VOC_JOB_RESULT   = ['Job Detail Explanation', 'Fee Explanation', 'Result Confirmation With Customer', 'Walk Around Check'];
+
+function parseVOC(raw) {
+    if (!raw) return {};
     try {
         const obj = JSON.parse(raw);
-        if (obj && typeof obj === 'object') {
-            return Object.entries(obj)
-                .filter(([, v]) => v)
-                .map(([k]) => k)
-                .join(', ');
-        }
-    } catch { /* not JSON — fall through and treat as free text */ }
-    return String(raw);
+        if (obj && typeof obj === 'object') return obj;
+    } catch { /* not JSON */ }
+    return {};
+}
+
+function VOCChecklist({ raw, freeText }) {
+    const checks = parseVOC(raw);
+    const anyChecked = Object.values(checks).some(Boolean);
+    // Fall back to the free-text `Remarks` field only when there's no VOC data
+    // at all — otherwise show the checklist as authoritative.
+    if (!anyChecked && !raw && freeText) return <>{freeText}</>;
+    return (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 12px', fontSize: '9pt' }}>
+            {[...VOC_PRE_DELIVERY, ...VOC_JOB_RESULT].map(item => {
+                const on = !!checks[item];
+                return (
+                    <div key={item} style={{ whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 700 }}>{on ? '☑' : '☐'}</span>
+                        <span style={{ marginLeft: 4, color: on ? '#000' : '#64748b' }}>{item}</span>
+                    </div>
+                );
+            })}
+        </div>
+    );
 }
 
 export default function WorkOrderPrint() {
@@ -142,7 +165,7 @@ export default function WorkOrderPrint() {
                         </td>
                         <td className="voc-cell" style={{ verticalAlign: 'top' }}>
                             <div className="sec-head"><b>Jobs Requested / Voice Of Customer</b></div>
-                            <div className="voc">{formatVOC(jc.VOCRemarks) || jc.Remarks || ''}</div>
+                            <div className="voc"><VOCChecklist raw={jc.VOCRemarks} freeText={jc.Remarks || ''} /></div>
                             {jc.WACResults && (
                                 <>
                                     <div className="sec-head" style={{ marginTop: 6 }}><b>VOC Results</b></div>
