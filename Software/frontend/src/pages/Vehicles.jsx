@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Car, Plus } from 'lucide-react';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -51,10 +52,17 @@ export default function Vehicles() {
   return (
     <div className="page-split">
       <div className="page-split-main">
-        <div className="card-header">
-          <div><h1 className="page-title">Vehicle Inventory</h1><p className="page-subtitle">Manage showroom stock and vehicle specifications.</p></div>
-          {!showForm && <button className="btn" onClick={() => setShowForm(true)}><Plus size={18} /> Add Vehicle</button>}
-        </div>
+        <ErpControlPanel
+          title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Car size={14} color="var(--erp-brand)" /> Vehicle Inventory</span>}
+          subtitle="Manage showroom stock and vehicle specifications."
+          actions={
+            !showForm && (
+              <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowForm(true)}>
+                <Plus size={14} /> Add Vehicle
+              </button>
+            )
+          }
+        />
         {success && <div className="alert-success">{success}</div>}
         <div className="card">
           <div className="table-wrapper">

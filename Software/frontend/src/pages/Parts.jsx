@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Package, Plus, Search, Pencil, X } from 'lucide-react';
 import { useCan } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -121,15 +122,17 @@ export default function Parts() {
   return (
     <div className="page-split">
       <div className="page-split-main">
-        <div className="card-header">
-          <div>
-            <h1 className="page-title">Spare Parts Catalog</h1>
-            <p className="page-subtitle">Search by name or part number. Click a row to edit price, category or bin location.</p>
-          </div>
-          {canInsert && !showForm && (
-            <button className="btn" onClick={startCreate}><Plus size={18} /> Add Part</button>
-          )}
-        </div>
+        <ErpControlPanel
+          title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Package size={14} color="var(--erp-brand)" /> Spare Parts Catalog</span>}
+          subtitle="Search by name or part number. Click a row to edit price, category or bin location."
+          actions={
+            canInsert && !showForm && (
+              <button type="button" className="erp-btn erp-btn-primary" onClick={startCreate}>
+                <Plus size={14} /> Add Part
+              </button>
+            )
+          }
+        />
 
         <div className="card" style={{ padding: 12 }}>
           <div className="search-box">

@@ -5,6 +5,7 @@ import { useFeedback } from '../context/FeedbackContext';
 // Shared datetime helper — same UTC-preserving fix applied elsewhere.
 // See utils/datetime.js for the rationale.
 import { fmtDTLong as dt } from '../utils/datetime';
+import { ErpControlPanel } from '../components/erp';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -163,10 +164,11 @@ export default function GatePass() {
     };
 
     return (
-        <div className="container" style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                <ShieldCheck size={28} color="#1e40af" /> Gate Pass
-            </h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ShieldCheck size={14} color="var(--erp-brand)" /> Gate Pass</span>}
+                subtitle="Issue vehicle release passes for finalised Job Cards and Store Sales."
+            />
 
             <div className="card" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>

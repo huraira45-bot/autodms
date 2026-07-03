@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { UserPlus, Edit, Search, Save, X, Loader2, Car, Plus } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api/workshop';
 
@@ -86,10 +87,15 @@ export default function WorkshopCustomers() {
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
-      <div className="card-header">
-        <div><h1 className="page-title">Workshop Customers</h1><p className="page-subtitle">Manage customer profiles and their vehicles.</p></div>
-        <button onClick={openNew} className="btn" style={{display:'flex',alignItems:'center',gap:'8px'}}><UserPlus size={18} /> New Customer</button>
-      </div>
+      <ErpControlPanel
+        title="Workshop Customers"
+        subtitle="Manage customer profiles and their vehicles."
+        actions={
+          <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
+            <UserPlus size={14} /> New Customer
+          </button>
+        }
+      />
 
       <div className="card" style={{padding:'16px'}}>
         <div style={{display:'flex',alignItems:'center',gap:'8px',background:'#f8fafc',padding:'0 12px',border:'1px solid #e2e8f0',borderRadius:'8px',height:'40px',maxWidth:'400px'}}>

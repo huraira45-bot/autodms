@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Package, Plus } from 'lucide-react';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -78,17 +79,17 @@ export default function Inventory() {
   return (
     <div className="page-split">
       <div className="page-split-main">
-        <div className="card-header" style={{ marginBottom: '24px' }}>
-          <div>
-            <h1 className="page-title">Master Catalog</h1>
-            <p className="page-subtitle">Manage Vehicles, Spare Parts, and Services.</p>
-          </div>
-          {!showForm && (
-            <button className="btn" onClick={() => setShowForm(true)}>
-              <Plus size={18} /> Add New Item
-            </button>
-          )}
-        </div>
+        <ErpControlPanel
+          title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Package size={14} color="var(--erp-brand)" /> Master Catalog</span>}
+          subtitle="Manage Vehicles, Spare Parts, and Services."
+          actions={
+            !showForm && (
+              <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowForm(true)}>
+                <Plus size={14} /> Add New Item
+              </button>
+            )
+          }
+        />
 
         {error && <div className="alert-error">{error}</div>}
         {success && <div className="alert-success">{success}</div>}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Plus, Edit, Trash2, Save, X, Loader2, Package } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 import { EmptyState, StatusPill } from '../components/UXPrimitives';
 
 const API = '/api/accessories';
@@ -76,15 +77,15 @@ export default function Accessories() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div className="card-header">
-        <div>
-          <h1 className="page-title">Accessories Master</h1>
-          <p className="page-subtitle">Manage the list of accessories checked on vehicle reception.</p>
-        </div>
-        <button onClick={openNew} className="btn" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Plus size={18} /> Add Accessory
-        </button>
-      </div>
+      <ErpControlPanel
+        title="Accessories Master"
+        subtitle="Manage the list of accessories checked on vehicle reception."
+        actions={
+          <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
+            <Plus size={14} /> Add Accessory
+          </button>
+        }
+      />
 
       <div className="card">
         <div className="table-wrapper">

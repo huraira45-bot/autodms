@@ -4,6 +4,7 @@ import { Wrench, Plus, Edit, X, Search, ChevronDown, ChevronRight, Building2 } f
 import { useFeedback } from '../context/FeedbackContext';
 import { EmptyState } from '../components/UXPrimitives';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -92,15 +93,15 @@ export default function LabourServices() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div className="card-header">
-        <div>
-          <h1 className="page-title">Labour & Services</h1>
-          <p className="page-subtitle">Standard labour operations and rates, grouped by business unit.</p>
-        </div>
-        <button className="btn" onClick={openNew} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={16} /> Add Service
-        </button>
-      </div>
+      <ErpControlPanel
+        title="Labour & Services"
+        subtitle="Standard labour operations and rates, grouped by business unit."
+        actions={
+          <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
+            <Plus size={14} /> Add Service
+          </button>
+        }
+      />
 
       {/* Search */}
       <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>

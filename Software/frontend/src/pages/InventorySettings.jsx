@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Plus, Warehouse, Trash2 } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import { PageHeader } from '../components/UXPrimitives';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -102,8 +103,8 @@ export default function InventorySettings() {
   const iconBtn = { background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4, marginLeft: 'auto' };
 
   return (
-    <div className="ux-page-stack">
-      <PageHeader
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErpControlPanel
         title="Inventory Configurations"
         subtitle="Setup lookups, categories, brands, warehouses, and units for the master catalog."
       />

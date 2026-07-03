@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Search, Loader2, Eye, Car, Lock, ChevronDown, ChevronRight, Wrench, Package, ExternalLink } from 'lucide-react';
 import { fmtDate } from '../utils/datetime';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api/workshop';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -61,15 +62,11 @@ export default function VehicleHistory() {
     const collapseAll = () => setExpanded(new Set());
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Car size={22} color="var(--primary)" /> Vehicle History
-                    </h1>
-                    <p className="page-subtitle">Every Job Card ever posted against the vehicle — click a row to see the labour, sublet, and parts performed.</p>
-                </div>
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Car size={14} color="var(--erp-brand)" /> Vehicle History</span>}
+                subtitle="Every Job Card ever posted against the vehicle — click a row to see the labour, sublet, and parts performed."
+            />
 
             <form onSubmit={runSearch} className="card" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 12, alignItems: 'end' }}>
                 <div className="form-group">

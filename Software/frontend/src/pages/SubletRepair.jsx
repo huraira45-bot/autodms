@@ -3,6 +3,7 @@ import axios from 'axios';
 import { ExternalLink, Search, Plus, Trash2, Save, Loader2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit2, Lock, Printer } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api/workshop';
 
@@ -147,20 +148,20 @@ export default function SubletRepair() {
           <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
         </div>
       </div>
-      <div className="card-header">
-        <div>
-          <h1 className="page-title">Sublet Repairs</h1>
-          <p className="page-subtitle">Outsourced repair work sent to external vendors.</p>
-        </div>
-        <div className="no-print" style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => window.print()} className="btn" style={{ background: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Printer size={16} /> Print
-          </button>
-          <button onClick={openNew} className="btn" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Plus size={16} /> Add Sublet
-          </button>
-        </div>
-      </div>
+      <ErpControlPanel
+        title="Sublet Repairs"
+        subtitle="Outsourced repair work sent to external vendors."
+        actions={
+          <>
+            <button type="button" className="erp-btn erp-btn-sm" onClick={() => window.print()}>
+              <Printer size={14} /> Print
+            </button>
+            <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
+              <Plus size={14} /> Add Sublet
+            </button>
+          </>
+        }
+      />
 
       {/* Search */}
       <div className="card" style={{ padding: '16px 20px' }}>

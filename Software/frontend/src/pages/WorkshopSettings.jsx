@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Settings, Plus, Edit, Trash2, X, Briefcase, Tags, Loader2, Hash, LayoutGrid } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api/workshop';
 
@@ -154,13 +155,10 @@ export default function WorkshopSettings() {
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
-      <div className="card-header">
-        <div>
-          <h1 className="page-title">Workshop Master Settings</h1>
-          <p className="page-subtitle">Configure Business Types and Order Types used in Job Cards.</p>
-        </div>
-        <Settings size={28} style={{color:'#cbd5e1'}} />
-      </div>
+      <ErpControlPanel
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Settings size={14} color="var(--erp-brand)" /> Workshop Master Settings</span>}
+        subtitle="Configure Business Types and Order Types used in Job Cards."
+      />
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'20px'}}>
         {/* Business Types Panel */}
