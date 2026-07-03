@@ -4,6 +4,7 @@ import axios from 'axios';
 import {
     Headphones, Phone, AlertTriangle, CheckCircle2, Clock, X,
     Search, Loader2, RefreshCw, Save, MessageCircle, Star, ClipboardList,
+    ExternalLink,
 } from 'lucide-react';
 import SurveyCapturePanel from '../components/SurveyCapturePanel';
 import { ErpControlPanel } from '../components/erp';
@@ -472,9 +473,23 @@ export default function CRDFollowUps() {
                                                 {r.PartyName && <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{r.PartyName}</div>}
                                             </td>
                                             <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#475569' }}>
-                                                <Link to={`/workshop/jobs/${r.JobCardID}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--primary)', textDecoration: 'none' }}>
-                                                    {r.JobCardNo}
-                                                </Link>
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                                    <Link to={`/workshop/jobs/${r.JobCardID}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--primary)', textDecoration: 'none' }}>
+                                                        {r.JobCardNo}
+                                                    </Link>
+                                                    {/* Owner ask 2026-07-04: dedicated "open in new tab" button so
+                                                        CRD can call up the JC without leaving the follow-up queue. */}
+                                                    <a
+                                                        href={`/workshop/jobs/${r.JobCardID}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        onClick={e => e.stopPropagation()}
+                                                        title="Open Job Card in new tab"
+                                                        style={{ color: 'var(--erp-text-muted, #64748b)', display: 'inline-flex', alignItems: 'center', padding: 2, borderRadius: 4 }}
+                                                    >
+                                                        <ExternalLink size={13} />
+                                                    </a>
+                                                </span>
                                             </td>
                                             <td style={{ padding: '10px 12px' }}>{r.VehicleRegNo || '—'}</td>
                                             <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
