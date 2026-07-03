@@ -303,6 +303,55 @@ exports.getVehicleHistory = async (req, res) => {
             ...x,
             TotalAmount: +(Number(x.LabourAmount) + Number(x.PartsAmount) + Number(x.SubletAmount)).toFixed(2),
         }));
+
+        // Owner ask 2026-07-03: also return each JC's line items so the
+        // history page can show what was actually done, not just the
+        // grand totals. One extra round trip pulls labour + sublet +
+        // parts scoped to the JCs we just found.
+        if (rows.length > 0) {
+            const jcIds = rows.map(r => r.JobCardId);
+            const jcIdList = jcIds.join(',');
+            const [labourRes, subletRes, partsRes] = await Promise.all([
+                pool.request().query(`
+                    SELECT JobCardId, DetailId, Remarks AS Description,
+                           Price, Quantity, DiscAmt, TaxAmount
+                    FROM Addata_JobCardInfoDetail
+                    WHERE JobCardId IN (${jcIdList})
+                    ORDER BY JobCardId DESC, DetailId`),
+                pool.request().query(`
+                    SELECT JobCardId, SubletDetailID, Remarks AS Description,
+                           InvoiceAmount, PayableAmount, TaxAmount
+                    FROM Addata_JobCardInfoSubletJobDetail
+                    WHERE JobCardId IN (${jcIdList})
+                    ORDER BY JobCardId DESC, SubletDetailID`),
+                pool.request().query(`
+                    SELECT sid.JobCardId, sid.StockIssueDetailID, sid.ItemId,
+                           sid.IssueQuantity, sid.ItemRate, sid.TaxAmount,
+                           i.ItenName AS ItemName,
+                           COALESCE(CAST(i.ItemNumber AS NVARCHAR(50)), i.ManualNumber) AS ItemNumber
+                    FROM data_StockIssuetoJobCardDetail sid
+                    LEFT JOIN InventItems i ON sid.ItemId = i.ItemId
+                    WHERE sid.JobCardId IN (${jcIdList})
+                    ORDER BY sid.JobCardId DESC, sid.StockIssueDetailID`),
+            ]);
+            const bucket = (recs, keyFn = () => null) => {
+                const m = {};
+                for (const r of recs) {
+                    if (!m[r.JobCardId]) m[r.JobCardId] = [];
+                    m[r.JobCardId].push(r);
+                }
+                return m;
+            };
+            const labourByJc = bucket(labourRes.recordset);
+            const subletByJc = bucket(subletRes.recordset);
+            const partsByJc  = bucket(partsRes.recordset);
+            for (const row of rows) {
+                row.LabourLines = labourByJc[row.JobCardId] || [];
+                row.SubletLines = subletByJc[row.JobCardId] || [];
+                row.PartsLines  = partsByJc[row.JobCardId]  || [];
+            }
+        }
+
         res.json({
             count: rows.length,
             rows,
