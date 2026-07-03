@@ -54,7 +54,7 @@ if (!voucherId) {
         .query(`SELECT vd.Debit, vd.Credit, a.GLCode, a.GLTitle
                 FROM data_FinanceVoucherDetail vd
                 LEFT JOIN GLChartOFAccount a ON a.GLCAID = vd.GLCAID
-                WHERE vd.VoucherID=@id ORDER BY vd.DetailID`);
+                WHERE vd.VoucherID=@id ORDER BY vd.VoucherDetailID`);
     console.log('Lines being reversed (Dr/Cr will swap in the reversal):');
     for (const l of lines.recordset) {
         console.log(`   ${l.GLCode}  ${l.GLTitle}   Dr ${Number(l.Debit).toFixed(2)}   Cr ${Number(l.Credit).toFixed(2)}`);
