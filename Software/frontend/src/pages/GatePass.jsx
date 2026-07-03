@@ -6,6 +6,7 @@ import { useFeedback } from '../context/FeedbackContext';
 // See utils/datetime.js for the rationale.
 import { fmtDTLong as dt } from '../utils/datetime';
 import { ErpControlPanel } from '../components/erp';
+import { getBusinessProfile, businessHeaderHtml, BUSINESS_HEADER_INLINE_CSS } from '../utils/businessProfile';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -80,9 +81,13 @@ export default function GatePass() {
         }
     };
 
-    const printPass = (gp) => {
+    const printPass = async (gp) => {
         const w = window.open('', '_blank', 'width=560,height=800');
         if (!w) return;
+        // Owner ask 2026-07-04: business header must come from Business
+        // Profile — no hard-coded company details on the Gate Pass. Fetch
+        // profile before writing the popup HTML.
+        const profile = await getBusinessProfile();
         // Owner ask 2026-07-02: A5 portrait (half of A4) so the slip fits
         // a receipt-sized printout. Two-column grid keeps every field but
         // packs it into the narrower page.
@@ -91,17 +96,21 @@ export default function GatePass() {
             ? `Credit${gp.PartyName ? ' — ' + gp.PartyName : ''}`
             : (gp.PaymentMode || gp.PaymentModes || '—');
         const ro = gp.RONumber || gp.InvoiceNo || `${gp.DocType} #${gp.DocID}`;
+        // Inline the same .pbh business header shared by every AutoDMS
+        // print — see utils/businessProfile.js.
+        const headerHtml = businessHeaderHtml(profile, {
+            docTitle: 'Gate Pass',
+            docSubtitle: gp.GatePassNo,
+            docMetaLeft: REASON_LABEL[gp.PassReason] || gp.PassReason,
+        });
         w.document.write(`<html><head><title>${gp.GatePassNo}</title>
             <style>
                 @page { size: A5 portrait; margin: 0; }
                 @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
                 html,body{margin:0;padding:0;background:#fff;}
                 body{font-family:Arial;padding:6mm 8mm;box-sizing:border-box;width:148mm;min-height:210mm;font-size:9pt;}
-                .banner{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:8px;}
-                .banner .title{font-size:14pt;color:#1e40af;font-weight:800;}
-                .banner .sub{font-size:8.5pt;color:#334155;}
-                .banner .gpno{font-size:11pt;color:#1e40af;font-weight:700;font-family:monospace;}
-                .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
+                ${BUSINESS_HEADER_INLINE_CSS}
+                .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;margin-top:6px;}
                 .cell{padding:4px 0;border-bottom:1px dashed #cbd5e1;display:flex;flex-direction:column;gap:1px;}
                 .cell.full{grid-column:1 / -1;}
                 .cell .lbl{color:#64748b;font-size:7.5pt;text-transform:uppercase;letter-spacing:0.3px;}
@@ -117,16 +126,7 @@ export default function GatePass() {
                 .sig{margin-top:14px;display:flex;justify-content:space-between;gap:14px;}
                 .sig div{flex:1;border-top:1px solid #475569;text-align:center;padding-top:4px;font-size:8pt;color:#475569;}
             </style></head><body>
-            <div class="banner">
-                <div>
-                    <div class="title">CHANGAN MULTAN MOTORS</div>
-                    <div class="sub">Gate Pass</div>
-                </div>
-                <div style="text-align:right">
-                    <div class="gpno">${gp.GatePassNo}</div>
-                    <div class="sub">${REASON_LABEL[gp.PassReason] || gp.PassReason}</div>
-                </div>
-            </div>
+            ${headerHtml}
 
             <div class="grid">
                 <div class="cell"><span class="lbl">RO / Doc #</span><span class="val">${ro}</span></div>

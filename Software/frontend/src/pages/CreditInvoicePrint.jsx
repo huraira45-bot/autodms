@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import PrintBusinessHeader from '../components/PrintBusinessHeader';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const d   = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-') : '';
@@ -17,7 +18,6 @@ export default function CreditInvoicePrint() {
     const { id } = useParams();
     const [jc, setJc] = useState(null);
     const [ins, setIns] = useState(null);
-    const [profile, setProfile] = useState(null);
     const [err, setErr] = useState(null);
 
     useEffect(() => {
@@ -29,15 +29,14 @@ export default function CreditInvoicePrint() {
         // print dialog to hide those.
         const oldTitle = document.title;
         document.title = ' ';
+        // Business profile is fetched by PrintBusinessHeader itself.
         Promise.all([
             axios.get(`/api/workshop/job-cards/${id}/print-data`),
             axios.get(`/api/workshop/job-cards/${id}/insurance`).catch(() => ({ data: null })),
-            axios.get(`/api/settings/business-profile`).catch(() => ({ data: null })),
         ])
-        .then(([jcRes, insRes, bpRes]) => {
+        .then(([jcRes, insRes]) => {
             setJc(jcRes.data);
             setIns(insRes.data);
-            setProfile(bpRes.data);
             setTimeout(() => window.print(), 500);
         })
         .catch(e => setErr(e.response?.data?.error || e.message));
@@ -77,15 +76,6 @@ export default function CreditInvoicePrint() {
     const dep       = partsRows.reduce((s, p) => s + (Number(p.DepAmount)||0), 0);
     const totalPayable = (labourNet + sublet) + pst + partsNet + gst - dep;
 
-    // Header letterhead — from Business Profile if configured
-    const company = profile?.CompanyName || 'CHANGAN MULTAN MOTORS';
-    const address = [profile?.Address1, profile?.Address2, profile?.City]
-        .filter(Boolean).join(', ') || 'NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN.';
-    const phone   = profile?.PhoneNumbers ? `UAN # ${profile.PhoneNumbers}` : 'UAN # 061-111-222-388';
-    const ntn     = profile?.NTN  || '';
-    const gstNo   = profile?.STRN || '';
-    const logoUrl = profile?.LogoPath ? `/uploads/${profile.LogoPath}` : null;
-
     // Party name — for credit sales, prefer the linked party's name; falls
     // back to CustomerName for walk-in workshops that shouldn't really have
     // a credit invoice but the operator triggered it anyway.
@@ -93,31 +83,10 @@ export default function CreditInvoicePrint() {
 
     return (
         <div className="ci">
-            {/* Letterhead */}
-            <table className="head">
-                <tbody>
-                    <tr>
-                        <td className="logo-cell">
-                            {logoUrl
-                                ? <img src={logoUrl} alt="logo" style={{ maxHeight: 80 }} />
-                                : <div className="logo-fallback">
-                                    <div className="lf-symbol">⌖</div>
-                                    <div className="lf-label">CHANGAN AUTO<br/>MULTAN</div>
-                                  </div>
-                            }
-                        </td>
-                        <td className="cmp-cell">
-                            <div className="cmp-name">{company}</div>
-                            <div className="cmp-addr">{address}</div>
-                            <div className="cmp-phone">{phone}</div>
-                            <div className="cmp-tax">
-                                <span>NTN # <b>{ntn || '—'}</b></span>
-                                <span style={{ marginLeft: 40 }}>GST # <b>{gstNo || '—'}</b></span>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            {/* Shared business header (owner ask 2026-07-04) — same letterhead
+                across every printed document. The invoice-style layout below
+                (customer block, item table, totals, signatures) is preserved. */}
+            <PrintBusinessHeader docTitle="Credit Invoice" showOnScreen />
 
             {/* Customer + invoice block */}
             <table className="cust">

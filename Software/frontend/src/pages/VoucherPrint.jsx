@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import PrintBusinessHeader from '../components/PrintBusinessHeader';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const d   = (v) => v ? new Date(v).toLocaleDateString('en-GB') : '';
@@ -59,18 +60,13 @@ export default function VoucherPrint() {
 
     return (
         <div className="vch-print">
-            {/* Business header */}
-            <div className="biz">
-                <div className="biz-name">CHANGAN MULTAN MOTORS</div>
-                <div className="biz-addr">NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN · Phone: 061-111-222-388</div>
-            </div>
-
-            {/* Voucher type title centered, then number L + date R */}
-            <div className="vch-title">{titleName}</div>
-            <div className="vch-meta">
-                <span className="vch-no">No. {v.VoucherNo}</span>
-                <span className="vch-date">Date: {d(v.VoucherDate)}</span>
-            </div>
+            {/* Shared business header (owner ask 2026-07-04) */}
+            <PrintBusinessHeader
+                docTitle={titleName}
+                docSubtitle={`No. ${v.VoucherNo}`}
+                docMetaRight={`Date: ${d(v.VoucherDate)}`}
+                showOnScreen
+            />
 
             {v.Remarks && (
                 <div className="narration"><b>Narration:</b> {v.Remarks}</div>

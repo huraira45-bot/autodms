@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import PrintBusinessHeader from '../components/PrintBusinessHeader';
+import { getBusinessProfile } from '../utils/businessProfile';
 
 // Master Motors sales-tax-invoice style GRN print. Portrait A4, dense layout
 // to fit the 14 data columns. Mirrors the supplier invoice numbers 1:1 so the
@@ -13,8 +15,10 @@ export default function GRNPrint() {
     const { id } = useParams();
     const [g, setG] = useState(null);
     const [err, setErr] = useState(null);
+    const [profile, setProfile] = useState(null);
 
     useEffect(() => {
+        getBusinessProfile().then(setProfile);
         axios.get(`/api/procurement/grn/${id}/print-data`)
             .then(r => { setG(r.data); setTimeout(() => window.print(), 400); })
             .catch(e => setErr(e.response?.data?.error || e.message));
@@ -54,14 +58,23 @@ export default function GRNPrint() {
         valueIncTax:   a.valueIncTax   + x.valueIncTax,
     }), { qty: 0, valueExcl: 0, dVal: 0, adVal: 0, salesValueEx: 0, tax: 0, ait: 0, taxPlusAit: 0, valueIncTax: 0 });
 
+    // Owner ask 2026-07-04: buyer identity now comes from Business Profile
+    // (no more hard-coded "CHANGAN MULTAN MOTORS" strings).
+    const buyerName    = profile?.CompanyName || '';
+    const buyerAddress = [profile?.Address1, profile?.Address2, profile?.City, profile?.Country]
+        .filter(Boolean).join(', ');
+    const buyerSTRN    = profile?.STRN || '—';
+    const buyerNTN     = profile?.NTN  || '—';
+
     return (
         <div className="grn-print">
+            {/* Shared business header (owner ask 2026-07-04) */}
+            <PrintBusinessHeader docTitle="Sales Tax Invoice" showOnScreen />
+
             {/* Top right form code */}
             <div className="topcode">CMCL/SP/PSP/F01</div>
 
-            <h1 className="title">SALES TAX INVOICE</h1>
-
-            {/* Header grid (buyer/supplier block) */}
+            {/* Header grid (buyer/supplier block) — buyer identity from Business Profile. */}
             <div className="hdr">
                 <div className="hdr-col">
                     <div><label>Supplier</label><span>{g.PurchasedParty || g.PartyName || ''}</span></div>
@@ -73,10 +86,10 @@ export default function GRNPrint() {
                 <div className="hdr-col">
                     <div><label>Date</label><span>{d(g.PurchaseDate)}</span></div>
                     <div><label>Invoice No</label><span>{g.FBRInvoiceNumber || g.SupplierBillNo || g.PurchaseCode || ''}</span></div>
-                    <div><label>Buyer</label><span>CHANGAN MULTAN MOTORS</span></div>
-                    <div><label>Address</label><span>NEAR PAK FERTILIZER MAIN KHANEWAL ROAD MULTAN</span></div>
-                    <div><label>STRN</label><span>—</span></div>
-                    <div><label>NTN No</label><span>—</span></div>
+                    <div><label>Buyer</label><span>{buyerName}</span></div>
+                    <div><label>Address</label><span>{buyerAddress}</span></div>
+                    <div><label>STRN</label><span>{buyerSTRN}</span></div>
+                    <div><label>NTN No</label><span>{buyerNTN}</span></div>
                     <div><label>Customer PO#</label><span>{g.PurchaseCode || `GRN-${g.PurchaseID}`}</span></div>
                 </div>
             </div>

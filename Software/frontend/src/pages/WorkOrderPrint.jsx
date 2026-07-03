@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import PrintBusinessHeader from '../components/PrintBusinessHeader';
 
 const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const d   = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
@@ -45,22 +46,15 @@ export default function WorkOrderPrint() {
 
     return (
         <div className="wo-print">
-            {/* TOP BANNER */}
-            <div className="banner">
-                <div style={{ flex: 1 }} />
-                <div className="banner-title">
-                    <div className="company">CHANGAN MULTAN MOTORS</div>
-                    <div className="subtitle"><em>Work Order Print Report</em></div>
-                </div>
-                <div className="logo-box">
-                    <div className="logo-letter">⌖</div>
-                    <div className="logo-text">CHANGAN AUTO<br/>MULTAN</div>
-                </div>
-            </div>
-            <div className="address-row">
-                NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN.&nbsp;&nbsp;
-                <b>Mobile :</b>&nbsp;&nbsp;<b>Phone#:</b> 061-111-222-388
-            </div>
+            {/* Shared business header — owner ask 2026-07-04: same letterhead
+                on every printed document, sourced from Business Profile.
+                showOnScreen so this dedicated print page also previews the
+                header (there's no separate on-screen shell to hide). */}
+            <PrintBusinessHeader
+                docTitle="Work Order Print Report"
+                docSubtitle={jc.JobCardNo ? `WO # ${jc.JobCardNo}` : null}
+                showOnScreen
+            />
 
             {/* HEADER GRID */}
             <table className="hdr">

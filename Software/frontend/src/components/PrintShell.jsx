@@ -11,29 +11,23 @@
  *   showSignatures — render "Authorized" / "Customer" signature lines (default true)
  *   sigLabels      — [leftLabel, rightLabel] to override default signature row
  */
+import PrintBusinessHeader from './PrintBusinessHeader';
+
 export default function PrintShell({ docTitle, metaPairs = [], children, footnote, showSignatures = true, sigLabels = ['Authorized Signature', 'Customer Signature'] }) {
+    // Owner ask 2026-07-04: banner now uses the shared PrintBusinessHeader
+    // fed by Business Profile. Meta pairs (Bill #, Date, etc.) render below
+    // via docMetaRight so the doc title + identifier stay grouped.
+    const metaLine = metaPairs.map(m => `${m.label}: ${m.value}`).join('   ·   ');
+    const primaryMeta = metaPairs.find(m => m.highlight) || metaPairs[0];
+
     return (
         <div className="dms-print">
-            {/* TOP BANNER */}
-            <div className="banner">
-                <div className="logo-box">
-                    <div className="logo-letter">⌖</div>
-                    <div className="logo-text">CHANGAN AUTO<br/>MULTAN</div>
-                </div>
-                <div className="banner-mid">
-                    <div className="company">CHANGAN MULTAN MOTORS</div>
-                    <div className="address">NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN.&nbsp;&nbsp;Phone#: 061-111-222-388</div>
-                </div>
-                <div className="banner-right">
-                    <div className="doc-title">{docTitle}</div>
-                    <div className="meta">
-                        {metaPairs.map((m, i) => (
-                            <div key={i}><b>{m.label}:</b>&nbsp;&nbsp;{m.highlight ? <span style={{ color: '#b91c1c', fontWeight: 700 }}>{m.value}</span> : m.value}</div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-            <hr className="rule" />
+            <PrintBusinessHeader
+                docTitle={docTitle}
+                docSubtitle={primaryMeta ? `${primaryMeta.label}: ${primaryMeta.value}` : null}
+                docMetaLeft={metaLine}
+                showOnScreen
+            />
 
             {/* BODY */}
             {children}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import PrintBusinessHeader from '../components/PrintBusinessHeader';
 
 const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = v => v ? new Date(v).toLocaleDateString('en-GB').replace(/\//g, '/') : '';
@@ -54,24 +55,15 @@ export default function StoreSalePrint() {
 
     return (
         <div className="ss-print">
-            {/* TOP BANNER */}
-            <div className="banner">
-                <div className="logo-box">
-                    <div className="logo-letter">⌖</div>
-                    <div className="logo-text">CHANGAN AUTO<br/>MULTAN</div>
-                </div>
-                <div className="banner-mid">
-                    <div className="company">CHANGAN MULTAN MOTORS</div>
-                    <div className="address">NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN.</div>
-                </div>
-                <div className="banner-right">
-                    <div className="invoice-title">Sales Invoice</div>
-                    <div className="meta">
-                        <div><b>Sale Date:</b>&nbsp;&nbsp;{fmtDate(ss.SaleDate)}</div>
-                        <div><b>Bill #:</b>&nbsp;&nbsp;<span style={{ color: '#b91c1c', fontWeight: 700 }}>{ss.InvoiceNo}</span></div>
-                    </div>
-                </div>
-            </div>
+            {/* Shared business header (owner ask 2026-07-04) — same letterhead
+                across every print. Body layout (customer row, item table,
+                totals) is preserved below. */}
+            <PrintBusinessHeader
+                docTitle="Sales Invoice"
+                docSubtitle={ss.InvoiceNo ? `Bill # ${ss.InvoiceNo}` : null}
+                docMetaLeft={`Sale Date: ${fmtDate(ss.SaleDate)}`}
+                showOnScreen
+            />
 
             <hr className="rule" />
 

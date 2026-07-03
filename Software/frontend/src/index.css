@@ -2250,8 +2250,11 @@ textarea:disabled,
   .erp-list thead th { padding: 6px 10px; }
 }
 
-/* On-screen preview of ReportPrintHeader (only when showOnScreen=true).
-   Print rules further down override the print rendering. */
+/* On-screen preview of PrintBusinessHeader (only when showOnScreen=true).
+   Print rules further down override the print rendering. `.pbh` is the
+   canonical class; `.report-print-header` + `.rph-*` remain as aliases so
+   existing pages that still render with the old class names keep working. */
+.pbh,
 .report-print-header {
   background: #ffffff;
   border: 1px solid var(--erp-border);
@@ -2260,19 +2263,19 @@ textarea:disabled,
   margin-bottom: 10px;
   font-size: 12px;
 }
-.report-print-header .rph-band {
+.pbh .pbh-band, .report-print-header .rph-band {
   display: flex; align-items: flex-start; gap: 14px;
 }
-.report-print-header .rph-logo { width: 64px; flex-shrink: 0; }
-.report-print-header .rph-logo img { max-width: 100%; max-height: 60px; object-fit: contain; display: block; }
-.report-print-header .rph-company { flex: 1; text-align: center; }
-.report-print-header .rph-name { font-size: 15px; font-weight: 700; }
-.report-print-header .rph-legal { font-size: 11px; color: var(--erp-text-muted); font-style: italic; margin-top: 1px; }
-.report-print-header .rph-line { font-size: 11px; color: var(--erp-text-muted); margin-top: 1px; line-height: 1.35; }
-.report-print-header .rph-report { border-top: 1px solid var(--erp-border); margin-top: 6px; padding-top: 4px; }
-.report-print-header .rph-report h1 { font-size: 14px; font-weight: 700; margin: 0; color: var(--erp-text); }
-.report-print-header .rph-subtitle { font-size: 11px; color: var(--erp-text-muted); margin-top: 1px; }
-.report-print-header .rph-meta {
+.pbh .pbh-logo, .report-print-header .rph-logo { width: 64px; flex-shrink: 0; }
+.pbh .pbh-logo img, .report-print-header .rph-logo img { max-width: 100%; max-height: 60px; object-fit: contain; display: block; }
+.pbh .pbh-company, .report-print-header .rph-company { flex: 1; text-align: center; }
+.pbh .pbh-name, .report-print-header .rph-name { font-size: 15px; font-weight: 700; }
+.pbh .pbh-legal, .report-print-header .rph-legal { font-size: 11px; color: var(--erp-text-muted); font-style: italic; margin-top: 1px; }
+.pbh .pbh-line, .report-print-header .rph-line { font-size: 11px; color: var(--erp-text-muted); margin-top: 1px; line-height: 1.35; }
+.pbh .pbh-doc, .report-print-header .rph-report { border-top: 1px solid var(--erp-border); margin-top: 6px; padding-top: 4px; }
+.pbh .pbh-doc-title, .report-print-header .rph-report h1 { font-size: 14px; font-weight: 700; margin: 0; color: var(--erp-text); }
+.pbh .pbh-doc-subtitle, .report-print-header .rph-subtitle { font-size: 11px; color: var(--erp-text-muted); margin-top: 1px; }
+.pbh .pbh-doc-meta, .report-print-header .rph-meta {
   font-size: 11px; color: var(--erp-text-muted); margin-top: 3px;
   display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }
@@ -2406,13 +2409,15 @@ textarea:disabled,
      already carries the title, subtitle, filters and timestamp, and the
      card-header's leftover controls/buttons are stripped via .no-print. */
   .print-header + .card-header,
-  .report-print-header + .card-header,
-  .report-print-header + .erp-control-panel { display: none !important; }
+  .pbh + .card-header, .report-print-header + .card-header,
+  .pbh + .erp-control-panel, .report-print-header + .erp-control-panel { display: none !important; }
 
-  /* ─── ReportPrintHeader — the ONE shared report header.
-     Compact banking-style: small logo, one-line contact / tax rows,
-     total header height ~26mm so the table starts high on page 1. */
-  .report-print-header {
+  /* ─── PrintBusinessHeader — the ONE shared business header used by
+     reports AND transaction/document prints (owner ask 2026-07-04).
+     `.pbh` is canonical; `.report-print-header` + `.rph-*` are legacy
+     aliases so any file that still renders with the old class names
+     stays visually consistent. Both selectors are always kept in sync. */
+  .pbh, .report-print-header {
     border-bottom: 1.5px solid #0f172a;
     padding: 0 0 4pt 0 !important;
     margin: 0 0 6pt 0 !important;
@@ -2422,42 +2427,42 @@ textarea:disabled,
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .report-print-header .rph-band {
+  .pbh .pbh-band, .report-print-header .rph-band {
     display: flex; align-items: center; gap: 10pt;
   }
-  .report-print-header .rph-logo {
+  .pbh .pbh-logo, .report-print-header .rph-logo {
     width: 48pt; flex-shrink: 0;
   }
-  .report-print-header .rph-logo img {
+  .pbh .pbh-logo img, .report-print-header .rph-logo img {
     max-width: 100%; max-height: 42pt; object-fit: contain;
     display: block;
   }
-  .report-print-header .rph-company {
+  .pbh .pbh-company, .report-print-header .rph-company {
     flex: 1; text-align: center; line-height: 1.2;
   }
-  .report-print-header .rph-name {
+  .pbh .pbh-name, .report-print-header .rph-name {
     font-size: 13pt; font-weight: 700; letter-spacing: 0.2px;
     line-height: 1.1; color: #0f172a;
   }
-  .report-print-header .rph-legal {
+  .pbh .pbh-legal, .report-print-header .rph-legal {
     font-size: 8pt; color: #475569; margin-top: 0;
     font-style: italic;
   }
-  .report-print-header .rph-line {
+  .pbh .pbh-line, .report-print-header .rph-line {
     font-size: 7.5pt; color: #334155; margin-top: 0; line-height: 1.25;
   }
-  .report-print-header .rph-report {
+  .pbh .pbh-doc, .report-print-header .rph-report {
     border-top: 0.5pt solid #94a3b8;
     margin-top: 3pt; padding-top: 2pt;
   }
-  .report-print-header .rph-report h1 {
+  .pbh .pbh-doc-title, .report-print-header .rph-report h1 {
     font-size: 12pt; font-weight: 700; margin: 0; color: #0f172a;
     line-height: 1.15;
   }
-  .report-print-header .rph-subtitle {
+  .pbh .pbh-doc-subtitle, .report-print-header .rph-subtitle {
     font-size: 8pt; color: #475569; margin-top: 0;
   }
-  .report-print-header .rph-meta {
+  .pbh .pbh-doc-meta, .report-print-header .rph-meta {
     font-size: 7.5pt; color: #475569; margin-top: 1pt;
     display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   }
