@@ -80,6 +80,9 @@ export default function GRN() {
     const [editingId, setEditingId]     = useState(null);
     const [grnNo, setGrnNo]             = useState('');
     const [isFinalizedEdit, setIsFinalizedEdit] = useState(false);
+    // Owner ask 2026-07-03: allow clicking an existing line to edit it.
+    // Non-null means the user is editing lineItems[editingLineIdx].
+    const [editingLineIdx, setEditingLineIdx] = useState(null);
     const disabled = isFinalizedEdit;
     const [unfinalizeModal, setUnfinalizeModal] = useState(null);
     const [unfinalizeReason, setUnfinalizeReason] = useState('');
@@ -170,7 +173,7 @@ export default function GRN() {
         }
     };
 
-    // ── Add / remove line ──────────────────────────────────────────
+    // ── Add / remove / edit line ───────────────────────────────────
     const addLineItem = () => {
         if (!currentItem.ItemID || Number(currentItem.Qty) <= 0) {
             notify({ type: 'warning', title: 'Add a part', message: 'Pick a part and a quantity greater than zero.' });
@@ -183,11 +186,44 @@ export default function GRN() {
             ItemNumber:   part?.ItemNumber,
             ManualNumber: part?.ManualNumber,
         });
-        setLineItems([...lineItems, line]);
+        if (editingLineIdx !== null) {
+            setLineItems(lineItems.map((row, i) => i === editingLineIdx ? line : row));
+            setEditingLineIdx(null);
+        } else {
+            setLineItems([...lineItems, line]);
+        }
         setCurrentItem(emptyEntry);
     };
 
-    const removeLineItem = (idx) => setLineItems(lineItems.filter((_, i) => i !== idx));
+    const editLineItem = (idx) => {
+        const row = lineItems[idx];
+        setCurrentItem({
+            ItemID: row.ItemID || row.ItemId || '',
+            ItenName: row.ItenName,
+            Qty: row.Qty,
+            ItemRate: row.ItemRate,
+            DiscountPct: row.DiscountPct,
+            AdditionalDiscountPct: row.AdditionalDiscountPct,
+            TaxRate: row.TaxRate,
+            AITAmount: row.AITAmount,
+        });
+        setEditingLineIdx(idx);
+        // Scroll the entry card into view so the editing form is obvious.
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const cancelEdit = () => {
+        setEditingLineIdx(null);
+        setCurrentItem(emptyEntry);
+    };
+
+    const removeLineItem = (idx) => {
+        setLineItems(lineItems.filter((_, i) => i !== idx));
+        if (editingLineIdx === idx) cancelEdit();
+    };
+
+    // Live preview of what the "Add" button will insert. Recomputes on any input change.
+    const linePreview = computeLine(currentItem);
 
     // ── Totals row ─────────────────────────────────────────────────
     const totals = lineItems.reduce((acc, l) => ({
@@ -308,14 +344,12 @@ export default function GRN() {
                 <div>
                     <h1 className="page-title">
                         Goods Receiving Note (Sales Tax Invoice)
-                        {editingId && (
-                            <>
-                                <span style={{ marginLeft: 10, fontSize: '0.7em', color: '#475569', fontFamily: 'monospace' }}>· {grnNo || `#${editingId}`}</span>
-                                {isFinalizedEdit && <span style={{ marginLeft: 10, background: '#f59e0b', color: '#fff', borderRadius: 4, padding: '2px 10px', fontSize: '0.6em', verticalAlign: 'middle' }}>FINALIZED</span>}
-                            </>
-                        )}
+                        {/* Owner ask 2026-07-03: always show the GRN identifier —
+                            an assigned code for edit, "(auto)" for a fresh doc. */}
+                        <span style={{ marginLeft: 10, fontSize: '0.7em', color: '#475569', fontFamily: 'monospace' }}>· {editingId ? (grnNo || `#${editingId}`) : '(auto)'}</span>
+                        {editingId && isFinalizedEdit && <span style={{ marginLeft: 10, background: '#f59e0b', color: '#fff', borderRadius: 4, padding: '2px 10px', fontSize: '0.6em', verticalAlign: 'middle' }}>FINALIZED</span>}
                     </h1>
-                    <p className="page-subtitle">{editingId ? (isFinalizedEdit ? 'Read-only · finalized GRN' : 'Editing existing GRN') : 'New supplier invoice — enter line-by-line.'}</p>
+                    <p className="page-subtitle">{editingId ? (isFinalizedEdit ? 'Read-only · finalized GRN' : 'Editing existing GRN') : 'New supplier invoice — GRN number will be assigned when you save.'}</p>
                 </div>
                 <div className="no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {editingId && canInsert && <button className="btn-sm" onClick={startNew}><Plus size={14} /> New</button>}
@@ -425,8 +459,23 @@ export default function GRN() {
                             <label>AIT (Rs)</label>
                             <input type="number" step="0.01" value={currentItem.AITAmount} onChange={e => setCurrentItem({ ...currentItem, AITAmount: e.target.value })} />
                         </div>
-                        <button className="btn" type="button" onClick={addLineItem} style={{ height: 38 }}><Plus size={16} /> Add</button>
+                        <button className="btn" type="button" onClick={addLineItem} style={{ height: 38, background: editingLineIdx !== null ? '#0284c7' : undefined }}>
+                            <Plus size={16} /> {editingLineIdx !== null ? `Update Line ${editingLineIdx + 1}` : 'Add'}
+                        </button>
                     </div>
+                    {/* Owner ask 2026-07-03: preview the line's total before adding. */}
+                    {currentItem.ItemID && Number(currentItem.Qty) > 0 && (
+                        <div style={{ marginTop: 12, padding: '8px 14px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12, alignItems: 'center' }}>
+                            <span style={{ color: '#0369a1', fontWeight: 700 }}>{editingLineIdx !== null ? 'Editing preview →' : 'Line preview →'}</span>
+                            <span>Excl-tax: <strong>{fmt(linePreview.SalesValueExclTax)}</strong></span>
+                            <span>GST: <strong>{fmt(linePreview.TaxAmount)}</strong></span>
+                            <span>AIT: <strong>{fmt(linePreview.AITAmount)}</strong></span>
+                            <span style={{ marginLeft: 'auto', color: '#0f172a', fontSize: 14, fontWeight: 800 }}>Total: PKR {fmt(linePreview.ValueIncTax)}</span>
+                            {editingLineIdx !== null && (
+                                <button type="button" onClick={cancelEdit} style={{ padding: '4px 10px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Cancel Edit</button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Line table — matches the Master Motors invoice column layout */}
@@ -458,7 +507,13 @@ export default function GRN() {
                                     <tr><td colSpan={16} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>No lines yet — add one above.</td></tr>
                                 )}
                                 {lineItems.map((l, idx) => (
-                                    <tr key={idx}>
+                                    <tr key={idx}
+                                        onClick={() => !disabled && editLineItem(idx)}
+                                        style={{
+                                            cursor: disabled ? 'default' : 'pointer',
+                                            background: editingLineIdx === idx ? '#e0f2fe' : undefined,
+                                        }}
+                                        title={disabled ? '' : 'Click to edit this line'}>
                                         <td style={td}>{idx + 1}</td>
                                         <td style={{ ...tdL, fontFamily: 'monospace', color: '#64748b' }}>{l.ManualNumber || l.ItemNumber || '—'}</td>
                                         <td style={tdL}>{l.ItenName}</td>
@@ -476,7 +531,7 @@ export default function GRN() {
                                         <td style={{ ...td, fontWeight: 700, color: '#0f172a' }}>{fmt(l.ValueIncTax)}</td>
                                         <td style={{ ...td, textAlign: 'center' }}>
                                             {!disabled && (
-                                                <button onClick={() => removeLineItem(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2 }}>
+                                                <button onClick={(e) => { e.stopPropagation(); removeLineItem(idx); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2 }}>
                                                     <Trash2 size={14} />
                                                 </button>
                                             )}

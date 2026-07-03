@@ -84,3 +84,66 @@ exports.createWarehouse = async (req, res) => {
     res.status(201).json(result.recordset);
   } catch (err) { res.status(400).json({ error: err.message }); }
 };
+
+// --- DELETE (owner ask 2026-07-03) ---
+// Small helper: refuse if the row is referenced by any InventItems row so we
+// never orphan a live part. Categories/brands/uoms are hard-deleted; the
+// warehouse table has an InActive column so we soft-delete that one so
+// historical stock/GRN rows still resolve back to a warehouse name.
+
+async function refuseIfInUse(pool, { column, id, label }) {
+  const r = await pool.request()
+    .input('id', sql.Int, id)
+    .query(`SELECT COUNT(*) AS n FROM InventItems WHERE ${column} = @id`);
+  if (r.recordset[0].n > 0) {
+    const e = new Error(`Cannot delete ${label} — it is still used by ${r.recordset[0].n} part(s). Reassign those parts first.`);
+    e.status = 409;
+    throw e;
+  }
+}
+
+exports.deleteCategory = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const pool = await getPool();
+    await refuseIfInUse(pool, { column: 'CategoryID', id, label: 'category' });
+    await pool.request().input('id', sql.Int, id)
+      .query('DELETE FROM InventCategory WHERE CategoryID=@id');
+    res.json({ message: 'Category deleted' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};
+
+exports.deleteBrand = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const pool = await getPool();
+    await refuseIfInUse(pool, { column: 'ItemBrandId', id, label: 'brand' });
+    await pool.request().input('id', sql.Int, id)
+      .query('DELETE FROM InventItemBrands WHERE ItemBrandId=@id');
+    res.json({ message: 'Brand deleted' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};
+
+exports.deleteUOM = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const pool = await getPool();
+    await refuseIfInUse(pool, { column: 'UOMId', id, label: 'unit of measure' });
+    await pool.request().input('id', sql.Int, id)
+      .query('DELETE FROM InventUOM WHERE UOMId=@id');
+    res.json({ message: 'Unit of measure deleted' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};
+
+exports.deleteWarehouse = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const pool = await getPool();
+    // Warehouses can't be hard-deleted because historic GRN / stock rows point
+    // at them by FK. Soft-delete via the existing InActive column instead.
+    const r = await pool.request().input('id', sql.Int, id)
+      .query('UPDATE InventWareHouse SET InActive=1 WHERE WHID=@id');
+    if (r.rowsAffected[0] === 0) return res.status(404).json({ error: 'Warehouse not found' });
+    res.json({ message: 'Warehouse archived' });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+};

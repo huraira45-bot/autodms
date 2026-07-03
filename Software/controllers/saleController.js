@@ -146,20 +146,39 @@ exports.getSales = async (req, res) => {
         const { search } = req.query;
         const pool = await getPool();
         const r = pool.request();
-        let q = 'SELECT TOP 200 * FROM data_StoreSaleInfo';
+        // Owner ask 2026-07-03: also match on part number (ManualNumber /
+        // legacy ItemNumber) and part name via the line table. EXISTS keeps
+        // the header row single-instance regardless of how many lines match.
+        let q = 'SELECT TOP 200 * FROM data_StoreSaleInfo si';
         if (search) {
             r.input('s', sql.NVarChar(200), `%${search}%`);
-            q += ' WHERE (InvoiceNo LIKE @s OR CustomerName LIKE @s OR MobileNo LIKE @s)';
+            q += ` WHERE (
+                si.InvoiceNo LIKE @s
+                OR si.CustomerName LIKE @s
+                OR si.MobileNo LIKE @s
+                OR EXISTS (
+                    SELECT 1 FROM data_StoreSaleDetail sd
+                    LEFT JOIN InventItems i ON sd.ItemID = i.ItemId
+                    WHERE sd.SaleID = si.SaleID
+                      AND (
+                        i.ItenName LIKE @s
+                        OR i.ManualNumber LIKE @s
+                        OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @s
+                      )
+                )
+            )`;
         }
-        q += ' ORDER BY SaleID DESC';
+        q += ' ORDER BY si.SaleID DESC';
         res.json((await r.query(q)).recordset);
     } catch (err) {
-        res.status(500).json({ error: 'Server Error' });
+        console.error('getSales:', err);
+        res.status(500).json({ error: 'Server Error', details: err.message });
     }
 };
 
-// GET /api/sales/store-sale/:id/print-data — same payload as getStoreSaleById
-// but refuses if the sale isn't finalized. Backstops the frontend gate.
+// GET /api/sales/store-sale/:id/print-data — same payload as getStoreSaleById.
+// Owner ask 2026-07-03: allow draft printing too, so the front counter can
+// hand a preview to the customer before the finalize approval flow.
 exports.getStoreSalePrintData = async (req, res) => {
     try {
         const pool = await getPool();
@@ -167,9 +186,6 @@ exports.getStoreSalePrintData = async (req, res) => {
             .input('id', sql.Int, parseInt(req.params.id))
             .query('SELECT IsFinalized FROM data_StoreSaleInfo WHERE SaleID=@id');
         if (!head.recordset.length) return res.status(404).json({ error: 'Store Sale not found' });
-        if (!head.recordset[0].IsFinalized) {
-            return res.status(409).json({ error: 'Store Sale must be finalized before printing.' });
-        }
         return exports.getStoreSaleById(req, res);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };

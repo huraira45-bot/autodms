@@ -158,8 +158,19 @@ export function PartsSalesRegister() {
             subtitle="Line-by-line store-sale invoices in the period."
             icon={ShoppingCart}
             endpoint="parts/sales-register"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO() }}
-            controls={PeriodControls}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PeriodControls params={params} updateParam={updateParam} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Search:
+                        <input value={params.search || ''}
+                            onChange={e => updateParam('search', e.target.value)}
+                            placeholder="Part no, part name, customer, or invoice #"
+                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 260 }} />
+                    </label>
+                </>
+            )}
         >
             {(data) => (
                 <>
@@ -217,8 +228,19 @@ export function PartsPurchaseSummary() {
             subtitle="Line-by-line GRN entries (parts received) in the period."
             icon={FileInput}
             endpoint="parts/purchase-summary"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO() }}
-            controls={PeriodControls}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PeriodControls params={params} updateParam={updateParam} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Search:
+                        <input value={params.search || ''}
+                            onChange={e => updateParam('search', e.target.value)}
+                            placeholder="Part no, part name, supplier, or GRN #"
+                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 260 }} />
+                    </label>
+                </>
+            )}
         >
             {(data) => (
                 <>

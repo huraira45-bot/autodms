@@ -189,18 +189,34 @@ exports.reorderAlert = async (req, res) => {
 exports.partsSalesRegister = async (req, res) => {
     try {
         const { from, to } = parseRange(req);
+        const search = (req.query.search || '').trim();
         const pool = await getPool();
         // AutoDMS store sales live in data_StoreSaleInfo / data_StoreSaleDetail
         // (sp_SaveStoreSale writes them). The earlier query targeted the legacy
         // FIS tables data_SaleInfo / data_SaleDetail which AutoDMS never writes
         // to — that's why the report was always empty.
-        const r = await pool.request()
+        // Owner ask 2026-07-03: add a free-text filter that matches part no
+        // (ManualNumber or legacy BIGINT ItemNumber), part name, customer,
+        // or SS invoice number.
+        const rq = pool.request()
             .input('from', sql.DateTime, from)
-            .input('to',   sql.DateTime, to)
-            .query(`
+            .input('to',   sql.DateTime, to);
+        let where = 's.SaleDate BETWEEN @from AND @to';
+        if (search) {
+            rq.input('s', sql.NVarChar(200), `%${search}%`);
+            where += ` AND (
+                s.InvoiceNo LIKE @s
+                OR ISNULL(p.PartyName, s.CustomerName) LIKE @s
+                OR i.ItenName LIKE @s
+                OR i.ManualNumber LIKE @s
+                OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @s
+            )`;
+        }
+        const r = await rq.query(`
                 SELECT s.SaleID, s.InvoiceNo AS SaleVoucherNo, s.SaleDate, s.NetPayable AS InvoiceNet,
                        ISNULL(p.PartyName, s.CustomerName) AS Customer,
-                       d.SaleDetailID, d.ItemID, i.ItemNumber AS ItemCode, i.ItenName AS ItemName,
+                       d.SaleDetailID, d.ItemID,
+                       i.ItemNumber AS ItemCode, i.ManualNumber AS ManualCode, i.ItenName AS ItemName,
                        d.Quantity, d.SaleRate AS ItemRate, d.NetAmount AS LineNet,
                        ISNULL(d.TaxAmount, 0) AS Tax,
                        d.DiscountAmount
@@ -208,14 +224,15 @@ exports.partsSalesRegister = async (req, res) => {
                 INNER JOIN data_StoreSaleInfo s ON d.SaleID = s.SaleID
                 LEFT JOIN gen_PartiesInfo p ON s.PartyID = p.PartyID
                 LEFT JOIN InventItems i     ON d.ItemID = i.ItemId
-                WHERE s.SaleDate BETWEEN @from AND @to
+                WHERE ${where}
                 ORDER BY s.SaleDate DESC, s.SaleID DESC`);
 
         const rows = r.recordset.map(x => ({
             SaleVoucherNo: x.SaleVoucherNo,
             SaleDate:      x.SaleDate?.toISOString().slice(0,10),
             Customer:      x.Customer || '',
-            ItemCode:      x.ItemCode != null ? String(x.ItemCode) : '',
+            // Prefer alphanumeric ManualNumber over legacy BIGINT ItemNumber.
+            ItemCode:      x.ManualCode || (x.ItemCode != null ? String(x.ItemCode) : ''),
             ItemName:      x.ItemName || '',
             Quantity:      +Number(x.Quantity || 0).toFixed(2),
             ItemRate:      +Number(x.ItemRate || 0).toFixed(2),
@@ -244,14 +261,27 @@ exports.partsSalesRegister = async (req, res) => {
 exports.purchaseSummary = async (req, res) => {
     try {
         const { from, to } = parseRange(req);
+        const search = (req.query.search || '').trim();
         const pool = await getPool();
-        const r = await pool.request()
+        const rq = pool.request()
             .input('from', sql.DateTime, from)
-            .input('to',   sql.DateTime, to)
-            .query(`
+            .input('to',   sql.DateTime, to);
+        let where = 'p.PurchaseDate BETWEEN @from AND @to';
+        if (search) {
+            rq.input('s', sql.NVarChar(200), `%${search}%`);
+            where += ` AND (
+                p.PurchaseVoucherNo LIKE @s
+                OR pp.PartyName LIKE @s
+                OR i.ItenName LIKE @s
+                OR i.ManualNumber LIKE @s
+                OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @s
+            )`;
+        }
+        const r = await rq.query(`
                 SELECT p.PurchaseID, p.PurchaseVoucherNo, p.PurchaseDate, p.NetAmount AS GRNNet,
                        pp.PartyName AS Supplier,
-                       d.PurchaseDetailID, d.ItemId, i.ItemNumber AS ItemCode, i.ItenName AS ItemName,
+                       d.PurchaseDetailID, d.ItemId,
+                       i.ItemNumber AS ItemCode, i.ManualNumber AS ManualCode, i.ItenName AS ItemName,
                        d.Quantity, d.ItemRate, d.NetAmount AS LineNet,
                        (ISNULL(d.TaxOneAmount,0) + ISNULL(d.TaxTwoAmount,0)) AS Tax,
                        d.DiscountAmount
@@ -259,14 +289,15 @@ exports.purchaseSummary = async (req, res) => {
                 INNER JOIN data_PurchaseInfo p ON d.PurchaseID = p.PurchaseID
                 LEFT JOIN gen_PartiesInfo pp   ON p.PartyID = pp.PartyID
                 LEFT JOIN InventItems i        ON d.ItemId = i.ItemId
-                WHERE p.PurchaseDate BETWEEN @from AND @to
+                WHERE ${where}
                 ORDER BY p.PurchaseDate DESC, p.PurchaseID DESC`);
 
         const rows = r.recordset.map(x => ({
             GRNNo:    x.PurchaseVoucherNo,
             GRNDate:  x.PurchaseDate?.toISOString().slice(0,10),
             Supplier: x.Supplier || '',
-            ItemCode: x.ItemCode != null ? String(x.ItemCode) : '',
+            // Prefer alphanumeric ManualNumber over legacy BIGINT ItemNumber.
+            ItemCode: x.ManualCode || (x.ItemCode != null ? String(x.ItemCode) : ''),
             ItemName: x.ItemName || '',
             Quantity: +Number(x.Quantity || 0).toFixed(2),
             ItemRate: +Number(x.ItemRate || 0).toFixed(2),

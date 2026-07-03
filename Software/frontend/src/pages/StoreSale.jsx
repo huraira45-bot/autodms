@@ -58,6 +58,8 @@ export default function StoreSale() {
   const [invoiceNo, setInvoiceNo] = useState('');
   const [isFinalizedEdit, setIsFinalizedEdit] = useState(false);
   const disabled = isFinalizedEdit;
+  // Owner ask 2026-07-03: click an existing line to edit it in place.
+  const [editingLineIdx, setEditingLineIdx] = useState(null);
 
   const fetchSales = useCallback(async () => {
     try {
@@ -213,9 +215,48 @@ export default function StoreSale() {
       NetAmt:       netAmt,
     };
 
-    setLineItems([...lineItems, newItem]);
+    if (editingLineIdx !== null) {
+      setLineItems(lineItems.map((row, i) => i === editingLineIdx ? newItem : row));
+      setEditingLineIdx(null);
+    } else {
+      setLineItems([...lineItems, newItem]);
+    }
     setCurrentItem({ ...currentItem, ItemID: '', Qty: 1, SaleRate: 0, PurRate: 0, Discount: 0, DiscType: 'Amount', IsGST: true, TaxPercent: gstRate });
   };
+
+  // Edit an existing line — re-populate currentItem, mark the row.
+  const editLineItem = (idx) => {
+    const row = lineItems[idx];
+    setCurrentItem({
+      ItemID:     row.ItemID || '',
+      Qty:        row.Qty,
+      SaleRate:   row.SaleRate,
+      PurRate:    row.PurRate,
+      TaxPercent: row.TaxPercent,
+      Discount:   row.DiscAmt / (row.Qty || 1),  // back to per-unit
+      DiscType:   'Amount',
+      IsGST:      row.IsGST !== false,
+      WHID:       row.WHID || warehouses[0]?.WHID || '',
+    });
+    setEditingLineIdx(idx);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelLineEdit = () => {
+    setEditingLineIdx(null);
+    setCurrentItem({ ItemID: '', Qty: 1, SaleRate: 0, PurRate: 0, TaxPercent: gstRate, Discount: 0, DiscType: 'Amount', IsGST: true, WHID: warehouses[0]?.WHID || '' });
+  };
+
+  // Live preview of the line total for whatever the user is typing.
+  const previewQty     = Number(currentItem.Qty) || 0;
+  const previewRate    = Number(currentItem.SaleRate) || 0;
+  const previewSubtotal = previewQty * previewRate;
+  const previewTax     = currentItem.IsGST ? (previewSubtotal * Number(gstRate) / 100) : 0;
+  const previewDiscInput = Number(currentItem.Discount) || 0;
+  const previewDisc    = currentItem.DiscType === 'Percent'
+    ? (previewSubtotal * previewDiscInput / 100)
+    : (previewDiscInput * previewQty);
+  const previewNet     = previewSubtotal + previewTax - previewDisc;
 
   const totals = {
     bill: lineItems.reduce((sum, i) => sum + (i.Qty * i.SaleRate), 0),
@@ -322,17 +363,15 @@ export default function StoreSale() {
         <div>
           <h1 className="page-title">
             Store Sale (Spares)
-            {editingId && (
-              <>
-                <span style={{ marginLeft: 10, fontSize: '0.7em', color: '#475569', fontFamily: 'monospace' }}>· {invoiceNo || `#${editingId}`}</span>
-                {isFinalizedEdit && <span style={{ marginLeft: 10, background: '#f59e0b', color: '#fff', borderRadius: 4, padding: '2px 10px', fontSize: '0.6em', verticalAlign: 'middle' }}>FINALIZED</span>}
-              </>
-            )}
+            {/* Owner ask 2026-07-03: always show the sale identifier — the assigned
+                invoice number for existing sales, "(auto)" for a fresh doc. */}
+            <span style={{ marginLeft: 10, fontSize: '0.7em', color: '#475569', fontFamily: 'monospace' }}>· {editingId ? (invoiceNo || `#${editingId}`) : '(auto)'}</span>
+            {editingId && isFinalizedEdit && <span style={{ marginLeft: 10, background: '#f59e0b', color: '#fff', borderRadius: 4, padding: '2px 10px', fontSize: '0.6em', verticalAlign: 'middle' }}>FINALIZED</span>}
           </h1>
           <p className="page-subtitle">
             {editingId
               ? (isFinalizedEdit ? 'Read-only · open existing sale' : 'Editing existing sale — Save Changes to update')
-              : 'Counter sales for spare parts and accessories.'}
+              : 'Counter sales for spare parts and accessories — invoice number will be assigned when you save.'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -573,8 +612,23 @@ export default function StoreSale() {
                 {warehouses.map(w => <option key={w.WHID} value={w.WHID}>{w.WHDesc}</option>)}
               </select>
             </div>
-            <button className="btn btn-add" style={{ flex: 1, alignSelf: 'flex-end', height: '42px' }} type="button" onClick={addLineItem}><Plus size={20} /> Add to Cart</button>
+            <button className="btn btn-add" style={{ flex: 1, alignSelf: 'flex-end', height: '42px', background: editingLineIdx !== null ? '#0284c7' : undefined }} type="button" onClick={addLineItem}>
+              <Plus size={20} /> {editingLineIdx !== null ? `Update Line ${editingLineIdx + 1}` : 'Add to Cart'}
+            </button>
           </div>
+          {/* Owner ask 2026-07-03: preview line total before Add. */}
+          {currentItem.ItemID && previewQty > 0 && (
+            <div style={{ marginTop: 12, padding: '8px 14px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12, alignItems: 'center' }}>
+              <span style={{ color: '#0369a1', fontWeight: 700 }}>{editingLineIdx !== null ? 'Editing preview →' : 'Line preview →'}</span>
+              <span>Subtotal: <strong>{previewSubtotal.toFixed(2)}</strong></span>
+              <span>GST: <strong>{previewTax.toFixed(2)}</strong></span>
+              <span>Discount: <strong>-{previewDisc.toFixed(2)}</strong></span>
+              <span style={{ marginLeft: 'auto', color: '#0f172a', fontSize: 14, fontWeight: 800 }}>Line Total: PKR {previewNet.toFixed(2)}</span>
+              {editingLineIdx !== null && (
+                <button type="button" onClick={cancelLineEdit} style={{ padding: '4px 10px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Cancel Edit</button>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="table-wrapper" style={{ marginTop: '24px' }}>
@@ -584,14 +638,20 @@ export default function StoreSale() {
             </thead>
             <tbody>
               {lineItems.map((item, idx) => (
-                <tr key={idx}>
+                <tr key={idx}
+                    onClick={() => !disabled && editLineItem(idx)}
+                    style={{
+                      cursor: disabled ? 'default' : 'pointer',
+                      background: editingLineIdx === idx ? '#e0f2fe' : undefined,
+                    }}
+                    title={disabled ? '' : 'Click to edit this line'}>
                   <td style={{ fontFamily: 'monospace', color: '#64748b' }}>{item.ManualNumber || item.ItemNumber || '—'}</td>
                   <td style={{ fontWeight: '500' }}>{item.ItenName}</td>
                   <td>{item.Qty}</td><td>{item.SaleRate.toLocaleString()}</td>
                   <td style={{ color: 'var(--danger)' }}>+{item.TaxAmt.toFixed(2)}</td>
                   <td style={{ color: 'var(--success)' }}>-{item.DiscAmt.toFixed(2)}</td>
                   <td style={{ fontWeight: '600' }}>{item.NetAmt.toLocaleString()}</td>
-                  <td><button onClick={() => setLineItems(lineItems.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}><Trash2 size={18} /></button></td>
+                  <td><button onClick={(e) => { e.stopPropagation(); setLineItems(lineItems.filter((_, i) => i !== idx)); if (editingLineIdx === idx) cancelLineEdit(); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}><Trash2 size={18} /></button></td>
                 </tr>
               ))}
             </tbody>

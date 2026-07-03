@@ -223,15 +223,31 @@ exports.getGRNs = async (req, res) => {
     const { search } = req.query;
     const pool = await getPool();
     const request = pool.request();
-    let query = 'SELECT TOP 100 * FROM vw_PurchaseGRNHeader';
+    // Owner ask 2026-07-03: also match on part no / name via detail table.
+    let query = 'SELECT TOP 100 * FROM vw_PurchaseGRNHeader h';
     if (search) {
-      request.input('search', sql.NVarChar(100), `%${search}%`);
-      query += ' WHERE PurchaseVoucherNo LIKE @search OR SupplierBillNo LIKE @search OR PartyName LIKE @search';
+      request.input('search', sql.NVarChar(200), `%${search}%`);
+      query += ` WHERE (
+          h.PurchaseVoucherNo LIKE @search
+          OR h.SupplierBillNo LIKE @search
+          OR h.PartyName LIKE @search
+          OR EXISTS (
+              SELECT 1 FROM data_PurchaseDetail d
+              LEFT JOIN InventItems i ON d.ItemID = i.ItemId
+              WHERE d.PurchaseID = h.PurchaseID
+                AND (
+                  i.ItenName LIKE @search
+                  OR i.ManualNumber LIKE @search
+                  OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @search
+                )
+          )
+      )`;
     }
-    query += ' ORDER BY PurchaseID DESC';
+    query += ' ORDER BY h.PurchaseID DESC';
     const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
+    console.error('getGRNs:', err);
     res.status(500).json({ error: err.message });
   }
 };
