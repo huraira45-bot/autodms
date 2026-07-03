@@ -13,6 +13,11 @@ const VALID_STATUSES = new Set(['Pending', 'Contacted', 'Closed', 'NoResponse'])
 const VALID_OUTCOMES = new Set(['Satisfied', 'Complaint', 'NeedsAttention', 'NoAnswer']);
 
 // GET /api/crd/follow-ups?status=&assignedTo=&dueBy=&search=
+// Owner ask 2026-07-04: a follow-up is only "overdue" after 3 days past
+// its DueDate, not the next day. Days 0-2 past DueDate are still active
+// but not flagged red. Same threshold used by exports.stats below.
+const OVERDUE_GRACE_DAYS = 3;
+
 exports.list = async (req, res) => {
     try {
         const { status, assignedTo, dueBy, search, closedFrom, closedTo } = req.query;
@@ -72,7 +77,7 @@ exports.stats = async (req, res) => {
         const pool = await getPool();
         const r = await pool.request().query(`
             SELECT
-                SUM(CASE WHEN Status='Pending'    AND DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS Overdue,
+                SUM(CASE WHEN Status='Pending'    AND DueDate < DATEADD(day, -${OVERDUE_GRACE_DAYS}, CAST(GETDATE() AS DATE)) THEN 1 ELSE 0 END) AS Overdue,
                 SUM(CASE WHEN Status='Pending'    AND DueDate = CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS DueToday,
                 SUM(CASE WHEN Status='Pending'    AND DueDate > CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS Upcoming,
                 SUM(CASE WHEN Status='NoResponse'  THEN 1 ELSE 0 END) AS NoResponse,

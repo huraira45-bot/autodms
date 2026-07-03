@@ -456,7 +456,10 @@ export default function CRDFollowUps() {
                             </thead>
                             <tbody>
                                 {rows.map(r => {
-                                    const overdue = r.Status === 'Pending' && r.DaysOverdue > 0;
+                                    // Owner ask 2026-07-04: a follow-up is only "overdue" once
+                                    // it's been past DueDate for 3+ days. Same OVERDUE_GRACE_DAYS
+                                    // threshold as the backend stats query.
+                                    const overdue = r.Status === 'Pending' && r.DaysOverdue >= 3;
                                     return (
                                         <tr key={r.FollowUpID}
                                             onClick={() => setOpenItem(r)}
