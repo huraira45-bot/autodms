@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api';
 
@@ -69,22 +70,22 @@ export default function SurveyTemplatesAdmin() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Survey Templates</h1>
-                    <p className="page-subtitle">Define the questions asked on Post-Job-Card and Post-Complaint surveys. Only the active template per type is used for new surveys; in-flight surveys keep the questions they were created with.</p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {canEdit && (
-                        <button className="btn" onClick={() => setShowCreate(true)}>
-                            <Plus size={16} /> New template
+            <ErpControlPanel
+                title="Survey Templates"
+                subtitle="Define the questions asked on Post-Job-Card / Post-Complaint surveys. Only the active template per type is used for new surveys."
+                actions={
+                    <>
+                        {canEdit && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowCreate(true)}>
+                                <Plus size={14} /> New Template
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         </button>
-                    )}
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
-                </div>
-            </div>
+                    </>
+                }
+            />
 
             {msg && (
                 <div style={{ padding: 10, borderRadius: 8, fontSize: '0.875rem',

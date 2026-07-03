@@ -6,6 +6,7 @@ import {
     AlertTriangle, Clock, CheckCircle2, XCircle, MessageSquare, Flame
 } from 'lucide-react';
 import NewComplaintModal from '../components/NewComplaintModal';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -81,20 +82,20 @@ export default function CROWorkspace() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">CRO Workspace</h1>
-                    <p className="page-subtitle">Complaint queue. Resolution loop: department resolves → WhatsApp proof → CRO verifies → close or re-escalate.</p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
-                    <button className="btn" onClick={() => setShowNew(true)}>
-                        <Plus size={16} /> New Complaint
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="CRO Workspace"
+                subtitle="Complaint queue — department resolves → WhatsApp proof → CRO verifies → close or re-escalate."
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowNew(true)}>
+                            <Plus size={14} /> New Complaint
+                        </button>
+                    </>
+                }
+            />
 
             {/* Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>

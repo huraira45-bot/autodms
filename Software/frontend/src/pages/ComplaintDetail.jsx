@@ -8,16 +8,17 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel, ErpStatusPill } from '../components/erp';
 
 const API = '/api';
 
 const STATUS_STYLE = {
-    New:               { bg: '#e0e7ff', col: '#3730a3', label: 'NEW' },
-    Assigned:          { bg: '#fef3c7', col: '#92400e', label: 'ASSIGNED' },
-    InProgress:        { bg: '#fed7aa', col: '#9a3412', label: 'IN PROGRESS' },
-    PendingCROVerify:  { bg: '#dbeafe', col: '#1e40af', label: 'PENDING CRO VERIFY' },
-    Closed:            { bg: '#dcfce7', col: '#15803d', label: 'CLOSED' },
-    ReOpened:          { bg: '#fee2e2', col: '#b91c1c', label: 'RE-OPENED' },
+    New:               { bg: '#e0e7ff', col: '#3730a3', label: 'NEW',                 tone: 'steel' },
+    Assigned:          { bg: '#fef3c7', col: '#92400e', label: 'ASSIGNED',            tone: 'amber' },
+    InProgress:        { bg: '#fed7aa', col: '#9a3412', label: 'IN PROGRESS',         tone: 'amber' },
+    PendingCROVerify:  { bg: '#dbeafe', col: '#1e40af', label: 'PENDING CRO VERIFY',  tone: 'steel' },
+    Closed:            { bg: '#dcfce7', col: '#15803d', label: 'CLOSED',              tone: 'green' },
+    ReOpened:          { bg: '#fee2e2', col: '#b91c1c', label: 'RE-OPENED',           tone: 'red' },
 };
 
 const ACTION_ICONS = {
@@ -200,22 +201,26 @@ export default function ComplaintDetail() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button onClick={() => navigate('/cro/workspace')} className="btn-sm">
-                        <ArrowLeft size={14} /> Back
-                    </button>
-                    <div>
-                        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            {data.ComplaintNo}
-                            <span style={{ background: status.bg, color: status.col, padding: '4px 10px', borderRadius: 99, fontSize: '0.7rem', fontWeight: 700 }}>{status.label}</span>
-                            <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 10px', borderRadius: 99, fontSize: '0.7rem', fontWeight: 700 }}>L{data.CurrentEscalationLevel}</span>
-                        </h1>
-                        <p className="page-subtitle" style={{ marginTop: 4 }}>{data.Subject}</p>
-                    </div>
-                </div>
-                <button onClick={load} className="btn-sm"><RefreshCw size={14} /></button>
-            </div>
+            <ErpControlPanel
+                title={
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                        {data.ComplaintNo}
+                        <ErpStatusPill tone={status.tone || 'muted'}>{status.label}</ErpStatusPill>
+                        <ErpStatusPill tone="muted">L{data.CurrentEscalationLevel}</ErpStatusPill>
+                    </span>
+                }
+                subtitle={data.Subject}
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={() => navigate('/cro/workspace')}>
+                            <ArrowLeft size={14} /> Back
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load}>
+                            <RefreshCw size={14} />
+                        </button>
+                    </>
+                }
+            />
 
             {msg && (
                 <div style={{ padding: 12, borderRadius: 8, fontSize: '0.875rem',

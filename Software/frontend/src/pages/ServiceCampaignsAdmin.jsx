@@ -18,6 +18,7 @@ import {
     Plus, RefreshCw, Loader2, X, Save, Pause, Play, CheckSquare, Square, Search,
 } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api';
 
@@ -165,21 +166,20 @@ export default function ServiceCampaignsAdmin() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Service & Parts Campaigns</h1>
-                    <p className="page-subtitle">
-                        Promotional offers on workshop services and parts sales. MCML-borne campaigns auto-create a
-                        new sub-account under 102006 Master Changan Motors for the receivable.
-                    </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
-                    <button className="btn" onClick={openNew}><Plus size={16} /> New Campaign</button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="Service & Parts Campaigns"
+                subtitle="Promotional offers on workshop services and parts sales. MCML-borne campaigns auto-create a sub-account under 102006 for the receivable."
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
+                            <Plus size={14} /> New Campaign
+                        </button>
+                    </>
+                }
+            />
 
             {msg && (
                 <div className="card" style={{

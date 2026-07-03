@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api';
 
@@ -80,22 +81,22 @@ export default function InquiriesAdmin() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Inquiries</h1>
-                    <p className="page-subtitle">Walk-in / phone / online questions before they become a JC or complaint. Routes to a department by category.</p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {(hasModule('cro_workspace') || hasModule('cro_admin')) && (
-                        <button className="btn" onClick={() => setShowCreate(true)}>
-                            <Plus size={16} /> Log Inquiry
+            <ErpControlPanel
+                title="Inquiries"
+                subtitle="Walk-in / phone / online questions before they become a JC or complaint. Routes to a department by category."
+                actions={
+                    <>
+                        {(hasModule('cro_workspace') || hasModule('cro_admin')) && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowCreate(true)}>
+                                <Plus size={14} /> Log Inquiry
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         </button>
-                    )}
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
-                </div>
-            </div>
+                    </>
+                }
+            />
 
             {msg && (
                 <div style={{ padding: 10, borderRadius: 8, fontSize: '0.875rem',

@@ -8,6 +8,9 @@ import { useFeedback } from '../context/FeedbackContext';
 import { DataCard, EmptyState, FilterBar, PageHeader, SearchField, StatusPill } from '../components/UXPrimitives';
 import SearchableSelect from '../components/SearchableSelect';
 import Can from '../components/Can';
+import {
+    ErpControlPanel, ErpSearchBar, ErpFilterDropdown, ErpListView, ErpStatusPill,
+} from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -161,78 +164,58 @@ export default function Customers() {
         setBusy(false);
     };
 
+    // ── ERP list columns ──
+    const columns = [
+        { key: 'id',   label: 'ID',    render: p => <span className="erp-mono" style={{ color: 'var(--erp-text-muted)' }}>#{p.PartyID}</span> },
+        { key: 'name', label: 'Name',  render: p => <strong>{p.PartyName}</strong> },
+        { key: 'type', label: 'Type',  render: p => <TypeBadge type={p.PartyType} /> },
+        { key: 'phone', label: 'Phone', render: p => p.PhoneOne || '—' },
+        { key: 'cnic',  label: 'CNIC',  render: p => <span className="erp-mono">{p.CNIC || '—'}</span> },
+        { key: 'ntn',   label: 'NTN',   render: p => <span className="erp-mono">{p.NTNNO || '—'}</span> },
+        { key: 'grp',   label: 'Group', render: p => <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>{p.PartyGroupName || '—'}</span> },
+        { key: 'lim',   label: 'Credit Limit', align: 'right', render: p => p.CreditLimit ? fmt(p.CreditLimit) : '—' },
+        { key: 'gl',    label: 'GL Account', render: p => (
+            <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>
+                {p.PartyGLCode ? <><span className="erp-mono">{p.PartyGLCode}</span> {p.PartyGLTitle}</> : '—'}
+            </span>
+        ) },
+    ];
+
     return (
-        <div className="ux-page-stack">
-            <PageHeader
-                icon={Building}
-                eyebrow="Master data"
-                title="Parties"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Building size={16} /> Parties</span>}
                 subtitle="Customers, suppliers, and insurance companies linked directly to their GL accounts."
-                actions={<Can perm="crm_parties" action="insert"><button className="btn" onClick={openCreate}><Plus size={18} /> New Party</button></Can>}
-            />
-            <FilterBar resultLabel={`${parties.length} parties`}>
-                <SearchField
+                actions={
+                    <Can perm="crm_parties" action="insert">
+                        <button type="button" className="erp-btn erp-btn-primary" onClick={openCreate}>
+                            <Plus size={14} /> New Party
+                        </button>
+                    </Can>
+                }
+            >
+                <ErpSearchBar
                     value={search}
                     onChange={setSearch}
-                    placeholder="Search name, phone, CNIC, NTN..."
-                    width={320}
+                    placeholder="Search name, phone, CNIC, NTN…"
+                    width={340}
                 />
-                <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ minWidth: 150 }}>
-                    <option value="">All Types</option>
-                    {PARTY_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-                </select>
-            </FilterBar>
+                <ErpFilterDropdown
+                    label="Party Type"
+                    items={PARTY_TYPES.map(t => ({ id: t.key, label: t.label }))}
+                    value={filterType}
+                    onChange={setFilterType}
+                />
+            </ErpControlPanel>
 
-            {/* Directory table */}
-            <DataCard>
-                <div className="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID</th><th>Name</th><th>Type</th><th>Phone</th>
-                                <th>CNIC</th><th>NTN</th><th>Group</th>
-                                <th style={{ textAlign: 'right' }}>Credit Limit</th>
-                                <th>GL Account</th><th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {parties.length === 0 ? (
-                                <tr>
-                                    <td colSpan={10} className="table-empty-row">
-                                        <EmptyState
-                                            icon={Building}
-                                            title="No parties found"
-                                            message="Try a different search or create a new party."
-                                            action={<Can perm="crm_parties" action="insert"><button className="btn-sm" onClick={openCreate}><Plus size={14} /> New Party</button></Can>}
-                                        />
-                                    </td>
-                                </tr>
-                            ) : parties.slice(0, 100).map(p => (
-                                <tr key={p.PartyID}>
-                                    <td>#{p.PartyID}</td>
-                                    <td style={{ fontWeight: 500 }}>{p.PartyName}</td>
-                                    <td><TypeBadge type={p.PartyType} /></td>
-                                    <td>{p.PhoneOne || '—'}</td>
-                                    <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{p.CNIC || '—'}</td>
-                                    <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{p.NTNNO || '—'}</td>
-                                    <td style={{ color: '#64748b', fontSize: '0.85rem' }}>{p.PartyGroupName || '—'}</td>
-                                    <td style={{ textAlign: 'right' }}>{p.CreditLimit ? fmt(p.CreditLimit) : '—'}</td>
-                                    <td style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                        {p.PartyGLCode ? <><span style={{ fontFamily: 'monospace' }}>{p.PartyGLCode}</span> {p.PartyGLTitle}</> : '—'}
-                                    </td>
-                                    <td>
-                                        <Can perm="crm_parties" action="edit">
-                                            <button onClick={() => openEdit(p)} className="btn-sm" style={{ padding: '4px 8px' }}>
-                                                <Edit3 size={12} /> Edit
-                                            </button>
-                                        </Can>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </DataCard>
+            <ErpListView
+                columns={columns}
+                rows={parties.slice(0, 200)}
+                rowKey="PartyID"
+                onRowClick={p => openEdit(p)}
+                emptyLabel="No parties match this search. Use New Party to create one."
+                footerLeft={`${parties.length} record${parties.length === 1 ? '' : 's'}`}
+            />
 
             {/* Modal */}
             {showModal && (

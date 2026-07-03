@@ -6,6 +6,7 @@ import {
     Search, Loader2, RefreshCw, Save, MessageCircle, Star, ClipboardList,
 } from 'lucide-react';
 import SurveyCapturePanel from '../components/SurveyCapturePanel';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -362,16 +363,16 @@ export default function CRDFollowUps() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">CRD Follow-Ups</h1>
-                    <p className="page-subtitle">Customer satisfaction queue. Auto-created when a Job Card is finalized (due next day).</p>
-                </div>
-                <button className="btn" onClick={load} disabled={loading}>
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                    Refresh
-                </button>
-            </div>
+            <ErpControlPanel
+                title="CRD Follow-Ups"
+                subtitle="Customer satisfaction queue — auto-created when a Job Card is finalized (due next day)."
+                actions={
+                    <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        Refresh
+                    </button>
+                }
+            />
 
             {/* Stats cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>

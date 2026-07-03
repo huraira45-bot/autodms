@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Search, Save, Loader2, Users, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { ErpControlPanel } from '../components/erp';
 
 const API = '/api/parties';
 
@@ -85,22 +86,20 @@ export default function PartyBusinessAccess() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Party ↔ Business Access</h1>
-                    <p className="page-subtitle">
-                        Control which parties appear in each module's picker. A party with NO mapping is hidden from every form.
-                    </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} Refresh
-                    </button>
-                    <button className="btn" onClick={grantAll} style={{ background: '#0f766e' }}>
-                        Grant ALL to ALL (bootstrap)
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="Party ↔ Business Access"
+                subtitle="Control which parties appear in each module's picker. A party with NO mapping is hidden from every form."
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} Refresh
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-primary" onClick={grantAll}>
+                            Grant ALL to ALL (bootstrap)
+                        </button>
+                    </>
+                }
+            />
 
             <div className="card">
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
