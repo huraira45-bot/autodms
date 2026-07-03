@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import NewComplaintModal from '../components/NewComplaintModal';
 import { ErpControlPanel } from '../components/erp';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE = '/api';
 
@@ -53,6 +54,14 @@ function KPI({ label, value, icon: Icon, color }) {
 
 export default function CROWorkspace() {
     const navigate = useNavigate();
+    const { hasModule } = useAuth();
+    // Owner ask 2026-07-04: an advisor with only cro_dept_responder must
+    // not see the "New Complaint" button, must not see other people's
+    // cases, and the "Assigned to me" toggle becomes redundant (server
+    // already scopes them). The CRO desk (cro_workspace) + admin retain
+    // the full toolset.
+    const isDesk          = hasModule('cro_workspace') || hasModule('cro_admin');
+    const isResponderOnly = !isDesk && hasModule('cro_dept_responder');
     const [rows, setRows] = useState([]);
     const [stats, setStats] = useState({});
     const [statusFilter, setStatusFilter] = useState('');
@@ -102,16 +111,24 @@ export default function CROWorkspace() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ErpControlPanel
-                title="CRO Workspace"
-                subtitle="Complaint queue — department resolves → WhatsApp proof → CRO verifies → close or re-escalate."
+                title={isResponderOnly ? 'My Complaints' : 'CRO Workspace'}
+                subtitle={
+                    isResponderOnly
+                        ? 'Complaints routed to you — mark resolved, upload WhatsApp proof, add notes.'
+                        : 'Complaint queue — department resolves → WhatsApp proof → CRO verifies → close or re-escalate.'
+                }
                 actions={
                     <>
                         <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
                             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         </button>
-                        <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowNew(true)}>
-                            <Plus size={14} /> New Complaint
-                        </button>
+                        {/* CRO desk / admin can file new complaints. Advisors
+                            with only cro_dept_responder do not get this button. */}
+                        {isDesk && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowNew(true)}>
+                                <Plus size={14} /> New Complaint
+                            </button>
+                        )}
                     </>
                 }
             />
@@ -145,19 +162,24 @@ export default function CROWorkspace() {
                     <option value="ReOpened">Re-Opened</option>
                     <option value="Closed">Closed</option>
                 </select>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={assignedToMe} onChange={e => setAssignedToMe(e.target.checked)} />
-                    Assigned to me
-                </label>
-                {/* Owner ask 2026-07-04: department managers see their whole
-                    department's queue by default; hidden for non-managers so
-                    only their own cases are visible. */}
-                {scope.isManager && (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}
-                        title="Every complaint routed to a department you manage">
-                        <input type="checkbox" checked={myDept} onChange={e => setMyDept(e.target.checked)} />
-                        My Department
-                    </label>
+                {/* For a responder-only user the server already restricts
+                    the list to (assigned to me OR my managed departments),
+                    so these toggles would just look like they can widen
+                    the scope. Hide them entirely for that role. */}
+                {!isResponderOnly && (
+                    <>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={assignedToMe} onChange={e => setAssignedToMe(e.target.checked)} />
+                            Assigned to me
+                        </label>
+                        {scope.isManager && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}
+                                title="Every complaint routed to a department you manage">
+                                <input type="checkbox" checked={myDept} onChange={e => setMyDept(e.target.checked)} />
+                                My Department
+                            </label>
+                        )}
+                    </>
                 )}
                 <div style={{ marginLeft: 'auto', color: '#64748b', fontSize: '0.85rem' }}>{rows.length} complaints</div>
             </div>

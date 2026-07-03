@@ -111,6 +111,31 @@ exports.list = async (req, res) => {
             r.input('q', sql.NVarChar(200), `%${req.query.search}%`);
             conds.push(`(c.ComplaintNo LIKE @q OR c.Subject LIKE @q OR c.ContactName LIKE @q OR c.ContactPhone LIKE @q)`);
         }
+
+        // Owner ask 2026-07-04: a user whose ONLY CRO permission is
+        // `cro_dept_responder` (advisor / department worker) must never
+        // see complaints outside their scope, regardless of what filters
+        // the client sends. CRO desk (cro_workspace) and admin see
+        // everything as before. This is a server-side hard limit — URL
+        // manipulation can't bypass it.
+        const mods = req.user?.modules || [];
+        const isDesk        = mods.includes('cro_workspace') || mods.includes('cro_admin');
+        const isResponderOnly = !isDesk && mods.includes('cro_dept_responder');
+        if (isResponderOnly) {
+            const empId   = req.user?.employeeId || null;
+            const managed = await getManagedDepartmentIds(empId);
+            const orParts = [];
+            if (empId) {
+                r.input('respMe', sql.Int, empId);
+                orParts.push('c.AssignedEmployeeID = @respMe');
+            }
+            if (managed.length) {
+                orParts.push(`c.AssignedDepartmentID IN (${managed.map(id => parseInt(id)).join(',')})`);
+            }
+            // If the user has neither a linked employee nor a managed
+            // department, they get zero rows.
+            conds.push(orParts.length ? `(${orParts.join(' OR ')})` : '1 = 0');
+        }
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
         const result = await r.query(`
@@ -204,6 +229,23 @@ exports.get = async (req, res) => {
                 WHERE c.ComplaintID = @id
             `);
         if (!hdr.recordset.length) return res.status(404).json({ error: 'Complaint not found' });
+
+        // Owner ask 2026-07-04: match the list-endpoint scope guard — a
+        // responder-only user must not open a complaint outside their
+        // scope even by URL. 404 (not 403) so they can't confirm the
+        // complaint exists.
+        const modsG = req.user?.modules || [];
+        const isDeskG        = modsG.includes('cro_workspace') || modsG.includes('cro_admin');
+        const isResponderOnlyG = !isDeskG && modsG.includes('cro_dept_responder');
+        if (isResponderOnlyG) {
+            const row = hdr.recordset[0];
+            const empIdG   = req.user?.employeeId || null;
+            const managedG = await getManagedDepartmentIds(empIdG);
+            const inScope =
+                (empIdG && row.AssignedEmployeeID === empIdG) ||
+                (row.AssignedDepartmentID && managedG.includes(row.AssignedDepartmentID));
+            if (!inScope) return res.status(404).json({ error: 'Complaint not found' });
+        }
 
         const actions = await pool.request()
             .input('id', sql.Int, id)
