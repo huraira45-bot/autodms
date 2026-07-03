@@ -101,6 +101,7 @@ const SECTIONS = [
         name: 'REPORTS — FINANCIAL',
         items: [
             { key: 'report:trial_balance',         label: 'Trial Balance',         kind: 'report' },
+            { key: 'report:trial_balance_extract', label: 'Trial Balance Extract', kind: 'report' },
             { key: 'report:gl_detail',             label: 'GL Detail',             kind: 'report' },
             { key: 'report:customer_statement',    label: 'Customer Statement',    kind: 'report' },
             { key: 'report:supplier_statement',    label: 'Supplier Statement',    kind: 'report' },

@@ -88,6 +88,108 @@ exports.getTrialBalance = async (req, res) => {
 };
 
 /**
+ * GET /reports/trial-balance-extract?from=YYYY-MM-DD&to=YYYY-MM-DD
+ *
+ * Movement extract — for each leaf account with any activity in the period
+ * (or a non-zero opening balance):
+ *   OpeningDr, OpeningCr : net balance BEFORE from-date, split by direction
+ *   PeriodDr,  PeriodCr  : sum of Dr / Cr postings BETWEEN from and to
+ *   ClosingDr, ClosingCr : net balance AS-OF to-date, split by direction
+ *
+ * Owner request 2026-07-03 — the classic six-column TB extract used for
+ * audit / handover to the accountant. Only accounts that actually moved
+ * (opening or period) show up.
+ */
+exports.getTrialBalanceExtract = async (req, res) => {
+    try {
+        const fromRaw = req.query.from ? new Date(req.query.from) : new Date(new Date().getFullYear(), 0, 1);
+        const toRaw   = req.query.to   ? new Date(req.query.to)   : new Date();
+        const from = new Date(fromRaw); from.setHours(0, 0, 0, 0);
+        const to   = endOfDay(toRaw);
+
+        const pool = await getPool();
+        const result = await pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to)
+            .query(`
+                WITH opening AS (
+                    SELECT d.GLCAID,
+                           ISNULL(SUM(d.Debit),  0) - ISNULL(SUM(d.Credit), 0) AS OpeningNetDr
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.VoucherDate < @from
+                    GROUP BY d.GLCAID
+                ),
+                period AS (
+                    SELECT d.GLCAID,
+                           ISNULL(SUM(d.Debit),  0) AS PeriodDr,
+                           ISNULL(SUM(d.Credit), 0) AS PeriodCr
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.VoucherDate BETWEEN @from AND @to
+                    GROUP BY d.GLCAID
+                )
+                SELECT c.GLCAID, c.GLCode, c.GLTitle,
+                       CASE c.GLNature WHEN 1 THEN 'Debit' ELSE 'Credit' END AS Nature,
+                       LEFT(c.GLCode, 1) AS ClassRoot,
+                       ISNULL(o.OpeningNetDr, 0) AS OpeningNetDr,
+                       ISNULL(p.PeriodDr, 0)     AS PeriodDr,
+                       ISNULL(p.PeriodCr, 0)     AS PeriodCr,
+                       ISNULL(o.OpeningNetDr, 0) + ISNULL(p.PeriodDr, 0) - ISNULL(p.PeriodCr, 0)
+                                                 AS ClosingNetDr
+                FROM GLChartOFAccount c
+                LEFT JOIN opening o ON o.GLCAID = c.GLCAID
+                LEFT JOIN period  p ON p.GLCAID = c.GLCAID
+                WHERE c.Status = 1 AND c.isParent = 0
+                  AND (ABS(ISNULL(o.OpeningNetDr, 0)) > 0.005
+                    OR ISNULL(p.PeriodDr, 0) > 0.005
+                    OR ISNULL(p.PeriodCr, 0) > 0.005)
+                ORDER BY c.GLCode
+            `);
+
+        // Split each NetDr into (Dr, Cr) columns for display.
+        const rows = result.recordset.map(r => {
+            const open  = Number(r.OpeningNetDr) || 0;
+            const close = Number(r.ClosingNetDr) || 0;
+            return {
+                GLCAID:    r.GLCAID,
+                GLCode:    r.GLCode,
+                GLTitle:   r.GLTitle,
+                Nature:    r.Nature,
+                ClassRoot: r.ClassRoot,
+                OpeningDr: +Math.max(open,  0).toFixed(2),
+                OpeningCr: +Math.max(-open, 0).toFixed(2),
+                PeriodDr:  +Number(r.PeriodDr).toFixed(2),
+                PeriodCr:  +Number(r.PeriodCr).toFixed(2),
+                ClosingDr: +Math.max(close,  0).toFixed(2),
+                ClosingCr: +Math.max(-close, 0).toFixed(2),
+            };
+        });
+
+        const totals = {
+            openingDr: +rows.reduce((s, r) => s + r.OpeningDr, 0).toFixed(2),
+            openingCr: +rows.reduce((s, r) => s + r.OpeningCr, 0).toFixed(2),
+            periodDr:  +rows.reduce((s, r) => s + r.PeriodDr,  0).toFixed(2),
+            periodCr:  +rows.reduce((s, r) => s + r.PeriodCr,  0).toFixed(2),
+            closingDr: +rows.reduce((s, r) => s + r.ClosingDr, 0).toFixed(2),
+            closingCr: +rows.reduce((s, r) => s + r.ClosingCr, 0).toFixed(2),
+        };
+
+        res.json({
+            from: fromRaw.toISOString().slice(0, 10),
+            to:   toRaw.toISOString().slice(0, 10),
+            rows,
+            totals,
+        });
+    } catch (err) {
+        console.error('Trial Balance Extract error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
  * GET /reports/gl-detail?glcaid=...&from=YYYY-MM-DD&to=YYYY-MM-DD
  *
  * One row per voucher-detail line on the chosen account, oldest first, with a

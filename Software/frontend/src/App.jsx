@@ -54,6 +54,7 @@ import BankAccounts       from './pages/BankAccounts';
 import CRDFollowUps       from './pages/CRDFollowUps';
 import VoucherBrowser     from './pages/VoucherBrowser';
 import TrialBalance       from './pages/TrialBalance';
+import TrialBalanceExtract from './pages/reports/TrialBalanceExtract';
 import GLDetail           from './pages/GLDetail';
 import PartyStatement     from './pages/PartyStatement';
 import DailyCashBook      from './pages/DailyCashBook';
@@ -388,6 +389,7 @@ function Sidebar({ onOpenCommand }) {
                     <div className="nav-section">ACCOUNT REPORTS</div>
                 )}
                 {canReport('trial_balance')         && <NavLink to="/reports/trial-balance"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><FileBarChart size={20} /> Trial Balance</NavLink>}
+                {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
                 {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
                 {canReport('pnl')                   && <NavLink to="/reports/pnl"                className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Profit &amp; Loss</NavLink>}
                 {canReport('balance_sheet')         && <NavLink to="/reports/balance-sheet"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Balance Sheet</NavLink>}
@@ -745,6 +747,9 @@ function AppShell() {
                     } />
                     <Route path="/reports/trial-balance" element={
                         <ProtectedRoute moduleKey="reports"><TrialBalance /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/trial-balance-extract" element={
+                        <ProtectedRoute moduleKey="reports"><TrialBalanceExtract /></ProtectedRoute>
                     } />
                     <Route path="/reports/gl-detail" element={
                         <ProtectedRoute moduleKey="reports"><GLDetail /></ProtectedRoute>

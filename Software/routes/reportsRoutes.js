@@ -6,6 +6,7 @@ const { requireAccess, requireAnyAccess } = require('../middleware/permissions')
 // Each report is its own permission key (report:<slug>). See config/permissions.js.
 
 router.get('/trial-balance',          requireAccess('report:trial_balance'),         reports.getTrialBalance);
+router.get('/trial-balance-extract',  requireAccess('report:trial_balance_extract'), reports.getTrialBalanceExtract);
 router.get('/gl-detail',              requireAccess('report:gl_detail'),             reports.getGLDetail);
 router.get('/customer-statement',     requireAccess('report:customer_statement'),    reports.getCustomerStatement);
 router.get('/supplier-statement',     requireAccess('report:supplier_statement'),    reports.getSupplierStatement);
