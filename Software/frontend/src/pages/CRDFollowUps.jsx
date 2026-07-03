@@ -384,7 +384,7 @@ export default function CRDFollowUps() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ErpControlPanel
                 title="CRD Follow-Ups"
-                subtitle="Customer satisfaction queue — auto-created when a Job Card is finalized (due 4 days later)."
+                subtitle="Customer satisfaction queue — auto-created when a Job Card is finalized (due 2 days after JC close)."
                 actions={
                     <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}

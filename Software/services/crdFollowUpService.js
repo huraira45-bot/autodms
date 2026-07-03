@@ -9,10 +9,12 @@
  */
 const { sql, getPool } = require('../config/db');
 
-// Owner ask 2026-07-04: give the customer a few days after delivery to
-// use the service before the CRD call — a next-day call feels intrusive.
-// Deadline now starts 4 days after JC finalization.
-const DEFAULT_FOLLOWUP_DAYS = 4;
+// Owner ask 2026-07-04 (revised): due date = JC.FinalizedAt + 2 days.
+// Example given: JC closed 7/1 → follow-up due 7/3. Combined with the
+// 3-day overdue grace (see crdController.OVERDUE_GRACE_DAYS), that gives
+// a 5-day window before the row flags red — enough time for the customer
+// to actually drive the vehicle before CRD calls to check on issues.
+const DEFAULT_FOLLOWUP_DAYS = 2;
 
 async function createFollowUpForJobCard(jobCardId, userInfo) {
     try {
@@ -36,6 +38,11 @@ async function createFollowUpForJobCard(jobCardId, userInfo) {
         if (!r.recordset.length) return null;
         const jc = r.recordset[0];
 
+        // Anchor DueDate on JC.FinalizedAt (not "now") so backfills, retries
+        // and cron re-runs always yield the same "finalize + N days" date.
+        const finalizedAt = jc.FinalizedAt ? new Date(jc.FinalizedAt) : new Date();
+        const dueDate     = new Date(finalizedAt.getTime() + DEFAULT_FOLLOWUP_DAYS * 24 * 60 * 60 * 1000);
+
         const result = await pool.request()
             .input('jcId',          sql.Int,           jc.JobCardId)
             .input('partyId',       sql.Int,           jc.PartyID || null)
@@ -43,7 +50,7 @@ async function createFollowUpForJobCard(jobCardId, userInfo) {
             .input('custName',      sql.NVarChar(200), jc.CustomerName || 'Walk-in')
             .input('phone',         sql.NVarChar(50),  jc.PhoneOne || null)
             .input('vehReg',        sql.NVarChar(50),  jc.VehicleRegNo || null)
-            .input('dueDate',       sql.Date,          new Date(Date.now() + DEFAULT_FOLLOWUP_DAYS * 24 * 60 * 60 * 1000))
+            .input('dueDate',       sql.Date,          dueDate)
             .input('createdBy',     sql.Int,           userInfo?.userId || null)
             .input('createdByName', sql.NVarChar(100), userInfo?.userName || 'system')
             .query(`
