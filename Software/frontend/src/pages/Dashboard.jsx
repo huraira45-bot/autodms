@@ -1,302 +1,267 @@
+/**
+ * Dashboard — Odoo-style ERP app launcher + daily work queue.
+ * Owner ask 2026-07-03: dense desktop dashboard, no hero sections.
+ *
+ * Layout (1366×768 optimised):
+ *   Row 1  Control panel (greeting + quick-nav search + counters)
+ *   Row 2  App tiles grid (RBAC-filtered)
+ *   Row 3  Two-column work queue (Service desk / Cash & stock / CRO)
+ *   Row 4  Right column: Birthdays + Report shortcuts
+ */
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Activity,
-  ArrowRight,
-  Cake,
-  ClipboardList,
-  CreditCard,
-  Headphones,
-  Package,
-  Receipt,
-  Search,
-  ShieldCheck,
-  ShoppingCart,
-  Wrench,
-} from 'lucide-react';
 import axios from 'axios';
+import {
+    Wrench, ClipboardList, Activity, Package, ShoppingCart, Receipt, CreditCard,
+    Headphones, ShieldCheck, Car, FileBarChart, Landmark, Cake, Users, ArrowRight,
+    Bell, Layers, Truck, TrendingUp,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ErpControlPanel, ErpPanel, ErpEmptyState, ErpStatusPill } from '../components/erp';
 
 const API = '/api/workshop';
 
-const ACTIONS = [
-  {
-    title: 'Create Job Card',
-    detail: 'Open a service visit and start RO work.',
-    to: '/workshop/jobs/new',
-    icon: Wrench,
-    moduleKey: 'workshop_jobs',
-    tone: 'blue',
-  },
-  {
-    title: 'Search Job Cards',
-    detail: 'Find active, draft, or finalized service work.',
-    to: '/workshop/jobs',
-    icon: ClipboardList,
-    moduleKey: 'workshop_jobs',
-    tone: 'indigo',
-  },
-  {
-    title: 'Job Controller',
-    detail: 'Track bay, technician, and job progress.',
-    to: '/workshop/controller',
-    icon: Activity,
-    moduleKey: 'workshop_controller',
-    tone: 'green',
-  },
-  {
-    title: 'Issue Parts',
-    detail: 'Post parts consumption against a job card.',
-    to: '/parts-issue',
-    icon: Package,
-    moduleKey: 'workshop_parts_issue',
-    tone: 'amber',
-  },
-  {
-    title: 'Receiving (GRN)',
-    detail: 'Record supplier receiving and landed cost.',
-    to: '/grn',
-    icon: ShoppingCart,
-    moduleKey: 'procurement_grn',
-    tone: 'teal',
-  },
-  {
-    title: 'Receive Payment',
-    detail: 'Collect customer payment and post the voucher.',
-    to: '/payments/receive',
-    icon: Receipt,
-    moduleKey: 'payments',
-    tone: 'emerald',
-  },
-  {
-    title: 'POS Settlement',
-    detail: 'Clear card collections into bank receipts.',
-    to: '/payments/pos-settlement',
-    icon: CreditCard,
-    moduleKey: 'payments',
-    tone: 'violet',
-  },
-  {
-    title: 'CRO Workspace',
-    detail: 'Handle complaints, follow-ups, and escalations.',
-    to: '/cro/workspace',
-    icon: Headphones,
-    moduleKey: 'cro_workspace',
-    tone: 'rose',
-  },
-  {
-    title: 'Sales Bookings',
-    detail: 'Review vehicle bookings and pending actions.',
-    to: '/sales/bookings',
-    icon: ShieldCheck,
-    anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'],
-    tone: 'slate',
-  },
+// App tiles — RBAC-filtered launcher grid.
+const APP_TILES = [
+    { name: 'Job Cards',       desc: 'Open + finalize workshop jobs', icon: Wrench,        tone: 'plum',  to: '/workshop/jobs',              moduleKey: 'workshop_jobs' },
+    { name: 'New Job Card',    desc: 'Start a new RO',               icon: ClipboardList, tone: 'plum',  to: '/workshop/jobs/new',          moduleKey: 'workshop_jobs' },
+    { name: 'Parts Issue',     desc: 'Consume parts on a JC',        icon: Package,       tone: 'amber', to: '/parts-issue',                moduleKey: 'workshop_parts_issue' },
+    { name: 'Spare Parts',     desc: 'Catalog + stock levels',       icon: Layers,        tone: 'amber', to: '/parts',                      moduleKey: 'parts_spare' },
+    { name: 'GRN',             desc: 'Supplier receiving',           icon: Truck,         tone: 'teal',  to: '/grn',                        moduleKey: 'procurement_grn' },
+    { name: 'Store Sale',      desc: 'Counter parts sale',           icon: ShoppingCart,  tone: 'teal',  to: '/store-sale',                 moduleKey: 'sales_store' },
+    { name: 'Receive Payment', desc: 'Customer receipt',             icon: Receipt,       tone: 'green', to: '/payments/receive',           moduleKey: 'payments' },
+    { name: 'Make Payment',    desc: 'Supplier/staff payment',       icon: CreditCard,    tone: 'green', to: '/payments/make',              moduleKey: 'payments' },
+    { name: 'Chart of Accts',  desc: 'GL accounts + hierarchy',      icon: Landmark,      tone: 'steel', to: '/coa',                        moduleKey: 'finance_coa' },
+    { name: 'Vouchers',        desc: 'CPV / CRV / BPV / BRV / JV',   icon: FileBarChart,  tone: 'steel', to: '/vouchers/browse',            moduleKey: 'finance_vouchers' },
+    { name: 'Customers',       desc: 'Parties + statements',         icon: Users,         tone: 'plum',  to: '/customers',                  moduleKey: 'crm_parties' },
+    { name: 'CRO Desk',        desc: 'Complaints + follow-ups',      icon: Headphones,    tone: 'red',   to: '/cro/workspace',              moduleKey: 'cro_workspace' },
+    { name: 'Bookings',        desc: 'New vehicle sales',            icon: Car,           tone: 'plum',  to: '/sales/bookings',             anyModules: ['sales_executive','sales_agm','sales_gm','sales_reports'] },
+    { name: 'Bay Controller',  desc: 'Workshop bay board',           icon: Activity,      tone: 'teal',  to: '/workshop/controller',        moduleKey: 'workshop_controller' },
+    { name: 'Reports',         desc: 'Trial Balance, revenue…',      icon: TrendingUp,    tone: 'steel', to: '/reports/trial-balance',      moduleKey: 'reports' },
+    { name: 'Unfinalize',      desc: 'Approval workflow',            icon: ShieldCheck,   tone: 'amber', to: '/unfinalize-requests',        anyModules: ['am_approve','admin_unfinalize'] },
 ];
 
 const WORK_AREAS = [
-  {
-    title: 'Service Desk',
-    items: [
-      { label: 'Open job cards', to: '/workshop/jobs', moduleKey: 'workshop_jobs' },
-      { label: 'Bay controller', to: '/workshop/controller', moduleKey: 'workshop_controller' },
-      { label: 'Service campaigns', to: '/workshop/campaigns', moduleKey: 'workshop_settings' },
-    ],
-  },
-  {
-    title: 'Cash & Stock',
-    items: [
-      { label: 'Receive payments', to: '/payments/receive', moduleKey: 'payments' },
-      { label: 'GRN receiving', to: '/grn', moduleKey: 'procurement_grn' },
-      { label: 'Stock movement', to: '/reports/parts/stock-movement', anyModules: ['parts_spare', 'inventory_settings', 'reports'] },
-    ],
-  },
-  {
-    title: 'Customer Follow-Up',
-    items: [
-      { label: 'CRD follow-ups', to: '/crd/follow-ups', moduleKey: 'crd_followups' },
-      { label: 'CRO complaints', to: '/cro/workspace', moduleKey: 'cro_workspace' },
-      { label: 'Service reminders', to: '/cro/reminders', anyModules: ['cro_workspace', 'cro_admin', 'cro_reports'] },
-    ],
-  },
+    {
+        title: 'Service Desk', icon: Wrench,
+        items: [
+            { label: 'Open job cards',    to: '/workshop/jobs',              moduleKey: 'workshop_jobs' },
+            { label: 'Bay controller',    to: '/workshop/controller',        moduleKey: 'workshop_controller' },
+            { label: 'Vehicle history',   to: '/workshop/vehicle-history',   moduleKey: 'workshop_jobs' },
+            { label: 'Service campaigns', to: '/workshop/campaigns',         moduleKey: 'workshop_settings' },
+        ],
+    },
+    {
+        title: 'Cash & Stock', icon: Layers,
+        items: [
+            { label: 'Receive payments',  to: '/payments/receive',                                            moduleKey: 'payments' },
+            { label: 'GRN receiving',     to: '/grn',                                                         moduleKey: 'procurement_grn' },
+            { label: 'Store sale',        to: '/store-sale',                                                  moduleKey: 'sales_store' },
+            { label: 'Stock movement',    to: '/reports/parts/stock-movement', anyModules: ['parts_spare','inventory_settings','reports'] },
+        ],
+    },
+    {
+        title: 'Customer Follow-Up', icon: Headphones,
+        items: [
+            { label: 'CRD follow-ups',    to: '/crd/follow-ups',   moduleKey: 'crd_followups' },
+            { label: 'CRO complaints',    to: '/cro/workspace',    moduleKey: 'cro_workspace' },
+            { label: 'Service reminders', to: '/cro/reminders',    anyModules: ['cro_workspace','cro_admin','cro_reports'] },
+            { label: 'Sales inquiries',   to: '/cro/inquiries',    moduleKey: 'cro_admin' },
+        ],
+    },
+];
+
+const REPORT_SHORTCUTS = [
+    { label: 'Trial Balance',     to: '/reports/trial-balance',                moduleKey: 'reports' },
+    { label: 'Job Card Register', to: '/reports/service/job-card-register',    anyModules: ['workshop_jobs','reports'] },
+    { label: 'Inventory On-Hand', to: '/reports/inventory-valuation',          anyModules: ['parts_spare','inventory_settings','reports'] },
+    { label: 'Parts Issued to JC',to: '/reports/parts/issued-to-jc',           anyModules: ['workshop_parts_issue','reports'] },
+    { label: 'Booking Register',  to: '/reports/sales/booking-register',      anyModules: ['sales_executive','sales_agm','sales_gm','sales_reports'] },
 ];
 
 function canUse(item, hasModule) {
-  if (item.moduleKey && !hasModule(item.moduleKey)) return false;
-  if (item.anyModules && !item.anyModules.some(hasModule)) return false;
-  return true;
-}
-
-function ActionCard({ action }) {
-  const Icon = action.icon;
-  return (
-    <Link to={action.to} className={`workspace-action tone-${action.tone}`}>
-      <span className="workspace-action-icon"><Icon size={22} /></span>
-      <span className="workspace-action-body">
-        <strong>{action.title}</strong>
-        <small>{action.detail}</small>
-      </span>
-      <ArrowRight size={17} />
-    </Link>
-  );
-}
-
-function WorkArea({ area, hasModule }) {
-  const items = area.items.filter(item => canUse(item, hasModule));
-  if (!items.length) return null;
-
-  return (
-    <section className="work-area">
-      <h2>{area.title}</h2>
-      <div className="work-area-links">
-        {items.map(item => (
-          <Link key={item.to} to={item.to}>
-            <span>{item.label}</span>
-            <ArrowRight size={15} />
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function BirthdayList({ birthdays }) {
-  const today = birthdays.filter(b => b.IsToday);
-  const upcoming = birthdays.filter(b => !b.IsToday);
-
-  if (!birthdays.length) {
-    return (
-      <div className="empty-state compact">
-        <Cake size={20} />
-        <strong>No customer birthdays this week</strong>
-      </div>
-    );
-  }
-
-  return (
-    <div className="birthday-list">
-      {today.length > 0 && (
-        <div className="birthday-group">
-          <div className="birthday-heading">Today</div>
-          {today.map(b => <BirthdayRow key={b.ProfileID} birthday={b} highlight />)}
-        </div>
-      )}
-      {upcoming.length > 0 && (
-        <div className="birthday-group">
-          {today.length > 0 && <div className="birthday-heading muted">Upcoming</div>}
-          {upcoming.map(b => <BirthdayRow key={b.ProfileID} birthday={b} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BirthdayRow({ birthday, highlight = false }) {
-  const dobDate = new Date(birthday.DOB);
-  const label = Number.isNaN(dobDate.getTime())
-    ? ''
-    : `${dobDate.toLocaleString('default', { month: 'short' })} ${dobDate.getDate()}`;
-
-  return (
-    <div className={`birthday-row ${highlight ? 'highlight' : ''}`}>
-      <span className="avatar-circle">{(birthday.CustomerName || '?').charAt(0).toUpperCase()}</span>
-      <span>
-        <strong>{birthday.CustomerName}</strong>
-        <small>{birthday.PhoneNo || 'No phone'}</small>
-      </span>
-      <em>{highlight ? 'Today' : label}</em>
-    </div>
-  );
+    if (item.moduleKey && !hasModule(item.moduleKey)) return false;
+    if (item.anyModules && !item.anyModules.some(hasModule)) return false;
+    return true;
 }
 
 export default function Dashboard() {
-  const { user, hasModule } = useAuth();
-  const [birthdays, setBirthdays] = useState([]);
-  const [birthdayError, setBirthdayError] = useState('');
+    const { user, hasModule } = useAuth();
+    const [birthdays, setBirthdays] = useState([]);
+    const [birthdayError, setBirthdayError] = useState('');
 
-  useEffect(() => {
-    axios.get(`${API}/birthdays`)
-      .then(r => {
-        setBirthdays(Array.isArray(r.data) ? r.data : []);
-        setBirthdayError('');
-      })
-      .catch(() => setBirthdayError('Birthdays could not be loaded.'));
-  }, []);
+    useEffect(() => {
+        axios.get(`${API}/birthdays`)
+            .then(r => { setBirthdays(Array.isArray(r.data) ? r.data : []); setBirthdayError(''); })
+            .catch(() => setBirthdayError('Birthdays could not be loaded.'));
+    }, []);
 
-  const visibleActions = useMemo(
-    () => ACTIONS.filter(action => canUse(action, hasModule)).slice(0, 8),
-    [hasModule]
-  );
+    const visibleTiles = useMemo(
+        () => APP_TILES.filter(t => canUse(t, hasModule)),
+        [hasModule]
+    );
 
-  return (
-    <div className="dashboard-workspace">
-      <section className="dashboard-hero">
+    const todayLabel = new Intl.DateTimeFormat('en-PK', {
+        weekday: 'long', day: '2-digit', month: 'short', year: 'numeric',
+    }).format(new Date());
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <ErpControlPanel
+                title={`Welcome${user?.userName ? `, ${user.userName}` : ''}`}
+                subtitle={`${todayLabel} · ${user?.groupTitle || 'User'}`}
+                actions={
+                    <>
+                        <Link to="/workshop/jobs/new" className="erp-btn erp-btn-primary">
+                            <Wrench size={14} /> New Job Card
+                        </Link>
+                        <Link to="/store-sale" className="erp-btn">
+                            <ShoppingCart size={14} /> Counter Sale
+                        </Link>
+                    </>
+                }
+            />
+
+            {visibleTiles.length === 0 ? (
+                <ErpEmptyState
+                    icon={ShieldCheck}
+                    title="No modules assigned"
+                    message="Ask an administrator to assign the modules for your daily work."
+                />
+            ) : (
+                <ErpPanel title={<><Layers size={13} /> Applications <span className="count">{visibleTiles.length}</span></>}>
+                    <div className="erp-tile-grid">
+                        {visibleTiles.map(t => {
+                            const Icon = t.icon;
+                            return (
+                                <Link key={t.to} to={t.to} className="erp-tile">
+                                    <div className={`icon tone-${t.tone}`}><Icon size={18} /></div>
+                                    <div className="name">{t.name}</div>
+                                    <div className="desc">{t.desc}</div>
+                                </Link>
+                            );
+                        })}
+                    </div>
+                </ErpPanel>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                    {WORK_AREAS.map(area => (
+                        <WorkArea key={area.title} area={area} hasModule={hasModule} />
+                    ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <ErpPanel title={<><Cake size={13} /> Customer Birthdays <span className="count">{birthdays.length}</span></>}>
+                        {birthdayError ? (
+                            <div className="erp-alert danger">{birthdayError}</div>
+                        ) : (
+                            <BirthdayList birthdays={birthdays} />
+                        )}
+                    </ErpPanel>
+
+                    <ErpPanel title={<><FileBarChart size={13} /> Reports</>}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            {REPORT_SHORTCUTS.filter(r => canUse(r, hasModule)).map(r => (
+                                <Link key={r.to} to={r.to}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        padding: '6px 4px', borderBottom: '1px solid var(--erp-border)',
+                                        color: 'var(--erp-text)', textDecoration: 'none', fontSize: 12.5,
+                                    }}>
+                                    {r.label}
+                                    <ArrowRight size={13} style={{ color: 'var(--erp-text-muted)' }} />
+                                </Link>
+                            ))}
+                        </div>
+                    </ErpPanel>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function WorkArea({ area, hasModule }) {
+    const items = area.items.filter(item => canUse(item, hasModule));
+    if (!items.length) return null;
+    const Icon = area.icon;
+
+    return (
+        <ErpPanel title={<><Icon size={13} /> {area.title} <span className="count">{items.length}</span></>}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {items.map(item => (
+                    <Link key={item.to} to={item.to}
+                        style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '6px 4px', borderBottom: '1px solid var(--erp-border)',
+                            color: 'var(--erp-text)', textDecoration: 'none', fontSize: 12.5,
+                        }}>
+                        <span>{item.label}</span>
+                        <ArrowRight size={13} style={{ color: 'var(--erp-text-muted)' }} />
+                    </Link>
+                ))}
+            </div>
+        </ErpPanel>
+    );
+}
+
+function BirthdayList({ birthdays }) {
+    const today = birthdays.filter(b => b.IsToday);
+    const upcoming = birthdays.filter(b => !b.IsToday);
+
+    if (!birthdays.length) {
+        return (
+            <div style={{ padding: '12px 4px', fontSize: 12, color: 'var(--erp-text-muted)', textAlign: 'center' }}>
+                No customer birthdays this week.
+            </div>
+        );
+    }
+
+    const row = (b, highlight = false) => {
+        const dobDate = new Date(b.DOB);
+        const label = Number.isNaN(dobDate.getTime())
+            ? ''
+            : `${dobDate.toLocaleString('default', { month: 'short' })} ${dobDate.getDate()}`;
+        return (
+            <div key={b.ProfileID} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 4px', borderBottom: '1px solid var(--erp-border)',
+            }}>
+                <span style={{
+                    width: 24, height: 24, borderRadius: '50%',
+                    background: highlight ? 'var(--erp-brand)' : 'var(--erp-surface-alt)',
+                    color: highlight ? 'white' : 'var(--erp-text-muted)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 600, flexShrink: 0,
+                }}>{(b.CustomerName || '?').charAt(0).toUpperCase()}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--erp-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.CustomerName}</div>
+                    <div style={{ fontSize: 11, color: 'var(--erp-text-muted)' }}>{b.PhoneNo || 'No phone'}</div>
+                </div>
+                {highlight
+                    ? <ErpStatusPill tone="plum">Today</ErpStatusPill>
+                    : <span style={{ fontSize: 11, color: 'var(--erp-text-muted)' }}>{label}</span>}
+            </div>
+        );
+    };
+
+    return (
         <div>
-          <p className="eyebrow">Daily workspace</p>
-          <h1 className="page-title">Good work starts here{user?.userName ? `, ${user.userName}` : ''}</h1>
-          <p className="page-subtitle">Open the next transaction, queue, or report without hunting through menus.</p>
+            {today.length > 0 && (
+                <>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--erp-brand)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 2px' }}>Today</div>
+                    {today.map(b => row(b, true))}
+                </>
+            )}
+            {upcoming.length > 0 && (
+                <>
+                    {today.length > 0 && (
+                        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--erp-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '6px 0 2px' }}>Upcoming</div>
+                    )}
+                    {upcoming.map(b => row(b))}
+                </>
+            )}
         </div>
-        <Link to="/workshop/jobs" className="hero-search-link">
-          <Search size={18} />
-          <span>Find job cards</span>
-        </Link>
-      </section>
-
-      {visibleActions.length > 0 ? (
-        <section className="workspace-actions-grid" aria-label="Priority actions">
-          {visibleActions.map(action => <ActionCard key={action.to} action={action} />)}
-        </section>
-      ) : (
-        <div className="empty-state">
-          <ShieldCheck size={24} />
-          <strong>No workspace shortcuts for this role</strong>
-          <span>Ask an administrator to assign modules for your daily work.</span>
-        </div>
-      )}
-
-      <section className="work-area-grid">
-        {WORK_AREAS.map(area => <WorkArea key={area.title} area={area} hasModule={hasModule} />)}
-      </section>
-
-      <section className="dashboard-panel-grid">
-        <div className="dashboard-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Customer care</p>
-              <h2>Birthdays</h2>
-            </div>
-            <Cake size={21} />
-          </div>
-          {birthdayError ? (
-            <div className="inline-warning">{birthdayError}</div>
-          ) : (
-            <BirthdayList birthdays={birthdays} />
-          )}
-        </div>
-
-        <div className="dashboard-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Fast paths</p>
-              <h2>Reports</h2>
-            </div>
-            <ClipboardList size={21} />
-          </div>
-          <div className="report-shortcuts">
-            {[
-              { label: 'Trial Balance', to: '/reports/trial-balance', moduleKey: 'reports' },
-              { label: 'Inventory On-Hand', to: '/reports/inventory-valuation', anyModules: ['parts_spare', 'inventory_settings', 'reports'] },
-              { label: 'Service Revenue', to: '/reports/service/revenue-summary', anyModules: ['workshop_jobs', 'workshop_labour', 'reports'] },
-              { label: 'Booking Register', to: '/reports/sales/booking-register', anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'] },
-            ].filter(item => canUse(item, hasModule)).map(item => (
-              <Link key={item.to} to={item.to}>
-                {item.label}
-                <ArrowRight size={15} />
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
+    );
 }

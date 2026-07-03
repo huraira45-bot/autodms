@@ -15,6 +15,9 @@ import {
 // renders the header when at least one child is actually going to show
 // (children that would evaluate to falsy are automatically filtered).
 // Owner ask 2026-07-03.
+// Odoo-style collapsible sidebar section. Open state persists per-title in
+// localStorage. Auto-hides if no children are visible under current RBAC.
+// Owner ask 2026-07-03 (redesigned as compact ERP shell).
 function NavSection({ title, children }) {
     const visibleChildren = Children.toArray(children).filter(c => c && c !== false);
     if (visibleChildren.length === 0) return null;
@@ -31,17 +34,13 @@ function NavSection({ title, children }) {
         });
     };
     return (
-        <>
-            <button type="button" onClick={toggle} className="nav-section nav-section-toggle"
-                    aria-expanded={open}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                             width: '100%', border: 'none', background: 'transparent',
-                             cursor: 'pointer', textAlign: 'left', padding: '4px 12px' }}>
+        <div className="erp-nav-group">
+            <div className="erp-nav-group-title" onClick={toggle}>
                 <span>{title}</span>
-                {open ? <ChevronDown size={12} /> : <ChevronRightIcon size={12} />}
-            </button>
+                {open ? <ChevronDown size={11} /> : <ChevronRightIcon size={11} />}
+            </div>
             {open && visibleChildren}
-        </>
+        </div>
     );
 }
 
@@ -167,8 +166,9 @@ function ProtectedRoute({ moduleKey, action = 'view', children }) {
     return children;
 }
 
-function Sidebar({ onOpenCommand }) {
-    const { user, logout, hasModule, hasPermission } = useAuth();
+function Sidebar() {
+    // User + logout controls live on the top bar now — see WorkspaceTopBar.
+    const { hasModule, hasPermission } = useAuth();
     // Short alias for "user has a specific report permission". Admin auto-passes
     // via hasPermission (groupId === 1).
     const canReport = (slug) => hasPermission(`report:${slug}`);
@@ -176,105 +176,97 @@ function Sidebar({ onOpenCommand }) {
     const anyReport = (...slugs) => slugs.some(s => canReport(s));
 
     return (
-        <aside className="sidebar">
-            <div className="sidebar-logo">
-                <Car size={24} />
-                <span>AutoDMS</span>
-            </div>
-            <button type="button" className="sidebar-search-trigger" onClick={onOpenCommand}>
-                <span><Search size={16} /> Search menu</span>
-                <kbd>Ctrl K</kbd>
-            </button>
-            <nav className="sidebar-nav">
-                <NavLink to="/" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'} end>
-                    <LayoutDashboard size={20} /> Dashboard
+        <aside className="erp-sidebar">
+            <nav>
+                <NavLink to="/" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'} end>
+                    <LayoutDashboard size={16} /> Dashboard
                 </NavLink>
 
                 {/* Workshop */}
                 <NavSection title="WORKSHOP & SERVICE">
 
                 {hasModule('workshop_customers') && (
-                    <NavLink to="/workshop/customers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/customers" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <UserCircle size={20} /> Workshop Customers
                     </NavLink>
                 )}
                 {hasModule('workshop_jobs') && (
-                    <NavLink to="/workshop/jobs/new" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/jobs/new" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <PlusCircle size={20} /> Create Job Card
                     </NavLink>
                 )}
                 {hasModule('workshop_jobs') && (
-                    <NavLink to="/workshop/jobs" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/jobs" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ClipboardList size={20} /> Search Job Cards
                     </NavLink>
                 )}
                 {hasModule('workshop_jobs') && (
-                    <NavLink to="/workshop/vehicle-history" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/vehicle-history" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Car size={20} /> Vehicle History
                     </NavLink>
                 )}
                 {hasModule('workshop_labour') && (
-                    <NavLink to="/workshop/services" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/services" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Wrench size={20} /> Labour & Services
                     </NavLink>
                 )}
                 {hasModule('workshop_sublet') && (
-                    <NavLink to="/workshop/sublet" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/sublet" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ExternalLink size={20} /> Sublet Repairs
                     </NavLink>
                 )}
                 {hasModule('workshop_settings') && (
-                    <NavLink to="/workshop/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/settings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <SlidersHorizontal size={20} /> Workshop Settings
                     </NavLink>
                 )}
                 {hasModule('workshop_settings') && (
-                    <NavLink to="/workshop/campaigns" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/campaigns" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Megaphone size={20} /> Service Campaigns
                     </NavLink>
                 )}
                 {hasModule('workshop_careoff') && (
-                    <NavLink to="/workshop/care-off" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/care-off" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <UserCheck size={20} /> Care-Off Management
                     </NavLink>
                 )}
                 {hasModule('workshop_accessories') && (
-                    <NavLink to="/workshop/accessories" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/accessories" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Package size={20} /> Accessories
                     </NavLink>
                 )}
                 {hasModule('workshop_controller') && (
-                    <NavLink to="/workshop/controller" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/workshop/controller" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ClipboardList size={20} /> Job Controller
                     </NavLink>
                 )}
                 {hasModule('workshop_gatepass') && (
-                    <NavLink to="/gatepass" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/gatepass" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShieldCheck size={20} /> Gate Pass
                     </NavLink>
                 )}
                 {canReport('job_card_register') && (
-                    <NavLink to="/reports/service/job-card-register" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/service/job-card-register" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Job Card Register
                     </NavLink>
                 )}
                 {canReport('advisor_performance') && (
-                    <NavLink to="/reports/service/advisor-performance" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/service/advisor-performance" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Advisor Performance
                     </NavLink>
                 )}
                 {canReport('revenue_summary') && (
-                    <NavLink to="/reports/service/revenue-summary" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/service/revenue-summary" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Service Revenue
                     </NavLink>
                 )}
                 {canReport('insurance_claims') && (
-                    <NavLink to="/reports/service/insurance-claims" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/service/insurance-claims" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Insurance Claims
                     </NavLink>
                 )}
                 {canReport('mechanic_productivity') && (
-                    <NavLink to="/reports/service/mechanic-productivity" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/service/mechanic-productivity" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Mechanic Productivity
                     </NavLink>
                 )}
@@ -284,67 +276,67 @@ function Sidebar({ onOpenCommand }) {
                 <NavSection title="PARTS & INVENTORY">
 
                 {hasModule('parts_spare') && (
-                    <NavLink to="/parts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/parts" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Package size={20} /> Spare Parts
                     </NavLink>
                 )}
                 {canReport('inventory_valuation') && (
-                    <NavLink to="/reports/inventory-valuation" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/inventory-valuation" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Inventory On-Hand
                     </NavLink>
                 )}
                 {canReport('stock_movement') && (
-                    <NavLink to="/reports/parts/stock-movement" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/parts/stock-movement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Stock Movement
                     </NavLink>
                 )}
                 {canReport('reorder_alert') && (
-                    <NavLink to="/reports/parts/reorder-alert" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/parts/reorder-alert" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Reorder Alert
                     </NavLink>
                 )}
                 {canReport('parts_sales_register') && (
-                    <NavLink to="/reports/parts/sales-register" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/parts/sales-register" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Parts Sales Register
                     </NavLink>
                 )}
                 {canReport('purchase_summary') && (
-                    <NavLink to="/reports/parts/purchase-summary" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/parts/purchase-summary" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Parts Purchase Summary
                     </NavLink>
                 )}
                 {canReport('parts_issued_to_jc') && (
-                    <NavLink to="/reports/parts/issued-to-jc" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/parts/issued-to-jc" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Parts Issued to Job Cards
                     </NavLink>
                 )}
                 {hasModule('procurement_grn') && (
-                    <NavLink to="/grn" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/grn" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileInput size={20} /> Receiving (GRN)
                     </NavLink>
                 )}
                 {hasModule('procurement_grtn') && (
-                    <NavLink to="/grtn" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/grtn" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileOutput size={20} /> Returns (GRTN)
                     </NavLink>
                 )}
                 {hasModule('sales_store') && (
-                    <NavLink to="/store-sale" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/store-sale" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShoppingCart size={20} /> Store Sale (Spares)
                     </NavLink>
                 )}
                 {hasModule('sales_ssr') && (
-                    <NavLink to="/ssr" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/ssr" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Undo2 size={20} /> Sale Returns (SSR)
                     </NavLink>
                 )}
                 {hasModule('workshop_parts_issue') && (
-                    <NavLink to="/parts-issue" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/parts-issue" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <BoxSelect size={20} /> Parts Issue (Job Card)
                     </NavLink>
                 )}
                 {hasModule('inventory_settings') && (
-                    <NavLink to="/inventory-settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/inventory-settings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Database size={20} /> Parts Config
                     </NavLink>
                 )}
@@ -354,65 +346,65 @@ function Sidebar({ onOpenCommand }) {
                 <NavSection title="FINANCE & ACCOUNTS">
 
                 {hasModule('finance_coa') && (
-                    <NavLink to="/coa" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/coa" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Landmark size={20} /> Chart of Accounts
                     </NavLink>
                 )}
                 {hasModule('finance_vouchers') && (
                     <>
-                        <NavLink to="/vouchers/cpv" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/vouchers/cpv" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <Wallet size={20} /> Cash Payment (CPV)
                         </NavLink>
-                        <NavLink to="/vouchers/crv" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/vouchers/crv" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <Receipt size={20} /> Cash Receipt (CRV)
                         </NavLink>
-                        <NavLink to="/vouchers/bpv" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/vouchers/bpv" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <CreditCard size={20} /> Bank Payment (BPV)
                         </NavLink>
-                        <NavLink to="/vouchers/brv" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/vouchers/brv" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <Landmark size={20} /> Bank Receipt (BRV)
                         </NavLink>
-                        <NavLink to="/vouchers/jv" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/vouchers/jv" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <ArrowLeftRight size={20} /> Journal Voucher (JV)
                         </NavLink>
-                        <NavLink to="/vouchers/browse" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/vouchers/browse" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <ClipboardList size={20} /> Voucher Browser
                         </NavLink>
                     </>
                 )}
                 {hasModule('accounting_setup') && (
                     <>
-                    <NavLink to="/accounting/setup" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/accounting/setup" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <SettingsIcon size={20} /> Accounting Setup
                     </NavLink>
-                    <NavLink to="/accounting/tax-rates" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/accounting/tax-rates" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <SlidersHorizontal size={20} /> Tax Rates
                     </NavLink>
-                    <NavLink to="/accounting/bank-accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/accounting/bank-accounts" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Landmark size={20} /> Bank Accounts
                     </NavLink>
                     </>
                 )}
                 {hasModule('settings_business_profile') && (
-                    <NavLink to="/settings/business-profile" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/settings/business-profile" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <SettingsIcon size={20} /> Business Profile
                     </NavLink>
                 )}
                 {hasModule('payments') && (
                     <>
-                    <NavLink to="/payments/receive" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/payments/receive" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Receipt size={20} /> Receive Payment
                     </NavLink>
-                    <NavLink to="/payments/make" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/payments/make" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Wallet size={20} /> Make Payment
                     </NavLink>
-                    <NavLink to="/payments/pos-settlement" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/payments/pos-settlement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <CreditCard size={20} /> POS Settlement
                     </NavLink>
                     </>
                 )}
                 {hasModule('finance_cheques') && (
-                    <NavLink to="/payments/cheques" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/payments/cheques" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Receipt size={20} /> Cheque Clearance
                     </NavLink>
                 )}
@@ -420,42 +412,42 @@ function Sidebar({ onOpenCommand }) {
 
                 <NavSection title="ACCOUNT REPORTS">
 
-                {canReport('trial_balance')         && <NavLink to="/reports/trial-balance"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><FileBarChart size={20} /> Trial Balance</NavLink>}
-                {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
-                {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
-                {canReport('pnl')                   && <NavLink to="/reports/pnl"                className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Profit &amp; Loss</NavLink>}
-                {canReport('balance_sheet')         && <NavLink to="/reports/balance-sheet"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Balance Sheet</NavLink>}
-                {canReport('day_book')              && <NavLink to="/reports/day-book"           className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Day Book</NavLink>}
-                {canReport('customer_statement')    && <NavLink to="/reports/customer-statement" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><UserCog size={20} /> Customer Statement</NavLink>}
-                {canReport('supplier_statement')    && <NavLink to="/reports/supplier-statement" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><Truck size={20} /> Supplier Statement</NavLink>}
-                {canReport('receivables_aging')     && <NavLink to="/reports/receivables-aging"  className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Receivables Aging</NavLink>}
-                {canReport('payables_aging')        && <NavLink to="/reports/payables-aging"     className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Payables Aging</NavLink>}
-                {canReport('insurance_aging')       && <NavLink to="/reports/insurance-aging"    className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Insurance Aging</NavLink>}
-                {canReport('walkin_outstanding')    && <NavLink to="/reports/walkin-outstanding" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Walk-in JC Pending</NavLink>}
-                {canReport('daily_cash_book')       && <NavLink to="/reports/daily-cash-book"    className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><Wallet size={20} /> Daily Cash Book</NavLink>}
-                {canReport('bank_balances')         && <NavLink to="/reports/bank-balances"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><Landmark size={20} /> Bank Balances</NavLink>}
-                {canReport('pos_pending')           && <NavLink to="/reports/pos-pending"        className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><CreditCard size={20} /> POS Pending</NavLink>}
-                {canReport('cheques_on_hand')       && <NavLink to="/reports/cheques-on-hand"    className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><Receipt size={20} /> Cheques on Hand</NavLink>}
-                {canReport('tax_summary')           && <NavLink to="/reports/tax-summary"        className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><Percent size={20} /> Tax Summary</NavLink>}
-                {canReport('tax_rate_history')      && <NavLink to="/reports/tax-rate-history"   className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><Percent size={20} /> Tax Rate History</NavLink>}
-                {canReport('sales_register')        && <NavLink to="/reports/sales-register"     className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Sales Register</NavLink>}
-                {canReport('gross_margin')          && <NavLink to="/reports/gross-margin"       className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Gross Margin</NavLink>}
-                {canReport('discount_given')        && <NavLink to="/reports/discount-given"     className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Discount Given</NavLink>}
-                {canReport('gencust_reconciliation')&& <NavLink to="/reports/gencust-reconciliation" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Gen-Customer Recon</NavLink>}
-                {canReport('voucher_audit')         && <NavLink to="/reports/voucher-audit"      className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ListChecks size={20} /> Voucher Audit Trail</NavLink>}
-                {canReport('system_account_audit') && <NavLink to="/reports/system-account-audit" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}><ShieldCheck size={20} /> System Account Audit</NavLink>}
+                {canReport('trial_balance')         && <NavLink to="/reports/trial-balance"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> Trial Balance</NavLink>}
+                {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
+                {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
+                {canReport('pnl')                   && <NavLink to="/reports/pnl"                className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Profit &amp; Loss</NavLink>}
+                {canReport('balance_sheet')         && <NavLink to="/reports/balance-sheet"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Balance Sheet</NavLink>}
+                {canReport('day_book')              && <NavLink to="/reports/day-book"           className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Day Book</NavLink>}
+                {canReport('customer_statement')    && <NavLink to="/reports/customer-statement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><UserCog size={20} /> Customer Statement</NavLink>}
+                {canReport('supplier_statement')    && <NavLink to="/reports/supplier-statement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Truck size={20} /> Supplier Statement</NavLink>}
+                {canReport('receivables_aging')     && <NavLink to="/reports/receivables-aging"  className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Receivables Aging</NavLink>}
+                {canReport('payables_aging')        && <NavLink to="/reports/payables-aging"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Payables Aging</NavLink>}
+                {canReport('insurance_aging')       && <NavLink to="/reports/insurance-aging"    className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Insurance Aging</NavLink>}
+                {canReport('walkin_outstanding')    && <NavLink to="/reports/walkin-outstanding" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Walk-in JC Pending</NavLink>}
+                {canReport('daily_cash_book')       && <NavLink to="/reports/daily-cash-book"    className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Wallet size={20} /> Daily Cash Book</NavLink>}
+                {canReport('bank_balances')         && <NavLink to="/reports/bank-balances"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Landmark size={20} /> Bank Balances</NavLink>}
+                {canReport('pos_pending')           && <NavLink to="/reports/pos-pending"        className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><CreditCard size={20} /> POS Pending</NavLink>}
+                {canReport('cheques_on_hand')       && <NavLink to="/reports/cheques-on-hand"    className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Receipt size={20} /> Cheques on Hand</NavLink>}
+                {canReport('tax_summary')           && <NavLink to="/reports/tax-summary"        className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Percent size={20} /> Tax Summary</NavLink>}
+                {canReport('tax_rate_history')      && <NavLink to="/reports/tax-rate-history"   className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Percent size={20} /> Tax Rate History</NavLink>}
+                {canReport('sales_register')        && <NavLink to="/reports/sales-register"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Sales Register</NavLink>}
+                {canReport('gross_margin')          && <NavLink to="/reports/gross-margin"       className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Gross Margin</NavLink>}
+                {canReport('discount_given')        && <NavLink to="/reports/discount-given"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Discount Given</NavLink>}
+                {canReport('gencust_reconciliation')&& <NavLink to="/reports/gencust-reconciliation" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Gen-Customer Recon</NavLink>}
+                {canReport('voucher_audit')         && <NavLink to="/reports/voucher-audit"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Voucher Audit Trail</NavLink>}
+                {canReport('system_account_audit') && <NavLink to="/reports/system-account-audit" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ShieldCheck size={20} /> System Account Audit</NavLink>}
                 </NavSection>
 
                 {/* Parties master (accounting side — AR/AP master) */}
                 <NavSection title="PARTIES">
 
                 {hasModule('crm_parties') && (
-                    <NavLink to="/customers" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/customers" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Building size={20} /> Credit Parties
                     </NavLink>
                 )}
                 {hasModule('crm_party_access') && (
-                    <NavLink to="/party-business-access" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/party-business-access" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShieldCheck size={20} /> Party Business Access
                     </NavLink>
                 )}
@@ -465,42 +457,42 @@ function Sidebar({ onOpenCommand }) {
                 <NavSection title="CUSTOMER RELATION">
 
                 {hasModule('crd_followups') && (
-                    <NavLink to="/crd/follow-ups" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/crd/follow-ups" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Headphones size={20} /> Follow-Ups
                     </NavLink>
                 )}
                 {hasModule('cro_workspace') && (
-                    <NavLink to="/cro/workspace" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/workspace" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Headphones size={20} /> CRO Workspace
                     </NavLink>
                 )}
                 {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_reports')) && (
-                    <NavLink to="/cro/surveys" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/surveys" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ClipboardList size={20} /> Surveys
                     </NavLink>
                 )}
                 {hasModule('cro_admin') && (
-                    <NavLink to="/cro/survey-templates" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/survey-templates" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ClipboardList size={20} /> Survey Templates
                     </NavLink>
                 )}
                 {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_reports')) && (
-                    <NavLink to="/cro/reminders" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/reminders" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Bell size={20} /> Service Reminders
                     </NavLink>
                 )}
                 {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_reports')) && (
-                    <NavLink to="/cro/kyc-flags" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/kyc-flags" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShieldCheck size={20} /> KYC Flags
                     </NavLink>
                 )}
                 {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_reports')) && (
-                    <NavLink to="/cro/inquiries" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/inquiries" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <MessageSquare size={20} /> Inquiries
                     </NavLink>
                 )}
                 {(hasModule('cro_workspace') || hasModule('cro_admin') || hasModule('cro_reports')) && (
-                    <NavLink to="/cro/campaigns" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/campaigns" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Megaphone size={20} /> Campaigns
                     </NavLink>
                 )}
@@ -510,62 +502,62 @@ function Sidebar({ onOpenCommand }) {
                 <NavSection title="NEW VEHICLE SALES">
 
                 {(hasModule('sales_admin_settings') || hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/models" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/models" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Car size={20} /> Vehicle Models
                     </NavLink>
                 )}
                 {(hasModule('sales_admin_settings') || hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/variants" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/variants" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Layers size={20} /> Vehicle Variants
                     </NavLink>
                 )}
                 {(hasModule('sales_admin_settings') || hasModule('sales_master_settlement') || hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/inventory" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/inventory" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Truck size={20} /> Vehicle Inventory
                     </NavLink>
                 )}
                 {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/bookings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/bookings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ClipboardList size={20} /> Bookings
                     </NavLink>
                 )}
                 {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/inquiries" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/inquiries" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Headphones size={20} /> Sales Inquiries
                     </NavLink>
                 )}
                 {hasModule('sales_admin_pricing') && (
-                    <NavLink to="/sales/negotiations" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/negotiations" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShieldCheck size={20} /> Discount Approvals
                     </NavLink>
                 )}
                 {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('am_approve') || hasModule('admin_unfinalize') || hasModule('sales_admin_settings')) && (
-                    <NavLink to="/sales/cancellations" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/cancellations" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Ban size={20} /> Cancellation Queue
                     </NavLink>
                 )}
                 {(hasModule('sales_admin_settings') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/incentive-policies" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/incentive-policies" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Percent size={20} /> Incentive Policies
                     </NavLink>
                 )}
                 {(hasModule('sales_admin_settings') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/incentive-disbursement" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/incentive-disbursement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Wallet size={20} /> Staff Incentive Payout
                     </NavLink>
                 )}
                 {(hasModule('sales_master_settlement') || hasModule('sales_admin_settings') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/master-incentive" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/master-incentive" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <TrendingUp size={20} /> Master Incentive
                     </NavLink>
                 )}
                 {(hasModule('sales_recovery') || hasModule('sales_admin_settings') || hasModule('sales_gm') || hasModule('sales_agm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/recovery" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/recovery" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Ban size={20} /> Sales Recovery
                     </NavLink>
                 )}
                 {(hasModule('sales_hierarchy') || hasModule('sales_admin_settings') || hasModule('sales_gm') || hasModule('sales_reports')) && (
-                    <NavLink to="/sales/hierarchy-targets" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/hierarchy-targets" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <UsersRound size={20} /> Hierarchy & Targets
                     </NavLink>
                 )}
@@ -574,32 +566,32 @@ function Sidebar({ onOpenCommand }) {
                     'customer_advances_aging','booking_pipeline','master_invoice_aging',
                     'incentive_receivable_aging',
                 ) && (
-                    <NavLink to="/sales/reports" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/sales/reports" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Sales Reports
                     </NavLink>
                 )}
                 {hasModule('cro_reports') && (
-                    <NavLink to="/cro/reports" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/cro/reports" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> CRO Reports
                     </NavLink>
                 )}
                 {canReport('booking_register') && (
-                    <NavLink to="/reports/sales/booking-register" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/sales/booking-register" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Booking Register
                     </NavLink>
                 )}
                 {canReport('vehicle_inventory') && (
-                    <NavLink to="/reports/sales/vehicle-inventory" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/sales/vehicle-inventory" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Vehicle Inventory Report
                     </NavLink>
                 )}
                 {canReport('executive_performance') && (
-                    <NavLink to="/reports/sales/executive-performance" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/sales/executive-performance" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Executive Performance
                     </NavLink>
                 )}
                 {canReport('customer_advances_aging') && (
-                    <NavLink to="/reports/sales/customer-advances-aging" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/reports/sales/customer-advances-aging" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Customer Advances Aging
                     </NavLink>
                 )}
@@ -609,12 +601,12 @@ function Sidebar({ onOpenCommand }) {
                 <NavSection title="ADMIN & HR">
 
                 {hasModule('hr_employees') && (
-                    <NavLink to="/employees" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/employees" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Users size={20} /> Employees
                     </NavLink>
                 )}
                 {hasModule('hr_settings') && (
-                    <NavLink to="/hr-settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/hr-settings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <SettingsIcon size={20} /> HR Config
                     </NavLink>
                 )}
@@ -624,12 +616,12 @@ function Sidebar({ onOpenCommand }) {
                 <NavSection title="ADMINISTRATION">
 
                 {hasModule('admin_users') && (
-                    <NavLink to="/admin/users" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/admin/users" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <UsersRound size={20} /> User Management
                     </NavLink>
                 )}
                 {hasModule('admin_permissions') && (
-                    <NavLink to="/admin/permissions" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                    <NavLink to="/admin/permissions" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShieldCheck size={20} /> Role Permissions
                     </NavLink>
                 )}
@@ -638,30 +630,12 @@ function Sidebar({ onOpenCommand }) {
                 {/* Workflow */}
                 <NavSection title="WORKFLOW">
                     {(hasModule('am_approve') || hasModule('admin_unfinalize')) && (
-                        <NavLink to="/unfinalize-requests" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <NavLink to="/unfinalize-requests" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                             <Unlock size={20} /> Unfinalize Requests
                         </NavLink>
                     )}
                 </NavSection>
             </nav>
-
-            {/* User info + logout at bottom */}
-            {user && (
-                <div style={{ padding: '12px 16px', borderTop: '1px solid #1e3a5f', marginTop: 'auto' }}>
-                    <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>{user.groupTitle}</div>
-                    <div style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 600, marginBottom: 8 }}>{user.userName}</div>
-                    <button
-                        onClick={logout}
-                        style={{
-                            background: 'transparent', border: '1px solid #334155', color: '#94a3b8',
-                            borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 12,
-                            display: 'flex', alignItems: 'center', gap: 6, width: '100%', justifyContent: 'center'
-                        }}
-                    >
-                        <LogOut size={14} /> Sign Out
-                    </button>
-                </div>
-            )}
         </aside>
     );
 }
@@ -701,23 +675,32 @@ function AppShell() {
 
     return (
         <FeedbackProvider>
-        <div className="app-container">
-                <Sidebar onOpenCommand={() => setCommandOpen(true)} />
+        <div className="erp-shell">
+            {/* Brand cell (top-left corner) */}
+            <div className="erp-brand">
+                <div className="erp-brand-badge">A</div>
+                <span className="erp-brand-name">AutoDMS</span>
+            </div>
+
+            {/* Top bar: breadcrumbs, search, user */}
+            <WorkspaceTopBar onOpenCommand={() => setCommandOpen(true)} />
+
+            {/* Sidebar with grouped nav (Workshop / Parts / Finance / …) */}
+            <Sidebar />
+
+            {/* Toast + command palette live outside grid so their fixed
+                positioning isn't clipped by the workspace overflow */}
             <NotificationBell />
             <CommandPalette
                 open={commandOpen}
                 onOpen={() => setCommandOpen(true)}
                 onClose={() => setCommandOpen(false)}
             />
-            <main className="main-content">
-                <WorkspaceTopBar onOpenCommand={() => setCommandOpen(true)} />
+
+            <main className="erp-workspace">
+                <div className="erp-workspace-inner">
                 {isDemoMode && (
-                    <div style={{
-                        background: 'linear-gradient(90deg, #fef3c7 0%, #fde68a 100%)',
-                        border: '1px solid #f59e0b', color: '#78350f',
-                        padding: '8px 14px', borderRadius: 6, fontSize: '0.78rem',
-                        marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
+                    <div className="erp-alert warning" style={{ marginBottom: 10 }}>
                         <strong>DEMO MODE</strong>
                         <span>— UI preview only. No real backend; all data is mocked and changes are not saved.</span>
                     </div>
@@ -1017,6 +1000,7 @@ function AppShell() {
                     <Route path="/vehicles" element={<Vehicles />} />
                     <Route path="/services" element={<Services />} />
                 </Routes>
+                </div>
             </main>
         </div>
         </FeedbackProvider>

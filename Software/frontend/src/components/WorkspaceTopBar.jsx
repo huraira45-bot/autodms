@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { CalendarDays, Search } from 'lucide-react';
+import { Search, Bell, Menu } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const EXACT_TITLES = {
     '/': 'Dashboard',
@@ -149,41 +150,65 @@ function todayLabel() {
     }).format(new Date());
 }
 
-export default function WorkspaceTopBar({ onOpenCommand }) {
+export default function WorkspaceTopBar({ onOpenCommand, onToggleSidebar }) {
     const location = useLocation();
+    const { user, logout } = useAuth();
 
     const breadcrumbs = useMemo(() => buildBreadcrumbs(location.pathname), [location.pathname]);
-    const title = useMemo(() => titleFromPath(location.pathname), [location.pathname]);
+    const initials = useMemo(() => {
+        const n = user?.userName || '';
+        return n.slice(0, 2).toUpperCase() || 'U';
+    }, [user]);
 
     return (
-        <header className="workspace-topbar">
-            <div className="workspace-context">
-                <nav className="breadcrumbs" aria-label="Breadcrumb">
-                    {breadcrumbs.map((crumb, index) => {
-                        const isLast = index === breadcrumbs.length - 1;
-                        return (
-                            <React.Fragment key={`${crumb.to}-${index}`}>
-                                {index > 0 && <span className="breadcrumb-separator">/</span>}
-                                {isLast ? (
-                                    <span aria-current="page">{crumb.label}</span>
-                                ) : (
-                                    <Link to={crumb.to}>{crumb.label}</Link>
-                                )}
-                            </React.Fragment>
-                        );
-                    })}
-                </nav>
-                <h1>{title}</h1>
-            </div>
-
-            <div className="workspace-actions">
-                <button type="button" className="command-trigger" onClick={onOpenCommand}>
-                    <Search size={17} />
-                    <span>Search</span>
+        <header className="erp-topbar">
+            {onToggleSidebar && (
+                <button type="button" className="erp-topbar-toggle" onClick={onToggleSidebar}
+                        title="Toggle sidebar">
+                    <Menu size={16} />
                 </button>
-                <div className="work-date">
-                    <CalendarDays size={16} />
-                    <span>{todayLabel()}</span>
+            )}
+
+            <nav className="erp-crumbs" aria-label="Breadcrumb">
+                {breadcrumbs.map((crumb, index) => {
+                    const isLast = index === breadcrumbs.length - 1;
+                    return (
+                        <React.Fragment key={`${crumb.to}-${index}`}>
+                            {index > 0 && <span className="sep">/</span>}
+                            {isLast ? (
+                                <span className="cur" aria-current="page">{crumb.label}</span>
+                            ) : (
+                                <Link to={crumb.to}>{crumb.label}</Link>
+                            )}
+                        </React.Fragment>
+                    );
+                })}
+            </nav>
+
+            <div className="erp-topbar-spacer" />
+
+            <button type="button" className="erp-topbar-search" onClick={onOpenCommand}
+                title="Open command palette (Ctrl+K)">
+                <Search size={13} />
+                <span style={{ flex: 1, fontSize: 12 }}>Search anything…</span>
+                <span className="kbd">Ctrl K</span>
+            </button>
+
+            <div className="erp-topbar-right">
+                <button type="button" className="erp-topbar-icon" title="Today">
+                    <span style={{ fontSize: 11, padding: '0 4px', color: 'var(--erp-text)' }}>{todayLabel()}</span>
+                </button>
+                <button type="button" className="erp-topbar-icon" title="Notifications">
+                    <Bell size={15} />
+                </button>
+                <div className="erp-topbar-user" title={user?.groupTitle || ''}>
+                    <span className="avatar">{initials}</span>
+                    <span>{user?.userName || 'User'}</span>
+                    <button type="button" onClick={logout}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--erp-text-muted)', cursor: 'pointer', padding: 2, marginLeft: 2 }}
+                        title="Log out">
+                        ×
+                    </button>
                 </div>
             </div>
         </header>

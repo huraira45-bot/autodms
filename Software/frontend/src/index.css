@@ -1,18 +1,80 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
+/* ----------------------------------------------------------------
+   Odoo-style ERP design tokens (owner ask 2026-07-03: redesign
+   AutoDMS as a dense desktop ERP shell). Avoid Odoo branding.
+   ---------------------------------------------------------------- */
 :root {
-  --bg-main: #f4f7f9;
+  /* Legacy names kept for backwards compatibility with older code that
+     still references --primary / --bg-main / etc. */
+  --bg-main: #f2f2f4;
   --bg-card: #ffffff;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --text-dark: #1e293b;
-  --text-muted: #64748b;
-  --border: #e2e8f0;
-  --sidebar-bg: #ffffff;
-  --danger: #ef4444;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --focus-ring: rgba(37, 99, 235, 0.18);
+  --primary: #714b67;              /* muted plum */
+  --primary-hover: #5c3d54;
+  --text-dark: #1f2933;
+  --text-muted: #6b7280;
+  --border: #dfe1e5;
+  --sidebar-bg: #23272f;
+  --danger: #c0392b;
+  --success: #1f8f4e;
+  --warning: #b7791f;
+  --focus-ring: rgba(113, 75, 103, 0.22);
+
+  /* Full ERP palette — used by every ERP primitive below. */
+  --erp-page-bg:        #f2f2f4;   /* soft grey workspace */
+  --erp-surface:        #ffffff;   /* white record sheets */
+  --erp-surface-alt:    #f8f9fa;
+  --erp-surface-hover:  #eef0f3;
+
+  --erp-border:         #dfe1e5;
+  --erp-border-strong:  #c9ccd1;
+
+  --erp-nav-bg:         #23272f;   /* dark slate/aubergine navigation */
+  --erp-nav-bg-hover:   #2d323b;
+  --erp-nav-fg:         #e5e7eb;
+  --erp-nav-fg-muted:   #9ca3af;
+  --erp-nav-accent:     #a06c94;   /* soft accent line for selected */
+
+  --erp-brand:          #714b67;   /* muted plum accent */
+  --erp-brand-hover:    #5c3d54;
+  --erp-brand-soft:     #f4eef2;
+
+  --erp-text:           #1f2933;
+  --erp-text-muted:     #6b7280;
+  --erp-text-soft:      #9aa1ab;
+
+  /* Semantic status */
+  --erp-steel:   #3b6f8a;   /* Draft / Info */
+  --erp-teal:    #17796a;   /* Approved */
+  --erp-green:   #1f8f4e;   /* Finalized / Success */
+  --erp-amber:   #b7791f;   /* Pending / Warning */
+  --erp-red:     #c0392b;   /* Rejected / Danger */
+  --erp-plum:    #714b67;   /* Highlighted */
+
+  --erp-steel-soft: #eaf1f6;
+  --erp-teal-soft:  #e6f3f0;
+  --erp-green-soft: #e5f3ec;
+  --erp-amber-soft: #fbf2e0;
+  --erp-red-soft:   #f7e6e4;
+  --erp-plum-soft:  #f4eef2;
+
+  /* Sizes / rhythm — dense but readable at 1366×768. */
+  --erp-radius:      6px;
+  --erp-radius-sm:   4px;
+  --erp-radius-lg:   8px;
+  --erp-shadow-sm:   0 1px 1px rgba(15, 23, 42, 0.04);
+  --erp-shadow:      0 1px 3px rgba(15, 23, 42, 0.06);
+  --erp-shadow-lg:   0 6px 16px rgba(15, 23, 42, 0.08);
+
+  --erp-h-topbar:    44px;
+  --erp-w-sidebar:   220px;
+  --erp-w-sidebar-collapsed: 52px;
+
+  --erp-fs-body:     13px;
+  --erp-fs-sm:       12px;
+  --erp-fs-xs:       11px;
+  --erp-fs-lg:       15px;
+  --erp-fs-title:    18px;
 }
 
 * {
@@ -25,6 +87,7 @@
 body {
   background-color: var(--bg-main);
   color: var(--text-dark);
+  font-size: var(--erp-fs-body);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1678,6 +1741,516 @@ textarea:disabled,
 }
 
 /* ============================================================
+   ERP DESKTOP SHELL — Odoo-inspired compact desktop UI.
+   Owner ask 2026-07-03. The shell composes:
+     .erp-shell        → grid container (topbar + sidebar + main)
+     .erp-topbar       → breadcrumbs + command + user
+     .erp-sidebar      → grouped dark nav
+     .erp-workspace    → grey padded canvas that holds all pages
+     .erp-page         → dense record surface
+     + primitives: control-panel, list, form-sheet, notebook,
+                    status-bar, smart-button, chip, pill, kbd
+   ============================================================ */
+
+.erp-shell {
+  display: grid;
+  grid-template-columns: var(--erp-w-sidebar) 1fr;
+  grid-template-rows: var(--erp-h-topbar) 1fr;
+  grid-template-areas:
+    "brand   topbar"
+    "sidebar workspace";
+  min-height: 100vh;
+  background: var(--erp-page-bg);
+  color: var(--erp-text);
+}
+
+.erp-shell.is-collapsed { grid-template-columns: var(--erp-w-sidebar-collapsed) 1fr; }
+
+.erp-brand {
+  grid-area: brand;
+  background: var(--erp-nav-bg);
+  color: var(--erp-nav-fg);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+  border-right: 1px solid rgba(255,255,255,0.05);
+}
+.erp-brand-badge {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: linear-gradient(135deg, var(--erp-brand) 0%, var(--erp-nav-accent) 100%);
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-weight: 700; font-size: 12px;
+}
+.erp-brand-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.erp-shell.is-collapsed .erp-brand-name { display: none; }
+
+.erp-topbar {
+  grid-area: topbar;
+  background: var(--erp-surface);
+  border-bottom: 1px solid var(--erp-border);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px;
+  height: var(--erp-h-topbar);
+}
+.erp-topbar-toggle {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--erp-text-muted);
+  width: 28px; height: 28px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.erp-topbar-toggle:hover { background: var(--erp-surface-hover); color: var(--erp-text); }
+
+.erp-crumbs { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--erp-text-muted); }
+.erp-crumbs .sep { color: var(--erp-text-soft); }
+.erp-crumbs .cur { color: var(--erp-text); font-weight: 600; }
+.erp-crumbs a { color: inherit; text-decoration: none; }
+.erp-crumbs a:hover { color: var(--erp-brand); }
+
+.erp-topbar-search {
+  flex: 1; max-width: 460px;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--erp-surface-alt);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  height: 28px; padding: 0 8px;
+  color: var(--erp-text-muted);
+  cursor: pointer;
+  transition: border-color 0.1s;
+}
+.erp-topbar-search:hover { border-color: var(--erp-border-strong); }
+.erp-topbar-search .kbd { font-size: 10px; color: var(--erp-text-soft); border: 1px solid var(--erp-border); border-radius: 3px; padding: 1px 4px; }
+.erp-topbar-spacer { flex: 1; }
+
+.erp-topbar-right { display: flex; align-items: center; gap: 4px; }
+.erp-topbar-icon {
+  background: transparent; border: none; cursor: pointer;
+  width: 30px; height: 30px; border-radius: 4px;
+  color: var(--erp-text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.erp-topbar-icon:hover { background: var(--erp-surface-hover); color: var(--erp-text); }
+.erp-topbar-icon .badge {
+  position: absolute; top: 2px; right: 2px;
+  min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 9px; background: var(--erp-red); color: white;
+  font-size: 9px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.erp-topbar-user {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 6px 0 10px; height: 30px;
+  border-left: 1px solid var(--erp-border); margin-left: 6px;
+  color: var(--erp-text); font-size: 12.5px;
+}
+.erp-topbar-user .avatar {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--erp-brand); color: white;
+  font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.erp-sidebar {
+  grid-area: sidebar;
+  background: var(--erp-nav-bg);
+  color: var(--erp-nav-fg);
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.erp-sidebar::-webkit-scrollbar { width: 6px; }
+.erp-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+.erp-nav-group { padding: 4px 0; }
+.erp-nav-group-title {
+  padding: 8px 14px 4px;
+  font-size: 10px; text-transform: uppercase;
+  color: var(--erp-nav-fg-muted); letter-spacing: 0.8px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.erp-nav-group-title:hover { color: var(--erp-nav-fg); }
+.erp-shell.is-collapsed .erp-nav-group-title { display: none; }
+
+.erp-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 14px;
+  color: var(--erp-nav-fg);
+  text-decoration: none;
+  font-size: 12.5px;
+  line-height: 1.35;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden;
+}
+.erp-nav-item svg { flex-shrink: 0; }
+.erp-nav-item:hover { background: var(--erp-nav-bg-hover); color: white; }
+.erp-nav-item.active {
+  background: var(--erp-nav-bg-hover);
+  color: white;
+  border-left-color: var(--erp-nav-accent);
+  font-weight: 500;
+}
+.erp-shell.is-collapsed .erp-nav-item { justify-content: center; padding: 8px 0; gap: 0; }
+.erp-shell.is-collapsed .erp-nav-item span { display: none; }
+
+/* ── Workspace ───────────────────────────────────────────── */
+.erp-workspace {
+  grid-area: workspace;
+  background: var(--erp-page-bg);
+  overflow: auto;
+  min-width: 0;
+}
+.erp-workspace-inner { padding: 12px 16px 20px; max-width: 1600px; margin: 0 auto; }
+
+/* ── Control Panel (list/report toolbar) ─────────────────── */
+.erp-control-panel {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+  min-height: 44px;
+  box-shadow: var(--erp-shadow-sm);
+}
+.erp-control-panel .title { font-size: 14px; font-weight: 600; color: var(--erp-text); margin-right: auto; }
+.erp-control-panel .subtitle { font-size: 12px; color: var(--erp-text-muted); }
+.erp-control-panel .row { display: flex; align-items: center; gap: 8px; }
+.erp-control-panel .spacer { flex: 1; }
+
+.erp-search-input {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--erp-surface-alt);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  height: 30px; padding: 0 8px;
+  min-width: 240px;
+}
+.erp-search-input input {
+  border: none; background: transparent; outline: none;
+  flex: 1; font-size: 13px; color: var(--erp-text);
+}
+.erp-search-input input::placeholder { color: var(--erp-text-soft); }
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.erp-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px;
+  border: 1px solid var(--erp-border-strong);
+  background: var(--erp-surface);
+  color: var(--erp-text);
+  border-radius: var(--erp-radius);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.erp-btn:hover { background: var(--erp-surface-hover); border-color: #b9bcc1; }
+.erp-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.erp-btn-primary {
+  background: var(--erp-brand); border-color: var(--erp-brand); color: white;
+}
+.erp-btn-primary:hover { background: var(--erp-brand-hover); border-color: var(--erp-brand-hover); }
+.erp-btn-danger { color: var(--erp-red); border-color: #e7bcb6; }
+.erp-btn-danger:hover { background: var(--erp-red-soft); border-color: var(--erp-red); }
+.erp-btn-ghost { background: transparent; border-color: transparent; color: var(--erp-text-muted); }
+.erp-btn-ghost:hover { background: var(--erp-surface-hover); color: var(--erp-text); }
+.erp-btn-sm { height: 26px; padding: 0 8px; font-size: 12px; }
+
+/* ── Filter chips ────────────────────────────────────────── */
+.erp-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 8px 0 10px;
+  border: 1px solid var(--erp-border-strong);
+  background: var(--erp-surface);
+  color: var(--erp-text);
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.erp-chip:hover { background: var(--erp-surface-hover); }
+.erp-chip.active { background: var(--erp-plum-soft); border-color: var(--erp-plum); color: var(--erp-plum); font-weight: 600; }
+.erp-chip .x { color: var(--erp-text-soft); font-size: 12px; }
+.erp-chip .x:hover { color: var(--erp-red); }
+
+/* ── List view ───────────────────────────────────────────── */
+.erp-list {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  overflow: hidden;
+  box-shadow: var(--erp-shadow-sm);
+}
+.erp-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.erp-list thead th {
+  text-align: left; padding: 8px 12px;
+  background: var(--erp-surface-alt);
+  color: var(--erp-text-muted);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--erp-border);
+  white-space: nowrap;
+}
+.erp-list thead th.num { text-align: right; }
+.erp-list tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--erp-border);
+  color: var(--erp-text);
+  vertical-align: middle;
+}
+.erp-list tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.erp-list tbody tr { cursor: pointer; transition: background 0.08s; }
+.erp-list tbody tr:hover { background: var(--erp-surface-hover); }
+.erp-list tbody tr.selected { background: var(--erp-brand-soft); }
+.erp-list tbody tr:last-child td { border-bottom: none; }
+.erp-list .list-empty { padding: 40px 20px; text-align: center; color: var(--erp-text-muted); font-size: 13px; }
+
+.erp-list-footer {
+  padding: 6px 12px;
+  background: var(--erp-surface-alt);
+  border-top: 1px solid var(--erp-border);
+  font-size: 12px; color: var(--erp-text-muted);
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ── Form Sheet ──────────────────────────────────────────── */
+.erp-form-sheet {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  box-shadow: var(--erp-shadow-sm);
+  padding: 0;
+  margin-top: 10px;
+}
+.erp-form-sheet-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--erp-border);
+  display: flex; align-items: flex-start; gap: 16px;
+}
+.erp-form-sheet-header .fs-title {
+  font-size: var(--erp-fs-title); font-weight: 700; color: var(--erp-text);
+  line-height: 1.2;
+}
+.erp-form-sheet-header .fs-subtitle {
+  font-size: 12px; color: var(--erp-text-muted); margin-top: 4px;
+}
+.erp-form-sheet-body { padding: 14px 16px; }
+.erp-form-sheet-actions { display: flex; gap: 6px; margin-left: auto; }
+
+/* Field grid */
+.erp-fieldgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; }
+.erp-fieldgrid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.erp-field { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px dashed transparent; }
+.erp-field-label {
+  width: 130px; flex-shrink: 0;
+  font-size: 12px; color: var(--erp-text-muted); font-weight: 500;
+}
+.erp-field-value { flex: 1; min-width: 0; font-size: 13px; color: var(--erp-text); }
+.erp-field input:not([type="checkbox"]):not([type="radio"]),
+.erp-field select,
+.erp-field textarea {
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  font-size: 13px; color: var(--erp-text);
+  outline: none;
+}
+.erp-field input:hover,
+.erp-field select:hover,
+.erp-field textarea:hover { border-bottom-color: var(--erp-border); }
+.erp-field input:focus,
+.erp-field select:focus,
+.erp-field textarea:focus { border-bottom-color: var(--erp-brand); background: var(--erp-brand-soft); }
+.erp-field input[readonly], .erp-field input:disabled { color: var(--erp-text-muted); }
+
+.erp-section-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--erp-text-muted);
+  border-bottom: 1px solid var(--erp-border);
+  padding-bottom: 4px; margin: 12px 0 8px;
+}
+
+/* ── Notebook tabs ───────────────────────────────────────── */
+.erp-notebook {
+  border-top: 1px solid var(--erp-border);
+  margin-top: 12px;
+}
+.erp-notebook-tabs {
+  display: flex; gap: 0;
+  background: var(--erp-surface-alt);
+  border-bottom: 1px solid var(--erp-border);
+  padding: 0 8px;
+  overflow-x: auto;
+}
+.erp-notebook-tab {
+  background: transparent; border: none;
+  padding: 10px 14px;
+  font-size: 13px; color: var(--erp-text-muted);
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.erp-notebook-tab:hover { color: var(--erp-text); }
+.erp-notebook-tab.active {
+  color: var(--erp-brand);
+  border-bottom-color: var(--erp-brand);
+  background: var(--erp-surface);
+}
+.erp-notebook-tab .count {
+  background: var(--erp-surface); border: 1px solid var(--erp-border);
+  border-radius: 10px; padding: 0 6px; font-size: 10px; font-weight: 700;
+  color: var(--erp-text-muted); min-width: 16px; text-align: center;
+}
+.erp-notebook-tab.active .count { background: var(--erp-brand-soft); border-color: var(--erp-brand); color: var(--erp-brand); }
+.erp-notebook-body { padding: 14px 16px; background: var(--erp-surface); }
+
+/* ── Status Bar (Draft → Posted flow) ────────────────────── */
+.erp-status-bar {
+  display: flex; gap: 4px;
+  padding: 6px 12px;
+  background: var(--erp-surface-alt);
+  border-bottom: 1px solid var(--erp-border);
+}
+.erp-status-step {
+  position: relative;
+  padding: 4px 16px 4px 20px;
+  font-size: 11.5px; font-weight: 600; text-transform: uppercase;
+  color: var(--erp-text-muted); letter-spacing: 0.4px;
+  background: transparent;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%, 8px 50%);
+  border: none;
+  cursor: default;
+}
+.erp-status-step.active { background: var(--erp-brand); color: white; }
+.erp-status-step.done { color: var(--erp-text); }
+
+/* ── Smart Buttons ───────────────────────────────────────── */
+.erp-smart-buttons {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 12px 0;
+}
+.erp-smart-btn {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 88px; padding: 6px 12px;
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.erp-smart-btn:hover { background: var(--erp-surface-hover); border-color: var(--erp-border-strong); }
+.erp-smart-btn .val { font-size: 15px; font-weight: 700; color: var(--erp-text); line-height: 1.1; }
+.erp-smart-btn .lbl { font-size: 10.5px; color: var(--erp-text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; display: flex; align-items: center; gap: 4px; }
+
+/* ── Status pills / badges ───────────────────────────────── */
+.erp-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.erp-pill.steel { background: var(--erp-steel-soft); color: var(--erp-steel); }
+.erp-pill.teal  { background: var(--erp-teal-soft);  color: var(--erp-teal); }
+.erp-pill.green { background: var(--erp-green-soft); color: var(--erp-green); }
+.erp-pill.amber { background: var(--erp-amber-soft); color: var(--erp-amber); }
+.erp-pill.red   { background: var(--erp-red-soft);   color: var(--erp-red); }
+.erp-pill.plum  { background: var(--erp-plum-soft);  color: var(--erp-plum); }
+.erp-pill.muted { background: #eceff2; color: var(--erp-text-muted); }
+
+/* ── Alerts ──────────────────────────────────────────────── */
+.erp-alert {
+  padding: 8px 12px; border-radius: var(--erp-radius);
+  font-size: 12.5px; line-height: 1.4;
+  display: flex; gap: 8px; align-items: flex-start;
+  border: 1px solid transparent;
+}
+.erp-alert.info    { background: var(--erp-steel-soft); border-color: var(--erp-steel); color: var(--erp-steel); }
+.erp-alert.success { background: var(--erp-green-soft); border-color: var(--erp-green); color: var(--erp-green); }
+.erp-alert.warning { background: var(--erp-amber-soft); border-color: var(--erp-amber); color: var(--erp-amber); }
+.erp-alert.danger  { background: var(--erp-red-soft);   border-color: var(--erp-red);   color: var(--erp-red); }
+
+/* ── Empty state ─────────────────────────────────────────── */
+.erp-empty {
+  padding: 40px 20px; text-align: center;
+  color: var(--erp-text-muted); font-size: 13px;
+}
+.erp-empty .em-icon { color: var(--erp-text-soft); margin-bottom: 8px; }
+.erp-empty .em-title { font-size: 14px; font-weight: 600; color: var(--erp-text); margin-bottom: 4px; }
+
+/* ── Kanban / Panel primitives ───────────────────────────── */
+.erp-panel {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 12px 14px;
+  box-shadow: var(--erp-shadow-sm);
+}
+.erp-panel-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--erp-text);
+  margin-bottom: 8px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--erp-border);
+}
+.erp-panel-title .count { margin-left: auto; font-size: 11px; color: var(--erp-text-muted); font-weight: 500; }
+
+/* App-launcher tiles */
+.erp-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.erp-tile {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 12px 10px;
+  display: flex; flex-direction: column; align-items: center;
+  cursor: pointer;
+  transition: border-color 0.1s, transform 0.1s;
+  color: var(--erp-text);
+  text-decoration: none;
+  min-height: 78px;
+}
+.erp-tile:hover {
+  border-color: var(--erp-brand);
+  transform: translateY(-1px);
+  box-shadow: var(--erp-shadow);
+}
+.erp-tile .icon {
+  width: 34px; height: 34px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: white; margin-bottom: 6px;
+}
+.erp-tile .name { font-size: 12px; font-weight: 600; text-align: center; }
+.erp-tile .desc { font-size: 10.5px; color: var(--erp-text-muted); text-align: center; margin-top: 2px; }
+
+/* Scoped Tone tints for tiles/pills (reuses shell colors) */
+.tone-steel { background: var(--erp-steel); }
+.tone-teal  { background: var(--erp-teal); }
+.tone-green { background: var(--erp-green); }
+.tone-amber { background: var(--erp-amber); }
+.tone-red   { background: var(--erp-red); }
+.tone-plum  { background: var(--erp-plum); }
+
+/* Utility */
+.erp-hstack { display: flex; align-items: center; gap: 8px; }
+.erp-vstack { display: flex; flex-direction: column; gap: 8px; }
+.erp-mono { font-family: 'ui-monospace', 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 12px; }
+
+/* Density: 1366×768 optimisation — tighten paddings on small viewports */
+@media (max-width: 1400px) {
+  :root { --erp-h-topbar: 40px; --erp-w-sidebar: 200px; }
+  .erp-workspace-inner { padding: 10px 12px 16px; }
+  .erp-list tbody td { padding: 6px 10px; }
+  .erp-list thead th { padding: 6px 10px; }
+}
+
+/* ============================================================
    PRINT STYLES — applied to every report page automatically.
    ------------------------------------------------------------
    .no-print on an element/section to strip from printed output.
@@ -1737,15 +2310,20 @@ textarea:disabled,
   tfoot { display: table-footer-group; }
   img, svg { max-width: 100%; height: auto; }
 
-  /* Strip the app shell entirely */
+  /* Strip the app shell entirely (old + new class names) */
   .sidebar,
   .sidebar-search-trigger,
   .app-topbar,
   .nav-section,
+  .erp-sidebar,
+  .erp-brand,
+  .erp-topbar,
   .no-print { display: none !important; }
 
-  .app-container { display: block !important; }
-  .main-content {
+  .app-container,
+  .erp-shell { display: block !important; grid-template-columns: none !important; grid-template-rows: none !important; grid-template-areas: none !important; }
+  .main-content,
+  .erp-workspace {
     margin-left: 0 !important;
     /* visual margins restored here since @page is 0 */
     padding: 10mm 12mm !important;
@@ -1753,6 +2331,7 @@ textarea:disabled,
     max-width: 100% !important;
     box-sizing: border-box !important;
   }
+  .erp-workspace-inner { padding: 0 !important; max-width: none !important; }
 
   /* Show print-only blocks */
   .print-only { display: block !important; }
