@@ -298,6 +298,7 @@ export function PartsIssuedToJc() {
             subtitle="Line-by-line record of every spare part issued to a workshop job card in the period."
             icon={Wrench}
             endpoint="parts/issued-to-jc"
+            landscape
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
             controls={({ params, updateParam }) => (
                 <>

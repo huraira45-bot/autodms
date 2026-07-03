@@ -17,6 +17,11 @@ export const fmtInt = (n) => Number(n || 0).toLocaleString('en-PK', { maximumFra
 export default function ReportShell({
     title, subtitle, icon: Icon, endpoint, defaultParams = {}, controls, children,
     printFilterSummary,
+    // Owner ask 2026-07-03: wide reports (JC Register etc.) were clipping the
+    // rightmost columns because the print CSS forces A4 portrait. Opt-in
+    // landscape via this prop; ReportShell just adds a class that the
+    // print CSS uses to reassign the @page rule.
+    landscape = false,
 }) {
     const [params, setParams] = useState(defaultParams);
     const [data, setData]     = useState(null);
@@ -44,8 +49,17 @@ export default function ReportShell({
         ? printFilterSummary(params)
         : formatFilterSummary(params);
 
+    // Toggle the page-orientation class on <body> while this report is mounted.
+    // We do it on body (not the wrapper) because @page bindings resolve at the
+    // root document element in most browsers.
+    useEffect(() => {
+        if (!landscape) return;
+        document.body.classList.add('print-landscape');
+        return () => document.body.classList.remove('print-landscape');
+    }, [landscape]);
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }} className={landscape ? 'report-landscape' : undefined}>
             <PrintHeader title={title} subtitle={subtitle} printedAt={printedAt} filterSummary={filterSummary} />
             <div className="card-header">
                 <div>

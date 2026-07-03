@@ -1687,12 +1687,18 @@ textarea:disabled,
 .print-only { display: none; }
 
 @media print {
-  /* Every print job in the app is A4 portrait. Margin set to 0 so the browser
-     has no room to inject its own header/footer (URL / date / page #). Visual
-     margins are restored via .main-content padding below. Dedicated print
-     pages (WorkOrderPrint, StoreSalePrint, etc.) override .main-content
-     entirely with their own padded container. */
+  /* Every print job in the app is A4 portrait by default. Margin set to 0 so
+     the browser has no room to inject its own header/footer (URL / date /
+     page #). Visual margins are restored via .main-content padding below.
+     Dedicated print pages (WorkOrderPrint, StoreSalePrint, etc.) override
+     .main-content entirely with their own padded container.
+
+     Wide reports opt into landscape by adding .print-landscape to <body> —
+     see ReportShell.jsx `landscape` prop (owner ask 2026-07-03 after the
+     Job Card Register clipped its right-hand columns in portrait). */
   @page { size: A4 portrait; margin: 0; }
+  @page landscape { size: A4 landscape; margin: 0; }
+  body.print-landscape { page: landscape; }
 
   html, body {
     width: 210mm;
@@ -1702,6 +1708,27 @@ textarea:disabled,
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  /* Landscape overrides — must come AFTER the shared html/body width rule so
+     the 297mm width wins the cascade. */
+  body.print-landscape,
+  body.print-landscape .main-content {
+    width: 297mm !important;
+    max-width: 297mm !important;
+  }
+  /* Some report tables live inside a card with overflow-x:auto for on-screen
+     horizontal scrolling. That collapses the printed width — force cards to
+     let the table expand. */
+  body.print-landscape .card,
+  body.print-landscape .card > div,
+  body.print-landscape .table-wrapper {
+    overflow: visible !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+  /* Shrink to fit at landscape too — wide multi-column reports look better
+     at 8pt so column headers don't wrap. */
+  body.print-landscape table { font-size: 8pt !important; table-layout: auto !important; }
+  body.print-landscape th, body.print-landscape td { padding: 3px 5px !important; }
 
   /* Tables shouldn't overflow A4 width — fall back to wrapping rather than scroll */
   table { page-break-inside: auto; }

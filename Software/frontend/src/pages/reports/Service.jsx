@@ -42,6 +42,7 @@ export function JobCardRegister() {
             endpoint="service/job-card-register"
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized' }}
             printFilterSummary={printFilterSummary}
+            landscape
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
