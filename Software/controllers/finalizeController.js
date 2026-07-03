@@ -80,8 +80,16 @@ exports.finalize = async (req, res) => {
             return res.status(409).json({ error: 'Already finalized' });
         }
 
+        // Owner ask 2026-07-03: user029 (Asst Manager Accounts, MUDASIR ALI)
+        // has the `finalize` module permission but was blocked here because
+        // he wasn't the voucher's creator. For manual finance vouchers the
+        // whole point of finalize is manager approval of somebody else's
+        // draft, so the creator-only gate never made sense there.
+        // Physical documents (JC, GRN, GRTN, Store Sale, SSR) still require
+        // either the creator or an admin to finalize — the person who
+        // physically handled the parts / signed the RO owns that step.
         const isAdmin = req.user.modules.includes('admin_unfinalize');
-        if (!isAdmin && check.recordset[0].CreatedBy !== req.user.userId) {
+        if (!em.isVoucher && !isAdmin && check.recordset[0].CreatedBy !== req.user.userId) {
             return res.status(403).json({ error: 'Only the creator of this record can finalize it.' });
         }
 
