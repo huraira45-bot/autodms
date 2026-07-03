@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { Users, Loader2, RefreshCw, Search, ArrowLeft, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -126,38 +127,37 @@ export default function PartyStatement({ kind }) {
                 subtitle={data?.party ? `${data.party.PartyName} (${data.party.PartyCode || '—'})` : null}
                 printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
                 filterSummary={`Period: ${from} → ${to}`} />
-            <div className="card-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Link to="/reports/trial-balance" className="no-print" style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none' }}>
-                        <ArrowLeft size={16} /> Reports
-                    </Link>
-                    <div>
-                        <h1 className="page-title">{title}</h1>
-                        <p className="page-subtitle">{subtitle}</p>
-                    </div>
-                </div>
-                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <PartyPicker onSelect={pick} />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
-                        From:
-                        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
-                        To:
-                        <input type="date" value={to} onChange={e => setTo(e.target.value)}
-                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
-                    </label>
-                    <button className="btn" onClick={load} disabled={loading || !partyId}>
-                        {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        Refresh
-                    </button>
-                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
-                        style={{ background: '#0f766e' }}>
-                        <Printer size={16} /> Print
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title={title}
+                subtitle={subtitle}
+                actions={
+                    <>
+                        <Link to="/reports/trial-balance" className="erp-btn erp-btn-sm no-print" style={{ textDecoration: 'none' }}>
+                            <ArrowLeft size={14} /> Reports
+                        </Link>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading || !partyId}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Refresh
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
+                            disabled={loading || !data}>
+                            <Printer size={14} /> Print
+                        </button>
+                    </>
+                }
+            >
+                <PartyPicker onSelect={pick} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    From:
+                    <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+                        style={{ height: 26, padding: '0 8px', border: '1px solid var(--erp-border-strong)', borderRadius: 'var(--erp-radius)', fontSize: 12 }} />
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    To:
+                    <input type="date" value={to} onChange={e => setTo(e.target.value)}
+                        style={{ height: 26, padding: '0 8px', border: '1px solid var(--erp-border-strong)', borderRadius: 'var(--erp-radius)', fontSize: 12 }} />
+                </label>
+            </ErpControlPanel>
 
             {!partyId && (
                 <div className="card" style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>

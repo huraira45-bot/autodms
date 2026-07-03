@@ -59,29 +59,30 @@ export default function ReportShell({
     }, [landscape]);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }} className={landscape ? 'report-landscape' : undefined}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} className={landscape ? 'report-landscape' : undefined}>
             <PrintHeader title={title} subtitle={subtitle} printedAt={printedAt} filterSummary={filterSummary} />
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">{title}</h1>
-                    {subtitle && <p className="page-subtitle">{subtitle}</p>}
+            <div className="erp-control-panel no-print">
+                <div style={{ marginRight: 'auto' }}>
+                    <div className="title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {Icon && <Icon size={16} color="var(--erp-brand)" />}
+                        {title}
+                    </div>
+                    {subtitle && <div className="subtitle">{subtitle}</div>}
                 </div>
-                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
                     {controls && controls({ params, updateParam })}
-                    <button className="btn" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                    <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         Refresh
                     </button>
-                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
-                        style={{ background: '#0f766e' }}>
-                        <Printer size={16} /> Print
+                    <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
+                        disabled={loading || !data}>
+                        <Printer size={14} /> Print
                     </button>
                 </div>
             </div>
             {err && (
-                <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}>
-                    {err}
-                </div>
+                <div className="erp-alert danger">{err}</div>
             )}
             {data && children(data, { params, updateParam, reload: load, loading, Icon })}
         </div>

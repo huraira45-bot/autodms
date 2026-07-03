@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Wallet, Loader2, RefreshCw, ArrowDown, ArrowUp, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -31,27 +32,28 @@ export default function DailyCashBook() {
             <PrintHeader title="Daily Cash Book"
                 printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
                 filterSummary={`Date: ${date}`} />
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Daily Cash Book</h1>
-                    <p className="page-subtitle">All cash movements for one day, with running till balance.</p>
-                </div>
-                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem' }}>
-                        Date:
-                        <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                            style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
-                    </label>
-                    <button className="btn" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        Refresh
-                    </button>
-                    <button className="btn" onClick={() => window.print()} disabled={loading || !data}
-                        style={{ background: '#0f766e' }}>
-                        <Printer size={16} /> Print
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="Daily Cash Book"
+                subtitle="All cash movements for one day, with running till balance."
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Refresh
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
+                            disabled={loading || !data}>
+                            <Printer size={14} /> Print
+                        </button>
+                    </>
+                }
+            >
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    Date:
+                    <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                        style={{ height: 26, padding: '0 8px', border: '1px solid var(--erp-border-strong)', borderRadius: 'var(--erp-radius)', fontSize: 12 }} />
+                </label>
+            </ErpControlPanel>
 
             {err && <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
 

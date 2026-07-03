@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { FileBarChart, Loader2, RefreshCw, CheckCircle2, AlertTriangle, Search, ChevronRight, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { ErpControlPanel, ErpSearchBar } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -63,41 +64,29 @@ export default function TrialBalance() {
             <PrintHeader title="Trial Balance" subtitle={`As of ${asOf}`}
                 printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
                 filterSummary={`As of: ${asOf}${search ? `  •  Filter: "${search}"` : ''}`} />
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Trial Balance</h1>
-                    <p className="page-subtitle">All GL accounts with non-zero balance as of a chosen date. Click any row to drill into GL Detail.</p>
-                </div>
-                <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <div className="search-box" style={{ width: 240 }}>
-                        <Search size={16} />
-                        <input
-                            type="text"
-                            placeholder="Filter code/title..."
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                            style={{ border: 'none', outline: 'none', flex: 1, fontSize: '0.875rem' }}
-                        />
-                    </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem' }}>
-                        As of:
-                        <input
-                            type="date"
-                            value={asOf}
-                            onChange={e => setAsOf(e.target.value)}
-                            style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6 }}
-                        />
-                    </label>
-                    <button className="btn" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        Refresh
-                    </button>
-                    <button className="btn" onClick={() => window.print()} disabled={loading || data.rows.length === 0}
-                        style={{ background: '#0f766e' }}>
-                        <Printer size={16} /> Print
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><FileBarChart size={14} color="var(--erp-brand)" /> Trial Balance</span>}
+                subtitle="All GL accounts with non-zero balance as of a chosen date. Click any row to drill into GL Detail."
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Refresh
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
+                            disabled={loading || data.rows.length === 0}>
+                            <Printer size={14} /> Print
+                        </button>
+                    </>
+                }
+            >
+                <ErpSearchBar value={search} onChange={setSearch} placeholder="Filter code / title…" width={240} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    As of:
+                    <input type="date" value={asOf} onChange={e => setAsOf(e.target.value)}
+                        style={{ height: 26, padding: '0 8px', border: '1px solid var(--erp-border-strong)', borderRadius: 'var(--erp-radius)', fontSize: 12 }} />
+                </label>
+            </ErpControlPanel>
 
             {/* Balance status banner */}
             <div className="card" style={{
