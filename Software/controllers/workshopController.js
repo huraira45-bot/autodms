@@ -963,6 +963,38 @@ exports.getPartsIssues = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+/**
+ * GET /api/workshop/parts-issue/list
+ * Owner ask 2026-07-03: a Store-Sale-style "Recent Issues" list across
+ * ALL job cards, filterable by Job No / Part No / Item Name / customer.
+ * Uses the same view for consistency.
+ */
+exports.getPartsIssueList = async (req, res) => {
+    try {
+        const { search } = req.query;
+        const pool = await getPool();
+        const rq = pool.request();
+        let q = `
+            SELECT TOP 200 v.*, c.endUserName AS CustomerName
+            FROM vw_PartsIssueToJobCard v
+            LEFT JOIN Addata_JobCardInfo   j ON v.JobCardId  = j.JobCardId
+            LEFT JOIN addata_CustomerInfo  c ON j.EndUserID  = c.ProfileID
+        `;
+        if (search) {
+            rq.input('s', sql.NVarChar(200), `%${search}%`);
+            q += ` WHERE (
+                v.JobCardNo    LIKE @s
+                OR v.ItemName  LIKE @s
+                OR v.ManualNumber LIKE @s
+                OR CAST(v.ItemNumber AS NVARCHAR(50)) LIKE @s
+                OR c.endUserName LIKE @s
+            )`;
+        }
+        q += ' ORDER BY v.IssueDate DESC, v.StockIssueID DESC, v.StockIssueDetailID DESC';
+        res.json((await rq.query(q)).recordset);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
 exports.issuePartsToJobCard = async (req, res) => {
     try {
         const { JobCardId, JobCardNo, Items, Remarks } = req.body;
@@ -1020,7 +1052,14 @@ exports.issuePartsToJobCard = async (req, res) => {
                 const rate = Number(item.Rate) || 0;
                 const discAmtVal = Number(item.DiscAmt) || 0;
                 const gross = rate * qty;
-                const tax = snapshotTax(gross, discAmtVal, gstRate);
+                // Owner ask 2026-07-03: honour per-line IsGST toggle. Non-GST
+                // items on the parts issue slip get zero tax; taxable ones use
+                // the configured rate. Backward-compatible: if the caller
+                // doesn't send IsGST we keep the old behaviour (default taxable).
+                const isTaxable = item.IsGST === undefined ? true : !!item.IsGST;
+                const tax = isTaxable
+                    ? snapshotTax(gross, discAmtVal, gstRate)
+                    : { taxRate: 0, taxAmount: 0 };
 
                 await new sql.Request(transaction)
                     .input('issueId', sql.Int, issueId)

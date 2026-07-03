@@ -1,5 +1,5 @@
 import React from 'react';
-import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput } from 'lucide-react';
+import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput, Wrench } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls, DateInput } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -276,6 +276,79 @@ export function PartsPurchaseSummary() {
                                         <TD align="right" mono>{fmt(r.ItemRate)}</TD>
                                         <TD align="right" mono>{fmt(r.Discount)}</TD>
                                         <TD align="right" mono>{fmt(r.Tax)}</TD>
+                                        <TD align="right" mono bold>{fmt(r.LineNet)}</TD>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
+            )}
+        </ReportShell>
+    );
+}
+
+// =====================================================================
+// Parts Issued to Job Cards (owner ask 2026-07-03)
+// =====================================================================
+export function PartsIssuedToJc() {
+    return (
+        <ReportShell
+            title="Parts Issued to Job Cards"
+            subtitle="Line-by-line record of every spare part issued to a workshop job card in the period."
+            icon={Wrench}
+            endpoint="parts/issued-to-jc"
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PeriodControls params={params} updateParam={updateParam} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Search:
+                        <input value={params.search || ''}
+                            onChange={e => updateParam('search', e.target.value)}
+                            placeholder="Job No, Part No, Item Name, Customer"
+                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 260 }} />
+                    </label>
+                </>
+            )}
+        >
+            {(data) => (
+                <>
+                    <SummaryBar items={[
+                        { label: 'Slips',    value: fmtInt(data.totals.slips) },
+                        { label: 'Lines',    value: fmtInt(data.totals.lines) },
+                        { label: 'Quantity', value: fmt(data.totals.quantity) },
+                        { label: 'Discount', value: fmt(data.totals.discount) },
+                        { label: 'GST',      value: fmt(data.totals.tax) },
+                        { label: 'Net',      value: 'PKR ' + fmt(data.totals.net), strong: true },
+                    ]} />
+                    <div className="card" style={{ overflowX: 'auto' }}>
+                        <table style={tableStyle}>
+                            <thead>
+                                <tr style={trHeader}>
+                                    <TH>Slip #</TH><TH>Date</TH>
+                                    <TH>Job Card</TH><TH>Customer</TH><TH>Vehicle</TH>
+                                    <TH>Part #</TH><TH>Item</TH>
+                                    <TH align="right">Qty</TH><TH align="right">Rate</TH>
+                                    <TH align="right">Disc</TH><TH align="right">GST</TH>
+                                    <TH align="right">Net</TH>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.rows.length === 0 && <Empty cols={12}>No parts issued in this period.</Empty>}
+                                {data.rows.map((r, i) => (
+                                    <tr key={i} style={trBody}>
+                                        <TD mono>{r.SlipNo}</TD>
+                                        <TD>{r.IssueDate}</TD>
+                                        <TD mono><strong>JC-{r.JobCardNo}</strong></TD>
+                                        <TD>{r.Customer}</TD>
+                                        <TD mono>{r.VehicleRegNo}</TD>
+                                        <TD mono>{r.ItemCode}</TD>
+                                        <TD>{r.ItemName}</TD>
+                                        <TD align="right" mono>{fmt(r.Quantity)}</TD>
+                                        <TD align="right" mono>{fmt(r.Rate)}</TD>
+                                        <TD align="right" mono>{fmt(r.Discount)}</TD>
+                                        <TD align="right" mono color="#1d4ed8">{fmt(r.Tax)}</TD>
                                         <TD align="right" mono bold>{fmt(r.LineNet)}</TD>
                                     </tr>
                                 ))}

@@ -23,6 +23,9 @@ export default function Parts() {
   const [uoms, setUOMs]             = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [brands, setBrands]         = useState([]);
+  // Owner ask 2026-07-03: read-only "Total Issued" column, sourced from
+  // /api/items/issued-summary. Keyed by ItemId.
+  const [issuedByItem, setIssuedByItem] = useState({});
 
   const [search, setSearch]   = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -31,18 +34,23 @@ export default function Parts() {
 
   const fetchData = async () => {
     try {
-      const [res, cat, uom, wh, br] = await Promise.all([
+      const [res, cat, uom, wh, br, iss] = await Promise.all([
         axios.get(`${API_BASE}/items`),
         axios.get(`${API_BASE}/inventory-config/categories`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/inventory-config/uoms`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/inventory-config/warehouses`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/inventory-config/brands`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE}/items/issued-summary`).catch(() => ({ data: [] })),
       ]);
       setItems((res.data || []).filter(i => i.ItemType === 'Part'));
       setCategories(cat.data || []);
       setUOMs(uom.data || []);
       setWarehouses(wh.data || []);
       setBrands(br.data || []);
+      // Turn the flat list into a lookup keyed by ItemId for O(1) merging.
+      const idx = {};
+      for (const row of (iss.data || [])) idx[row.ItemId] = row;
+      setIssuedByItem(idx);
     } catch (err) { console.error(err); }
   };
 
@@ -149,13 +157,16 @@ export default function Parts() {
                   <th>Bin</th>
                   <th>UOM</th>
                   <th style={{ textAlign: 'right' }}>Sale Price</th>
+                  <th style={{ textAlign: 'right' }} title="Total quantity issued to job cards (read-only)">Issued</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={canEdit ? 7 : 6} className="table-empty-row">No parts match this search.</td></tr>
-                ) : filtered.map(i => (
+                  <tr><td colSpan={canEdit ? 8 : 7} className="table-empty-row">No parts match this search.</td></tr>
+                ) : filtered.map(i => {
+                  const iss = issuedByItem[i.ItemId];
+                  return (
                   <tr key={i.ItemId} onClick={() => canEdit && startEdit(i)} style={{ cursor: canEdit ? 'pointer' : 'default' }}>
                     <td><code>{i.ManualNumber ?? i.ItemNumber ?? '—'}</code></td>
                     <td>{i.ItenName}</td>
@@ -165,6 +176,10 @@ export default function Parts() {
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {Number(i.ItemSalesPrice || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: iss ? '#0f172a' : '#94a3b8', fontWeight: iss ? 600 : 400 }}
+                        title={iss ? `Across ${iss.IssueCount} slip(s) — PKR ${Number(iss.TotalIssuedValue || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'No issues yet'}>
+                      {iss ? Number(iss.TotalIssuedQty || 0).toLocaleString('en-PK') : '—'}
+                    </td>
                     {canEdit && (
                       <td style={{ width: 50, textAlign: 'right' }}>
                         <button className="btn-icon" title="Edit" onClick={(e) => { e.stopPropagation(); startEdit(i); }}>
@@ -173,7 +188,8 @@ export default function Parts() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

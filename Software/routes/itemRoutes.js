@@ -12,6 +12,10 @@ router.get( '/',     requireAnyAccess(
                        'inventory_settings:view',
                      ), itemController.getItems);
 
+// Total issued qty / value per part for the Parts Catalog "Issued" column.
+router.get('/issued-summary', requireAnyAccess('parts_spare:view'),
+          itemController.getItemsIssuedSummary);
+
 // The same /api/items endpoint creates BOTH parts (ItemType='Part') and
 // labour services (ItemType='Service'). Workshop managers who own the labour
 // catalog have workshop_labour:insert but not parts_spare:insert, so a narrow

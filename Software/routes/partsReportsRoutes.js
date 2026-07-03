@@ -7,5 +7,6 @@ router.get('/stock-movement',    requireAccess('report:stock_movement'),       c
 router.get('/reorder-alert',     requireAccess('report:reorder_alert'),        c.reorderAlert);
 router.get('/sales-register',    requireAccess('report:parts_sales_register'), c.partsSalesRegister);
 router.get('/purchase-summary',  requireAccess('report:purchase_summary'),     c.purchaseSummary);
+router.get('/issued-to-jc',      requireAccess('report:parts_issued_to_jc'),   c.partsIssuedToJc);
 
 module.exports = router;

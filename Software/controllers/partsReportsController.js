@@ -318,3 +318,67 @@ exports.purchaseSummary = async (req, res) => {
         res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
     } catch (err) { console.error('purchaseSummary:', err); res.status(500).json({ error: err.message }); }
 };
+
+/**
+ * GET /reports/parts/issued-to-jc
+ * Owner ask 2026-07-03: "which parts were issued to which job cards"
+ * line-by-line for a date range, with a free-text filter.
+ */
+exports.partsIssuedToJc = async (req, res) => {
+    try {
+        const { from, to } = parseRange(req);
+        const search = (req.query.search || '').trim();
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+        let where = 'v.IssueDate BETWEEN @from AND @to';
+        if (search) {
+            rq.input('s', sql.NVarChar(200), `%${search}%`);
+            where += ` AND (
+                v.JobCardNo LIKE @s
+                OR v.ItemName LIKE @s
+                OR v.ManualNumber LIKE @s
+                OR CAST(v.ItemNumber AS NVARCHAR(50)) LIKE @s
+                OR ISNULL(c.endUserName, '') LIKE @s
+            )`;
+        }
+        const r = await rq.query(`
+            SELECT v.StockIssueDetailID, v.IssueNo, v.IssueDate,
+                   v.JobCardId, v.JobCardNo,
+                   c.endUserName AS CustomerName,
+                   j.VehicleRegNo,
+                   v.ItemId, v.ItemName, v.ItemNumber, v.ManualNumber,
+                   v.IssueQuantity, v.ItemRate, v.Discount, v.DiscAmt,
+                   v.TaxRate, v.TaxAmount, v.LineNet
+            FROM vw_PartsIssueToJobCard v
+            LEFT JOIN Addata_JobCardInfo  j ON v.JobCardId = j.JobCardId
+            LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
+            WHERE ${where}
+            ORDER BY v.IssueDate DESC, v.StockIssueID DESC, v.StockIssueDetailID DESC
+        `);
+        const rows = r.recordset.map(x => ({
+            SlipNo:       'PI-' + String(x.IssueNo || 0).padStart(4, '0'),
+            IssueDate:    x.IssueDate?.toISOString().slice(0, 10),
+            JobCardNo:    x.JobCardNo || '',
+            Customer:     x.CustomerName || '',
+            VehicleRegNo: x.VehicleRegNo || '',
+            ItemCode:     x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
+            ItemName:     x.ItemName || '',
+            Quantity:     +Number(x.IssueQuantity || 0).toFixed(2),
+            Rate:         +Number(x.ItemRate || 0).toFixed(2),
+            Discount:     +Number(x.DiscAmt || 0).toFixed(2),
+            Tax:          +Number(x.TaxAmount || 0).toFixed(2),
+            LineNet:      +Number(x.LineNet || 0).toFixed(2),
+        }));
+        const totals = {
+            lines:    rows.length,
+            slips:    new Set(rows.map(r => r.SlipNo)).size,
+            quantity: +rows.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
+            discount: +rows.reduce((s, x) => s + x.Discount, 0).toFixed(2),
+            tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
+            net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
+        };
+        res.json({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), rows, totals });
+    } catch (err) { console.error('partsIssuedToJc:', err); res.status(500).json({ error: err.message }); }
+};

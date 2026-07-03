@@ -11,6 +11,32 @@ exports.getItems = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/items/issued-summary
+ * Owner ask 2026-07-03: show a "total issued" quantity next to each part in
+ * the catalog. Returns [{ ItemId, TotalIssuedQty, TotalIssuedValue }].
+ * Cheap enough to run on every catalog load (small parts count).
+ */
+exports.getItemsIssuedSummary = async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query(`
+      SELECT sid.ItemId,
+             SUM(ISNULL(sid.IssueQuantity, 0))                                          AS TotalIssuedQty,
+             SUM(ISNULL(sid.IssueQuantity, 0) * ISNULL(sid.ItemRate, 0)
+                 - ISNULL(sid.DiscAmt, 0)
+                 + ISNULL(sid.TaxAmount, 0))                                            AS TotalIssuedValue,
+             COUNT(DISTINCT sid.StockIssueID)                                           AS IssueCount
+      FROM data_StockIssuetoJobCardDetail sid
+      GROUP BY sid.ItemId
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('getItemsIssuedSummary:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.createItem = async (req, res) => {
   try {
     const {

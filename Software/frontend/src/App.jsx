@@ -136,7 +136,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
 // Module-scoped reports
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
-import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary }       from './pages/reports/Parts';
+import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
 import NotificationBell     from './components/NotificationBell';
@@ -311,6 +311,11 @@ function Sidebar({ onOpenCommand }) {
                 {canReport('purchase_summary') && (
                     <NavLink to="/reports/parts/purchase-summary" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                         <FileBarChart size={20} /> Parts Purchase Summary
+                    </NavLink>
+                )}
+                {canReport('parts_issued_to_jc') && (
+                    <NavLink to="/reports/parts/issued-to-jc" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                        <FileBarChart size={20} /> Parts Issued to Job Cards
                     </NavLink>
                 )}
                 {hasModule('procurement_grn') && (
@@ -815,6 +820,7 @@ function AppShell() {
                     <Route path="/reports/parts/reorder-alert"    element={<ProtectedRoute><ReorderAlert /></ProtectedRoute>} />
                     <Route path="/reports/parts/sales-register"   element={<ProtectedRoute><PartsSalesRegister /></ProtectedRoute>} />
                     <Route path="/reports/parts/purchase-summary" element={<ProtectedRoute><PartsPurchaseSummary /></ProtectedRoute>} />
+                    <Route path="/reports/parts/issued-to-jc"     element={<ProtectedRoute><PartsIssuedToJc /></ProtectedRoute>} />
 
                     {/* Sales (vehicle) reports */}
                     <Route path="/reports/sales/booking-register"        element={<ProtectedRoute><BookingRegister /></ProtectedRoute>} />
