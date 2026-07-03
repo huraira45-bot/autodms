@@ -6,6 +6,7 @@ import GLAccountPicker from '../components/GLAccountPicker';
 import Can from '../components/Can';
 import { useCan } from '../context/AuthContext';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -95,16 +96,18 @@ export default function Employees() {
   };
 
   return (
-    <div>
-      <div className="card-header" style={{ marginBottom: '24px' }}>
-        <div>
-          <h1 className="page-title">Employees</h1>
-          <p className="page-subtitle">Manage dealership staff, credentials, and financials.</p>
-        </div>
-        {canInsert && <button className="btn" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Close Form' : <><UserPlus size={18} /> Add Employee</>}
-        </button>}
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErpControlPanel
+        title="Employees"
+        subtitle="Manage dealership staff, credentials, and financials."
+        actions={
+          canInsert && (
+            <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Close Form' : <><UserPlus size={14} /> Add Employee</>}
+            </button>
+          )
+        }
+      />
 
       {showForm && (
         <div className="card" style={{ marginBottom: '24px', borderLeft: '4px solid var(--primary)' }}>

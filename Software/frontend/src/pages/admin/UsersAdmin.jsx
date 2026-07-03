@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import SearchableSelect from '../../components/SearchableSelect';
+import { ErpControlPanel } from '../../components/erp';
 
 const emptyForm = { UserName: '', Password: '', GroupID: '', Active: true, LinkedEmployeeID: '' };
 
@@ -74,11 +75,14 @@ export default function UsersAdmin() {
     const roleName = (id) => roles.find(r => r.GroupID === id)?.GroupTitle || id;
 
     return (
-        <div className="page-container">
-            <div className="page-header">
-                <h1 className="page-title">User Management</h1>
-                <button className="btn-primary" onClick={openCreate}>+ New User</button>
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title="User Management"
+                subtitle="Login users, role assignment, and linked employees."
+                actions={
+                    <button type="button" className="erp-btn erp-btn-primary" onClick={openCreate}>+ New User</button>
+                }
+            />
 
             {msg && <div style={notifStyle('#dcfce7','#166534')}>{msg}</div>}
             {err && <div style={notifStyle('#fee2e2','#b91c1c')}>{err}</div>}

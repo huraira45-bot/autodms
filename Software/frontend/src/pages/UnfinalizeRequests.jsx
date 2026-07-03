@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { ErpControlPanel } from '../components/erp';
 
 const STATUS_STYLE = {
     PENDING:     { bg: '#fef3c7', color: '#92400e', label: 'Pending AM' },
@@ -72,10 +73,11 @@ export default function UnfinalizeRequests() {
     if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>;
 
     return (
-        <div className="page-container">
-            <div className="page-header">
-                <h1 className="page-title">Unfinalize Requests</h1>
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title="Unfinalize Requests"
+                subtitle="Approval workflow: PENDING → AM_APPROVED → COMPLETED / REJECTED. AM approves, Admin unfinalizes."
+            />
 
             {msg && <div style={notif('#dcfce7','#166534')}>{msg}</div>}
             {err && <div style={notif('#fee2e2','#b91c1c')}>{err}</div>}

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Plus, Save, Loader2 } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import { PageHeader } from '../components/UXPrimitives';
+import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -53,8 +54,8 @@ export default function HRSettings() {
   };
 
   return (
-    <div className="ux-page-stack">
-      <PageHeader
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErpControlPanel
         title="HR Configurations"
         subtitle="Manage departments, designations, and org-chart relationships used by escalation chains."
       />

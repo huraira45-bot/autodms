@@ -14,6 +14,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Trash2, Plus, Save, Check, AlertTriangle } from 'lucide-react';
+import { ErpControlPanel } from '../../components/erp';
 
 const ACTIONS = ['view', 'insert', 'edit', 'delete'];
 
@@ -127,11 +128,11 @@ export default function RolePermissions() {
     const totalGranted = perms.size;
 
     return (
-        <div className="page-container">
-            <div className="page-header" style={{ marginBottom: 16 }}>
-                <h1 className="page-title">Role Permissions</h1>
-                <p className="page-subtitle">Granular per-action access. Workshop / Parts / Sales documents have View / Insert / Edit / Delete; reports + workflow pages have single-access.</p>
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title="Role Permissions"
+                subtitle="Granular per-action access — Workshop / Parts / Sales docs support View / Insert / Edit / Delete; reports + workflow pages are single-access."
+            />
 
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                 {/* ───── Roles panel ───── */}
