@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Loader2, RefreshCw, Printer } from 'lucide-react';
+import ReportPrintHeader from '../../components/ReportPrintHeader';
 
 export const API_BASE = '/api';
 
@@ -98,30 +99,21 @@ function formatFilterSummary(params) {
     return parts.join('  •  ');
 }
 
-export function PrintHeader({ title, subtitle, printedAt, filterSummary }) {
+// Re-exported so legacy report pages that still `import { PrintHeader } from
+// './reports/ReportShell'` keep compiling. All rendering delegates to the new
+// business-profile-backed ReportPrintHeader — no company details are
+// hard-coded here anymore (owner ask 2026-07-03).
+export function PrintHeader(props) {
+    return <ReportPrintHeader {...props} />;
+}
+
+// Legacy no-op left in place so the old class name still targets nothing.
+function _legacyPrintHeaderPlaceholder({ title, subtitle, printedAt, filterSummary }) {
     return (
-        <div className="print-only print-header">
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                <div style={{ width: 74, height: 56, border: '1px solid #64748b', display: 'flex', flexDirection: 'column',
-                              alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <div style={{ fontSize: 20, lineHeight: 1 }}>⌖</div>
-                    <div style={{ fontSize: '6pt', textAlign: 'center', marginTop: 2 }}>CHANGAN AUTO<br/>MULTAN</div>
-                </div>
-                <div style={{ flex: 1, textAlign: 'center' }}>
-                    <div style={{ fontSize: '14pt', fontWeight: 700 }}>CHANGAN MULTAN MOTORS</div>
-                    <div style={{ fontSize: '8pt', color: '#334155', marginTop: 1 }}>
-                        NEAR PAK-ARAB FERTILIZERS, KHANEWAL ROAD, MULTAN.&nbsp;&nbsp;Phone#: 061-111-222-388
-                    </div>
-                </div>
-            </div>
-            <div style={{ borderTop: '1px solid #0f172a', marginTop: 6, paddingTop: 6 }}>
-                <h1>{title}</h1>
-                {subtitle && <div style={{ fontSize: '9pt', color: '#475569', marginTop: 2 }}>{subtitle}</div>}
-                <div className="meta">
-                    <span>{filterSummary}</span>
-                    <span>Printed: {printedAt}</span>
-                </div>
-            </div>
+        <div className="print-only print-header" style={{ display: 'none' }}>
+            <h1>{title}</h1>
+            {subtitle && <div>{subtitle}</div>}
+            <div className="meta"><span>{filterSummary}</span><span>Printed: {printedAt}</span></div>
         </div>
     );
 }

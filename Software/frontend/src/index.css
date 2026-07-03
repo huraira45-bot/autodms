@@ -2250,6 +2250,33 @@ textarea:disabled,
   .erp-list thead th { padding: 6px 10px; }
 }
 
+/* On-screen preview of ReportPrintHeader (only when showOnScreen=true).
+   Print rules further down override the print rendering. */
+.report-print-header {
+  background: #ffffff;
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.report-print-header .rph-band {
+  display: flex; align-items: flex-start; gap: 14px;
+}
+.report-print-header .rph-logo { width: 64px; flex-shrink: 0; }
+.report-print-header .rph-logo img { max-width: 100%; max-height: 60px; object-fit: contain; display: block; }
+.report-print-header .rph-company { flex: 1; text-align: center; }
+.report-print-header .rph-name { font-size: 15px; font-weight: 700; }
+.report-print-header .rph-legal { font-size: 11px; color: var(--erp-text-muted); font-style: italic; margin-top: 1px; }
+.report-print-header .rph-line { font-size: 11px; color: var(--erp-text-muted); margin-top: 1px; line-height: 1.35; }
+.report-print-header .rph-report { border-top: 1px solid var(--erp-border); margin-top: 6px; padding-top: 4px; }
+.report-print-header .rph-report h1 { font-size: 14px; font-weight: 700; margin: 0; color: var(--erp-text); }
+.report-print-header .rph-subtitle { font-size: 11px; color: var(--erp-text-muted); margin-top: 1px; }
+.report-print-header .rph-meta {
+  font-size: 11px; color: var(--erp-text-muted); margin-top: 3px;
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+
 /* ============================================================
    PRINT STYLES — applied to every report page automatically.
    ------------------------------------------------------------
@@ -2351,7 +2378,58 @@ textarea:disabled,
   /* Hide the on-screen card-header on print — the print-header banner
      already carries the title, subtitle, filters and timestamp, and the
      card-header's leftover controls/buttons are stripped via .no-print. */
-  .print-header + .card-header { display: none !important; }
+  .print-header + .card-header,
+  .report-print-header + .card-header,
+  .report-print-header + .erp-control-panel { display: none !important; }
+
+  /* ─── ReportPrintHeader — the ONE shared report header (owner ask
+     2026-07-03). Sources every field from /api/settings/business-profile
+     so no company details are hard-coded. */
+  .report-print-header {
+    border-bottom: 1.5px solid #0f172a;
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+    font-family: 'Inter', sans-serif;
+    color: #000;
+  }
+  .report-print-header .rph-band {
+    display: flex; align-items: flex-start; gap: 14px;
+  }
+  .report-print-header .rph-logo {
+    width: 72px; flex-shrink: 0;
+  }
+  .report-print-header .rph-logo img {
+    max-width: 100%; max-height: 64px; object-fit: contain;
+    display: block;
+  }
+  .report-print-header .rph-company {
+    flex: 1; text-align: center;
+  }
+  .report-print-header .rph-name {
+    font-size: 15pt; font-weight: 700; letter-spacing: 0.2px;
+    line-height: 1.15;
+  }
+  .report-print-header .rph-legal {
+    font-size: 9pt; color: #334155; margin-top: 1px;
+    font-style: italic;
+  }
+  .report-print-header .rph-line {
+    font-size: 8.5pt; color: #334155; margin-top: 1px; line-height: 1.3;
+  }
+  .report-print-header .rph-report {
+    border-top: 1px solid #94a3b8;
+    margin-top: 6px; padding-top: 4px;
+  }
+  .report-print-header .rph-report h1 {
+    font-size: 13pt; font-weight: 700; margin: 0; color: #0f172a;
+  }
+  .report-print-header .rph-subtitle {
+    font-size: 8.5pt; color: #475569; margin-top: 1px;
+  }
+  .report-print-header .rph-meta {
+    font-size: 8.5pt; color: #475569; margin-top: 3px;
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
 
   /* Flatten chrome */
   .card {

@@ -16,6 +16,7 @@ import {
     ErpControlPanel, ErpSearchBar, ErpFilterChip, ErpFilterDropdown,
     ErpListView, ErpStatusPill, ErpEmptyState, ErpLoadingState,
 } from '../components/erp';
+import ReportPrintHeader from '../components/ReportPrintHeader';
 
 const API_BASE = '/api';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -133,18 +134,18 @@ export default function VoucherBrowser() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {/* Print-only header */}
-            <div className="print-only print-header">
-                <h1>Voucher Listing{myVouchersOn ? ` — ${user?.userName || 'My Vouchers'}` : ''}</h1>
-                <div className="meta">
-                    <span>
-                        Period: {filters.from} → {filters.to}
-                        {filters.types.length ? `  •  Types: ${filters.types.join(', ')}` : ''}
-                        {filters.status ? `  •  Status: ${filters.status}` : ''}
-                    </span>
-                    <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                </div>
-            </div>
+            {/* Print-only header — the ONE shared report header, sourced from
+                /api/settings/business-profile so no company details are
+                hard-coded here (owner ask 2026-07-03). */}
+            <ReportPrintHeader
+                title={`Voucher Listing${myVouchersOn ? ` — ${user?.userName || 'My Vouchers'}` : ''}`}
+                filterSummary={[
+                    `Period: ${filters.from} → ${filters.to}`,
+                    filters.types.length ? `Types: ${filters.types.join(', ')}` : null,
+                    filters.status ? `Status: ${filters.status}` : null,
+                ].filter(Boolean).join('  •  ')}
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
+            />
 
             <ErpControlPanel
                 title="Voucher Browser"
