@@ -86,8 +86,9 @@ export function InventoryValuation() {
         >
             {(data) => (
                 <>
-                    {/* Summary cards */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                    {/* Summary cards — `report-summary-strip` flattens these to a
+                        one-line strip in print, see index.css @media print. */}
+                    <div className="report-summary-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
                         <SummaryCard label="As of"           value={data.asOf} />
                         <SummaryCard label="Items"           value={fmtInt(data.totals.items)} />
                         <SummaryCard label="Total On-Hand Qty" value={fmt(data.totals.totalQty)} />
@@ -179,13 +180,13 @@ export function InventoryValuation() {
 
 function SummaryCard({ label, value, highlight }) {
     return (
-        <div className="card" style={{
+        <div className="card rss-item" style={{
             background: highlight ? 'linear-gradient(135deg, #1e40af, #2563eb)' : undefined,
             color: highlight ? 'white' : undefined,
         }}>
-            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase',
+            <div className="rss-label" style={{ fontSize: '0.7rem', textTransform: 'uppercase',
                 color: highlight ? 'rgba(255,255,255,0.85)' : '#64748b' }}>{label}</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: 4 }}>{value}</div>
+            <div className="rss-value" style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: 4 }}>{value}</div>
         </div>
     );
 }

@@ -277,11 +277,11 @@ const trBody     = { borderBottom: '1px solid #f1f5f9' };
 
 function SummaryBar({ items }) {
     return (
-        <div className="card" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', padding: 14 }}>
+        <div className="card report-summary-strip" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', padding: 14 }}>
             {items.map(it => (
-                <div key={it.label}>
-                    <div style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>{it.label}</div>
-                    <div style={{ fontWeight: it.strong ? 700 : 600, fontSize: it.strong ? '1.1rem' : '0.95rem',
+                <div key={it.label} className="rss-item">
+                    <div className="rss-label" style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>{it.label}</div>
+                    <div className="rss-value" style={{ fontWeight: it.strong ? 700 : 600, fontSize: it.strong ? '1.1rem' : '0.95rem',
                                   color: it.strong ? '#1e40af' : '#0f172a' }}>{it.value}</div>
                 </div>
             ))}
