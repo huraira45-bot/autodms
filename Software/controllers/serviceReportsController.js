@@ -61,6 +61,17 @@ exports.jobCardRegister = async (req, res) => {
         else if (finalized === 'draft')      conds.push('(j.IsFinalized IS NULL OR j.IsFinalized = 0)');
         // finalized === 'all' → no filter
 
+        // Owner ask 2026-07-03: break labour, parts, sublet, PST, GST out as
+        // separate columns instead of one mashed-together total. PST is
+        // snapshotted on each labour + sublet line's TaxAmount; GST is on
+        // each parts line's TaxAmount. Convention (already used by the
+        // credit-invoice print):
+        //   Labour (gross)  = Σ (Price × Qty − DiscAmt)  on labour lines
+        //   Sublet (gross)  = Σ PayableAmount            on sublet lines
+        //   PST             = Σ TaxAmount                on labour + sublet lines
+        //   Parts (gross)   = Σ (IssueQty × ItemRate)    on parts lines
+        //   GST             = Σ TaxAmount                on parts lines
+        //   Grand Total     = Labour + Sublet + Parts + PST + GST
         const r = await rq.query(`
             SELECT j.JobCardId, j.JobCardNo, j.JobCardDate, j.Status,
                    j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter,
@@ -68,46 +79,64 @@ exports.jobCardRegister = async (req, res) => {
                    j.ServiceAdvisor, j.JobResult, j.IsFinalized,
                    c.endUserName AS CustomerName, c.PhoneNo, c.CustomerCode,
                    t.Title AS JobType,
-                   ISNULL((SELECT SUM(ISNULL(d.Price,0) * ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0) + ISNULL(d.TaxAmount,0))
-                           FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourAmount,
-                   ISNULL((SELECT SUM(ISNULL(s.IssueQuantity,0) * ISNULL(s.ItemRate,0))
-                           FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsAmount,
+                   ISNULL((SELECT SUM(ISNULL(d.Price,0) * ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0))
+                           FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourGross,
+                   ISNULL((SELECT SUM(ISNULL(d.TaxAmount,0))
+                           FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourTax,
                    ISNULL((SELECT SUM(ISNULL(b.PayableAmount,0))
-                           FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId), 0) AS SubletAmount
+                           FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId), 0) AS SubletGross,
+                   ISNULL((SELECT SUM(ISNULL(b.TaxAmount,0))
+                           FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId), 0) AS SubletTax,
+                   ISNULL((SELECT SUM(ISNULL(s.IssueQuantity,0) * ISNULL(s.ItemRate,0))
+                           FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsGross,
+                   ISNULL((SELECT SUM(ISNULL(s.TaxAmount,0))
+                           FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsTax
             FROM Addata_JobCardInfo j
             LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
             LEFT JOIN gen_JobCardType t      ON j.JobTypeId = t.JobCardTypeId
             WHERE ${conds.join(' AND ')}
             ORDER BY j.JobCardDate DESC, j.JobCardId DESC`);
 
-        const rows = r.recordset.map(x => ({
-            JobCardId:    x.JobCardId,
-            JobCardNo:    x.JobCardNo,
-            JobCardDate:  x.JobCardDate?.toISOString().slice(0,10),
-            Status:       x.Status || (x.IsFinalized ? 'Finalized' : 'Open'),
-            CustomerName: x.CustomerName || '',
-            CustomerCode: x.CustomerCode || '',
-            PhoneNo:      x.PhoneNo || '',
-            VehicleRegNo: x.VehicleRegNo || '',
-            ChasisNo:     x.ChasisNo || '',
-            KiloMeter:    Number(x.KiloMeter || 0),
-            JobType:      x.JobType || '',
-            ServiceAdvisor: x.ServiceAdvisor || '',
-            ReceiptDate:  x.ReceiptDate?.toISOString().slice(0,10) || null,
-            PromisedDate: x.PromisedDate?.toISOString().slice(0,10) || null,
-            DeliveryDate: x.DeliveryDate?.toISOString().slice(0,10) || null,
-            LabourAmount: +Number(x.LabourAmount).toFixed(2),
-            PartsAmount:  +Number(x.PartsAmount).toFixed(2),
-            SubletAmount: +Number(x.SubletAmount).toFixed(2),
-            TotalAmount:  +(Number(x.LabourAmount) + Number(x.PartsAmount) + Number(x.SubletAmount)).toFixed(2),
-            IsFinalized:  !!x.IsFinalized,
-        }));
+        const rows = r.recordset.map(x => {
+            const labour = Number(x.LabourGross) || 0;
+            const sublet = Number(x.SubletGross) || 0;
+            const parts  = Number(x.PartsGross)  || 0;
+            const pst    = (Number(x.LabourTax) || 0) + (Number(x.SubletTax) || 0);
+            const gst    = Number(x.PartsTax) || 0;
+            return {
+                JobCardId:    x.JobCardId,
+                JobCardNo:    x.JobCardNo,
+                JobCardDate:  x.JobCardDate?.toISOString().slice(0,10),
+                Status:       x.Status || (x.IsFinalized ? 'Finalized' : 'Open'),
+                CustomerName: x.CustomerName || '',
+                CustomerCode: x.CustomerCode || '',
+                PhoneNo:      x.PhoneNo || '',
+                VehicleRegNo: x.VehicleRegNo || '',
+                ChasisNo:     x.ChasisNo || '',
+                KiloMeter:    Number(x.KiloMeter || 0),
+                JobType:      x.JobType || '',
+                ServiceAdvisor: x.ServiceAdvisor || '',
+                ReceiptDate:  x.ReceiptDate?.toISOString().slice(0,10) || null,
+                PromisedDate: x.PromisedDate?.toISOString().slice(0,10) || null,
+                DeliveryDate: x.DeliveryDate?.toISOString().slice(0,10) || null,
+                // Broken-out amounts (owner ask 2026-07-03)
+                LabourAmount: +labour.toFixed(2),
+                SubletAmount: +sublet.toFixed(2),
+                PartsAmount:  +parts.toFixed(2),
+                PSTAmount:    +pst.toFixed(2),
+                GSTAmount:    +gst.toFixed(2),
+                TotalAmount:  +(labour + sublet + parts + pst + gst).toFixed(2),
+                IsFinalized:  !!x.IsFinalized,
+            };
+        });
 
         const totals = {
-            count: rows.length,
+            count:  rows.length,
             labour: +rows.reduce((s, x) => s + x.LabourAmount, 0).toFixed(2),
-            parts:  +rows.reduce((s, x) => s + x.PartsAmount,  0).toFixed(2),
             sublet: +rows.reduce((s, x) => s + x.SubletAmount, 0).toFixed(2),
+            parts:  +rows.reduce((s, x) => s + x.PartsAmount,  0).toFixed(2),
+            pst:    +rows.reduce((s, x) => s + x.PSTAmount,    0).toFixed(2),
+            gst:    +rows.reduce((s, x) => s + x.GSTAmount,    0).toFixed(2),
             total:  +rows.reduce((s, x) => s + x.TotalAmount,  0).toFixed(2),
         };
 

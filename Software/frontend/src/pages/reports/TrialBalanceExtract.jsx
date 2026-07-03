@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { FileBarChart } from 'lucide-react';
-import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls } from './ReportShell';
+import ReportShell, { TH, TD, fmt, fmtInt, todayISO, DateInput } from './ReportShell';
 
 const yearStart = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 
@@ -44,14 +45,61 @@ function downloadCSV(rows, totals, from, to) {
 
 export default function TrialBalanceExtract() {
     const [showZeroPeriod, setShowZeroPeriod] = useState(true);
+    // Load headers (L1 + L2 + L3) once. These populate the group / parent
+    // picker. Owner ask 2026-07-03: pick a parent and see only its leaves,
+    // not the whole COA.
+    const [parents, setParents] = useState([]);
+    useEffect(() => {
+        // level=4&below=1 returns all L1, L2, L3 rows (i.e. anything above L4
+        // leaves). Filter isParent=1 client-side to keep only headers.
+        axios.get('/api/accounts/coa', { params: { level: 4, below: 1 } })
+            .then(r => {
+                const headers = (r.data || [])
+                    .filter(a => a.isParent === 1)
+                    .sort((a, b) => a.GLCode.localeCompare(b.GLCode));
+                setParents(headers);
+            })
+            .catch(() => {});
+    }, []);
+
+    const printFilterSummary = (params) => {
+        const parts = [];
+        if (params.from && params.to) parts.push(`Period: ${params.from} → ${params.to}`);
+        if (params.parentCode) {
+            const p = parents.find(x => x.GLCode === params.parentCode);
+            parts.push(`Filtered to: ${params.parentCode}${p ? ' — ' + p.GLTitle : ''}`);
+        } else {
+            parts.push('Scope: All accounts');
+        }
+        return parts.join('  •  ');
+    };
+    const selectStyle = { padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' };
     return (
         <ReportShell
             title="Trial Balance Extract"
             subtitle="Six-column movement report — Opening / Period / Closing (Dr, Cr) per account. Only accounts that moved in the period or carried a balance."
             icon={FileBarChart}
             endpoint="trial-balance-extract"
-            defaultParams={{ from: yearStart(), to: todayISO() }}
-            controls={PeriodControls}
+            defaultParams={{ from: yearStart(), to: todayISO(), parentCode: '' }}
+            printFilterSummary={printFilterSummary}
+            controls={({ params, updateParam }) => (
+                <>
+                    <DateInput label="From" value={params.from} onChange={v => updateParam('from', v)} />
+                    <DateInput label="To"   value={params.to}   onChange={v => updateParam('to', v)} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Group / Parent:
+                        <select value={params.parentCode || ''} onChange={e => updateParam('parentCode', e.target.value)}
+                            style={{ ...selectStyle, minWidth: 260 }}>
+                            <option value="">All accounts</option>
+                            {parents.map(p => (
+                                <option key={p.GLCAID} value={p.GLCode}>
+                                    {p.GLCode} — {p.GLTitle} {p.GLLevel === 1 ? '(Class)' : p.GLLevel === 2 ? '(Group)' : '(Sub-Group)'}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                </>
+            )}
         >
             {(data) => (
                 <>

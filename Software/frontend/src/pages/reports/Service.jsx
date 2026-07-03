@@ -83,8 +83,10 @@ export function JobCardRegister() {
                     <SummaryBar items={[
                         { label: 'Cards',  value: fmtInt(data.totals.count) },
                         { label: 'Labour', value: 'PKR ' + fmt(data.totals.labour) },
-                        { label: 'Parts',  value: 'PKR ' + fmt(data.totals.parts) },
                         { label: 'Sublet', value: 'PKR ' + fmt(data.totals.sublet) },
+                        { label: 'PST',    value: 'PKR ' + fmt(data.totals.pst) },
+                        { label: 'Parts',  value: 'PKR ' + fmt(data.totals.parts) },
+                        { label: 'GST',    value: 'PKR ' + fmt(data.totals.gst) },
                         { label: 'Total',  value: 'PKR ' + fmt(data.totals.total), strong: true },
                     ]} />
                     <div className="card" style={{ overflowX: 'auto' }}>
@@ -93,12 +95,16 @@ export function JobCardRegister() {
                                 <tr style={trHeader}>
                                     <TH>Card #</TH><TH>Date</TH><TH>Customer</TH><TH>Vehicle</TH>
                                     <TH>Advisor</TH><TH>Status</TH>
-                                    <TH align="right">Labour</TH><TH align="right">Parts</TH>
-                                    <TH align="right">Sublet</TH><TH align="right">Total</TH>
+                                    <TH align="right">Labour</TH>
+                                    <TH align="right">Sublet</TH>
+                                    <TH align="right">PST</TH>
+                                    <TH align="right">Parts</TH>
+                                    <TH align="right">GST</TH>
+                                    <TH align="right">Total</TH>
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={10}>No job cards in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={12}>No job cards in this period.</Empty>}
                                 {data.rows.map(r => (
                                     <tr key={r.JobCardId} style={trBody}>
                                         <TD mono><strong>{r.JobCardNo}</strong></TD>
@@ -108,12 +114,29 @@ export function JobCardRegister() {
                                         <TD>{r.ServiceAdvisor}</TD>
                                         <TD><StatusPill v={r.Status} finalized={r.IsFinalized} /></TD>
                                         <TD align="right" mono>{fmt(r.LabourAmount)}</TD>
-                                        <TD align="right" mono>{fmt(r.PartsAmount)}</TD>
                                         <TD align="right" mono>{fmt(r.SubletAmount)}</TD>
+                                        <TD align="right" mono color="#1d4ed8">{fmt(r.PSTAmount)}</TD>
+                                        <TD align="right" mono>{fmt(r.PartsAmount)}</TD>
+                                        <TD align="right" mono color="#1d4ed8">{fmt(r.GSTAmount)}</TD>
                                         <TD align="right" mono bold>{fmt(r.TotalAmount)}</TD>
                                     </tr>
                                 ))}
                             </tbody>
+                            {data.rows.length > 0 && (
+                                <tfoot>
+                                    <tr style={{ borderTop: '2px solid #0f172a', background: '#f8fafc' }}>
+                                        <td colSpan={6} style={{ padding: 12, fontWeight: 700 }}>
+                                            Totals — {fmtInt(data.totals.count)} cards
+                                        </td>
+                                        <TD align="right" bold>{fmt(data.totals.labour)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.sublet)}</TD>
+                                        <TD align="right" bold color="#1d4ed8">{fmt(data.totals.pst)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.parts)}</TD>
+                                        <TD align="right" bold color="#1d4ed8">{fmt(data.totals.gst)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.total)}</TD>
+                                    </tr>
+                                </tfoot>
+                            )}
                         </table>
                     </div>
                 </>

@@ -107,10 +107,16 @@ exports.getTrialBalanceExtract = async (req, res) => {
         const from = new Date(fromRaw); from.setHours(0, 0, 0, 0);
         const to   = endOfDay(toRaw);
 
+        // Optional parent filter — restrict to leaves under a chosen L1/L2/L3
+        // header. Owner ask 2026-07-03. Trimmed to strip whitespace and
+        // avoid accidental space in the LIKE prefix.
+        const parentCode = (req.query.parentCode || '').trim();
+
         const pool = await getPool();
         const result = await pool.request()
-            .input('from', sql.DateTime, from)
-            .input('to',   sql.DateTime, to)
+            .input('from',   sql.DateTime,     from)
+            .input('to',     sql.DateTime,     to)
+            .input('parent', sql.NVarChar(50), parentCode ? parentCode + '%' : '%')
             .query(`
                 WITH opening AS (
                     SELECT d.GLCAID,
@@ -143,6 +149,7 @@ exports.getTrialBalanceExtract = async (req, res) => {
                 LEFT JOIN opening o ON o.GLCAID = c.GLCAID
                 LEFT JOIN period  p ON p.GLCAID = c.GLCAID
                 WHERE c.Status = 1 AND c.isParent = 0
+                  AND c.GLCode LIKE @parent
                   AND (ABS(ISNULL(o.OpeningNetDr, 0)) > 0.005
                     OR ISNULL(p.PeriodDr, 0) > 0.005
                     OR ISNULL(p.PeriodCr, 0) > 0.005)
@@ -177,9 +184,20 @@ exports.getTrialBalanceExtract = async (req, res) => {
             closingCr: +rows.reduce((s, r) => s + r.ClosingCr, 0).toFixed(2),
         };
 
+        // Look up the parent's title for the print-header summary
+        let parentLabel = null;
+        if (parentCode) {
+            const p = await pool.request()
+                .input('c', sql.NVarChar(50), parentCode)
+                .query('SELECT GLTitle FROM GLChartOFAccount WHERE GLCode=@c');
+            if (p.recordset.length) parentLabel = `${parentCode} — ${p.recordset[0].GLTitle}`;
+        }
+
         res.json({
             from: fromRaw.toISOString().slice(0, 10),
             to:   toRaw.toISOString().slice(0, 10),
+            parentCode: parentCode || '',
+            parentLabel,
             rows,
             totals,
         });
