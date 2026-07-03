@@ -5,6 +5,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildGRTNJournalLines } = require('../utils/grtnJournalBuilder');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function resolveGRTNAccounts(/* transaction */) {
     return {
@@ -53,10 +54,7 @@ async function postGRTNVoucher(purchaseReturnId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('PRV voucher type missing — run migration 001.');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-    );
-    const voucherNo = `PRV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'PRV');
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',      sql.DateTime,     new Date())

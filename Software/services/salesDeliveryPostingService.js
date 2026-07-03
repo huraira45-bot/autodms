@@ -21,6 +21,7 @@
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function resolveAccounts() {
     const need = ['BOOKING_ADVANCE', 'BOOKING_VARIANT_RECEIVABLE',
@@ -91,9 +92,7 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('JV voucher type missing');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
-    const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'JV');
 
     const totalAmount = masterPaid + premium;
     const narration = `Delivery — settling booking ${b.BookingNo}`

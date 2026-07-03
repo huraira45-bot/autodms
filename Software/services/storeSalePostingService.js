@@ -5,6 +5,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildStoreSaleJournalLines } = require('../utils/storeSaleJournalBuilder');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function resolveStoreSaleAccounts(/* transaction */) {
     // Credit-customer A/R uses the party's own PartyGLID — not a system role —
@@ -92,10 +93,7 @@ async function postStoreSaleVoucher(saleId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('SS voucher type missing — run migration 001.');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-    );
-    const voucherNo = `SS-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'SS');
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',      sql.DateTime,     new Date())
@@ -182,9 +180,7 @@ async function postPOSAutoSettleForStoreSale({ transaction, ssVoucherId, storeSa
     if (!vt.recordset.length) throw new Error('CRV voucher type missing.');
     const crvTypeId = vt.recordset[0].Voucherid;
 
-    const seq = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo");
-    const crvNo = `CRV-${String(seq.recordset[0].nextNo).padStart(4, '0')}`;
+    const crvNo = await nextVoucherNo(transaction, 'CRV');
 
     const narration = `POS receipt at finalize — ${ref}`;
     const hdr = await new sql.Request(transaction)

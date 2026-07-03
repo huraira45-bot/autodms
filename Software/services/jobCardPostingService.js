@@ -15,6 +15,7 @@
  * Throws on any error so the caller's transaction rolls back.
  */
 const { sql } = require('../config/db');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildJournalLines } = require('../utils/jobCardJournalBuilder');
 
@@ -239,11 +240,8 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('SI voucher type missing — run migration 001.');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    // 5. Generate voucher number (SI-<sequential>)
-    const seqResult = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-    );
-    const voucherNo = `SI-${String(seqResult.recordset[0].nextNo).padStart(4, '0')}`;
+    // 5. Generate voucher number from the per-type sequence (migration 062).
+    const voucherNo = await nextVoucherNo(transaction, 'SI');
 
     // 6. Insert header — Status starts as 'Draft', flipped to 'Posted' after detail inserts
     // so the balanced-entry trigger fires once all lines are in place.
@@ -342,9 +340,7 @@ async function postPOSAutoSettleForJobCard({ transaction, siVoucherId, jobCard, 
     if (!vt.recordset.length) throw new Error('CRV voucher type missing.');
     const crvTypeId = vt.recordset[0].Voucherid;
 
-    const seq = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo");
-    const crvNo = `CRV-${String(seq.recordset[0].nextNo).padStart(4, '0')}`;
+    const crvNo = await nextVoucherNo(transaction, 'CRV');
 
     const narration = `POS receipt at finalize — JC-${jcNo}`;
     const hdr = await new sql.Request(transaction)

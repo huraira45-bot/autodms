@@ -21,6 +21,7 @@
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 // Agency model (migration 045): Master invoices the customer directly, not us.
 // We never own the vehicle, so this step posts NO inventory/payable legs.
@@ -72,9 +73,7 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
     if (!vt.recordset.length) throw new Error('JV voucher type missing');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
-    const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'JV');
 
     const totalAmount = stdIncentive;
     const narration = `Master incentive accrued on Master invoice ${b.MasterInvoiceNo || '(no#)'} for booking ${b.BookingNo} (PKR ${stdIncentive.toLocaleString('en-PK')})`;

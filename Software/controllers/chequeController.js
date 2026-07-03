@@ -1,4 +1,5 @@
 const { sql, getPool } = require('../config/db');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { resolveRole } = require('./systemAccountsController');
 const { postReversalVoucher } = require('../services/voucherReversalService');
 
@@ -61,9 +62,7 @@ async function postClearanceVoucher(tx, { vtCode, amount, narration, sourceDocId
     if (!vt.recordset.length) throw new Error(`Voucher type ${vtCode} missing.`);
     const vtId = vt.recordset[0].Voucherid;
 
-    const seq = await new sql.Request(tx)
-        .query("SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo");
-    const voucherNo = `${vtCode}-${String(seq.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(tx, vtCode);
 
     const hdr = await new sql.Request(tx)
         .input('vd',    sql.DateTime,     new Date())

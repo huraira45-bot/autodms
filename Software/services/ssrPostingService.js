@@ -5,6 +5,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildSSRJournalLines } = require('../utils/ssrJournalBuilder');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function resolveSSRAccounts(/* transaction */) {
     const roles = ['CASH_BOOK', 'GENERAL_CUSTOMER', 'GST_PAYABLE', 'POS_CLEARING',
@@ -63,10 +64,7 @@ async function postSSRVoucher(returnId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('SSR voucher type missing — run migration 001.');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-    );
-    const voucherNo = `SSR-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'SSR');
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',      sql.DateTime,     new Date())

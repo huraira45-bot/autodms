@@ -23,6 +23,7 @@
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 // Agency model (migration 045). Two journal patterns based on PaymentMode:
 //
@@ -81,9 +82,7 @@ async function postDirectPayOrderVoucher(paymentId, p, amount, accounts, custome
     if (!vt.recordset.length) throw new Error('JV voucher type missing');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
-    const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'JV');
 
     const narration = `Booking ${p.BookingNo} — Pay Order ${p.PayOrderNumber || ''}`
         + (p.PayOrderBankName ? ` (${p.PayOrderBankName})` : '')
@@ -220,9 +219,7 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error(`${vtCode} voucher type missing`);
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
-    const voucherNo = `${vtCode}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, vtCode);
 
     const narration = premium > 0
         ? `Booking ${p.BookingNo} — ${debitNarrationTail} → vehicle ${vehicleAmount} + premium ${premium} (total ${totalReceived})`

@@ -15,6 +15,7 @@
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID, reference, notes }, userInfo, tx) {
     if (!bookingId)            throw new Error('bookingId is required.');
@@ -45,8 +46,7 @@ async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID
     if (!vt.recordset.length) throw new Error(`${vtCode} voucher type missing.`);
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(tx).query(`SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS n`);
-    const voucherNo = `${vtCode}-${String(seqRes.recordset[0].n).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(tx, vtCode);
 
     const narration = `Pay Master Motors for booking ${b.BookingNo}`
         + (reference ? ` — ref ${reference}` : '');

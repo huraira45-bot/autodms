@@ -1,4 +1,5 @@
 const { sql, getPool } = require('../config/db');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { computeLineDiscAmt, validateDiscountCap } = require('../utils/careOffUtils');
 const { resolveRate } = require('./taxRatesController');
 const { assertEnoughStock } = require('../services/stockBalanceService');
@@ -1643,9 +1644,7 @@ exports.recordDepreciationPayment = async (req, res) => {
             const depPaymentId = insPay.recordset[0].DepPaymentID;
 
             // 2. Voucher header (Draft)
-            const seqRes = await new sql.Request(tx).query(
-                'SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo');
-            const voucherNo = `${vtCode}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+            const voucherNo = await nextVoucherNo(tx, vtCode);
 
             const hdrRes = await new sql.Request(tx)
                 .input('vd',   sql.DateTime,     new Date())

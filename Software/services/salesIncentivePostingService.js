@@ -18,6 +18,7 @@
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function loadAccrual(accrualId, transaction) {
     const r = await new sql.Request(transaction)
@@ -49,9 +50,7 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('JV voucher type missing');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
-    const voucherNo = `JV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'JV');
 
     const narration = `Staff incentive accrued — booking ${a.BookingNo}, employee #${a.EarnerEmployeeID}`;
 
@@ -137,9 +136,7 @@ async function postDisbursementVoucher(dis, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error(`${vtCode} voucher type missing`);
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`);
-    const voucherNo = `${vtCode}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, vtCode);
 
     const narration = dis.narration || `Staff incentive disbursement #${dis.sourceDocId || ''}`;
 

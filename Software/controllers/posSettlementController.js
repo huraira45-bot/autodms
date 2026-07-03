@@ -1,4 +1,5 @@
 const { sql, getPool } = require('../config/db');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { resolveRole } = require('./systemAccountsController');
 
 // GET /api/pos-settlement/pending
@@ -161,10 +162,7 @@ exports.postSettlement = async (req, res) => {
         const transaction = new sql.Transaction(pool);
         await transaction.begin();
         try {
-            const seqRes = await new sql.Request(transaction).query(
-                "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-            );
-            const voucherNo = `BRV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+            const voucherNo = await nextVoucherNo(transaction, 'BRV');
 
             const narrationStr = narration || `POS settlement to ${bank.GLTitle} (${pendingRes.recordset.length} receipt${pendingRes.recordset.length === 1 ? '' : 's'})`;
 

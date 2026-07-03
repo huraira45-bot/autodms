@@ -1,6 +1,7 @@
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
 const { buildPaymentJournalLines } = require('../utils/paymentJournalBuilder');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 // ----- account resolution -----
 async function resolveAccounts() {
@@ -534,10 +535,7 @@ async function postPayment(req, res, direction) {
         const transaction = new sql.Transaction(pool);
         await transaction.begin();
         try {
-            const seqRes = await new sql.Request(transaction).query(
-                "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-            );
-            const voucherNo = `${voucherTypeTitle}-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+            const voucherNo = await nextVoucherNo(transaction, voucherTypeTitle);
 
             const hdrRes = await new sql.Request(transaction)
                 .input('vd',      sql.DateTime,     new Date())

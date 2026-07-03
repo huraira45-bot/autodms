@@ -1,4 +1,5 @@
 const { sql, getPool } = require('../config/db');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 /**
  * Policy: vouchers can only be posted with today's date — no back-date, no
@@ -560,10 +561,11 @@ exports.saveVoucher = async (req, res) => {
             if (!typeResult.recordset.length) throw new Error('Invalid voucher type.');
             const typeCode = typeResult.recordset[0].VoucherTypeCode;
 
-            // 2. Generate sequential voucher number
-            const countResult = await new sql.Request(transaction)
-                .query('SELECT ISNULL(MAX(VoucherID), 0) + 1 AS NextNo FROM data_FinanceVoucherInfo');
-            const voucherNo = `${typeCode}-${countResult.recordset[0].NextNo}`;
+            // 2. Generate sequential voucher number from the per-type sequence
+            // (migration 062). Old behaviour used MAX(VoucherID)+1, which mixed
+            // every type's counter into one and inflated even faster than the
+            // old shared seq_FinanceVoucherNo.
+            const voucherNo = await nextVoucherNo(transaction, typeCode);
 
             // 3. Insert voucher header as Draft (no GL impact yet — finalize flips it to Posted)
             const infoResult = await new sql.Request(transaction)

@@ -7,6 +7,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { buildGRNJournalLines } = require('../utils/grnJournalBuilder');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function resolveGRNAccounts(/* transaction */) {
     return {
@@ -66,11 +67,7 @@ async function postGRNVoucher(purchaseId, userInfo, transaction) {
     if (!vt.recordset.length) throw new Error('PV voucher type missing — run migration 001.');
     const voucherTypeId = vt.recordset[0].Voucherid;
 
-    // Generate sequential voucher number
-    const seqRes = await new sql.Request(transaction).query(
-        "SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo"
-    );
-    const voucherNo = `PV-${String(seqRes.recordset[0].nextNo).padStart(4, '0')}`;
+    const voucherNo = await nextVoucherNo(transaction, 'PV');
 
     // Insert header as Draft
     const hdrRes = await new sql.Request(transaction)

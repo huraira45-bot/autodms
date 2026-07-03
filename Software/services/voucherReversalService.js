@@ -15,6 +15,7 @@
  * Note: the balanced-entry trigger fires when we flip the reversal Status to 'Posted'.
  */
 const { sql } = require('../config/db');
+const { nextVoucherNo } = require('../utils/voucherNumbering');
 
 async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
     // 1. Load original header
@@ -43,16 +44,14 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
         .query(`SELECT PartyID, JobCardID, GLCAID, Debit, Credit, Narration
                 FROM dms_PartyLedger WHERE VoucherID=@id`);
 
-    // 4. Generate reversal voucher number — same type prefix, next sequential
-    const seqRes = await new sql.Request(transaction).query(
-        `SELECT NEXT VALUE FOR dbo.seq_FinanceVoucherNo AS nextNo`
-    );
-    const nextId = seqRes.recordset[0].nextNo;
+    // 4. Generate reversal voucher number — draws from the originating type's
+    // sequence so the reversal shares the type's monotonic number space
+    // (e.g. an SI reversal is SI-REV-NNNN and consumes seq_Voucher_SI).
     const typeRes = await new sql.Request(transaction)
         .input('vt', sql.Int, orig.VoucherTypeID)
         .query(`SELECT Title FROM GLVoucherType WHERE Voucherid=@vt`);
     const prefix = typeRes.recordset[0]?.Title || 'JV';
-    const reversalNo = `${prefix}-REV-${String(nextId).padStart(4,'0')}`;
+    const reversalNo = await nextVoucherNo(transaction, prefix, { reversal: true });
 
     const reversalRemarks = `Reversal of ${orig.VoucherNo}` +
         (orig.Remarks ? ` — ${orig.Remarks}` : '');
