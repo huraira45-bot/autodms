@@ -5,6 +5,7 @@ import { Plus, Trash2, Save, FileText, Calculator, Lock, Unlock, RefreshCw, Load
 import { useAuth, useCan } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
 import SearchableSelect from '../components/SearchableSelect';
+import { fmtDTLong } from '../utils/datetime';
 
 const API_BASE = '/api';
 
@@ -460,8 +461,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
 
                     {/* Audit row */}
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.8rem', color: '#64748b' }}>
-                        <span>Created by <strong>{active.CreatedByName || '—'}</strong> on {new Date(active.EntryUserDateTime).toLocaleString()}</span>
-                        {active.PostedAt && <span>· Posted by <strong>{active.PostedBy ? `#${active.PostedBy}` : '—'}</strong> at {new Date(active.PostedAt).toLocaleString()}</span>}
+                        <span>Created by <strong>{active.CreatedByName || '—'}</strong> on {fmtDTLong(active.EntryUserDateTime)}</span>
+                        {active.PostedAt && <span>· Posted by <strong>{active.PostedBy ? `#${active.PostedBy}` : '—'}</strong> at {fmtDTLong(active.PostedAt)}</span>}
                         {active.ReversesVoucherID && <span>· Reverses voucher #{active.ReversesVoucherID}</span>}
                     </div>
                 </div>

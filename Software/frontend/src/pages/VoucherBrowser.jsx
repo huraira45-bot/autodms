@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Search, Filter, Loader2, RefreshCw, X, ChevronLeft, ChevronRight, Printer, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { fmtDate } from '../utils/datetime';
 
 const API_BASE = '/api';
 
@@ -280,7 +281,7 @@ export default function VoucherBrowser() {
                                             onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
                                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                                         >
-                                            <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{new Date(v.VoucherDate).toLocaleDateString()}</td>
+                                            <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{fmtDate(v.VoucherDate)}</td>
                                             <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{v.VoucherNo}</td>
                                             <td style={{ padding: '8px 12px' }}>{v.VoucherType}</td>
                                             <td style={{ padding: '8px 12px' }}>

@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import KYCBanner from '../components/KYCBanner';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
+import { fmtDate } from '../utils/datetime';
 
 const API = '/api/workshop';
 const API_BASE = '/api';
@@ -719,7 +720,7 @@ export default function JobCardForm() {
         <span style={S.roLabel}>Job NO:</span>
         <input style={{ ...S.roInput, width: 80 }} value={form.jobCode} onChange={e => !disabled && f('jobCode', e.target.value)} readOnly={disabled} placeholder="e.g. 28931" />
         {createdByName && <span style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 4, color: '#2a5a8a', fontSize: 11 }}><UserCircle size={12} /> Created: <strong>{createdByName}</strong></span>}
-        {isFinalized && finalizedByName && <span style={{ color: '#92400e', fontSize: 11 }}>| Finalized by: <strong>{finalizedByName}</strong>{finalizedAt ? ` on ${new Date(finalizedAt).toLocaleDateString()}` : ''}</span>}
+        {isFinalized && finalizedByName && <span style={{ color: '#92400e', fontSize: 11 }}>| Finalized by: <strong>{finalizedByName}</strong>{finalizedAt ? ` on ${fmtDate(finalizedAt)}` : ''}</span>}
       </div>
 
       {statusMsg && <div style={{ background: '#dcfce7', color: '#166534', padding: '4px 10px', fontSize: 11 }}>{statusMsg}</div>}
