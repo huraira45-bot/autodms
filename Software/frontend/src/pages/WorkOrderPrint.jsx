@@ -48,13 +48,11 @@ export default function WorkOrderPrint() {
         <div className="wo-print">
             {/* Shared business header — owner ask 2026-07-04: same letterhead
                 on every printed document, sourced from Business Profile.
-                showOnScreen so this dedicated print page also previews the
-                header (there's no separate on-screen shell to hide). */}
-            <PrintBusinessHeader
-                docTitle="Work Order Print Report"
-                docSubtitle={jc.JobCardNo ? `WO # ${jc.JobCardNo}` : null}
-                showOnScreen
-            />
+                Job Card / Work Order print keeps ONLY the business band —
+                the WO Number lives inside the header grid below (see the
+                <hdr> table), so we don't want the extra doc-title / subtitle
+                strip that other prints show (owner ask 2026-07-04 II). */}
+            <PrintBusinessHeader showOnScreen />
 
             {/* HEADER GRID */}
             <table className="hdr">
