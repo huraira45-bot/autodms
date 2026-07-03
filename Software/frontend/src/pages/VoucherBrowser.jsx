@@ -1,38 +1,39 @@
+/**
+ * Voucher Browser — Odoo-style ERP list view.
+ * Owner ask 2026-07-03: use control panel with filter chips for type/status/
+ * date/amount/user + pagination. Keeps all API + navigation behaviour intact.
+ */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Filter, Loader2, RefreshCw, X, ChevronLeft, ChevronRight, Printer, User } from 'lucide-react';
+import {
+    Loader2, RefreshCw, ChevronLeft, ChevronRight, Printer, User, Wallet,
+    ShieldCheck,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { fmtDate } from '../utils/datetime';
+import {
+    ErpControlPanel, ErpSearchBar, ErpFilterChip, ErpFilterDropdown,
+    ErpListView, ErpStatusPill, ErpEmptyState, ErpLoadingState,
+} from '../components/erp';
 
 const API_BASE = '/api';
-
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Voucher type → route mapping for click-through.
-// Auto-posted vouchers (SI / PV / PRV / SS / SSR) open in the JV view since they have no
-// dedicated entry route — VoucherEntry handles view-only display for any type.
+// Type → route mapping for click-through. Auto-posted vouchers (SI / PV / etc.)
+// open in the JV view; VoucherEntry handles read-only display for any type.
 const TYPE_TO_ROUTE = {
     CPV: '/vouchers/cpv', CRV: '/vouchers/crv', BPV: '/vouchers/bpv',
-    BRV: '/vouchers/brv', JV:  '/vouchers/jv'
+    BRV: '/vouchers/brv', JV:  '/vouchers/jv',
 };
-
 const ALL_TYPES = ['CPV', 'CRV', 'BPV', 'BRV', 'JV', 'SI', 'SS', 'SSR', 'PV', 'PRV'];
 
-const STATUS_BADGE = {
-    Draft:    { bg: '#f1f5f9', col: '#475569' },
-    Posted:   { bg: '#dcfce7', col: '#15803d' },
-    Reversed: { bg: '#fee2e2', col: '#b91c1c' }
-};
+const STATUS_TONE = { Draft: 'muted', Posted: 'green', Reversed: 'red' };
 
 const SOURCE_DOC_LABELS = {
-    JOBCARD: 'Job Card',
-    STORE_SALE: 'Store Sale',
-    GRN: 'GRN',
-    GRTN: 'GRTN',
-    SSR: 'Store Sale Return',
-    SALES_PAYMENT: 'Sales Payment',
-    CHEQUE: 'Cheque',
+    JOBCARD: 'Job Card', STORE_SALE: 'Store Sale',
+    GRN: 'GRN', GRTN: 'GRTN', SSR: 'Store Sale Return',
+    SALES_PAYMENT: 'Sales Payment', CHEQUE: 'Cheque',
 };
 
 const todayISO     = () => new Date().toISOString().slice(0, 10);
@@ -49,27 +50,26 @@ export default function VoucherBrowser() {
         q: '',
         minAmount: '',
         maxAmount: '',
-        createdById: ''   // when set to the current user's id, shows only their vouchers
+        createdById: '',
     });
-    const [data, setData]   = useState({ rows: [], total: 0, limit: 50, offset: 0 });
-    const [busy, setBusy]   = useState(false);
-    const [err, setErr]     = useState(null);
+    const [data, setData] = useState({ rows: [], total: 0, limit: 50, offset: 0 });
+    const [busy, setBusy] = useState(false);
+    const [err, setErr]   = useState(null);
 
     const reload = useCallback(async (opts = {}) => {
         const offset = opts.offset !== undefined ? opts.offset : data.offset;
         setBusy(true); setErr(null);
         try {
             const params = {
-                type:      filters.types.join(',') || undefined,
-                status:    filters.status || undefined,
-                from:      filters.from || undefined,
-                to:        filters.to || undefined,
-                q:         filters.q || undefined,
-                minAmount: filters.minAmount || undefined,
-                maxAmount: filters.maxAmount || undefined,
+                type:        filters.types.join(',') || undefined,
+                status:      filters.status || undefined,
+                from:        filters.from || undefined,
+                to:          filters.to || undefined,
+                q:           filters.q || undefined,
+                minAmount:   filters.minAmount || undefined,
+                maxAmount:   filters.maxAmount || undefined,
                 createdById: filters.createdById || undefined,
-                limit:     50,
-                offset
+                limit: 50, offset,
             };
             const r = await axios.get(`${API_BASE}/accounts/vouchers/search`, { params });
             setData(r.data);
@@ -83,17 +83,10 @@ export default function VoucherBrowser() {
 
     useEffect(() => { reload({ offset: 0 }); /* eslint-disable-next-line */ }, [filters]);
 
-    const toggleType = (t) => {
-        setFilters(f => ({
-            ...f,
-            types: f.types.includes(t) ? f.types.filter(x => x !== t) : [...f.types, t]
-        }));
-    };
-
-    const clearAll = () => setFilters({
-        types: [], status: '', from: yearStartISO(), to: todayISO(),
-        q: '', minAmount: '', maxAmount: '', createdById: ''
-    });
+    const toggleType = (t) => setFilters(f => ({
+        ...f,
+        types: f.types.includes(t) ? f.types.filter(x => x !== t) : [...f.types, t],
+    }));
 
     const toggleMyVouchers = () => {
         if (!user?.userId) return;
@@ -106,206 +99,175 @@ export default function VoucherBrowser() {
         navigate(`${route}?id=${v.VoucherID}`);
     };
 
-    const page    = Math.floor(data.offset / data.limit) + 1;
+    const page     = Math.floor(data.offset / data.limit) + 1;
     const lastPage = Math.max(1, Math.ceil(data.total / data.limit));
 
+    // ── Columns ────────────────────────────────────────────
+    const columns = [
+        { key: 'Date',    label: 'Date',
+            render: v => <span style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{fmtDate(v.VoucherDate)}</span> },
+        { key: 'Voucher', label: 'Voucher #',
+            render: v => <strong className="erp-mono" style={{ color: 'var(--erp-brand)' }}>{v.VoucherNo}</strong> },
+        { key: 'Type',    label: 'Type',
+            render: v => <ErpStatusPill tone="steel">{v.VoucherType}</ErpStatusPill> },
+        { key: 'Status',  label: 'Status',
+            render: v => <ErpStatusPill tone={STATUS_TONE[v.Status] || 'muted'}>{v.Status}</ErpStatusPill> },
+        { key: 'Source',  label: 'Source',
+            render: v => (
+                <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>
+                    {v.SourceDocType ? `${SOURCE_DOC_LABELS[v.SourceDocType] || v.SourceDocType} #${v.SourceDocID}` : '—'}
+                </span>
+            ) },
+        { key: 'Remarks', label: 'Remarks / Line hit',
+            render: v => (
+                <span title={v.LineSnippet || v.Remarks || ''}
+                    style={{ display: 'inline-block', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
+                    {v.LineSnippet || v.Remarks || '—'}
+                </span>
+            ) },
+        { key: 'By',      label: 'By',
+            render: v => <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>{v.CreatedByName || '—'}</span> },
+        { key: 'Amount', label: 'Amount', align: 'right',
+            render: v => <strong>{fmt(v.TotalAmount)}</strong> },
+    ];
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {/* Print-only header */}
             <div className="print-only print-header">
                 <h1>Voucher Listing{myVouchersOn ? ` — ${user?.userName || 'My Vouchers'}` : ''}</h1>
                 <div className="meta">
-                    <span>Period: {filters.from} → {filters.to}{filters.types.length ? `  •  Types: ${filters.types.join(', ')}` : ''}{filters.status ? `  •  Status: ${filters.status}` : ''}</span>
+                    <span>
+                        Period: {filters.from} → {filters.to}
+                        {filters.types.length ? `  •  Types: ${filters.types.join(', ')}` : ''}
+                        {filters.status ? `  •  Status: ${filters.status}` : ''}
+                    </span>
                     <span>Printed: {new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
                 </div>
             </div>
 
-            <div className="card-header">
+            <ErpControlPanel
+                title="Voucher Browser"
+                subtitle="Search every voucher across all types with status / date / amount / party filters."
+                actions={
+                    <>
+                        {user?.userId && (
+                            <button type="button" className={`erp-btn erp-btn-sm${myVouchersOn ? ' erp-btn-primary' : ''}`}
+                                onClick={toggleMyVouchers}>
+                                <User size={14} /> {myVouchersOn ? 'My vouchers' : 'Mine only'}
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={() => reload({ offset: 0 })} disabled={busy}>
+                            {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Refresh
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={() => window.print()}
+                            disabled={busy || data.rows.length === 0}>
+                            <Printer size={14} /> Print
+                        </button>
+                    </>
+                }
+            >
+                <ErpSearchBar value={filters.q} onChange={v => setFilters(f => ({ ...f, q: v }))}
+                    placeholder="Search number, remarks, or line narration…" width={320} />
+
+                <ErpFilterDropdown
+                    icon={ShieldCheck}
+                    label="Status"
+                    items={[
+                        { id: 'Draft', label: 'Draft' },
+                        { id: 'Posted', label: 'Posted' },
+                        { id: 'Reversed', label: 'Reversed' },
+                    ]}
+                    value={filters.status}
+                    onChange={v => setFilters(f => ({ ...f, status: v }))}
+                />
+
+                <input type="date" value={filters.from}
+                    onChange={e => setFilters(f => ({ ...f, from: e.target.value }))}
+                    style={dateStyle} title="From" />
+                <input type="date" value={filters.to}
+                    onChange={e => setFilters(f => ({ ...f, to: e.target.value }))}
+                    style={dateStyle} title="To" />
+
+                <input type="number" step="0.01" value={filters.minAmount} placeholder="Min ₨"
+                    onChange={e => setFilters(f => ({ ...f, minAmount: e.target.value }))}
+                    style={{ ...dateStyle, width: 100 }} />
+                <input type="number" step="0.01" value={filters.maxAmount} placeholder="Max ₨"
+                    onChange={e => setFilters(f => ({ ...f, maxAmount: e.target.value }))}
+                    style={{ ...dateStyle, width: 100 }} />
+            </ErpControlPanel>
+
+            {/* Type chip row */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '0 4px' }}>
+                <span style={{ fontSize: 11, color: 'var(--erp-text-muted)', textTransform: 'uppercase', letterSpacing: 0.4, alignSelf: 'center', marginRight: 4 }}>
+                    <Wallet size={11} style={{ marginRight: 4, verticalAlign: 'text-bottom' }} /> Types:
+                </span>
+                {ALL_TYPES.map(t => (
+                    <ErpFilterChip key={t}
+                        active={filters.types.includes(t)}
+                        label={t}
+                        onClick={() => toggleType(t)}
+                    />
+                ))}
+            </div>
+
+            {err && <div className="erp-alert danger">{err}</div>}
+
+            {/* Pagination bar */}
+            <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 12px', background: 'var(--erp-surface)',
+                border: '1px solid var(--erp-border)', borderRadius: 'var(--erp-radius)',
+                fontSize: 12, color: 'var(--erp-text-muted)',
+            }}>
                 <div>
-                    <h1 className="page-title">Voucher Browser</h1>
-                    <p className="page-subtitle">Search every voucher across all types, with status / date / amount / party filters and free-text search on number, remarks, and line narration.</p>
+                    {busy ? 'Loading…' : `${data.total} matching voucher${data.total === 1 ? '' : 's'} · showing ${data.rows.length}`}
                 </div>
-                <div className="no-print" style={{ display: 'flex', gap: 8 }}>
-                    {user?.userId && (
-                        <button className="btn-sm" onClick={toggleMyVouchers}
-                            style={{ background: myVouchersOn ? 'var(--primary)' : '#f1f5f9',
-                                     color: myVouchersOn ? 'white' : '#475569',
-                                     border: '1px solid ' + (myVouchersOn ? 'var(--primary)' : '#cbd5e1') }}>
-                            <User size={14} /> {myVouchersOn ? 'Showing my vouchers' : 'My vouchers only'}
-                        </button>
-                    )}
-                    <button className="btn-sm" onClick={clearAll}><X size={14} /> Clear</button>
-                    <button className="btn-sm" onClick={() => reload({ offset: 0 })} disabled={busy}>
-                        {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                        Refresh
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button type="button" className="erp-btn erp-btn-sm"
+                        onClick={() => reload({ offset: Math.max(0, data.offset - data.limit) })}
+                        disabled={busy || data.offset === 0}>
+                        <ChevronLeft size={13} />
                     </button>
-                    <button className="btn-sm" onClick={() => window.print()} disabled={busy || data.rows.length === 0}
-                        style={{ background: '#0f766e', color: 'white', border: '1px solid #0f766e' }}>
-                        <Printer size={14} /> Print
+                    <span>Page {page} of {lastPage}</span>
+                    <button type="button" className="erp-btn erp-btn-sm"
+                        onClick={() => reload({ offset: data.offset + data.limit })}
+                        disabled={busy || page >= lastPage}>
+                        <ChevronRight size={13} />
                     </button>
                 </div>
             </div>
 
-            {/* Filter bar */}
-            <div className="card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: 'var(--primary)' }}>
-                    <Filter size={16} /> <strong>Filters</strong>
-                </div>
-
-                {/* Free-text search */}
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', flex: 1, minWidth: 280 }}>
-                        <Search size={14} color="#64748b" />
-                        <input
-                            type="text"
-                            value={filters.q}
-                            onChange={e => setFilters(f => ({ ...f, q: e.target.value }))}
-                            placeholder="Search number, remarks, or line narration..."
-                            style={{ border: 'none', outline: 'none', flex: 1, padding: '8px 0', fontSize: '0.875rem' }}
-                        />
-                    </div>
-                </div>
-
-                {/* Type pills */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                    {ALL_TYPES.map(t => (
-                        <button
-                            key={t}
-                            onClick={() => toggleType(t)}
-                            style={{
-                                padding: '4px 10px', borderRadius: 99, fontSize: '0.75rem', fontWeight: 600,
-                                cursor: 'pointer',
-                                background: filters.types.includes(t) ? 'var(--primary)' : '#f1f5f9',
-                                color: filters.types.includes(t) ? 'white' : '#475569',
-                                border: '1px solid ' + (filters.types.includes(t) ? 'var(--primary)' : '#cbd5e1')
-                            }}
-                        >
-                            {t}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Status / date / amount row */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10 }}>
-                    <div>
-                        <label style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Status</label>
-                        <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}
-                            style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.85rem' }}>
-                            <option value="">Any</option>
-                            <option value="Draft">Draft</option>
-                            <option value="Posted">Posted</option>
-                            <option value="Reversed">Reversed</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>From</label>
-                        <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))}
-                            style={{ width: '100%', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.85rem' }} />
-                    </div>
-                    <div>
-                        <label style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>To</label>
-                        <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))}
-                            style={{ width: '100%', padding: '5px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.85rem' }} />
-                    </div>
-                    <div>
-                        <label style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Min Amount</label>
-                        <input type="number" step="0.01" value={filters.minAmount} onChange={e => setFilters(f => ({ ...f, minAmount: e.target.value }))}
-                            placeholder="0.00"
-                            style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.85rem' }} />
-                    </div>
-                    <div>
-                        <label style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Max Amount</label>
-                        <input type="number" step="0.01" value={filters.maxAmount} onChange={e => setFilters(f => ({ ...f, maxAmount: e.target.value }))}
-                            placeholder="∞"
-                            style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.85rem' }} />
-                    </div>
-                </div>
-            </div>
-
-            {err && <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}>{err}</div>}
-
-            {/* Results */}
-            <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                        {busy ? 'Loading...' : `${data.total} matching voucher${data.total === 1 ? '' : 's'} (showing ${data.rows.length})`}
-                    </div>
-                    {/* Pagination */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
-                        <button
-                            onClick={() => reload({ offset: Math.max(0, data.offset - data.limit) })}
-                            disabled={busy || data.offset === 0}
-                            className="btn-sm"
-                            style={{ opacity: data.offset === 0 ? 0.4 : 1 }}
-                        >
-                            <ChevronLeft size={14} />
-                        </button>
-                        <span>Page {page} of {lastPage}</span>
-                        <button
-                            onClick={() => reload({ offset: data.offset + data.limit })}
-                            disabled={busy || page >= lastPage}
-                            className="btn-sm"
-                            style={{ opacity: page >= lastPage ? 0.4 : 1 }}
-                        >
-                            <ChevronRight size={14} />
-                        </button>
-                    </div>
-                </div>
-
-                {data.rows.length === 0 && !busy ? (
-                    <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-                        No vouchers match the current filters.
-                    </div>
-                ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                            <thead>
-                                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Date</th>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Voucher</th>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Type</th>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Status</th>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Source</th>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Remarks / Hit</th>
-                                    <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>By</th>
-                                    <th style={{ padding: 10, textAlign: 'right', fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {data.rows.map(v => {
-                                    const sb = STATUS_BADGE[v.Status] || STATUS_BADGE.Posted;
-                                    return (
-                                        <tr key={v.VoucherID}
-                                            onClick={() => openVoucher(v)}
-                                            style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
-                                            onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
-                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                        >
-                                            <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{fmtDate(v.VoucherDate)}</td>
-                                            <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{v.VoucherNo}</td>
-                                            <td style={{ padding: '8px 12px' }}>{v.VoucherType}</td>
-                                            <td style={{ padding: '8px 12px' }}>
-                                                <span style={{ background: sb.bg, color: sb.col, padding: '2px 8px', borderRadius: 99, fontSize: '0.7rem', fontWeight: 700 }}>
-                                                    {v.Status}
-                                                </span>
-                                            </td>
-                                            <td style={{ padding: '8px 12px', color: '#64748b', fontSize: '0.8rem' }}>
-                                                {v.SourceDocType ? (SOURCE_DOC_LABELS[v.SourceDocType] || v.SourceDocType) + ` #${v.SourceDocID}` : '—'}
-                                            </td>
-                                            <td style={{ padding: '8px 12px', color: '#475569', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                                title={v.LineSnippet || v.Remarks || ''}>
-                                                {v.LineSnippet || v.Remarks || '—'}
-                                            </td>
-                                            <td style={{ padding: '8px 12px', color: '#64748b' }}>{v.CreatedByName || '—'}</td>
-                                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(v.TotalAmount)}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
+            {busy && data.rows.length === 0 ? (
+                <ErpLoadingState message="Loading vouchers…" />
+            ) : data.rows.length === 0 ? (
+                <ErpEmptyState
+                    title="No vouchers"
+                    message="No vouchers match the current filters. Adjust the filter chips above."
+                />
+            ) : (
+                <ErpListView
+                    columns={columns}
+                    rows={data.rows}
+                    rowKey="VoucherID"
+                    onRowClick={openVoucher}
+                    emptyLabel=""
+                    footerLeft={`${data.rows.length} of ${data.total} record${data.total === 1 ? '' : 's'}`}
+                    footerRight={<span>Page {page} of {lastPage}</span>}
+                />
+            )}
         </div>
     );
 }
+
+const dateStyle = {
+    height: 26,
+    padding: '0 8px',
+    border: '1px solid var(--erp-border-strong)',
+    borderRadius: 'var(--erp-radius)',
+    background: 'var(--erp-surface)',
+    color: 'var(--erp-text)',
+    fontSize: 12,
+    outline: 'none',
+};

@@ -6,6 +6,9 @@ import { useAuth, useCan } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
 import SearchableSelect from '../components/SearchableSelect';
 import { fmtDTLong } from '../utils/datetime';
+import {
+    ErpControlPanel, ErpStatusBar, ErpSmartButton, ErpStatusPill, ErpEmptyState,
+} from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -370,23 +373,84 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         const canUnfReq    = status === 'Posted' && hasModule('finalize');
         const isReversed   = status === 'Reversed';
 
+        // Line count / total for the smart-button row.
+        const linesCount = (active.lines || []).length;
+        const totalAmt   = (active.lines || []).reduce((s, l) => s + (Number(l.Debit) || 0), 0);
         return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                <div className="card-header">
-                    <div>
-                        <h1 className="page-title">{title || 'Finance Voucher'}</h1>
-                        <p className="page-subtitle">Viewing existing voucher.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <ErpControlPanel
+                    title={`${active.VoucherNo || 'Voucher'} · ${active.VoucherTypeName || title || 'Finance Voucher'}`}
+                    subtitle={active.Remarks || (mode === 'edit-draft' ? 'Editing draft' : 'Viewing existing voucher')}
+                    actions={
+                        <>
+                            <button type="button" className="erp-btn erp-btn-sm" onClick={() => loadVoucher(active.VoucherID)} disabled={busy}>
+                                {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                                Refresh
+                            </button>
+                            <button type="button" className="erp-btn erp-btn-sm" onClick={() => window.open(`/vouchers/${active.VoucherID}/print`, '_blank')}>
+                                <Printer size={14} /> Print
+                            </button>
+                            {canInsert && (
+                                <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={startNew}>
+                                    <Plus size={14} /> New
+                                </button>
+                            )}
+                        </>
+                    }
+                />
+
+                {/* Odoo-style status-bar (Draft → Posted → Reversed) */}
+                <div style={{ background: 'var(--erp-surface)', border: '1px solid var(--erp-border)', borderRadius: 'var(--erp-radius)', overflow: 'hidden' }}>
+                    <ErpStatusBar
+                        current={status === 'Reversed' ? 'reversed' : status === 'Posted' ? 'posted' : 'draft'}
+                        steps={[
+                            { id: 'draft',    label: 'Draft' },
+                            { id: 'posted',   label: 'Posted' },
+                            { id: 'reversed', label: 'Reversed' },
+                        ]}
+                    />
+
+                    {/* Smart buttons row */}
+                    <div className="erp-smart-buttons">
+                        <ErpSmartButton icon={Calculator} value={linesCount} label="Lines" />
+                        <ErpSmartButton icon={FileText} value={fmt(totalAmt)} label="PKR" />
+                        {active.ReversesVoucherID && (
+                            <ErpSmartButton icon={AlertTriangle} value={`#${active.ReversesVoucherID}`} label="Reverses" />
+                        )}
                     </div>
-                    <div className="no-print" style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn-sm" onClick={() => loadVoucher(active.VoucherID)} disabled={busy}>
-                            <RefreshCw size={14} /> Refresh
-                        </button>
-                        <button className="btn" onClick={() => window.open(`/vouchers/${active.VoucherID}/print`, '_blank')} style={{ background: '#0f766e' }}>
-                            <Printer size={16} /> Print
-                        </button>
-                        {canInsert && <button className="btn" onClick={startNew}>
-                            <Plus size={16} /> New Voucher
-                        </button>}
+
+                    <div style={{ padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--erp-border)' }}>
+                        {status === 'Draft' && (
+                            <>
+                                {canEdit && (
+                                    <button type="button" className="erp-btn erp-btn-primary" onClick={startEditDraft} disabled={busy}>
+                                        <Edit3 size={14} /> Edit Draft
+                                    </button>
+                                )}
+                                {canDelete && (
+                                    <button type="button" className="erp-btn erp-btn-danger" onClick={handleDeleteDraft} disabled={busy}>
+                                        <Trash2 size={14} /> Delete
+                                    </button>
+                                )}
+                            </>
+                        )}
+                        {canFinalize && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={handleFinalize} disabled={busy}>
+                                {busy ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+                                Finalize (Post to GL)
+                            </button>
+                        )}
+                        {canUnfReq && (
+                            <button type="button" className="erp-btn" onClick={openUnfinalize} disabled={busy}>
+                                <Unlock size={14} /> Request Unfinalize
+                            </button>
+                        )}
+                        {isReversed && (
+                            <div className="erp-alert danger" style={{ margin: 0 }}>
+                                <AlertTriangle size={14} />
+                                Reversed by {active.ReversedByName} on {active.ReversedAt ? new Date(active.ReversedAt).toLocaleDateString() : ''}
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -410,61 +474,11 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     </div>
                 )}
 
-                {/* Header summary */}
-                <div className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-                        <div>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase' }}>Voucher</div>
-                            <div style={{ fontWeight: 700, fontSize: '1.25rem' }}>
-                                {active.VoucherNo} <Badge status={status} />
-                            </div>
-                            <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: 4 }}>
-                                {active.VoucherTypeName} · {new Date(active.VoucherDate).toLocaleDateString()}
-                            </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {status === 'Draft' && (
-                                <>
-                                    {canEdit && <button className="btn" onClick={startEditDraft} disabled={busy} style={{ background: '#0891b2' }}>
-                                        <Edit3 size={16} /> Edit Draft
-                                    </button>}
-                                    {canDelete && <button className="btn" onClick={handleDeleteDraft} disabled={busy} style={{ background: '#dc2626' }}>
-                                        <Trash2 size={16} /> Delete
-                                    </button>}
-                                </>
-                            )}
-                            {canFinalize && (
-                                <button className="btn" onClick={handleFinalize} disabled={busy} style={{ background: '#15803d' }}>
-                                    {busy ? <Loader2 size={16} className="animate-spin" /> : <Lock size={16} />}
-                                    Finalize (Post to GL)
-                                </button>
-                            )}
-                            {canUnfReq && (
-                                <button className="btn" onClick={openUnfinalize} disabled={busy} style={{ background: '#b45309' }}>
-                                    <Unlock size={16} /> Request Unfinalize
-                                </button>
-                            )}
-                            {isReversed && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#b91c1c', fontSize: '0.875rem' }}>
-                                    <AlertTriangle size={16} />
-                                    Reversed by {active.ReversedByName} on {active.ReversedAt ? new Date(active.ReversedAt).toLocaleDateString() : ''}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {active.Remarks && (
-                        <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, fontSize: '0.875rem', marginBottom: 12 }}>
-                            <strong>Remarks:</strong> {active.Remarks}
-                        </div>
-                    )}
-
-                    {/* Audit row */}
-                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.8rem', color: '#64748b' }}>
-                        <span>Created by <strong>{active.CreatedByName || '—'}</strong> on {fmtDTLong(active.EntryUserDateTime)}</span>
-                        {active.PostedAt && <span>· Posted by <strong>{active.PostedBy ? `#${active.PostedBy}` : '—'}</strong> at {fmtDTLong(active.PostedAt)}</span>}
-                        {active.ReversesVoucherID && <span>· Reverses voucher #{active.ReversesVoucherID}</span>}
-                    </div>
+                {/* Audit row (compact) */}
+                <div className="erp-panel" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--erp-text-muted)' }}>
+                    <span>Created by <strong style={{ color: 'var(--erp-text)' }}>{active.CreatedByName || '—'}</strong> on {fmtDTLong(active.EntryUserDateTime)}</span>
+                    {active.PostedAt && <span>· Posted by <strong style={{ color: 'var(--erp-text)' }}>{active.PostedBy ? `#${active.PostedBy}` : '—'}</strong> at {fmtDTLong(active.PostedAt)}</span>}
+                    {active.ReversesVoucherID && <span>· Reverses voucher #{active.ReversesVoucherID}</span>}
                 </div>
 
                 {/* Lines */}
@@ -582,29 +596,36 @@ export default function VoucherEntry({ forceTypeCode, title }) {
 
     // ---------- New-voucher UI ----------
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">{title || 'Finance Voucher'}{editingId ? ` — Editing Draft #${editingId}` : ''}</h1>
-                    <p className="page-subtitle">
-                        {editingId
-                            ? 'Editing existing Draft. Save replaces the current lines.'
-                            : 'Save as Draft. Then Finalize to post to the General Ledger.'}
-                    </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {editingId && (
-                        <button type="button" className="btn-sm" onClick={() => { setEditingId(null); loadVoucher(editingId); }}>
-                            Cancel Edit
-                        </button>
-                    )}
-                    {(editingId ? canEdit : canInsert) && (
-                        <button className="btn" onClick={handleSave} disabled={busy}>
-                            {busy ? <Loader2 size={16} className="animate-spin" /> : <Save size={18} />}
-                            {editingId ? 'Update Draft' : 'Save as Draft'}
-                        </button>
-                    )}
-                </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={`${title || 'Finance Voucher'}${editingId ? ` — Editing Draft #${editingId}` : ''}`}
+                subtitle={editingId
+                    ? 'Editing existing Draft. Save replaces the current lines.'
+                    : 'Save as Draft. Then Finalize to post to the General Ledger.'}
+                actions={
+                    <>
+                        {editingId && (
+                            <button type="button" className="erp-btn erp-btn-sm"
+                                onClick={() => { setEditingId(null); loadVoucher(editingId); }}>
+                                Cancel Edit
+                            </button>
+                        )}
+                        {(editingId ? canEdit : canInsert) && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={handleSave} disabled={busy}>
+                                {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                                {editingId ? 'Update Draft' : 'Save as Draft'}
+                            </button>
+                        )}
+                    </>
+                }
+            />
+
+            <div style={{ background: 'var(--erp-surface)', border: '1px solid var(--erp-border)', borderRadius: 'var(--erp-radius)', overflow: 'hidden' }}>
+                <ErpStatusBar current="draft" steps={[
+                    { id: 'draft',    label: editingId ? 'Editing Draft' : 'New Draft' },
+                    { id: 'posted',   label: 'Posted' },
+                    { id: 'reversed', label: 'Reversed' },
+                ]} />
             </div>
 
             {msg && (

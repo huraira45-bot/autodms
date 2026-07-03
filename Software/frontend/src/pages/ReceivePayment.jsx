@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Receipt, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Wallet, Printer } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 // Receive Payment from customers.
 // Workflow per §14.11: pick party (or walk-in JC) → see outstanding invoices + advance balance →
@@ -370,15 +371,12 @@ export default function ReceivePayment() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 1500, margin: '0 auto', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 20 }}>
-      <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <Receipt size={28} style={{ color: '#16a34a' }} />
-        <h1 style={{ margin: 0, fontSize: 24 }}>Receive Payment</h1>
-      </div>
-      <p style={{ color: '#64748b', marginTop: 0, marginBottom: 20 }}>
-        Record cash, cheque, POS, or bank-transfer receipts from customers. Multiple payment modes per receipt are supported. Excess routes to Customer Advance Received.
-      </p>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErpControlPanel
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Receipt size={16} color="var(--erp-green)" /> Receive Payment</span>}
+        subtitle="Record cash / cheque / POS / bank-transfer receipts from customers. Multi-mode supported; excess routes to Customer Advance Received."
+      />
 
       {msg && (
         <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Send, Search, X, Plus, Trash2, Check, Loader2, AlertTriangle, Printer } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel } from '../components/erp';
 
 // Make Payment to suppliers. Symmetric to Receive Payment.
 // Workflow per §14.11: pick supplier → see outstanding bills + advance balance →
@@ -135,15 +136,12 @@ export default function MakePayment() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 1500, margin: '0 auto', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 20 }}>
-      <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <Send size={28} style={{ color: '#dc2626' }} />
-        <h1 style={{ margin: 0, fontSize: 24 }}>Make Payment</h1>
-      </div>
-      <p style={{ color: '#64748b', marginTop: 0, marginBottom: 20 }}>
-        Pay suppliers via cash, cheque, POS, or bank transfer. Allocate to specific bills or leave as a supplier advance.
-      </p>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErpControlPanel
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Send size={16} color="var(--erp-red)" /> Make Payment</span>}
+        subtitle="Pay suppliers via cash / cheque / POS / bank transfer. Allocate to bills or leave as supplier advance."
+      />
 
       {msg && (
         <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>

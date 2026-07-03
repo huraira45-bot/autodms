@@ -4,6 +4,7 @@ import { Plus, ChevronRight, ChevronDown, Landmark, X, Search, Loader2, Building
 import { useFeedback } from '../context/FeedbackContext';
 import { useAuth } from '../context/AuthContext';
 import SearchableSelect from '../components/SearchableSelect';
+import { ErpControlPanel, ErpSearchBar, ErpPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
@@ -245,32 +246,35 @@ export default function ChartOfAccounts() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div className="card-header">
-        <div><h1 className="page-title">Chart of Accounts</h1><p className="page-subtitle">Ultra-performance remote filtering for 10k+ entries.</p></div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <div className="search-box">
-            <Search size={18} />
-            <input type="text" placeholder="Search accounts..." value={search} onChange={handleSearch} />
-          </div>
-          <button className="btn" onClick={() => setShowModal(true)}><Plus size={18} /> New Account</button>
-        </div>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErpControlPanel
+        title="Chart of Accounts"
+        subtitle="Ultra-performance remote filtering across 10k+ entries."
+        actions={
+          <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={14} /> New Account
+          </button>
+        }
+      >
+        <ErpSearchBar
+          value={search}
+          onChange={v => handleSearch({ target: { value: v } })}
+          placeholder="Search account name or code…"
+          width={340}
+        />
+      </ErpControlPanel>
 
-      <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', color: 'var(--primary)' }}>
-          <Landmark size={20} />
-          <strong>{searchResults ? 'Search Results' : 'Financial Structure Tree'}</strong>
-        </div>
-        
+      <ErpPanel title={<><Landmark size={13} /> {searchResults ? 'Search Results' : 'Financial Structure Tree'}</>}>
         <div className="coa-tree-container">
           {searchResults ? (
             searchResults.map(acc => <SearchResultRow key={acc.GLCAID} acc={acc} />)
           ) : (
-            roots.length > 0 ? roots.map(root => <AccountNode key={root.GLCAID} acc={root} />) : <p style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No accounts found. Create your first root account!</p>
+            roots.length > 0
+              ? roots.map(root => <AccountNode key={root.GLCAID} acc={root} />)
+              : <p style={{ padding: 16, textAlign: 'center', color: 'var(--erp-text-muted)', fontSize: 13 }}>No accounts found. Create your first root account.</p>
           )}
         </div>
-      </div>
+      </ErpPanel>
 
       {showModal && (
         <div className="modal-overlay">
