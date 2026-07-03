@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Car, Plus, RefreshCw, Loader2, Search, Pencil, Trash2, Power, XCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { ErpControlPanel } from '../../components/erp';
 import { useFeedback } from '../../context/FeedbackContext';
 
 const API = '/api';
@@ -55,18 +56,22 @@ export default function VehicleModelsAdmin() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Vehicle Models</h1>
-                    <p className="page-subtitle">Top-level model catalog. Variants are added per Model from the Variants page.</p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {canEdit && <button className="btn" onClick={() => setShowCreate(true)}><Plus size={16} /> New Model</button>}
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="Vehicle Models"
+                subtitle="Top-level model catalog. Variants are added per Model from the Variants page."
+                actions={
+                    <>
+                        {canEdit && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowCreate(true)}>
+                                <Plus size={14} /> New Model
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        </button>
+                    </>
+                }
+            />
 
             {msg && <FlashMsg msg={msg} />}
 

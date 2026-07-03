@@ -19,6 +19,7 @@ import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
+import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -109,24 +110,30 @@ export default function BookingDetail() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1100, margin: '0 auto' }}>
-            <div className="card-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button onClick={() => navigate('/sales/bookings')} className="btn-sm"><ArrowLeft size={14} /> Back</button>
-                    <div>
-                        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            {data.BookingNo}
-                            <Pill bg={sty.bg} col={sty.col}>{sty.label}</Pill>
-                        </h1>
-                        <p className="page-subtitle">{data.PartyName} · {data.VariantCode} {data.VariantName}</p>
-                    </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {canCancel && (
-                        <button className="btn-sm" onClick={() => setShowCancel(true)} style={{ color: '#b91c1c' }}><Ban size={14} /> Cancel</button>
-                    )}
-                    <button className="btn-sm" onClick={load}><RefreshCw size={14} /></button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title={
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                        {data.BookingNo}
+                        <Pill bg={sty.bg} col={sty.col}>{sty.label}</Pill>
+                    </span>
+                }
+                subtitle={`${data.PartyName} · ${data.VariantCode} ${data.VariantName}`}
+                actions={
+                    <>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={() => navigate('/sales/bookings')}>
+                            <ArrowLeft size={14} /> Back
+                        </button>
+                        {canCancel && (
+                            <button type="button" className="erp-btn erp-btn-sm erp-btn-danger" onClick={() => setShowCancel(true)}>
+                                <Ban size={14} /> Cancel
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load}>
+                            <RefreshCw size={14} />
+                        </button>
+                    </>
+                }
+            />
 
             {msg && <FlashMsg msg={msg} />}
 

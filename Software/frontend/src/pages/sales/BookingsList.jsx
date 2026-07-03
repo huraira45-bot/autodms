@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { ClipboardList, Plus, RefreshCw, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { ErpControlPanel } from '../../components/erp';
 import { FlashMsg, Th, Td } from './VehicleModelsAdmin';
 import { DataCard, EmptyState, FilterBar, PageHeader, SearchField, StatusPill } from '../../components/UXPrimitives';
 
@@ -71,29 +72,20 @@ export default function BookingsList() {
     useEffect(() => { load(); }, [load]);
 
     return (
-        <div className="ux-page-stack">
-            <PageHeader
-                icon={ClipboardList}
-                eyebrow="Vehicle sales"
-                title="Vehicle Bookings"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ClipboardList size={16} /> Vehicle Bookings</span>}
                 subtitle="Track customer bookings, payments, allocation, approvals, and delivery readiness."
-                meta={
-                    <>
-                        <StatusPill tone="amber">Approvals</StatusPill>
-                        <StatusPill tone="blue">Payment</StatusPill>
-                        <StatusPill tone="green">Delivery</StatusPill>
-                    </>
-                }
                 actions={
                     <>
-                    {canCreate && (
-                        <button className="btn" onClick={() => navigate('/sales/bookings/new')}>
-                            <Plus size={16} /> New Booking
+                        {canCreate && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={() => navigate('/sales/bookings/new')}>
+                                <Plus size={14} /> New Booking
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         </button>
-                    )}
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
                     </>
                 }
             />

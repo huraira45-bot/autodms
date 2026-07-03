@@ -16,6 +16,7 @@ import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { Ban, RefreshCw, Loader2, CheckCircle2, XCircle, Undo2, ExternalLink, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { ErpControlPanel } from '../../components/erp';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -76,17 +77,15 @@ export default function CancellationQueue() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Cancellation Queue</h1>
-                    <p className="page-subtitle">
-                        3-stage cancellation loop for confirmed bookings: Executive proposes → AM approves → Admin executes (refund + accrual clawback).
-                    </p>
-                </div>
-                <button className="btn-sm" onClick={load} disabled={loading}>
-                    {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                </button>
-            </div>
+            <ErpControlPanel
+                title="Cancellation Queue"
+                subtitle="3-stage cancellation loop for confirmed bookings: Executive proposes → AM approves → Admin executes (refund + accrual clawback)."
+                actions={
+                    <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    </button>
+                }
+            />
 
             {msg && <FlashMsg msg={msg} />}
 

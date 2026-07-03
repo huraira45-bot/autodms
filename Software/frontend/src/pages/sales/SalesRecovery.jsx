@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { TrendingDown, Loader2, AlertTriangle, Check, X, RefreshCw, FileX2 } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
+import { ErpControlPanel } from '../../components/erp';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
@@ -49,10 +50,11 @@ export default function SalesRecovery() {
     };
 
     return (
-        <div style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                <TrendingDown size={28} color="#b91c1c" /> Sales Recovery
-            </h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><TrendingDown size={16} color="var(--erp-red)" /> Sales Recovery</span>}
+                subtitle="Aging report + payment plan tracking for overdue vehicle-sale receivables."
+            />
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 {[['aging','Aging Report'],['plans','All Plans']].map(([key,label]) => (

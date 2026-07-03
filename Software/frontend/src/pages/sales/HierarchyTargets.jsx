@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Users, Target, Plus, X, Loader2, UserMinus } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import SearchableSelect from '../../components/SearchableSelect';
+import { ErpControlPanel } from '../../components/erp';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
@@ -47,10 +48,11 @@ export default function HierarchyTargets() {
     };
 
     return (
-        <div style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                <Users size={28} color="#1e40af" /> Sales Hierarchy & Targets
-            </h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Users size={16} /> Sales Hierarchy & Targets</span>}
+                subtitle="Executive → AGM → GM hierarchy plus per-period unit + revenue targets."
+            />
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 {[['hierarchy','Hierarchy'],['targets','Targets'],['performance','Performance']].map(([key,label]) => (

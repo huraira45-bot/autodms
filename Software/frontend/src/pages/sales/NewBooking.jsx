@@ -15,6 +15,7 @@ import { ArrowLeft, Loader2, Search, AlertTriangle, Car, User, UserPlus, XCircle
 import { useAuth } from '../../context/AuthContext';
 import { inputStyle, Field, Err, FlashMsg, Shell, Actions } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
+import { ErpControlPanel } from '../../components/erp';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -137,15 +138,15 @@ export default function NewBooking() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 920, margin: '0 auto' }}>
-            <div className="card-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button onClick={() => navigate('/sales/bookings')} className="btn-sm"><ArrowLeft size={14} /> Back</button>
-                    <div>
-                        <h1 className="page-title">New Vehicle Booking</h1>
-                        <p className="page-subtitle">Pick customer + variant + price. Any discount triggers admin approval (decision #14).</p>
-                    </div>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="New Vehicle Booking"
+                subtitle="Pick customer + variant + price. Any discount triggers admin approval."
+                actions={
+                    <button type="button" className="erp-btn erp-btn-sm" onClick={() => navigate('/sales/bookings')}>
+                        <ArrowLeft size={14} /> Back
+                    </button>
+                }
+            />
 
             {msg && <FlashMsg msg={msg} />}
             {err && <Err>{err}</Err>}

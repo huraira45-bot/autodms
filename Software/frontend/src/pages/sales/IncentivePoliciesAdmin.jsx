@@ -8,6 +8,7 @@ import { TrendingUp, Plus, RefreshCw, Loader2, Pencil, Trash2, Power } from 'luc
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
 import SearchableSelect from '../../components/SearchableSelect';
+import { ErpControlPanel } from '../../components/erp';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -60,18 +61,22 @@ export default function IncentivePoliciesAdmin() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Incentive Policies</h1>
-                    <p className="page-subtitle">Per-hierarchy-level payout rules. Decision #8: accrue at booking save. Decision #10: base = negotiated price.</p>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    {canEdit && <button className="btn" onClick={() => setShowCreate(true)}><Plus size={16} /> New Policy</button>}
-                    <button className="btn-sm" onClick={load} disabled={loading}>
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                    </button>
-                </div>
-            </div>
+            <ErpControlPanel
+                title="Incentive Policies"
+                subtitle="Per-hierarchy-level payout rules. Accrue at booking save; base = negotiated price."
+                actions={
+                    <>
+                        {canEdit && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={() => setShowCreate(true)}>
+                                <Plus size={14} /> New Policy
+                            </button>
+                        )}
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        </button>
+                    </>
+                }
+            />
 
             {msg && <FlashMsg msg={msg} />}
 

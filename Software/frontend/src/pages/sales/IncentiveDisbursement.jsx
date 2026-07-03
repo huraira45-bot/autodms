@@ -8,6 +8,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Wallet, RefreshCw, Loader2, DollarSign, Eye, Users as UsersIcon, Send } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { ErpControlPanel } from '../../components/erp';
 import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
@@ -43,15 +44,15 @@ export default function IncentiveDisbursement() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card-header">
-                <div>
-                    <h1 className="page-title">Sales Incentive — Disbursement</h1>
-                    <p className="page-subtitle">Per-employee outstanding incentive accruals. Payouts distribute FIFO across oldest accruals.</p>
-                </div>
-                <button className="btn-sm" onClick={load} disabled={loading}>
-                    {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                </button>
-            </div>
+            <ErpControlPanel
+                title="Sales Incentive — Disbursement"
+                subtitle="Per-employee outstanding incentive accruals. Payouts distribute FIFO across the oldest accruals."
+                actions={
+                    <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
+                        {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    </button>
+                }
+            />
 
             {msg && <FlashMsg msg={msg} />}
 

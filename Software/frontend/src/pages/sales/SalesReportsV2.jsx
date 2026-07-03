@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Loader2, BarChart3, Clock, TrendingUp } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
+import { ErpControlPanel } from '../../components/erp';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
@@ -39,10 +40,11 @@ export default function SalesReportsV2() {
     useEffect(() => { load(); }, [load]);
 
     return (
-        <div style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                <BarChart3 size={28} color="#1e40af" /> Sales Reports
-            </h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><BarChart3 size={16} /> Sales Reports</span>}
+                subtitle="Booking pipeline, master invoice aging, incentive receivable aging."
+            />
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                 {[
                     ['pipeline','Booking Pipeline', BarChart3],

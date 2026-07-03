@@ -3,6 +3,7 @@ import axios from 'axios';
 import { TrendingUp, Wallet, Clock, Plus, X, FileCheck2, RotateCcw, Loader2, ReceiptText } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import SearchableSelect from '../../components/SearchableSelect';
+import { ErpControlPanel } from '../../components/erp';
 
 const API = '';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -74,10 +75,11 @@ export default function MasterIncentive() {
     };
 
     return (
-        <div style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                <TrendingUp size={28} color="#1e40af" /> Master Incentive
-            </h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErpControlPanel
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><TrendingUp size={16} color="var(--erp-brand)" /> Master Incentive</span>}
+                subtitle="Master accrual tracking + payout allocation across the network."
+            />
 
             {/* Summary tiles */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
