@@ -19,7 +19,7 @@ export function JobCardRegister() {
     const selectStyle = { padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' };
     const printFilterSummary = (params) => {
         const parts = [];
-        if (params.from && params.to) parts.push(`Period: ${params.from} → ${params.to}`);
+        if (params.from && params.to) parts.push(`Gate Pass Period: ${params.from} → ${params.to}`);
         if (params.businessType) {
             const t = jobTypes.find(x => String(x.JobCardTypeId) === String(params.businessType));
             parts.push(`Business Type: ${t ? `${t.CardCode} — ${t.Title}` : params.businessType}`);
@@ -37,7 +37,7 @@ export function JobCardRegister() {
     return (
         <ReportShell
             title="Job Card Register"
-            subtitle="All workshop job cards in the period — customer, vehicle, advisor, labour/parts/sublet/total."
+            subtitle="Job cards whose gate pass was issued in the period — filtered and dated by the day the vehicle actually left the workshop."
             icon={Wrench}
             endpoint="service/job-card-register"
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized' }}
@@ -93,7 +93,7 @@ export function JobCardRegister() {
                         <table style={tableStyle}>
                             <thead>
                                 <tr style={trHeader}>
-                                    <TH>Card #</TH><TH>Date</TH><TH>Customer</TH><TH>Vehicle</TH>
+                                    <TH>Card #</TH><TH>Gate Pass Date</TH><TH>Customer</TH><TH>Vehicle</TH>
                                     <TH>Advisor</TH><TH>Status</TH>
                                     <TH align="right">Labour</TH>
                                     <TH align="right">Sublet</TH>
@@ -108,7 +108,10 @@ export function JobCardRegister() {
                                 {data.rows.map(r => (
                                     <tr key={r.JobCardId} style={trBody}>
                                         <TD mono><strong>{r.JobCardNo}</strong></TD>
-                                        <TD>{r.JobCardDate}</TD>
+                                        <TD>
+                                            {r.GatePassDate || '—'}
+                                            {r.GatePassNo && <div style={subText}>{r.GatePassNo}</div>}
+                                        </TD>
                                         <TD>{r.CustomerName}<div style={subText}>{r.CustomerCode}</div></TD>
                                         <TD mono>{r.VehicleRegNo}<div style={subText}>{r.ChasisNo}</div></TD>
                                         <TD>{r.ServiceAdvisor}</TD>

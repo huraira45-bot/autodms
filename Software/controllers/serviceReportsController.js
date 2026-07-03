@@ -31,7 +31,12 @@ exports.jobCardRegister = async (req, res) => {
             .input('from', sql.DateTime, from)
             .input('to',   sql.DateTime, to);
 
-        const conds = ['j.JobCardDate BETWEEN @from AND @to'];
+        // Owner ask 2026-07-03: the register's date is the Gate Pass IssuedAt
+        // (the day the vehicle physically leaves), not the JC creation date.
+        // Filter on the same column so the period lines up with what actually
+        // moved out of the workshop. JOBCARDs without an ACTIVE gate pass
+        // (RevokedAt IS NULL) are excluded — they haven't been delivered yet.
+        const conds = ['gp.IssuedAt BETWEEN @from AND @to'];
         if (req.query.status)    { rq.input('st', sql.NVarChar(30), req.query.status); conds.push('j.Status = @st'); }
         if (req.query.advisorId) { rq.input('ad', sql.Int, parseInt(req.query.advisorId)); conds.push('j.ServiceAdvisorID = @ad'); }
 
@@ -77,6 +82,8 @@ exports.jobCardRegister = async (req, res) => {
                    j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter,
                    j.ReceiptDate, j.PromisedDate, j.DeliveryDate,
                    j.ServiceAdvisor, j.JobResult, j.IsFinalized,
+                   gp.IssuedAt   AS GatePassDate,
+                   gp.GatePassNo AS GatePassNo,
                    c.endUserName AS CustomerName, c.PhoneNo, c.CustomerCode,
                    t.Title AS JobType,
                    ISNULL((SELECT SUM(ISNULL(d.Price,0) * ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0))
@@ -92,10 +99,12 @@ exports.jobCardRegister = async (req, res) => {
                    ISNULL((SELECT SUM(ISNULL(s.TaxAmount,0))
                            FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsTax
             FROM Addata_JobCardInfo j
+            INNER JOIN dms_GatePasses gp
+                    ON gp.DocType = 'JOBCARD' AND gp.DocID = j.JobCardId AND gp.RevokedAt IS NULL
             LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
             LEFT JOIN gen_JobCardType t      ON j.JobTypeId = t.JobCardTypeId
             WHERE ${conds.join(' AND ')}
-            ORDER BY j.JobCardDate DESC, j.JobCardId DESC`);
+            ORDER BY gp.IssuedAt DESC, j.JobCardId DESC`);
 
         const rows = r.recordset.map(x => {
             const labour = Number(x.LabourGross) || 0;
@@ -107,6 +116,8 @@ exports.jobCardRegister = async (req, res) => {
                 JobCardId:    x.JobCardId,
                 JobCardNo:    x.JobCardNo,
                 JobCardDate:  x.JobCardDate?.toISOString().slice(0,10),
+                GatePassDate: x.GatePassDate?.toISOString().slice(0,10) || null,
+                GatePassNo:   x.GatePassNo || null,
                 Status:       x.Status || (x.IsFinalized ? 'Finalized' : 'Open'),
                 CustomerName: x.CustomerName || '',
                 CustomerCode: x.CustomerCode || '',
