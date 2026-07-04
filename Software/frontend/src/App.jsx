@@ -63,6 +63,8 @@ import PaintDashboard     from './pages/paint/PaintDashboard';
 import PaintItems         from './pages/paint/PaintItems';
 import PaintSettings      from './pages/paint/PaintSettings';
 import PaintPlaceholder   from './pages/paint/PaintPlaceholder';
+import PaintGRN           from './pages/paint/PaintGRN';
+import PaintGRNPrint      from './pages/paint/PaintGRNPrint';
 import GRN                from './pages/GRN';
 import GRTN               from './pages/GRTN';
 import StoreSale          from './pages/StoreSale';
@@ -971,9 +973,10 @@ function AppShell() {
                         <ProtectedRoute moduleKey="paint_lab_items"><PaintItems /></ProtectedRoute>
                     } />
                     <Route path="/paint/grn" element={
-                        <ProtectedRoute moduleKey="paint_lab_grn">
-                            <PaintPlaceholder title="Paint GRN" subtitle="Paint receiving from supplier." phase="Phase 1" />
-                        </ProtectedRoute>
+                        <ProtectedRoute moduleKey="paint_lab_grn"><PaintGRN /></ProtectedRoute>
+                    } />
+                    <Route path="/paint/grn/:id/print" element={
+                        <ProtectedRoute moduleKey="paint_lab_grn"><PaintGRNPrint /></ProtectedRoute>
                     } />
                     <Route path="/paint/grtn" element={
                         <ProtectedRoute moduleKey="paint_lab_grtn">

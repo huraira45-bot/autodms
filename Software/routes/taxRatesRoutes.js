@@ -10,6 +10,8 @@ router.get( '/',                  requireAnyAccess(
                                       'sales_store:view', 'sales_ssr:view',
                                       'procurement_grn:view', 'procurement_grtn:view',
                                       'workshop_jobs:view',
+                                      // Paint Lab needs GST rate for Paint GRN.
+                                      'paint_lab_grn:view', 'paint_lab_issue:view',
                                   ), c.getCurrent);
 router.get( '/:taxType/history',  requirePerm('inventory_settings', 'view'),  c.getHistory);
 router.post('/:taxType',          requirePerm('inventory_settings', 'edit'),  c.changeRate);
