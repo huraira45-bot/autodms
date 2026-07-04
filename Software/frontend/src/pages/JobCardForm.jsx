@@ -1615,12 +1615,16 @@ export default function JobCardForm() {
                         💾 {insSaving ? 'Saving…' : 'Save Insurance Info'}
                       </button>
                       {isEdit && (
-                        <button type="button"
-                          onClick={() => window.open(`/workshop/jobs/${id}/dep-print`, '_blank', 'noopener')}
+                        // Anchor instead of <button> so the enclosing
+                        // fieldset[disabled] on the tab body doesn't grey it
+                        // out after JC finalize — printing must stay usable.
+                        <a href={`/workshop/jobs/${id}/dep-print`}
+                          target="_blank"
+                          rel="noopener"
                           title="Print Issue Spares With Depreciation slip"
-                          style={{ ...S.toolBtn, marginTop: 4, justifyContent: 'center', background: '#1d4ed8', color: 'white', borderColor: '#1d4ed8' }}>
+                          style={{ ...S.toolBtn, marginTop: 4, justifyContent: 'center', background: '#1d4ed8', color: 'white', borderColor: '#1d4ed8', textDecoration: 'none', display: 'flex' }}>
                           🖨️ Print Depreciation Slip
-                        </button>
+                        </a>
                       )}
                       {!isEdit && (
                         <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>
