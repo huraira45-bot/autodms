@@ -5,6 +5,7 @@ const { postGRTNVoucher } = require('../services/grtnPostingService');
 const { postStoreSaleVoucher } = require('../services/storeSalePostingService');
 const { postSSRVoucher } = require('../services/ssrPostingService');
 const { postReversalVoucher } = require('../services/voucherReversalService');
+const { postPaintConsumptionForJC, unlockPaintIssuesForJC } = require('../services/paintIssueConsumptionService');
 const { getDownstreamRefs } = require('../services/downstreamRefsService');
 const { createFollowUpForJobCard } = require('../services/crdFollowUpService');
 const { triggerPostJobCard } = require('../services/croSurveyService');
@@ -44,8 +45,21 @@ for (const [k, v] of Object.entries(ENTITY_MAP)) {
 // Posting hooks fired inside the finalize transaction. Each function takes
 // (entityId, userInfo, transaction) and returns the new VoucherID (or null).
 // Throwing here rolls back the entire finalize (lock + posting are atomic).
+// JOBCARD posts TWO vouchers: the main JC voucher (revenue + parts + services)
+// and a SEPARATE Paint Consumption voucher (Dr PAINT_CONSUMPTION / Cr
+// PAINT_INVENTORY) for the Paint Issues linked to this JC. Both are posted
+// inside the same finalize transaction. Returns the main JC voucher ID for
+// backwards compatibility with the /finalize response payload.
+async function postJobCardVoucherWithPaint(id, userInfo, tx) {
+    const mainVoucherId = await postJobCardVoucher(id, userInfo, tx);
+    // Paint consumption is best-effort inside the tx: if the JC didn't
+    // consume any paint, the service returns null and no voucher is posted.
+    await postPaintConsumptionForJC(id, userInfo, tx);
+    return mainVoucherId;
+}
+
 const POSTING_HOOKS = {
-    JOBCARD: postJobCardVoucher,
+    JOBCARD: postJobCardVoucherWithPaint,
     GRN: postGRNVoucher,
     GRTN: postGRTNVoucher,
     STORE_SALE: postStoreSaleVoucher,
@@ -320,24 +334,43 @@ exports.adminUnfinalize = async (req, res) => {
                 // (c) reactivate any campaign application that was linked to the
                 //     reversed voucher (so the user can re-apply / change it before
                 //     re-finalizing).
-                const postedVoucher = await new sql.Request(transaction)
-                    .input('src',   sql.NVarChar(20), r.EntityType)
-                    .input('srcId', sql.Int,          r.EntityID)
-                    .query(`SELECT TOP 1 VoucherID FROM data_FinanceVoucherInfo
-                            WHERE SourceDocType = @src AND SourceDocID = @srcId
+                // Reverse ALL open non-reversal vouchers tied to this source
+                // doc. Historically only the main voucher existed and TOP 1
+                // was fine; the Paint Consumption voucher (JOBCARD → also
+                // posts JC_PAINT_CONS) means a JC can have two open vouchers,
+                // both of which must be reversed to keep the GL flat.
+                const srcTypes = r.EntityType === 'JOBCARD'
+                    ? [r.EntityType, 'JC_PAINT_CONS']
+                    : [r.EntityType];
+                const openVouchers = await new sql.Request(transaction)
+                    .input('srcId', sql.Int, r.EntityID)
+                    .query(`SELECT VoucherID FROM data_FinanceVoucherInfo
+                            WHERE SourceDocType IN ('${srcTypes.join("','")}')
+                              AND SourceDocID = @srcId
                               AND Status = 'Posted' AND ReversesVoucherID IS NULL
                             ORDER BY VoucherID DESC`);
-                if (postedVoucher.recordset.length) {
-                    reversalInfo = await postReversalVoucher(
-                        postedVoucher.recordset[0].VoucherID,
+                const reversals = [];
+                for (const row of openVouchers.recordset) {
+                    const info = await postReversalVoucher(
+                        row.VoucherID,
                         { userId: req.user.userId, userName: req.user.userName },
                         transaction
                     );
+                    reversals.push(info);
                 }
+                reversalInfo = reversals.length === 1 ? reversals[0]
+                              : reversals.length > 1  ? { reversals }
+                              : null;
 
                 await new sql.Request(transaction)
                     .input('id', sql.Int, r.EntityID)
                     .query(`UPDATE ${em.table} SET IsFinalized=0, FinalizedBy=NULL, FinalizedByName=NULL, FinalizedAt=NULL WHERE ${em.pk}=@id`);
+
+                // JC unfinalize: unlock paint_Issue rows so the user can
+                // edit them again before the next finalize.
+                if (r.EntityType === 'JOBCARD') {
+                    await unlockPaintIssuesForJC(r.EntityID, transaction);
+                }
             }
 
             await new sql.Request(transaction)
