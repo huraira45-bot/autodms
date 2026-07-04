@@ -60,8 +60,9 @@ app.use('/api/procurement/grtn', require('./routes/grtnRoutes'));
 // Paint Lab — separate paint inventory + costing module (owner ask 2026-07-04).
 // Only master data + settings ship in phase 0; GRN / GRTN / Issue / Reports
 // mount under /api/paint/* in follow-up phases.
-app.use('/api/paint/grn', require('./routes/paintGRNRoutes'));
-app.use('/api/paint', require('./routes/paintLabRoutes'));
+app.use('/api/paint/grn',  require('./routes/paintGRNRoutes'));
+app.use('/api/paint/grtn', require('./routes/paintGRTNRoutes'));
+app.use('/api/paint',      require('./routes/paintLabRoutes'));
 app.use('/api/sales/store-sale', require('./routes/saleRoutes'));
 app.use('/api/sales/ssr', require('./routes/ssrRoutes'));
 app.use('/api/accounts', require('./routes/accountRoutes'));
