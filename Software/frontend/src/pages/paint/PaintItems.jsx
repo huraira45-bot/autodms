@@ -1,14 +1,12 @@
 /**
- * Paint Items master (Phase 0).
- * Full CRUD (create/edit/soft-delete) over paint_Item with pickers for
- * category / brand / UOM. Stock qty / avg cost / stock value are
- * read-only — they move via GRN / GRTN / Issue only, never here.
+ * Paint Items master — compact list + right-side edit panel.
+ * Stock qty / avg cost / stock value are read-only backend values.
+ * Owner ask 2026-07-05: fit desktop 1366×768 without page overflow.
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Plus, Pencil, X, Loader2 } from 'lucide-react';
+import { Plus, Save, X, Search, Loader2 } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
-import { ErpControlPanel, ErpSearchBar, ErpListView } from '../../components/erp';
 import SearchableSelect from '../../components/SearchableSelect';
 
 const emptyForm = {
@@ -21,12 +19,12 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigit
 
 export default function PaintItems() {
     const { notify } = useFeedback();
-    const [items, setItems] = useState([]);
-    const [cats, setCats]   = useState([]);
+    const [items, setItems]   = useState([]);
+    const [cats, setCats]     = useState([]);
     const [brands, setBrands] = useState([]);
-    const [uoms, setUOMs]   = useState([]);
+    const [uoms, setUOMs]     = useState([]);
     const [search, setSearch] = useState('');
-    const [showForm, setShowForm] = useState(false);
+    const [openForm, setOpenForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [busy, setBusy] = useState(false);
@@ -45,7 +43,6 @@ export default function PaintItems() {
             setUOMs(r4.data || []);
         } catch (err) { console.error(err); }
     };
-
     useEffect(() => { fetchAll(); }, []);
 
     const filtered = useMemo(() => {
@@ -57,8 +54,8 @@ export default function PaintItems() {
         );
     }, [items, search]);
 
-    const openCreate = () => { setEditingId(null); setForm(emptyForm); setShowForm(true); };
-    const openEdit = (row) => {
+    const openCreate = () => { setEditingId(null); setForm(emptyForm); setOpenForm(true); };
+    const openEdit   = (row) => {
         setEditingId(row.PaintItemID);
         setForm({
             PaintCode:       row.PaintCode || '',
@@ -70,9 +67,9 @@ export default function PaintItems() {
             GSTDefaultOn:    row.GSTDefaultOn !== 0 && row.GSTDefaultOn !== false,
             IsActive:        row.IsActive !== 0 && row.IsActive !== false,
         });
-        setShowForm(true);
+        setOpenForm(true);
     };
-    const closeForm = () => { setShowForm(false); setEditingId(null); setForm(emptyForm); };
+    const closeForm = () => { setOpenForm(false); setEditingId(null); setForm(emptyForm); };
 
     const submit = async (e) => {
         e.preventDefault();
@@ -93,109 +90,141 @@ export default function PaintItems() {
         setBusy(false);
     };
 
-    const columns = [
-        { key: 'code',   label: 'Code',        render: r => <code>{r.PaintCode}</code> },
-        { key: 'name',   label: 'Paint Name',  render: r => <strong>{r.PaintName}</strong> },
-        { key: 'cat',    label: 'Category',    render: r => r.CategoryName || '—' },
-        { key: 'brand',  label: 'Brand',       render: r => r.BrandName || '—' },
-        { key: 'uom',    label: 'UOM',         render: r => r.UOMName || '—' },
-        { key: 'reord',  label: 'Reorder',     align: 'right', render: r => r.ReorderLevel != null ? fmt(r.ReorderLevel) : '—' },
-        { key: 'stock',  label: 'Stock Qty',   align: 'right', render: r => fmt(r.StockQty) },
-        { key: 'avg',    label: 'Avg Cost',    align: 'right', render: r => fmt(r.AvgCost) },
-        { key: 'value',  label: 'Stock Value', align: 'right', render: r => <strong>{fmt(r.StockValue)}</strong> },
-    ];
-
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <ErpControlPanel
-                title="Paint Items"
-                subtitle="Paint master — codes, brands, categories, UOM. Stock and average cost move only via Paint GRN / GRTN / Issue."
-                actions={
-                    <button type="button" className="erp-btn erp-btn-primary" onClick={openCreate}>
-                        <Plus size={14} /> Add Paint Item
-                    </button>
-                }
-            >
-                <ErpSearchBar value={search} onChange={setSearch} placeholder="Search code or name…" width={280} />
-            </ErpControlPanel>
+        <div className="paint-page">
+            <div className="paint-actionbar">
+                <div className="title">
+                    Paint Items
+                    <span className="subtitle">Codes, brands, UOM. Stock moves only via GRN / GRTN / Issue.</span>
+                </div>
+                <div className="actions">
+                    <div className="erp-search-input" style={{ height: 28, minWidth: 220 }}>
+                        <Search size={12} />
+                        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search code or name…" />
+                        {search && <X size={12} style={{ cursor: 'pointer' }} onClick={() => setSearch('')} />}
+                    </div>
+                    <button className="btn btn-primary" onClick={openCreate}><Plus size={13} /> New</button>
+                </div>
+            </div>
 
-            <ErpListView
-                columns={columns}
-                rows={filtered}
-                rowKey="PaintItemID"
-                onRowClick={openEdit}
-                emptyLabel="No paint items yet. Click Add Paint Item to seed the master."
-                footerLeft={`${filtered.length} paint item${filtered.length === 1 ? '' : 's'}`}
-            />
+            <div className={openForm ? 'paint-split' : 'paint-split no-form'}>
+                <div className="paint-pane" style={{ gridColumn: openForm ? 'auto' : '1 / -1' }}>
+                    <div className="paint-table-wrap tall">
+                        <table className="paint-table">
+                            <thead>
+                                <tr>
+                                    <th>Code</th>
+                                    <th>Paint Name</th>
+                                    {!openForm && <th>Category</th>}
+                                    {!openForm && <th>Brand</th>}
+                                    <th>UOM</th>
+                                    <th className="num">Reorder</th>
+                                    <th className="num">Stock</th>
+                                    <th className="num">Avg Cost</th>
+                                    <th className="num">Stock Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map(r => (
+                                    <tr key={r.PaintItemID}
+                                        className={editingId === r.PaintItemID ? 'is-selected' : ''}
+                                        onClick={() => openEdit(r)}
+                                        style={{ cursor: 'pointer' }}>
+                                        <td className="mono">{r.PaintCode}</td>
+                                        <td className="trunc"><strong>{r.PaintName}</strong></td>
+                                        {!openForm && <td className="trunc">{r.CategoryName || '—'}</td>}
+                                        {!openForm && <td className="trunc">{r.BrandName || '—'}</td>}
+                                        <td>{r.UOMName || '—'}</td>
+                                        <td className="num">{r.ReorderLevel != null ? fmt(r.ReorderLevel) : '—'}</td>
+                                        <td className="num">{fmt(r.StockQty)}</td>
+                                        <td className="num">{fmt(r.AvgCost)}</td>
+                                        <td className="num"><strong>{fmt(r.StockValue)}</strong></td>
+                                    </tr>
+                                ))}
+                                {filtered.length === 0 && (
+                                    <tr><td colSpan={openForm ? 7 : 9} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
+                                        No paint items{search ? ' match your search' : ' yet — click New to add one'}.
+                                    </td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="hint">{filtered.length} paint item{filtered.length === 1 ? '' : 's'}</div>
+                </div>
 
-            {showForm && (
-                <div className="modal-overlay" onClick={closeForm}>
-                    <div className="modal-card" style={{ width: 560 }} onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h3>{editingId ? 'Edit Paint Item' : 'New Paint Item'}</h3>
-                            <button onClick={closeForm}><X size={16} /></button>
-                        </div>
-                        <form onSubmit={submit} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            <div className="form-group">
-                                <label>Paint Code *</label>
-                                <input required value={form.PaintCode} disabled={!!editingId}
-                                       onChange={e => setForm({ ...form, PaintCode: e.target.value })} />
-                                {editingId && <small style={{ color: '#94a3b8' }}>Code is immutable after creation.</small>}
+                {openForm && (
+                    <div className="paint-pane">
+                        <div className="paint-card">
+                            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                                <div className="paint-card-title" style={{ marginBottom: 0, flex: 1 }}>
+                                    {editingId ? 'Edit Paint Item' : 'New Paint Item'}
+                                </div>
+                                <button className="paint-icon-btn" onClick={closeForm} title="Close"><X size={12} /></button>
                             </div>
-                            <div className="form-group">
-                                <label>Paint Name *</label>
-                                <input required value={form.PaintName}
-                                       onChange={e => setForm({ ...form, PaintName: e.target.value })} />
-                            </div>
-                            <div className="grid-2">
-                                <div className="form-group">
-                                    <label>Category</label>
+                            <form onSubmit={submit} className="paint-form-grid">
+                                <label className="span-2">
+                                    Paint Code *
+                                    <input className="field" required value={form.PaintCode} disabled={!!editingId}
+                                        onChange={e => setForm({ ...form, PaintCode: e.target.value })} />
+                                    {editingId && <span className="hint">Immutable after creation.</span>}
+                                </label>
+                                <label className="span-2">
+                                    Paint Name *
+                                    <input className="field" required value={form.PaintName}
+                                        onChange={e => setForm({ ...form, PaintName: e.target.value })} />
+                                </label>
+                                <label>
+                                    Category
                                     <SearchableSelect value={form.PaintCategoryID}
                                         onChange={v => setForm({ ...form, PaintCategoryID: v })}
-                                        placeholder="Select category…"
+                                        placeholder="Select…"
                                         options={cats.map(c => ({ id: c.PaintCategoryID, label: c.CategoryName }))} />
-                                </div>
-                                <div className="form-group">
-                                    <label>Brand</label>
+                                </label>
+                                <label>
+                                    Brand
                                     <SearchableSelect value={form.PaintBrandID}
                                         onChange={v => setForm({ ...form, PaintBrandID: v })}
-                                        placeholder="Select brand…"
+                                        placeholder="Select…"
                                         options={brands.map(b => ({ id: b.PaintBrandID, label: b.BrandName }))} />
-                                </div>
-                            </div>
-                            <div className="grid-2">
-                                <div className="form-group">
-                                    <label>UOM</label>
+                                </label>
+                                <label>
+                                    UOM
                                     <SearchableSelect value={form.PaintUOMID}
                                         onChange={v => setForm({ ...form, PaintUOMID: v })}
-                                        placeholder="Select UOM…"
+                                        placeholder="Select…"
                                         options={uoms.map(u => ({ id: u.PaintUOMID, label: u.UOMName }))} />
-                                </div>
-                                <div className="form-group">
-                                    <label>Reorder Level</label>
-                                    <input type="number" step="0.001" value={form.ReorderLevel}
-                                           onChange={e => setForm({ ...form, ReorderLevel: e.target.value })} />
-                                </div>
-                            </div>
-                            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                                <input type="checkbox" checked={form.GSTDefaultOn}
-                                       onChange={e => setForm({ ...form, GSTDefaultOn: e.target.checked })} />
-                                GST on by default (line-level override on GRN)
-                            </label>
-                            {editingId && (
-                                <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                                    <input type="checkbox" checked={form.IsActive}
-                                           onChange={e => setForm({ ...form, IsActive: e.target.checked })} />
-                                    Active
                                 </label>
-                            )}
-                            <button type="submit" className="btn" disabled={busy} style={{ marginTop: 6 }}>
-                                {busy ? <Loader2 size={14} className="animate-spin" /> : <Pencil size={14} />} {editingId ? 'Save changes' : 'Create paint item'}
-                            </button>
-                        </form>
+                                <label>
+                                    Reorder Level
+                                    <input className="field" type="number" step="0.001" value={form.ReorderLevel}
+                                        onChange={e => setForm({ ...form, ReorderLevel: e.target.value })} />
+                                </label>
+                                <label className="span-2" style={{ flexDirection: 'row', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, fontSize: 12.5, color: 'var(--erp-text)' }}>
+                                    <input type="checkbox" checked={form.GSTDefaultOn}
+                                        onChange={e => setForm({ ...form, GSTDefaultOn: e.target.checked })}
+                                        style={{ height: 'auto', width: 'auto', minHeight: 'auto' }} />
+                                    GST on by default (per-line override on GRN)
+                                </label>
+                                {editingId && (
+                                    <label className="span-2" style={{ flexDirection: 'row', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, fontSize: 12.5, color: 'var(--erp-text)' }}>
+                                        <input type="checkbox" checked={form.IsActive}
+                                            onChange={e => setForm({ ...form, IsActive: e.target.checked })}
+                                            style={{ height: 'auto', width: 'auto', minHeight: 'auto' }} />
+                                        Active
+                                    </label>
+                                )}
+                                <div className="span-2" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
+                                    <button type="button" className="btn" onClick={closeForm}>Cancel</button>
+                                    <button type="submit" className="btn btn-primary" disabled={busy}>
+                                        {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                        {editingId ? ' Save' : ' Create'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }

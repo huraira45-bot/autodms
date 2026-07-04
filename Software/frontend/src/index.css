@@ -2611,3 +2611,565 @@ textarea:disabled,
     position: static !important;
   }
 }
+
+/* ═════════════════════════════════════════════════════════════
+   Paint Lab — compact desktop-ERP layout (owner ask 2026-07-05).
+   Primary target: 1366×768. Applies only inside .paint-page so
+   nothing here leaks into other modules.
+   ═════════════════════════════════════════════════════════════ */
+
+.paint-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Sticky action bar — hosts New / Save / Finalize / Print / Close +
+   status pill. Stays put while the user scrolls the form or line
+   table below it. */
+.paint-actionbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  box-shadow: var(--erp-shadow-sm);
+}
+.paint-actionbar .title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--erp-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.paint-actionbar .subtitle {
+  font-size: 11px;
+  color: var(--erp-text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.paint-actionbar .actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.paint-actionbar .actions .btn,
+.paint-actionbar .actions .erp-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Compact card — used for header + line panels + totals */
+.paint-card {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 8px 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.paint-card + .paint-card { margin-top: 6px; }
+.paint-card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--erp-text-muted);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+/* Form grid — 2 rows max on 1366; every field ≥160px */
+.paint-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 10px;
+  min-width: 0;
+}
+.paint-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--erp-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  min-width: 0;
+}
+.paint-form-grid label > .field {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--erp-text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.paint-form-grid input,
+.paint-form-grid select,
+.paint-form-grid textarea,
+.paint-form-grid .search-select {
+  min-height: 30px;
+  height: 30px;
+  padding: 2px 8px;
+  font-size: 12.5px;
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  background: white;
+  color: var(--erp-text);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.paint-form-grid textarea { height: auto; min-height: 30px; }
+.paint-form-grid label.span-2 { grid-column: span 2; }
+.paint-form-grid label.span-3 { grid-column: span 3; }
+
+/* Inline "add a line" strip — item + qty + rate + gst + add */
+.paint-line-entry {
+  display: grid;
+  grid-template-columns: minmax(180px, 2.5fr) 90px 90px 80px 80px auto;
+  gap: 6px;
+  align-items: end;
+  padding: 6px 8px;
+  background: var(--erp-surface-alt);
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  min-width: 0;
+}
+
+/* Table wrapper — the ONLY scrolling surface inside a Paint page */
+.paint-table-wrap {
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  overflow: auto;
+  max-height: 55vh;
+  background: white;
+  min-width: 0;
+  max-width: 100%;
+}
+.paint-table-wrap.short { max-height: 40vh; }
+.paint-table-wrap.tall  { max-height: 62vh; }
+
+.paint-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+}
+.paint-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--erp-surface-alt);
+  border-bottom: 1px solid var(--erp-border);
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--erp-text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.paint-table tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #eef0f3;
+  vertical-align: middle;
+  color: var(--erp-text);
+}
+.paint-table tbody tr:hover td { background: #fafbfc; }
+.paint-table tbody tr.is-selected td { background: var(--erp-brand-soft); }
+.paint-table tbody tr.is-warn td { background: #fef2f2; }
+.paint-table td.num,
+.paint-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.paint-table td.mono {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11.5px;
+}
+.paint-table td.trunc {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.paint-table tfoot td {
+  background: #f1f5f9;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-top: 2px solid #cbd5e1;
+}
+.paint-table td input[type="number"],
+.paint-table td input[type="text"] {
+  height: 26px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border: 1px solid var(--erp-border);
+  border-radius: 3px;
+  width: 100%;
+  box-sizing: border-box;
+  background: white;
+}
+.paint-table td .row-btn {
+  height: 24px;
+  width: 24px;
+  border: 1px solid var(--erp-border);
+  background: white;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--erp-red);
+}
+.paint-table td .row-btn:hover { background: var(--erp-red-soft); }
+
+/* Compact totals panel — sits at bottom right of a transaction form */
+.paint-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, max-content));
+  gap: 6px 18px;
+  justify-content: end;
+  padding: 6px 10px;
+  background: var(--erp-surface-alt);
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.paint-totals .t {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 80px;
+}
+.paint-totals .t .lbl {
+  font-size: 10px;
+  color: var(--erp-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.paint-totals .t .val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--erp-text);
+  font-variant-numeric: tabular-nums;
+}
+.paint-totals .t.emph .val {
+  color: var(--erp-brand);
+  font-size: 15px;
+}
+
+/* Two-pane list + form layout (Items / GRN / GRTN / Issue). Uses
+   grid so the list narrows when a form is open and both sides get
+   min-width: 0 so overflow stays inside .paint-table-wrap. */
+.paint-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+.paint-split.no-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+.paint-split > .paint-pane {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* KPI strip — 5 tiles across at 1366; wraps below.
+   Deliberately small (72px tall) — no giant cards. */
+.paint-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+.paint-kpi {
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 60px;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+.paint-kpi:hover { background: #fafbfc; }
+.paint-kpi .icn {
+  width: 30px; height: 30px;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.paint-kpi .body {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.paint-kpi .lbl {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--erp-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.paint-kpi .val {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--erp-text);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.paint-kpi .sub {
+  font-size: 10px;
+  color: var(--erp-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.paint-kpi.tone-brand   .icn { background: var(--erp-brand-soft); color: var(--erp-brand); }
+.paint-kpi.tone-warning .icn { background: #fef3c7; color: #b45309; }
+.paint-kpi.tone-danger  .icn { background: var(--erp-red-soft); color: var(--erp-red); }
+.paint-kpi.tone-success .icn { background: #f0fdf4; color: #059669; }
+.paint-kpi.tone-muted   .icn { background: #f1f5f9; color: #64748b; }
+
+/* Two-column layout for below-the-KPI dashboards / reports */
+.paint-two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Tab bar — used in Paint Settings + Reports left-rail */
+.paint-tabbar {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--erp-border);
+  background: var(--erp-surface);
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  min-width: 0;
+}
+.paint-tabbar .tab {
+  padding: 8px 12px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--erp-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.paint-tabbar .tab:hover { color: var(--erp-text); }
+.paint-tabbar .tab.active {
+  color: var(--erp-brand);
+  border-bottom-color: var(--erp-brand);
+  font-weight: 600;
+}
+
+/* Vertical rail (Reports hub) */
+.paint-rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  padding: 4px;
+  min-width: 0;
+}
+.paint-rail .tab {
+  padding: 7px 10px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--erp-text);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.paint-rail .tab:hover { background: var(--erp-surface-alt); }
+.paint-rail .tab.active {
+  background: var(--erp-brand-soft);
+  color: var(--erp-brand);
+  border-left-color: var(--erp-brand);
+  font-weight: 600;
+}
+
+.paint-report-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Compact filter bar shared by Reports controls */
+.paint-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  min-height: 38px;
+}
+.paint-filterbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--erp-text-muted);
+}
+.paint-filterbar input[type="date"],
+.paint-filterbar select {
+  height: 28px;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--erp-border);
+  border-radius: 3px;
+  background: white;
+}
+.paint-filterbar .spacer { flex: 1; }
+
+/* Status pill compact */
+.paint-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.paint-status.draft    { background: #f1f5f9; color: #64748b; }
+.paint-status.posted   { background: #dcfce7; color: #059669; }
+.paint-status.reversed { background: #fee2e2; color: #b91c1c; }
+.paint-status.locked   { background: #dcfce7; color: #059669; }
+.paint-status.open     { background: #f1f5f9; color: #64748b; }
+
+/* Compact icon button reused in tables */
+.paint-icon-btn {
+  height: 26px;
+  width: 26px;
+  border: 1px solid var(--erp-border);
+  background: white;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--erp-text-muted);
+}
+.paint-icon-btn:hover { background: var(--erp-surface-hover); color: var(--erp-text); }
+.paint-icon-btn.danger { color: var(--erp-red); }
+.paint-icon-btn.danger:hover { background: var(--erp-red-soft); }
+
+/* Compact <select> baseline */
+.paint-page select {
+  height: 30px;
+  padding: 2px 8px;
+  font-size: 12.5px;
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  background: white;
+}
+
+/* Small text helpers scoped to paint pages */
+.paint-page .muted { color: var(--erp-text-muted); font-size: 11.5px; }
+.paint-page .hint  { font-size: 11px; color: var(--erp-text-muted); }
+.paint-page a { color: var(--erp-brand); }
+
+/* Sub-list on dashboard — condensed table */
+.paint-mini-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.paint-mini-list th {
+  text-align: left;
+  padding: 5px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--erp-text-muted);
+  border-bottom: 1px solid var(--erp-border);
+  font-weight: 600;
+  background: var(--erp-surface-alt);
+}
+.paint-mini-list td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.paint-mini-list td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Narrow-screen tightening (≤1366 sidebar-open) */
+@media (max-width: 1366px) {
+  .paint-split { grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); }
+  .paint-form-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 4px 8px; }
+  .paint-line-entry {
+    grid-template-columns: minmax(160px, 2.2fr) 80px 80px 70px 70px auto;
+  }
+  .paint-kpi .val { font-size: 16px; }
+  .paint-report-layout { grid-template-columns: 190px minmax(0, 1fr); }
+}
+@media (max-width: 1100px) {
+  .paint-split { grid-template-columns: minmax(0, 1fr); }
+  .paint-line-entry { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .paint-report-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Print — actionbar/tabbar/filters don't belong on paper */
+@media print {
+  .paint-actionbar,
+  .paint-tabbar,
+  .paint-rail,
+  .paint-filterbar,
+  .no-print { display: none !important; }
+  .paint-table-wrap { max-height: none !important; overflow: visible !important; }
+  .paint-table thead th { position: static !important; background: white !important; }
+}
+

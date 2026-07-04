@@ -1,37 +1,34 @@
 /**
- * Paint GRN — receive paint from a supplier. Owner ask 2026-07-04.
+ * Paint GRN — compact desktop-ERP layout (owner ask 2026-07-05).
  *
- * Two-pane layout: draft/posted list on the left; open form on the right.
- * Draft rows are freely editable and deletable. Posted rows are read-only
- * unless an admin unfinalizes them (which reverses the GL voucher and rolls
- * back the moving-average cost impact using each line's original landed
- * unit cost).
+ * BUSINESS LOGIC UNCHANGED:
+ *  - Server-side moving-avg + finalize + unfinalize + posting.
+ *  - Draft ↔ Posted ↔ Reversed state machine.
+ *  - GST rolls into paint cost (single voucher Dr Paint Inv / Cr Supplier).
  *
- * Moving-average math lives server-side (paintGRNController.finalize). This
- * screen only builds the payload and shows the results.
+ * Layout — sticky action bar, 2-row compact header grid, inline line-add
+ * strip, scrollable line table with sticky headers, right-aligned totals.
+ * No page-level horizontal scroll on 1366×768.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Plus, Save, Check, Trash2, Printer, X, Search, AlertTriangle, RefreshCcw, Lock } from 'lucide-react';
+import {
+    Plus, Save, Check, Trash2, Printer, X, Search,
+    AlertTriangle, RefreshCcw, Lock, ChevronLeft,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
-import { ErpControlPanel, ErpStatusPill, ErpEmptyState, ErpField } from '../../components/erp';
 import SearchableSelect from '../../components/SearchableSelect';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Blank form + blank line templates — a fresh Draft always starts here.
 const blankLine = (defaultUomId, defaultGstRate) => ({
-    PaintItemID: '',
-    PaintUOMID: defaultUomId || '',
-    Quantity: 1,
-    UnitRate: 0,
-    DiscountPct: 0,
-    DiscountAmt: 0,
-    GSTOn: true,
-    GSTRate: defaultGstRate || 0,
+    PaintItemID: '', PaintUOMID: defaultUomId || '',
+    Quantity: 1, UnitRate: 0,
+    DiscountPct: 0, DiscountAmt: 0,
+    GSTOn: true, GSTRate: defaultGstRate || 0,
 });
 
 export default function PaintGRN() {
@@ -44,20 +41,17 @@ export default function PaintGRN() {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
 
-    // Master pickers
     const [items, setItems]           = useState([]);
     const [uoms, setUoms]             = useState([]);
     const [parties, setParties]       = useState([]);
     const [warehouses, setWarehouses] = useState([]);
     const [gstRate, setGstRate]       = useState(0);
 
-    // Open form state
     const [id, setId]         = useState(null);
     const [form, setForm]     = useState(null);
     const [dirty, setDirty]   = useState(false);
     const [saving, setSaving] = useState(false);
 
-    // ── Initial loads ──
     const reloadList = async () => {
         const params = {};
         if (search) params.search = search;
@@ -87,21 +81,18 @@ export default function PaintGRN() {
             }
             reloadList();
         })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => { reloadList().catch(() => {}); /* eslint-disable-next-line */ }, [search, statusFilter]);
 
-    // ── Open / new form actions ──
     const openNew = () => {
         setId(null);
         setForm({
             GRNDate: today(),
-            PartyID: '',
-            SupplierBillNo: '',
+            PartyID: '', SupplierBillNo: '',
             PaintWHID: warehouses[0]?.PaintWHID || '',
-            Remarks: '',
-            Status: 'Draft',
+            Remarks: '', Status: 'Draft',
             Lines: [blankLine(null, gstRate)],
         });
         setDirty(false);
@@ -113,12 +104,13 @@ export default function PaintGRN() {
             const data = r.data;
             setId(data.PaintGRNID);
             setForm({
-                GRNDate:   (data.GRNDate || '').slice(0, 10),
-                PartyID:   data.PartyID,
+                GRNNo: data.GRNNo,
+                GRNDate: (data.GRNDate || '').slice(0, 10),
+                PartyID: data.PartyID,
                 SupplierBillNo: data.SupplierBillNo || '',
                 PaintWHID: data.PaintWHID,
-                Remarks:   data.Remarks || '',
-                Status:    data.Status,
+                Remarks: data.Remarks || '',
+                Status: data.Status,
                 VoucherNo: data.VoucherNo,
                 Lines: (data.Lines || []).map(l => ({
                     PaintItemID: l.PaintItemID,
@@ -129,8 +121,6 @@ export default function PaintGRN() {
                     DiscountAmt: Number(l.DiscountAmt),
                     GSTOn:       !!l.GSTOn,
                     GSTRate:     Number(l.GSTRate),
-                    _existing:   true,
-                    LineTotal:   Number(l.LineTotal),
                 })),
             });
             setDirty(false);
@@ -144,26 +134,14 @@ export default function PaintGRN() {
         setId(null); setForm(null); setDirty(false);
     };
 
-    // ── Form mutators ──
     const patch = (k, v) => { setForm(f => ({ ...f, [k]: v })); setDirty(true); };
     const patchLine = (idx, patchObj) => {
-        setForm(f => {
-            const Lines = f.Lines.map((l, i) => i === idx ? { ...l, ...patchObj } : l);
-            return { ...f, Lines };
-        });
+        setForm(f => ({ ...f, Lines: f.Lines.map((l, i) => i === idx ? { ...l, ...patchObj } : l) }));
         setDirty(true);
     };
-    const addLine = () => {
-        setForm(f => ({ ...f, Lines: [...f.Lines, blankLine(null, gstRate)] }));
-        setDirty(true);
-    };
-    const removeLine = (idx) => {
-        setForm(f => ({ ...f, Lines: f.Lines.filter((_, i) => i !== idx) }));
-        setDirty(true);
-    };
+    const addLine    = () => { setForm(f => ({ ...f, Lines: [...f.Lines, blankLine(null, gstRate)] })); setDirty(true); };
+    const removeLine = (idx) => { setForm(f => ({ ...f, Lines: f.Lines.filter((_, i) => i !== idx) })); setDirty(true); };
 
-    // Line calc — mirrors server-side computeLineAmounts so the preview
-    // stays consistent with what will get saved.
     const linesWithCalc = useMemo(() => (form?.Lines || []).map((l) => {
         const qty = Number(l.Quantity) || 0;
         const rate = Number(l.UnitRate) || 0;
@@ -179,15 +157,14 @@ export default function PaintGRN() {
     }), [form]);
 
     const totals = useMemo(() => linesWithCalc.reduce((a, x) => ({
-        SubTotal:      a.SubTotal      + x._gross,
+        SubTotal: a.SubTotal + x._gross,
         DiscountTotal: a.DiscountTotal + x._discAmt,
-        GSTTotal:      a.GSTTotal      + x._gstAmt,
-        GrandTotal:    a.GrandTotal    + x._total,
+        GSTTotal: a.GSTTotal + x._gstAmt,
+        GrandTotal: a.GrandTotal + x._total,
     }), { SubTotal: 0, DiscountTotal: 0, GSTTotal: 0, GrandTotal: 0 }), [linesWithCalc]);
 
     const isReadOnly = form && form.Status !== 'Draft';
 
-    // ── Save / Finalize / Delete / Unfinalize ──
     const buildPayload = () => ({
         GRNDate: form.GRNDate,
         PartyID: form.PartyID,
@@ -216,6 +193,7 @@ export default function PaintGRN() {
                 const r = await axios.post('/api/paint/grn', buildPayload());
                 setId(r.data.PaintGRNID);
                 notify({ type: 'success', title: 'Draft created' });
+                await openId(r.data.PaintGRNID);
             }
             setDirty(false);
             await reloadList();
@@ -226,11 +204,11 @@ export default function PaintGRN() {
 
     const finalize = async () => {
         if (dirty) {
-            if (!(await confirm({ title: 'Save + Finalize?', message: 'Your changes must be saved before finalizing. Continue?', confirmLabel: 'Save + Finalize' }))) return;
+            if (!(await confirm({ title: 'Save + Finalize?', message: 'Save then finalize?', confirmLabel: 'Save + Finalize' }))) return;
             await saveDraft();
         } else if (!(await confirm({
             title: 'Finalize Paint GRN?',
-            message: 'This will add stock to inventory (moving-avg cost updated), post a GL voucher, and lock the record.',
+            message: 'Adds stock (moving-avg updated), posts GL voucher, locks the record.',
             confirmLabel: 'Finalize',
         }))) return;
         try {
@@ -247,7 +225,7 @@ export default function PaintGRN() {
     const unfinalize = async () => {
         if (!(await confirm({
             title: 'Unfinalize Paint GRN?',
-            message: 'Reverses the GL voucher and rolls back the moving-average cost using each line\'s original landed unit cost. Only proceed if no downstream GRTN or Issue has consumed this stock.',
+            message: 'Reverses the voucher and rolls back moving-avg using each line\'s original landed cost.',
             confirmLabel: 'Unfinalize', tone: 'warning',
         }))) return;
         try {
@@ -273,12 +251,8 @@ export default function PaintGRN() {
         }
     };
 
-    const printPaintGRN = () => {
-        if (!id) return;
-        window.open(`/paint/grn/${id}/print`, '_blank', 'noopener');
-    };
+    const printGRN = () => id && window.open(`/paint/grn/${id}/print`, '_blank', 'noopener');
 
-    // ── Options for pickers ──
     const itemOpts = useMemo(() => items.map(i => ({
         id: i.PaintItemID, label: i.PaintName, sub: i.PaintCode,
         group: i.CategoryName || 'Uncategorised',
@@ -291,286 +265,253 @@ export default function PaintGRN() {
     })), [warehouses]);
     const uomOpts = useMemo(() => uoms.map(u => ({ id: u.PaintUOMID, label: u.UOMName })), [uoms]);
 
-    // ── Render ──
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <ErpControlPanel title="Paint GRN"
-                subtitle="Receive paint from suppliers. Finalize updates stock, moving-average cost, and posts a purchase voucher."
-                actions={canEdit && <button className="btn btn-primary" onClick={openNew}><Plus size={14} /> New GRN</button>}
-            >
-                <div className="erp-search-input">
-                    <Search size={14} />
-                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="GRN #, Bill #, Supplier…" />
-                    {search && <X size={14} style={{ cursor: 'pointer' }} onClick={() => setSearch('')} />}
-                </div>
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="erp-input">
-                    <option value="">All statuses</option>
-                    <option value="Draft">Draft</option>
-                    <option value="Posted">Posted</option>
-                    <option value="Reversed">Reversed</option>
-                </select>
-            </ErpControlPanel>
-
-            <div style={{ display: 'grid', gridTemplateColumns: form ? 'minmax(280px, 340px) 1fr' : '1fr', gap: 10 }}>
-                {/* LIST */}
-                <div className="erp-panel" style={{ padding: 0, maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                        <thead>
-                            <tr style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
-                                <th style={th}>GRN #</th>
-                                <th style={th}>Date</th>
-                                {!form && <th style={th}>Supplier</th>}
-                                <th style={{ ...th, textAlign: 'right' }}>Grand Total</th>
-                                <th style={th}>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {list.map(row => (
-                                <tr key={row.PaintGRNID}
-                                    onClick={() => openId(row.PaintGRNID)}
-                                    style={{
-                                        cursor: 'pointer',
-                                        background: row.PaintGRNID === id ? 'var(--erp-brand-soft)' : 'transparent',
-                                        borderTop: '1px solid #e5e7eb',
-                                    }}>
-                                    <td style={td}><strong>{row.GRNNo}</strong></td>
-                                    <td style={td}>{(row.GRNDate || '').slice(0, 10)}</td>
-                                    {!form && <td style={td}>{row.PartyName}</td>}
-                                    <td style={{ ...td, textAlign: 'right' }}>{fmt(row.GrandTotal)}</td>
-                                    <td style={td}>
-                                        <StatusPill status={row.Status} />
-                                    </td>
-                                </tr>
-                            ))}
-                            {list.length === 0 && (
-                                <tr><td colSpan={form ? 4 : 5}>
-                                    <ErpEmptyState title="No Paint GRNs" message="Create one to record paint received from a supplier." />
-                                </td></tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* FORM */}
+        <div className="paint-page">
+            {/* Sticky action bar — always reachable */}
+            <div className="paint-actionbar">
                 {form && (
-                    <div className="erp-panel" style={{ padding: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <div style={{ fontSize: 15, fontWeight: 600 }}>
-                                    {id ? (form.GRNNo || `GRN #${id}`) : 'New Paint GRN'}
-                                </div>
-                                <StatusPill status={form.Status} />
-                                {form.VoucherNo && <span style={{ fontSize: 12, color: '#64748b' }}>· Voucher {form.VoucherNo}</span>}
-                                {isReadOnly && <span style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}><Lock size={11} /> Read-only</span>}
-                            </div>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                                {!isReadOnly && canEdit && (
-                                    <button className="btn btn-primary" onClick={saveDraft} disabled={saving || !dirty}>
-                                        <Save size={14} /> Save
-                                    </button>
-                                )}
-                                {form.Status === 'Draft' && id && canEdit && (
-                                    <button className="btn btn-primary" onClick={finalize} disabled={saving}>
-                                        <Check size={14} /> Finalize
-                                    </button>
-                                )}
-                                {form.Status === 'Posted' && canUnfinalize && (
-                                    <button className="btn btn-secondary" onClick={unfinalize} disabled={saving}>
-                                        <RefreshCcw size={14} /> Unfinalize
-                                    </button>
-                                )}
-                                {id && (
-                                    <button className="btn" onClick={printPaintGRN}>
-                                        <Printer size={14} /> Print
-                                    </button>
-                                )}
-                                {form.Status === 'Draft' && id && canEdit && (
-                                    <button className="btn btn-danger" onClick={remove} disabled={saving}>
-                                        <Trash2 size={14} /> Delete
-                                    </button>
-                                )}
-                                <button className="btn" onClick={closeForm}><X size={14} /> Close</button>
-                            </div>
-                        </div>
+                    <button className="paint-icon-btn" onClick={closeForm} title="Back to list"><ChevronLeft size={13} /></button>
+                )}
+                <div className="title">
+                    {form
+                        ? <>Paint GRN {form.GRNNo || (id ? `#${id}` : '· New')}
+                            <StatusPill status={form.Status} />
+                            {form.VoucherNo && <span className="subtitle">· Voucher {form.VoucherNo}</span>}
+                            {isReadOnly && <span className="subtitle" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Lock size={10} /> Read-only</span>}
+                        </>
+                        : <>Paint GRN <span className="subtitle">Receive paint from suppliers</span></>}
+                </div>
+                <div className="actions">
+                    {!form && canEdit && <button className="btn btn-primary" onClick={openNew}><Plus size={13} /> New</button>}
+                    {form && !isReadOnly && canEdit && (
+                        <button className="btn btn-primary" onClick={saveDraft} disabled={saving || !dirty}><Save size={13} /> Save</button>
+                    )}
+                    {form?.Status === 'Draft' && id && canEdit && (
+                        <button className="btn btn-primary" onClick={finalize} disabled={saving}><Check size={13} /> Finalize</button>
+                    )}
+                    {form?.Status === 'Posted' && canUnfinalize && (
+                        <button className="btn btn-secondary" onClick={unfinalize} disabled={saving}><RefreshCcw size={13} /> Unfinalize</button>
+                    )}
+                    {form && id && <button className="btn" onClick={printGRN}><Printer size={13} /> Print</button>}
+                    {form?.Status === 'Draft' && id && canEdit && (
+                        <button className="btn btn-danger" onClick={remove} disabled={saving}><Trash2 size={13} /> Delete</button>
+                    )}
+                    {form && <button className="btn" onClick={closeForm}><X size={13} /> Close</button>}
+                </div>
+            </div>
 
-                        <fieldset disabled={isReadOnly} style={{ border: 'none', padding: 0, margin: 0 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, marginBottom: 12 }}>
-                                <ErpField label="GRN Date *">
-                                    <input type="date" value={form.GRNDate} onChange={e => patch('GRNDate', e.target.value)} />
-                                </ErpField>
-                                <ErpField label="Supplier *">
-                                    <SearchableSelect
-                                        value={form.PartyID}
+            {/* LIST-ONLY VIEW */}
+            {!form && (
+                <>
+                    <div className="paint-filterbar">
+                        <div className="erp-search-input" style={{ height: 28, minWidth: 240 }}>
+                            <Search size={12} />
+                            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="GRN #, Bill #, Supplier…" />
+                            {search && <X size={12} style={{ cursor: 'pointer' }} onClick={() => setSearch('')} />}
+                        </div>
+                        <label>
+                            Status
+                            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                                <option value="">All</option>
+                                <option value="Draft">Draft</option>
+                                <option value="Posted">Posted</option>
+                                <option value="Reversed">Reversed</option>
+                            </select>
+                        </label>
+                        <div className="spacer" />
+                        <span className="hint">{list.length} record{list.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div className="paint-table-wrap tall">
+                        <table className="paint-table">
+                            <thead>
+                                <tr>
+                                    <th>GRN #</th>
+                                    <th>Date</th>
+                                    <th>Supplier</th>
+                                    <th>Bill #</th>
+                                    <th>Warehouse</th>
+                                    <th>Voucher</th>
+                                    <th className="num">Grand Total</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {list.map(row => (
+                                    <tr key={row.PaintGRNID} onClick={() => openId(row.PaintGRNID)} style={{ cursor: 'pointer' }}>
+                                        <td className="mono"><strong>{row.GRNNo}</strong></td>
+                                        <td>{(row.GRNDate || '').slice(0, 10)}</td>
+                                        <td className="trunc">{row.PartyName}</td>
+                                        <td className="trunc">{row.SupplierBillNo || ''}</td>
+                                        <td className="trunc">{row.WHDesc}</td>
+                                        <td className="mono">{row.VoucherID ? `#${row.VoucherID}` : ''}</td>
+                                        <td className="num">{fmt(row.GrandTotal)}</td>
+                                        <td><StatusPill status={row.Status} /></td>
+                                    </tr>
+                                ))}
+                                {list.length === 0 && (
+                                    <tr><td colSpan={8} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
+                                        No Paint GRNs. Click New to record one.
+                                    </td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
+            )}
+
+            {/* FORM VIEW */}
+            {form && (
+                <>
+                    <div className="paint-card">
+                        <div className="paint-card-title">Header</div>
+                        <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0 }}>
+                            <div className="paint-form-grid">
+                                <label>GRN Date *
+                                    <input className="field" type="date" value={form.GRNDate}
+                                        onChange={e => patch('GRNDate', e.target.value)} />
+                                </label>
+                                <label>Supplier *
+                                    <SearchableSelect value={form.PartyID}
                                         onChange={v => patch('PartyID', v)}
                                         options={partyOpts}
                                         placeholder="Select supplier…"
-                                        title="Pick supplier"
-                                    />
-                                </ErpField>
-                                <ErpField label="Warehouse *">
-                                    <SearchableSelect
-                                        value={form.PaintWHID}
+                                        title="Pick supplier" />
+                                </label>
+                                <label>Warehouse *
+                                    <SearchableSelect value={form.PaintWHID}
                                         onChange={v => patch('PaintWHID', v)}
                                         options={whOpts}
                                         placeholder="Select warehouse…"
-                                        title="Pick warehouse"
-                                    />
-                                </ErpField>
-                                <ErpField label="Supplier Bill No">
-                                    <input value={form.SupplierBillNo || ''} onChange={e => patch('SupplierBillNo', e.target.value)} placeholder="e.g. INV-12345" />
-                                </ErpField>
-                            </div>
-                            <ErpField label="Remarks">
-                                <input value={form.Remarks || ''} onChange={e => patch('Remarks', e.target.value)} placeholder="Optional" />
-                            </ErpField>
-
-                            {parties.length === 0 && (
-                                <div className="erp-alert warning" style={{ marginTop: 8 }}>
-                                    <AlertTriangle size={14} /> No suppliers mapped to PAINT_LAB. Open <a href="/parties/business-access">Party Business Access</a> and grant PAINT_LAB to your paint suppliers.
-                                </div>
-                            )}
-
-                            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div style={{ fontWeight: 600 }}>Lines</div>
-                                {!isReadOnly && <button className="btn" onClick={addLine}><Plus size={14} /> Add Line</button>}
-                            </div>
-
-                            <div style={{ overflowX: 'auto', marginTop: 6 }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                                    <thead>
-                                        <tr style={{ background: '#f8fafc' }}>
-                                            <th style={th2}>#</th>
-                                            <th style={th2}>Paint Item *</th>
-                                            <th style={th2}>UOM</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>Qty *</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>Rate *</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>Disc %</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>Disc Amt</th>
-                                            <th style={{ ...th2, textAlign: 'center' }}>GST</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>GST %</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>GST Amt</th>
-                                            <th style={{ ...th2, textAlign: 'right' }}>Line Total</th>
-                                            <th style={th2}></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {linesWithCalc.map((l, idx) => (
-                                            <tr key={idx} style={{ borderTop: '1px solid #e5e7eb' }}>
-                                                <td style={td2}>{idx + 1}</td>
-                                                <td style={{ ...td2, minWidth: 220 }}>
-                                                    <SearchableSelect
-                                                        value={l.PaintItemID}
-                                                        onChange={v => {
-                                                            const it = items.find(x => x.PaintItemID === Number(v));
-                                                            patchLine(idx, {
-                                                                PaintItemID: v,
-                                                                PaintUOMID: it?.PaintUOMID || l.PaintUOMID || '',
-                                                                GSTOn: it ? !!it.GSTDefaultOn : l.GSTOn,
-                                                                GSTRate: it && it.GSTDefaultOn ? gstRate : (l.GSTOn ? gstRate : 0),
-                                                            });
-                                                        }}
-                                                        options={itemOpts}
-                                                        placeholder="Pick paint…"
-                                                        title="Pick paint item"
-                                                    />
-                                                </td>
-                                                <td style={{ ...td2, minWidth: 100 }}>
-                                                    <SearchableSelect
-                                                        value={l.PaintUOMID || ''}
-                                                        onChange={v => patchLine(idx, { PaintUOMID: v })}
-                                                        options={uomOpts}
-                                                        placeholder="UOM"
-                                                        title="Pick UOM"
-                                                    />
-                                                </td>
-                                                <td style={td2}>
-                                                    <input type="number" step="0.0001" value={l.Quantity} min={0}
-                                                        onChange={e => patchLine(idx, { Quantity: e.target.value })}
-                                                        style={{ width: '100%', textAlign: 'right' }} />
-                                                </td>
-                                                <td style={td2}>
-                                                    <input type="number" step="0.0001" value={l.UnitRate} min={0}
-                                                        onChange={e => patchLine(idx, { UnitRate: e.target.value })}
-                                                        style={{ width: '100%', textAlign: 'right' }} />
-                                                </td>
-                                                <td style={td2}>
-                                                    <input type="number" step="0.01" value={l.DiscountPct} min={0} max={100}
-                                                        onChange={e => patchLine(idx, {
-                                                            DiscountPct: e.target.value,
-                                                            DiscountAmt: '', // clear amt so % drives
-                                                        })}
-                                                        style={{ width: '100%', textAlign: 'right' }} />
-                                                </td>
-                                                <td style={td2}>
-                                                    <input type="number" step="0.01" value={l.DiscountAmt}
-                                                        onChange={e => patchLine(idx, { DiscountAmt: e.target.value })}
-                                                        placeholder={fmt(l._discAmt)}
-                                                        style={{ width: '100%', textAlign: 'right' }} />
-                                                </td>
-                                                <td style={{ ...td2, textAlign: 'center' }}>
-                                                    <input type="checkbox" checked={!!l.GSTOn}
-                                                        onChange={e => patchLine(idx, {
-                                                            GSTOn: e.target.checked,
-                                                            GSTRate: e.target.checked ? gstRate : 0,
-                                                        })} />
-                                                </td>
-                                                <td style={td2}>
-                                                    <input type="number" step="0.01" value={l.GSTRate} min={0}
-                                                        disabled={!l.GSTOn}
-                                                        onChange={e => patchLine(idx, { GSTRate: e.target.value })}
-                                                        style={{ width: '100%', textAlign: 'right' }} />
-                                                </td>
-                                                <td style={{ ...td2, textAlign: 'right' }}>{fmt(l._gstAmt)}</td>
-                                                <td style={{ ...td2, textAlign: 'right', fontWeight: 600 }}>{fmt(l._total)}</td>
-                                                <td style={td2}>
-                                                    {!isReadOnly && (
-                                                        <button className="btn btn-sm btn-danger" onClick={() => removeLine(idx)} title="Remove line">
-                                                            <Trash2 size={12} />
-                                                        </button>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {linesWithCalc.length === 0 && (
-                                            <tr><td colSpan={12} style={{ padding: 16, color: '#94a3b8', textAlign: 'center' }}>
-                                                No lines yet. Click "Add Line" to start.
-                                            </td></tr>
-                                        )}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr style={{ background: '#f1f5f9', fontWeight: 600 }}>
-                                            <td style={td2} colSpan={6}>Totals</td>
-                                            <td style={{ ...td2, textAlign: 'right' }}>{fmt(totals.DiscountTotal)}</td>
-                                            <td colSpan={2}></td>
-                                            <td style={{ ...td2, textAlign: 'right' }}>{fmt(totals.GSTTotal)}</td>
-                                            <td style={{ ...td2, textAlign: 'right' }}>{fmt(totals.GrandTotal)}</td>
-                                            <td></td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-
-                            <div style={{ marginTop: 12, display: 'flex', gap: 24, justifyContent: 'flex-end', fontSize: 13 }}>
-                                <div>Sub Total: <strong>{fmt(totals.SubTotal)}</strong></div>
-                                <div>Discount: <strong>{fmt(totals.DiscountTotal)}</strong></div>
-                                <div>GST: <strong>{fmt(totals.GSTTotal)}</strong></div>
-                                <div style={{ fontSize: 15 }}>Grand Total: <strong>{fmt(totals.GrandTotal)}</strong></div>
+                                        title="Pick warehouse" />
+                                </label>
+                                <label>Supplier Bill No
+                                    <input className="field" value={form.SupplierBillNo || ''}
+                                        onChange={e => patch('SupplierBillNo', e.target.value)}
+                                        placeholder="e.g. INV-12345" />
+                                </label>
+                                <label className="span-2">Remarks
+                                    <input className="field" value={form.Remarks || ''}
+                                        onChange={e => patch('Remarks', e.target.value)} placeholder="Optional" />
+                                </label>
                             </div>
                         </fieldset>
                     </div>
-                )}
-            </div>
+
+                    {parties.length === 0 && (
+                        <div className="erp-alert warning" style={{ padding: '6px 10px', fontSize: 12 }}>
+                            <AlertTriangle size={13} /> No suppliers mapped to PAINT_LAB.
+                            Open <a href="/parties/business-access">Party Business Access</a> and grant it.
+                        </div>
+                    )}
+
+                    <div className="paint-card">
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                            <div className="paint-card-title" style={{ marginBottom: 0, flex: 1 }}>Lines</div>
+                            {!isReadOnly && <button className="btn" onClick={addLine}><Plus size={12} /> Add Line</button>}
+                        </div>
+
+                        <div className="paint-table-wrap">
+                            <table className="paint-table">
+                                <thead>
+                                    <tr>
+                                        <th style={{ width: 30 }}>#</th>
+                                        <th>Paint Item *</th>
+                                        <th style={{ width: 100 }}>UOM</th>
+                                        <th className="num" style={{ width: 90 }}>Qty *</th>
+                                        <th className="num" style={{ width: 90 }}>Rate *</th>
+                                        <th className="num" style={{ width: 70 }}>Disc %</th>
+                                        <th className="num" style={{ width: 80 }}>Disc Amt</th>
+                                        <th style={{ width: 40, textAlign: 'center' }}>GST</th>
+                                        <th className="num" style={{ width: 60 }}>GST %</th>
+                                        <th className="num" style={{ width: 80 }}>GST Amt</th>
+                                        <th className="num" style={{ width: 100 }}>Line Total</th>
+                                        <th style={{ width: 30 }}></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {linesWithCalc.map((l, idx) => (
+                                        <tr key={idx}>
+                                            <td>{idx + 1}</td>
+                                            <td style={{ minWidth: 220 }}>
+                                                <SearchableSelect value={l.PaintItemID}
+                                                    onChange={v => {
+                                                        const it = items.find(x => x.PaintItemID === Number(v));
+                                                        patchLine(idx, {
+                                                            PaintItemID: v,
+                                                            PaintUOMID: it?.PaintUOMID || l.PaintUOMID || '',
+                                                            GSTOn: it ? !!it.GSTDefaultOn : l.GSTOn,
+                                                            GSTRate: it && it.GSTDefaultOn ? gstRate : (l.GSTOn ? gstRate : 0),
+                                                        });
+                                                    }}
+                                                    options={itemOpts}
+                                                    placeholder="Pick paint…"
+                                                    title="Pick paint item" />
+                                            </td>
+                                            <td>
+                                                <SearchableSelect value={l.PaintUOMID || ''}
+                                                    onChange={v => patchLine(idx, { PaintUOMID: v })}
+                                                    options={uomOpts} placeholder="UOM" title="Pick UOM" />
+                                            </td>
+                                            <td className="num">
+                                                <input type="number" step="0.0001" value={l.Quantity} min={0}
+                                                    onChange={e => patchLine(idx, { Quantity: e.target.value })} />
+                                            </td>
+                                            <td className="num">
+                                                <input type="number" step="0.0001" value={l.UnitRate} min={0}
+                                                    onChange={e => patchLine(idx, { UnitRate: e.target.value })} />
+                                            </td>
+                                            <td className="num">
+                                                <input type="number" step="0.01" value={l.DiscountPct} min={0} max={100}
+                                                    onChange={e => patchLine(idx, { DiscountPct: e.target.value, DiscountAmt: '' })} />
+                                            </td>
+                                            <td className="num">
+                                                <input type="number" step="0.01" value={l.DiscountAmt}
+                                                    onChange={e => patchLine(idx, { DiscountAmt: e.target.value })}
+                                                    placeholder={fmt(l._discAmt)} />
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <input type="checkbox" checked={!!l.GSTOn}
+                                                    onChange={e => patchLine(idx, { GSTOn: e.target.checked, GSTRate: e.target.checked ? gstRate : 0 })} />
+                                            </td>
+                                            <td className="num">
+                                                <input type="number" step="0.01" value={l.GSTRate} min={0}
+                                                    disabled={!l.GSTOn}
+                                                    onChange={e => patchLine(idx, { GSTRate: e.target.value })} />
+                                            </td>
+                                            <td className="num">{fmt(l._gstAmt)}</td>
+                                            <td className="num"><strong>{fmt(l._total)}</strong></td>
+                                            <td>
+                                                {!isReadOnly && (
+                                                    <button className="row-btn" onClick={() => removeLine(idx)} title="Remove">
+                                                        <Trash2 size={11} />
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {linesWithCalc.length === 0 && (
+                                        <tr><td colSpan={12} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
+                                            No lines. Click Add Line to start.
+                                        </td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div className="paint-totals">
+                        <div className="t"><span className="lbl">Sub Total</span><span className="val">{fmt(totals.SubTotal)}</span></div>
+                        <div className="t"><span className="lbl">Discount</span><span className="val">{fmt(totals.DiscountTotal)}</span></div>
+                        <div className="t"><span className="lbl">GST</span><span className="val">{fmt(totals.GSTTotal)}</span></div>
+                        <div className="t emph"><span className="lbl">Grand Total</span><span className="val">{fmt(totals.GrandTotal)}</span></div>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
 
 function StatusPill({ status }) {
-    if (status === 'Posted')   return <ErpStatusPill tone="success">Posted</ErpStatusPill>;
-    if (status === 'Reversed') return <ErpStatusPill tone="danger">Reversed</ErpStatusPill>;
-    return <ErpStatusPill tone="muted">Draft</ErpStatusPill>;
+    const s = (status || '').toLowerCase();
+    return <span className={`paint-status ${s}`}>{status}</span>;
 }
-
-const th  = { padding: '6px 8px', textAlign: 'left', fontSize: 11, textTransform: 'uppercase', color: '#64748b' };
-const td  = { padding: '6px 8px', fontSize: 12 };
-const th2 = { padding: '4px 6px', textAlign: 'left', fontSize: 10, textTransform: 'uppercase', color: '#64748b', whiteSpace: 'nowrap' };
-const td2 = { padding: '3px 6px', fontSize: 12 };
