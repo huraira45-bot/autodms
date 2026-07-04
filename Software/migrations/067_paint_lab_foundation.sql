@@ -382,6 +382,7 @@ ALTER TABLE dms_SystemAccounts ADD CONSTRAINT CK_SystemAccounts_RoleKey CHECK (
         'PURCHASE_RETURN_VARIANCE','CUSTOMER_ADVANCE_RECEIVED','SUPPLIER_ADVANCE_PAID',
         'CHEQUES_ON_HAND','CHEQUES_ISSUED_UNCLEARED',
         'VEHICLE_INVENTORY','BOOKING_RECEIVABLE','BOOKING_ADVANCE',
+        'BOOKING_VARIANT_RECEIVABLE','PREMIUM_DEFERRED',
         'MASTER_VEHICLE_PAYABLE','MASTER_INCENTIVE_RECEIVABLE','STAFF_INCENTIVE_PAYABLE',
         'VEHICLE_SALES_REVENUE','PREMIUM_INCOME','MASTER_INCENTIVE_INCOME',
         'COGS_VEHICLES','STAFF_INCENTIVE_EXPENSE','SALES_DISCOUNT_GIVEN',
@@ -423,10 +424,10 @@ WHERE NOT EXISTS (
 );
 -- Also the bare workflow key (view-only fallback used by the ERP shell).
 INSERT INTO dms_ModulePermissions (GroupID, PermissionKey)
-SELECT @admin, K FROM @perms
+SELECT @admin, pp.K FROM @perms pp
 WHERE NOT EXISTS (
-    SELECT 1 FROM dms_ModulePermissions p
-    WHERE p.GroupID = @admin AND p.PermissionKey = @perms.K
+    SELECT 1 FROM dms_ModulePermissions dp
+    WHERE dp.GroupID = @admin AND dp.PermissionKey = pp.K
 );
 GO
 
