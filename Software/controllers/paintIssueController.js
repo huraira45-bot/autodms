@@ -99,7 +99,7 @@ exports.eligibleJobs = async (req, res) => {
                    cust.endUserName AS CustomerName,
                    jt.CardCode, jt.Title AS JobTypeTitle
             FROM Addata_JobCardInfo jc
-            INNER JOIN gen_JobCardType jt ON jc.JobCardTypeId = jt.JobCardTypeId
+            INNER JOIN gen_JobCardType jt ON jc.JobTypeId = jt.JobCardTypeId
             INNER JOIN paint_AllowedBusinessType abt ON abt.JobCardTypeId = jt.JobCardTypeId
             LEFT JOIN addata_CustomerInfo cust ON jc.EndUserID = cust.ProfileID
             WHERE ${conds.join(' AND ')}
@@ -231,7 +231,7 @@ async function assertJCEligible(tx, jobCardId) {
         .query(`SELECT jc.JobCardId, jc.JobCardNo, jc.IsFinalized, jt.JobCardTypeId, jt.CardCode, jt.Title,
                        (SELECT COUNT(*) FROM paint_AllowedBusinessType abt WHERE abt.JobCardTypeId = jt.JobCardTypeId) AS allowed
                 FROM Addata_JobCardInfo jc
-                INNER JOIN gen_JobCardType jt ON jc.JobCardTypeId = jt.JobCardTypeId
+                INNER JOIN gen_JobCardType jt ON jc.JobTypeId = jt.JobCardTypeId
                 WHERE jc.JobCardId=@id`);
     if (!r.recordset.length) throw new Error('Job Card not found.');
     const jc = r.recordset[0];

@@ -167,7 +167,7 @@ exports.issueToJC = async (req, res) => {
                    (SELECT COUNT(*) FROM paint_IssueDetail d WHERE d.PaintIssueID = pi.PaintIssueID) AS LineCount
             FROM paint_Issue pi
             INNER JOIN Addata_JobCardInfo jc  ON pi.JobCardID = jc.JobCardId
-            INNER JOIN gen_JobCardType jt     ON jc.JobCardTypeId = jt.JobCardTypeId
+            INNER JOIN gen_JobCardType jt     ON jc.JobTypeId = jt.JobCardTypeId
             LEFT JOIN addata_CustomerInfo cust ON jc.EndUserID = cust.ProfileID
             LEFT JOIN paint_Warehouse w       ON pi.PaintWHID = w.PaintWHID
             WHERE ${conds.join(' AND ')}
@@ -202,7 +202,7 @@ exports.consumptionByJC = async (req, res) => {
                    MAX(pi.IssueDate) AS LastIssueDate
             FROM paint_Issue pi
             INNER JOIN Addata_JobCardInfo jc  ON pi.JobCardID = jc.JobCardId
-            INNER JOIN gen_JobCardType jt     ON jc.JobCardTypeId = jt.JobCardTypeId
+            INNER JOIN gen_JobCardType jt     ON jc.JobTypeId = jt.JobCardTypeId
             LEFT JOIN addata_CustomerInfo cust ON jc.EndUserID = cust.ProfileID
             WHERE ${conds.join(' AND ')}
             GROUP BY jc.JobCardId, jc.JobCardNo, jc.VehicleRegNo, jc.IsFinalized,
@@ -233,7 +233,7 @@ exports.consumptionByBusinessType = async (req, res) => {
                    SUM(pi.TotalCost)            AS TotalConsumption
             FROM paint_Issue pi
             INNER JOIN Addata_JobCardInfo jc ON pi.JobCardID = jc.JobCardId
-            INNER JOIN gen_JobCardType jt    ON jc.JobCardTypeId = jt.JobCardTypeId
+            INNER JOIN gen_JobCardType jt    ON jc.JobTypeId = jt.JobCardTypeId
             WHERE ${conds.join(' AND ')}
             GROUP BY jt.JobCardTypeId, jt.CardCode, jt.Title
             ORDER BY SUM(pi.TotalCost) DESC
