@@ -375,7 +375,12 @@ IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name='CK_SystemAccounts_Rol
     ALTER TABLE dms_SystemAccounts DROP CONSTRAINT CK_SystemAccounts_RoleKey;
 GO
 
-ALTER TABLE dms_SystemAccounts ADD CONSTRAINT CK_SystemAccounts_RoleKey CHECK (
+-- WITH NOCHECK: grandfather in any existing rows whose RoleKey isn't in
+-- this whitelist. Real-world dev/live databases have accumulated role
+-- keys added by later migrations that we don't want to enumerate here;
+-- NOCHECK skips the pre-existing-row validation but still enforces the
+-- constraint on all new inserts / updates.
+ALTER TABLE dms_SystemAccounts WITH NOCHECK ADD CONSTRAINT CK_SystemAccounts_RoleKey CHECK (
     RoleKey IN (
         'CASH_BOOK','GENERAL_CUSTOMER','GST_PAYABLE','INPUT_GST','PST_PAYABLE',
         'POS_CLEARING','DEFAULT_DISCOUNT_GIVEN','ROUNDING_ADJUSTMENT',
