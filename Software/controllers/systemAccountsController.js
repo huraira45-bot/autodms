@@ -38,6 +38,11 @@ const ROLE_DEFS = [
     { key: 'SUBLET_COST',                label: 'Sublet Vendor Cost',         type: 'Expense',   purpose: 'Expense for the sublet vendor portion of a Job Card' },
     { key: 'TRADE_DEBTORS',              label: 'Trade Debtors (fallback)',   type: 'Asset',     purpose: 'Receivable bucket when a billed party has no PartyGLID set' },
     { key: 'TRADE_CREDITORS',            label: 'Trade Creditors (fallback)', type: 'Liability', purpose: 'Payable bucket when a supplier/sublet vendor has no PartyGLID set' },
+    // Paint Lab (migration 067). GRN finalize debits Paint Inventory;
+    // JC finalize posts a separate Paint Consumption voucher (Dr expense
+    // / Cr inventory) for the paint drawn on that JC.
+    { key: 'PAINT_INVENTORY',            label: 'Paint Inventory',            type: 'Asset',     purpose: 'On-hand paint stock at landed cost (Paint GRN Dr, Paint Issue/GRTN Cr)' },
+    { key: 'PAINT_CONSUMPTION',          label: 'Paint Consumption',          type: 'Expense',   purpose: 'Cost of paint drawn against a Job Card (posted when JC finalizes)' },
 ];
 
 // Internal lookup — used by other controllers (Job Card finalize, GRN finalize, etc.).
