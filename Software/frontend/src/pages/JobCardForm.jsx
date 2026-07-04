@@ -609,7 +609,10 @@ export default function JobCardForm() {
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Loader2 size={32} style={{ animation: 'spin 1s linear infinite' }} /></div>;
 
-  const canFinalize = !isFinalized && hasModule('finalize') && (user?.userId === createdById || hasModule('admin_unfinalize'));
+  // Owner ask 2026-07-05: drop the "creator only" restriction on Finalize.
+  // Anyone with the `finalize` permission AND `admin_unfinalize` can finalize
+  // any Job Card, regardless of who created it.
+  const canFinalize = !isFinalized && hasModule('finalize') && hasModule('admin_unfinalize');
 
   return (
     <div style={S.page}>
