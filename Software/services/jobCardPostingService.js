@@ -311,20 +311,12 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
                     WHERE ApplicationID = @aid`);
     }
 
-    // 11. POS auto-settle. When the JC is paid by POS at the counter the card
-    //     terminal has already cleared the customer's balance — only the bank
-    //     settlement (POS_CLEARING → Bank) is pending, and that's what the POS
-    //     Settlement module handles. So we post the receipt CRV in this same
-    //     transaction (Dr POS_CLEARING / Cr customer subsidiary, allocated to
-    //     the SI we just posted). Skipped when the AR is split (insurer + dep)
-    //     because POS would only cover the customer's dep portion — that edge
-    //     case still flows through Receive Payment.
-    if ((jobCard.PaymentType || '').toUpperCase() === 'POS' && built.customerARDr) {
-        await postPOSAutoSettleForJobCard({
-            transaction, siVoucherId: voucherId, jobCard, userInfo,
-            ar: built.customerARDr, posClearingGL: accounts.POS_CLEARING.GLCAID,
-        });
-    }
+    // POS auto-settle intentionally REMOVED (owner ask 2026-07-05):
+    // finalize now posts ONLY the invoice voucher (Dr AR / Cr revenue +
+    // tax) regardless of payment mode. Cash / POS / Bank / Cheque all
+    // flow through the Receive Payment screen — the cashier records the
+    // real receipt against whichever GL matches the payment mode.
+    // Historical POS auto-settled vouchers are left as-is.
 
     return voucherId;
 }

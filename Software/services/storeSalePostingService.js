@@ -158,16 +158,12 @@ async function postStoreSaleVoucher(saleId, userInfo, transaction) {
                     WHERE ApplicationID = @aid`);
     }
 
-    // POS auto-settle. Mirror of the Job Card path — when the customer paid by
-    // POS at the counter, post the receipt CRV in this same transaction so the
-    // customer A/R closes immediately. The POS Settlement module handles the
-    // later POS_CLEARING → Bank reconciliation when the acquirer pays out.
-    if ((storeSale.PaymentMode || '').toUpperCase() === 'POS' && built.customerARDr) {
-        await postPOSAutoSettleForStoreSale({
-            transaction, ssVoucherId: voucherId, storeSale, userInfo,
-            ar: built.customerARDr, posClearingGL: accounts.POS_CLEARING.GLCAID,
-        });
-    }
+    // POS auto-settle intentionally REMOVED (owner ask 2026-07-05):
+    // Store Sale finalize now posts ONLY the invoice voucher (Dr AR /
+    // Cr revenue + tax) regardless of payment mode. Cash / POS / Bank /
+    // Cheque all flow through Receive Payment — the cashier records the
+    // real receipt against whichever GL matches the mode.
+    // Historical POS auto-settled vouchers are left as-is.
 
     return voucherId;
 }
