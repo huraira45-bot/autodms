@@ -23,13 +23,22 @@ const dt  = (v) => v ? new Date(v).toLocaleDateString('en-GB') : '';
         const caGL = roles.recordset[0]?.GLCAID;
         if (!caGL) throw new Error('CUSTOMER_ADVANCE_RECEIVED role is not mapped in Accounting Setup.');
 
-        // Net balance
+        // Net balance — include BOTH Posted and Reversed statuses because the
+        // GL trigger keeps the detail rows in place after a reversal; a real
+        // ledger balance sums them all and the reversal + original net to 0.
         const bal = await pool.request().input('ca', sql.Int, caGL)
             .query(`SELECT ISNULL(SUM(d.Credit) - SUM(d.Debit), 0) AS Net
                     FROM data_FinanceVoucherDetail d
                     INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@ca`);
+        console.log(`\nCurrent Customer Advance net balance (all vouchers): PKR ${fmt(bal.recordset[0].Net)}`);
+        // Posted-only view — shows what a "hide reversed" filter would report.
+        const posted = await pool.request().input('ca', sql.Int, caGL)
+            .query(`SELECT ISNULL(SUM(d.Credit) - SUM(d.Debit), 0) AS Net
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
                     WHERE v.Status='Posted' AND d.GLCAID=@ca`);
-        console.log(`\nCurrent Customer Advance net balance: PKR ${fmt(bal.recordset[0].Net)}\n`);
+        console.log(`Posted-only (excludes reversed originals):         PKR ${fmt(posted.recordset[0].Net)}\n`);
 
         // Every voucher hitting Customer Advance (both Cr and Dr sides).
         const rows = await pool.request().input('ca', sql.Int, caGL)
