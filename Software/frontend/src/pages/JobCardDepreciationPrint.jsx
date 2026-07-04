@@ -90,13 +90,16 @@ export default function JobCardDepreciationPrint() {
                 <div><label>Status</label><span>{rowStatus}</span></div>
             </div>
 
-            {/* Header field block — customer / vehicle / insurance / IDs */}
+            {/* Header field block — customer / vehicle / insurance / IDs.
+                Fixed 8-col grid (4 label/value pairs per row). Labels are
+                bold and fixed-width; values wrap freely so long chassis /
+                engine / company names never get ellipsised. */}
             <table className="party">
                 <colgroup>
-                    <col style={{ width: '13%' }}/><col style={{ width: '22%' }}/>
-                    <col style={{ width: '8%' }}/><col style={{ width: '22%' }}/>
-                    <col style={{ width: '7%' }}/><col style={{ width: '13%' }}/>
-                    <col style={{ width: '8%' }}/><col style={{ width: 'auto' }}/>
+                    <col style={{ width: '11%' }}/><col style={{ width: '14%' }}/>
+                    <col style={{ width: '9%' }}/><col style={{ width: '19%' }}/>
+                    <col style={{ width: '7%' }}/><col style={{ width: '14%' }}/>
+                    <col style={{ width: '9%' }}/><col style={{ width: '17%' }}/>
                 </colgroup>
                 <tbody>
                     <tr>
@@ -106,17 +109,17 @@ export default function JobCardDepreciationPrint() {
                         <td className="val">{vehicleName}</td>
                         <td className="lbl">Color:</td>
                         <td className="val">{jc.VehicleColor || ''}</td>
-                        <td className="lbl">Engine#</td>
+                        <td className="lbl">Engine #:</td>
                         <td className="val">{jc.EngineNo || ''}</td>
                     </tr>
                     <tr>
-                        <td className="lbl">Party</td>
+                        <td className="lbl">Party:</td>
                         <td className="val">{insurance.header?.CompanyName || ''}</td>
-                        <td className="lbl">Company</td>
+                        <td className="lbl">Company:</td>
                         <td className="val">{jc.PartyName || ''}</td>
-                        <td className="lbl">Reg #</td>
+                        <td className="lbl">Reg #:</td>
                         <td className="val">{jc.VehicleRegNo || ''}</td>
-                        <td className="lbl">Chasis #</td>
+                        <td className="lbl">Chassis #:</td>
                         <td className="val">{jc.ChasisNo || ''}</td>
                     </tr>
                 </tbody>
@@ -148,7 +151,7 @@ export default function JobCardDepreciationPrint() {
                 <tbody>
                     {parts.map((p, i) => (
                         <tr key={i}>
-                            <td className="mono trunc">{p.ItemNumber || ''}</td>
+                            <td className="mono wrap">{p.ItemNumber || ''}</td>
                             <td className="wrap">{p.ItemName || ''}</td>
                             <td className="r">{fmt(p.Qty)}</td>
                             <td className="r">{fmt(p.Rate)}</td>
@@ -235,14 +238,21 @@ export default function JobCardDepreciationPrint() {
                 }
 
                 /* ── Header band ─────────────────────────────────────── */
+                /* Give the business band all the room it needs — the dates
+                   block is narrow enough not to squeeze the company header. */
                 .top {
                     display: grid;
-                    grid-template-columns: 1fr 130px;
-                    gap: 8px;
+                    grid-template-columns: 1fr 100px;
+                    gap: 10px;
                     align-items: flex-start;
                 }
                 .top-biz .pbh { padding: 0; }
-                .top-dates { font-size: 10px; text-align: right; padding-top: 4px; }
+                .top-dates {
+                    font-size: 10px;
+                    text-align: right;
+                    padding-top: 4px;
+                    white-space: nowrap;
+                }
                 .top-dates > div { padding: 1px 0; }
                 .top-dates label { font-weight: 700; margin-right: 4px; }
 
@@ -268,23 +278,33 @@ export default function JobCardDepreciationPrint() {
                     color: #444;
                 }
 
-                /* Party header block */
+                /* Party header block — values wrap; NO ellipsis in print. */
                 .party {
                     width: 100%;
                     border-collapse: collapse;
                     margin-bottom: 4px;
-                    font-size: 10px;
+                    font-size: 9.5px;
                     table-layout: fixed;
                 }
                 .party td {
                     border: 1px solid #000;
-                    padding: 2px 5px;
-                    vertical-align: middle;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
+                    padding: 2px 4px;
+                    vertical-align: top;
+                    /* Long chassis / engine / company strings must wrap onto
+                       a second line instead of being ellipsised. */
+                    overflow: visible;
+                    text-overflow: clip;
+                    white-space: normal;
+                    word-break: break-word;
+                    line-height: 1.25;
                 }
-                .party td.lbl { font-weight: 700; background: #fafafa; }
+                .party td.lbl {
+                    font-weight: 700;
+                    background: #fafafa;
+                    white-space: nowrap;    /* labels themselves stay on one line */
+                    color: #333;
+                }
+                .party td.val { min-height: 14px; }
 
                 /* ── Items table — spec column widths ────────────────── */
                 .items {
@@ -310,14 +330,13 @@ export default function JobCardDepreciationPrint() {
                     font-family: 'Consolas', 'Courier New', monospace;
                     font-size: 9.5px;
                 }
-                .items td.trunc {
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
+                /* Never truncate values in print — wrap onto the next line. */
                 .items td.wrap {
-                    overflow: hidden;
+                    overflow: visible;
                     word-break: break-word;
+                    white-space: normal;
+                    line-height: 1.25;
+                    vertical-align: top;
                 }
                 .items td.empty {
                     padding: 14px;
