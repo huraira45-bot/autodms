@@ -79,6 +79,7 @@ import BusinessProfile    from './pages/BusinessProfile';
 import CreditInvoicePrint from './pages/CreditInvoicePrint';
 import JobCardGSTPrint    from './pages/JobCardGSTPrint';
 import JobCardPSTPrint    from './pages/JobCardPSTPrint';
+import JobCardDepreciationPrint from './pages/JobCardDepreciationPrint';
 import VehicleHistory     from './pages/VehicleHistory';
 import VoucherEntry       from './pages/VoucherEntry';
 import WorkshopCustomers  from './pages/WorkshopCustomers';
@@ -737,6 +738,7 @@ function AppShell() {
                         <Route path="/workshop/jobs/:id/credit-invoice" element={<CreditInvoicePrint />} />
                         <Route path="/workshop/jobs/:id/gst-invoice"    element={<JobCardGSTPrint />} />
                         <Route path="/workshop/jobs/:id/pst-invoice"    element={<JobCardPSTPrint />} />
+                        <Route path="/workshop/jobs/:id/dep-print"      element={<JobCardDepreciationPrint />} />
                         <Route path="/store-sale/:id/print"    element={<StoreSalePrint />} />
                         <Route path="/grn/:id/print"           element={<GRNPrint />} />
                         <Route path="/grtn/:id/print"          element={<GRTNPrint />} />
@@ -915,6 +917,9 @@ function AppShell() {
                     } />
                     <Route path="/workshop/jobs/:id/pst-invoice" element={
                         <ProtectedRoute moduleKey="workshop_jobs"><JobCardPSTPrint /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/jobs/:id/dep-print" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><JobCardDepreciationPrint /></ProtectedRoute>
                     } />
                     <Route path="/store-sale/:id/print" element={
                         <ProtectedRoute moduleKey="sales_store"><StoreSalePrint /></ProtectedRoute>

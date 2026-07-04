@@ -1614,6 +1614,14 @@ export default function JobCardForm() {
                         style={{ ...S.toolBtn, marginTop: 6, justifyContent: 'center', background: insSaving ? '#cbd5e1' : '#15803d', color: 'white', borderColor: '#15803d' }}>
                         💾 {insSaving ? 'Saving…' : 'Save Insurance Info'}
                       </button>
+                      {isEdit && (
+                        <button type="button"
+                          onClick={() => window.open(`/workshop/jobs/${id}/dep-print`, '_blank', 'noopener')}
+                          title="Print Issue Spares With Depreciation slip"
+                          style={{ ...S.toolBtn, marginTop: 4, justifyContent: 'center', background: '#1d4ed8', color: 'white', borderColor: '#1d4ed8' }}>
+                          🖨️ Print Depreciation Slip
+                        </button>
+                      )}
                       {!isEdit && (
                         <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>
                           Save the Job Card first, then this tab unlocks.
