@@ -58,12 +58,17 @@ export default function JobCardPSTPrint() {
             </div>
 
             <table className="party">
+                <colgroup>
+                    <col style={{ width: '15%' }} /><col style={{ width: '22%' }} />
+                    <col style={{ width: '13%' }} /><col style={{ width: '18%' }} />
+                    <col style={{ width: '13%' }} /><col style={{ width: '19%' }} />
+                </colgroup>
                 <tbody>
                     <tr>
                         <td className="lbl">Company Name</td>
-                        <td className="val">{d.Recipient?.name || ''}</td>
+                        <td className="val" colSpan={3}>{d.Recipient?.name || ''}</td>
                         <td className="lbl">Invoice #</td>
-                        <td className="val" colSpan={2}>{d.InvoiceNo}</td>
+                        <td className="val">{d.InvoiceNo}</td>
                     </tr>
                     <tr>
                         <td className="lbl">Address</td>
@@ -71,7 +76,24 @@ export default function JobCardPSTPrint() {
                         <td className="lbl">GST NO</td>
                         <td className="val">{d.Recipient?.gst || ''}</td>
                         <td className="lbl">NTN NO</td>
+                        <td className="val">{d.Recipient?.ntn || ''}</td>
                     </tr>
+                    <tr>
+                        <td className="lbl">Phone</td>
+                        <td className="val">{d.Recipient?.phone || ''}</td>
+                        <td className="lbl">CNIC</td>
+                        <td className="val" colSpan={3}>{d.Recipient?.cnic || ''}</td>
+                    </tr>
+                    {(d.Recipient?.contactPerson || d.Recipient?.contactMobile || d.Recipient?.email) && (
+                        <tr>
+                            <td className="lbl">Contact</td>
+                            <td className="val">
+                                {[d.Recipient?.contactPerson, d.Recipient?.contactMobile].filter(Boolean).join(' · ')}
+                            </td>
+                            <td className="lbl">Email</td>
+                            <td className="val" colSpan={3}>{d.Recipient?.email || ''}</td>
+                        </tr>
+                    )}
                 </tbody>
             </table>
 

@@ -468,9 +468,26 @@ exports.getJobCardInvoiceData = async (req, res) => {
                            jc.EndUserID, jc.PartyID,
                            jc.VehicleRegNo, jc.FinalizedAt,
                            t.ReceivableAccount AS TypeReceivableGL,
-                           p.PartyName, p.AddressOne AS PartyAddress1, p.AddressTwo AS PartyAddress2,
-                           p.NTNNO AS PartyNTN,
-                           cust.endUserName AS CustomerName, cust.Address AS CustomerAddress
+                           -- Party creation form fields (owner ask 2026-07-05):
+                           -- pull the FULL party record so the tax invoice
+                           -- carries whatever the accountant typed in on
+                           -- party creation.
+                           p.PartyName,
+                           p.AddressOne         AS PartyAddress1,
+                           p.AddressTwo         AS PartyAddress2,
+                           p.PhoneOne           AS PartyPhone1,
+                           p.PhoneTwo           AS PartyPhone2,
+                           p.Fax                AS PartyFax,
+                           p.Email              AS PartyEmail,
+                           p.NTNNO              AS PartyNTN,
+                           p.SaleTaxRegNo       AS PartyGST,
+                           p.CNIC               AS PartyCNIC,
+                           p.ContactPerson      AS PartyContactPerson,
+                           p.ContactPersonMobile AS PartyContactMobile,
+                           cust.endUserName     AS CustomerName,
+                           cust.Address         AS CustomerAddress,
+                           cust.PhoneNo         AS CustomerPhone,
+                           cust.CNIC            AS CustomerCNIC
                     FROM Addata_JobCardInfo jc
                     LEFT JOIN gen_JobCardType t ON jc.JobTypeId = t.JobCardTypeId
                     LEFT JOIN gen_PartiesInfo p ON jc.PartyID = p.PartyID
@@ -486,7 +503,10 @@ exports.getJobCardInvoiceData = async (req, res) => {
         let claimParty = null;
         if (!jc.PartyID && jc.TypeReceivableGL) {
             const cp = await pool.request().input('gl', sql.Int, jc.TypeReceivableGL)
-                .query(`SELECT TOP 1 p.PartyID, p.PartyName, p.AddressOne, p.AddressTwo, p.NTNNO
+                .query(`SELECT TOP 1 p.PartyID, p.PartyName,
+                               p.AddressOne, p.AddressTwo,
+                               p.PhoneOne, p.PhoneTwo, p.Email,
+                               p.NTNNO, p.SaleTaxRegNo, p.CNIC
                         FROM gen_PartiesInfo p
                         WHERE p.PartyGLID = @gl
                         ORDER BY p.PartyID`);
@@ -540,30 +560,48 @@ exports.getJobCardInvoiceData = async (req, res) => {
         //      ReceivableAccount (mirrors loadPartyForReceivableGL).
         //   3. Walk-in (no PartyID and no type receivable): the end-user
         //      customer name/address (billed against Gen-Cust bucket).
+        // The full party-form field set gets exposed here so the print
+        // pages can show whatever the accountant captured on party
+        // creation (address / phone / email / NTN / GST / CNIC).
         let recipient;
         if (jc.PartyID) {
             recipient = {
                 source:  'PARTY',
                 name:    jc.PartyName || '',
                 address: [jc.PartyAddress1, jc.PartyAddress2].filter(Boolean).join(', '),
-                ntn:     jc.PartyNTN || '',
-                gst:     '',
+                phone:   [jc.PartyPhone1, jc.PartyPhone2].filter(Boolean).join(' / '),
+                email:   jc.PartyEmail || '',
+                ntn:     jc.PartyNTN   || '',
+                gst:     jc.PartyGST   || '',
+                cnic:    jc.PartyCNIC  || '',
+                contactPerson: jc.PartyContactPerson || '',
+                contactMobile: jc.PartyContactMobile || '',
             };
         } else if (claimParty) {
             recipient = {
                 source:  'CLAIM_PARTY',
                 name:    claimParty.PartyName || '',
                 address: [claimParty.AddressOne, claimParty.AddressTwo].filter(Boolean).join(', '),
+                phone:   [claimParty.PhoneOne, claimParty.PhoneTwo].filter(Boolean).join(' / '),
+                email:   claimParty.Email || '',
                 ntn:     claimParty.NTNNO || '',
-                gst:     '',
+                gst:     claimParty.SaleTaxRegNo || '',
+                cnic:    claimParty.CNIC || '',
+                contactPerson: '',
+                contactMobile: '',
             };
         } else {
             recipient = {
                 source:  'CUSTOMER',
                 name:    jc.CustomerName || '',
                 address: jc.CustomerAddress || '',
+                phone:   jc.CustomerPhone || '',
+                email:   '',
                 ntn:     '',
                 gst:     '',
+                cnic:    jc.CustomerCNIC || '',
+                contactPerson: '',
+                contactMobile: '',
             };
         }
 
