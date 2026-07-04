@@ -1851,7 +1851,10 @@ exports.recordDepreciationPayment = async (req, res) => {
         if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'PaidAmount must be > 0' });
         if (!['Cash','BankTransfer','Cheque','POS','PayOrder'].includes(mode))
             return res.status(400).json({ error: 'Invalid PaymentMode' });
-        if (mode !== 'Cash' && !b.BankAccountID)
+        // POS Dr is POS_CLEARING (settled by the POS Settlement screen later),
+        // so no BankAccountID is needed. Cash needs no bank either. Everything
+        // else must pick the destination bank up-front.
+        if (mode !== 'Cash' && mode !== 'POS' && !b.BankAccountID)
             return res.status(400).json({ error: 'BankAccountID is required for non-cash modes' });
         if (mode === 'Cheque') {
             if (!b.ReferenceNo) return res.status(400).json({ error: 'Cheque # (ReferenceNo) is required for Cheque mode.' });
@@ -1898,6 +1901,7 @@ exports.recordDepreciationPayment = async (req, res) => {
         const { resolveRole } = require('./systemAccountsController');
         const isCash   = mode === 'Cash';
         const isCheque = mode === 'Cheque';
+        const isPOS    = mode === 'POS';
         let drGL, depositBankGL = null;
         if (isCash) {
             drGL = await resolveRole('CASH_BOOK');
@@ -1910,6 +1914,12 @@ exports.recordDepreciationPayment = async (req, res) => {
             if (!bkChk.recordset.length) return res.status(400).json({ error: 'Bank account not active or not registered.' });
             depositBankGL = bkChk.recordset[0].GLCAID;
             drGL = await resolveRole('CHEQUES_ON_HAND');
+        } else if (isPOS) {
+            // POS card payments sit in POS_CLEARING until the POS Settlement
+            // screen moves the balance to the acquiring bank. Matches the
+            // convention used by paymentJournalBuilder.js for standard
+            // receive-payment flows.
+            drGL = await resolveRole('POS_CLEARING');
         } else {
             const bkChk = await pool.request().input('id', sql.Int, parseInt(b.BankAccountID))
                 .query('SELECT GLCAID FROM dms_BankAccounts WHERE GLCAID=@id AND IsActive=1');
