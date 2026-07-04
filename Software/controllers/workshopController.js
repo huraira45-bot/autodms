@@ -459,16 +459,20 @@ exports.getJobCardInvoiceData = async (req, res) => {
         const id = parseInt(req.params.id);
         const pool = await getPool();
 
+        // Pull the same fields jobCardPostingService uses to resolve the
+        // billed party — TypeReceivableGL is the JC type's fallback claim
+        // receivable (used when the JC has no explicit PartyID).
         const head = await pool.request().input('id', sql.Int, id)
             .query(`SELECT jc.JobCardId, jc.JobCardNo, jc.jobCode, jc.IsFinalized,
                            jc.Remarks, jc.VOCRemarks, jc.EstimatedRONo, jc.IsEstimatedRO,
                            jc.EndUserID, jc.PartyID,
                            jc.VehicleRegNo, jc.FinalizedAt,
+                           t.ReceivableAccount AS TypeReceivableGL,
                            p.PartyName, p.AddressOne AS PartyAddress1, p.AddressTwo AS PartyAddress2,
-                           p.NTNNO AS PartyNTN, p.CNIC AS PartyCNIC,
-                           cust.endUserName AS CustomerName, cust.Address AS CustomerAddress,
-                           cust.CNIC AS CustomerCNIC
+                           p.NTNNO AS PartyNTN,
+                           cust.endUserName AS CustomerName, cust.Address AS CustomerAddress
                     FROM Addata_JobCardInfo jc
+                    LEFT JOIN gen_JobCardType t ON jc.JobTypeId = t.JobCardTypeId
                     LEFT JOIN gen_PartiesInfo p ON jc.PartyID = p.PartyID
                     LEFT JOIN addata_CustomerInfo cust ON jc.EndUserID = cust.ProfileID
                     WHERE jc.JobCardId=@id`);
@@ -476,9 +480,18 @@ exports.getJobCardInvoiceData = async (req, res) => {
         const jc = head.recordset[0];
         if (!jc.IsFinalized) return res.status(409).json({ error: 'Job Card must be finalized before printing an invoice.' });
 
-        const ins = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT CompanyName, InsClaimNo FROM dms_JobCardInsurance WHERE JobCardId=@id`);
-        const insurance = ins.recordset[0] || null;
+        // MCML-claim JC fallback (mirrors jobCardPostingService §2): when
+        // PartyID is null but the JC type has a ReceivableAccount, the party
+        // being charged is the one that owns that receivable GL.
+        let claimParty = null;
+        if (!jc.PartyID && jc.TypeReceivableGL) {
+            const cp = await pool.request().input('gl', sql.Int, jc.TypeReceivableGL)
+                .query(`SELECT TOP 1 p.PartyID, p.PartyName, p.AddressOne, p.AddressTwo, p.NTNNO
+                        FROM gen_PartiesInfo p
+                        WHERE p.PartyGLID = @gl
+                        ORDER BY p.PartyID`);
+            claimParty = cp.recordset[0] || null;
+        }
 
         // Parts issued to the JC (for the GST invoice). Snapshotted TaxAmount
         // is the GST because parts snapshot the configured GST rate at issue.
@@ -515,27 +528,34 @@ exports.getJobCardInvoiceData = async (req, res) => {
         try { gstRate = await resolveRate('GST'); } catch (_) {}
         try { pstRate = await resolveRate('PST'); } catch (_) {}
 
-        // Recipient resolution — insurance company wins if a JC insurance row
-        // exists; else supplier/party; else end-user customer. Address / NTN
-        // travel with whichever wins. Nothing is invented — blank is blank.
+        // Recipient = the party actually being charged in the ledger.
+        // Owner ask 2026-07-05: match the exact resolution
+        // jobCardPostingService uses at finalize time so the invoice
+        // recipient equals the ledger debit party.
+        //
+        // Order:
+        //   1. jc.PartyID → gen_PartiesInfo.PartyName (the JC's named payer;
+        //      corporate customer or insurer)
+        //   2. MCML-claim JCs (no PartyID): party that owns the JC type's
+        //      ReceivableAccount (mirrors loadPartyForReceivableGL).
+        //   3. Walk-in (no PartyID and no type receivable): the end-user
+        //      customer name/address (billed against Gen-Cust bucket).
         let recipient;
-        if (insurance?.CompanyName) {
-            recipient = {
-                source:  'INSURANCE',
-                name:    insurance.CompanyName,
-                address: '',   // no address on dms_JobCardInsurance
-                ntn:     '',
-                gst:     '',
-                claimNo: insurance.InsClaimNo || '',
-            };
-        } else if (jc.PartyName) {
+        if (jc.PartyID) {
             recipient = {
                 source:  'PARTY',
-                name:    jc.PartyName,
+                name:    jc.PartyName || '',
                 address: [jc.PartyAddress1, jc.PartyAddress2].filter(Boolean).join(', '),
                 ntn:     jc.PartyNTN || '',
-                gst:     '',   // no STRN/GST column on gen_PartiesInfo
-                claimNo: '',
+                gst:     '',
+            };
+        } else if (claimParty) {
+            recipient = {
+                source:  'CLAIM_PARTY',
+                name:    claimParty.PartyName || '',
+                address: [claimParty.AddressOne, claimParty.AddressTwo].filter(Boolean).join(', '),
+                ntn:     claimParty.NTNNO || '',
+                gst:     '',
             };
         } else {
             recipient = {
@@ -544,7 +564,6 @@ exports.getJobCardInvoiceData = async (req, res) => {
                 address: jc.CustomerAddress || '',
                 ntn:     '',
                 gst:     '',
-                claimNo: '',
             };
         }
 
