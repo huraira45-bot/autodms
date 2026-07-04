@@ -26,14 +26,19 @@
  *      the depreciation portion (the Gen-Cust Dr leg). Same check as walk-in.
  *   3. Walk-in or unresolved party → Gen-Cust Dr − Gen-Cust Cr (tagged with the
  *      doc) must be ≤ 0.01.
- *   4. Same vehicle (RegNo OR ChasisNo) with another open RO that is non-warranty
- *      AND (not finalized OR has unpaid Gen-Cust balance) → block.
+ *   4. Same vehicle (RegNo OR ChasisNo) with another OPEN RO whose business
+ *      type is B&P or CT (Body & Paint / Car Trim) → block. Other business
+ *      types (GR / WR / FFS / SFS / PDS / PPM) never block gate-pass issue
+ *      even if their RO is still open, per owner ask 2026-07-05.
  *   5. POS_CLEARING legs on any receipt → warning to confirm the card swipe.
  */
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 
-const WARRANTY_JOBCARDTYPE_CODE = 'WR';   // gen_JobCardType.CardCode for warranty
+// Only these JC business types block gate-pass issuance when another RO on
+// the same vehicle is still open (owner ask 2026-07-05). Anything else is
+// ignored — GR / WR / FFS / SFS / PDS / PPM don't affect the gate.
+const GATEPASS_BLOCKING_CARDCODES = ['B&P', 'CT'];
 
 async function loadJobCard(tx, jcId) {
     const r = await new sql.Request(tx)
@@ -117,16 +122,21 @@ async function loadStoreSalePaymentModes(tx, saleId) {
     return q.recordset;
 }
 
-// Find other open ROs on the same vehicle. "Open" = not finalized OR has unpaid
-// walk-out balance. Warranty jobs are exempted per owner rule.
+// Find other open ROs on the same vehicle whose business type is in the
+// blocking list (B&P / CT). "Open" = not finalized OR has unpaid walk-out
+// balance. Other business types are ignored entirely per owner ask
+// 2026-07-05 — the gate opens for them regardless of their state.
 async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCustGL) {
     if (!regNo && !chasisNo) return [];
+    // sql.NVarChar parameters can't hold a list, so build the IN() literal
+    // from a compile-time whitelist. Safe: no user input reaches this SQL.
+    const codeList = GATEPASS_BLOCKING_CARDCODES
+        .map(c => `'${c.replace(/'/g, "''")}'`).join(', ');
     const q = await new sql.Request(tx)
         .input('jcId',    sql.Int,          currentJcId)
         .input('reg',     sql.NVarChar(100),regNo || null)
         .input('chassis', sql.NVarChar(100),chasisNo || null)
         .input('gl',      sql.Int,          genCustGL)
-        .input('warr',    sql.NVarChar(20), WARRANTY_JOBCARDTYPE_CODE)
         .query(`
             SELECT jc.JobCardId, jc.JobCardNo, jc.IsFinalized,
                    jct.CardCode AS JobCardTypeCode, jct.Title AS JobCardTypeTitle,
@@ -143,7 +153,7 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
                   AND d.GLCAID=@gl AND d.PartyID IS NULL AND d.JobCardID=jc.JobCardId
             ) bal
             WHERE jc.JobCardId <> @jcId
-              AND ISNULL(jct.CardCode, '') <> @warr
+              AND ISNULL(jct.CardCode, '') IN (${codeList})
               AND ((@reg     IS NOT NULL AND jc.VehicleRegNo = @reg)
                 OR (@chassis IS NOT NULL AND jc.ChasisNo     = @chassis))
               AND (jc.IsFinalized = 0
