@@ -1695,15 +1695,23 @@ exports.getJobCardInsurance = async (req, res) => {
             ...labourRs.recordset.sort((a, b) => a.LineRefID - b.LineRefID),
         ]};
 
+        // Pull each payment WITH its linked voucher status so reversed
+        // receipts are (a) surfaced to the UI so the row can be styled
+        // and (b) excluded from the "Already Paid" sum. Without this the
+        // reversal flips the GL back but the JC still looks fully paid.
         const pays = await pool.request().input('id', sql.Int, id).query(`
-            SELECT DepPaymentID, PaidAmount, PaymentMode, BankAccountID, ReferenceNo, Notes,
-                   ReceivedAt, ReceivedByName, VoucherID
-            FROM dms_JobCardDepreciationPayments
-            WHERE JobCardId = @id
-            ORDER BY ReceivedAt DESC, DepPaymentID DESC`);
+            SELECT p.DepPaymentID, p.PaidAmount, p.PaymentMode, p.BankAccountID,
+                   p.ReferenceNo, p.Notes, p.ReceivedAt, p.ReceivedByName, p.VoucherID,
+                   ISNULL(v.Status, 'Posted') AS VoucherStatus
+            FROM dms_JobCardDepreciationPayments p
+            LEFT JOIN data_FinanceVoucherInfo v ON p.VoucherID = v.VoucherID
+            WHERE p.JobCardId = @id
+            ORDER BY p.ReceivedAt DESC, p.DepPaymentID DESC`);
 
         const depreciationTotal = parts.recordset.reduce((s, p) => s + Number(p.DepAmount || 0), 0);
-        const depreciationPaid  = pays.recordset.reduce((s, p) => s + Number(p.PaidAmount || 0), 0);
+        const depreciationPaid  = pays.recordset
+            .filter(p => (p.VoucherStatus || 'Posted') !== 'Reversed')
+            .reduce((s, p) => s + Number(p.PaidAmount || 0), 0);
 
         res.json({
             header,
@@ -1873,11 +1881,20 @@ exports.recordDepreciationPayment = async (req, res) => {
             });
         }
 
-        // Cap at outstanding balance to prevent overpayment
+        // Cap at outstanding balance to prevent overpayment. Excludes
+        // payments whose linked voucher was later reversed — otherwise a
+        // reversed receipt would still count against the cap and block
+        // re-recording the payment.
         const totals = await pool.request().input('id', sql.Int, id).query(`
             SELECT
-              (SELECT ISNULL(SUM(DepAmount), 0) FROM dms_JobCardPartsDepreciation WHERE JobCardId=@id) AS Total,
-              (SELECT ISNULL(SUM(PaidAmount), 0) FROM dms_JobCardDepreciationPayments WHERE JobCardId=@id) AS Paid`);
+              (SELECT ISNULL(SUM(DepAmount), 0)
+                 FROM dms_JobCardPartsDepreciation
+                 WHERE JobCardId=@id) AS Total,
+              (SELECT ISNULL(SUM(p.PaidAmount), 0)
+                 FROM dms_JobCardDepreciationPayments p
+                 LEFT JOIN data_FinanceVoucherInfo v ON p.VoucherID = v.VoucherID
+                 WHERE p.JobCardId=@id
+                   AND ISNULL(v.Status, 'Posted') <> 'Reversed') AS Paid`);
         const total = Number(totals.recordset[0].Total) || 0;
         const paid  = Number(totals.recordset[0].Paid)  || 0;
         const balance = +(total - paid).toFixed(2);

@@ -496,7 +496,11 @@ export default function JobCardForm() {
   };
 
   const totalDepAmount = insParts.reduce((s, p) => s + (Number(p.DepAmount) || 0), 0);
-  const totalDepPaid   = insPayments.reduce((s, p) => s + (Number(p.PaidAmount) || 0), 0);
+  // Reversed receipts must NOT count against "Already Paid" — otherwise the
+  // JC still looks fully paid after the CRV/BRV has been reversed.
+  const totalDepPaid   = insPayments
+    .filter(p => (p.VoucherStatus || 'Posted') !== 'Reversed')
+    .reduce((s, p) => s + (Number(p.PaidAmount) || 0), 0);
   const totalDepBalance = +(totalDepAmount - totalDepPaid).toFixed(2);
 
   const saveInsurance = async () => {
@@ -1689,19 +1693,26 @@ export default function JobCardForm() {
                         ) : (
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                             <thead><tr style={{ background: '#e8edf2' }}>
-                              {['Date', 'Mode', 'Reference', 'Amount', 'Received By'].map(h => (
+                              {['Date', 'Mode', 'Reference', 'Amount', 'Status', 'Received By'].map(h => (
                                 <th key={h} style={{ padding: '3px 8px', textAlign: h === 'Amount' ? 'right' : 'left', border: '1px solid #c8d4e4' }}>{h}</th>
                               ))}
                             </tr></thead>
-                            <tbody>{insPayments.map(p => (
-                              <tr key={p.DepPaymentID}>
-                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10 }}>{new Date(p.ReceivedAt).toLocaleString()}</td>
-                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0' }}>{p.PaymentMode}</td>
-                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10 }}>{p.ReferenceNo || '—'}</td>
-                                <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0', fontWeight: 700, color: '#15803d' }}>{Number(p.PaidAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10, color: '#64748b' }}>{p.ReceivedByName || '—'}</td>
-                              </tr>
-                            ))}</tbody>
+                            <tbody>{insPayments.map(p => {
+                              const reversed = (p.VoucherStatus || 'Posted') === 'Reversed';
+                              const rowBg   = reversed ? '#fee2e2' : 'transparent';
+                              const strike  = reversed ? 'line-through' : 'none';
+                              const amtCol  = reversed ? '#b91c1c' : '#15803d';
+                              return (
+                                <tr key={p.DepPaymentID} style={{ background: rowBg }}>
+                                  <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10, textDecoration: strike }}>{new Date(p.ReceivedAt).toLocaleString()}</td>
+                                  <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', textDecoration: strike }}>{p.PaymentMode}</td>
+                                  <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10, textDecoration: strike }}>{p.ReferenceNo || '—'}</td>
+                                  <td style={{ padding: '3px 8px', textAlign: 'right', border: '1px solid #e2e8f0', fontWeight: 700, color: amtCol, textDecoration: strike }}>{Number(p.PaidAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                  <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10, color: reversed ? '#b91c1c' : '#15803d', fontWeight: 600 }}>{reversed ? 'REVERSED' : 'POSTED'}</td>
+                                  <td style={{ padding: '3px 8px', border: '1px solid #e2e8f0', fontSize: 10, color: '#64748b' }}>{p.ReceivedByName || '—'}</td>
+                                </tr>
+                              );
+                            })}</tbody>
                           </table>
                         )}
                       </div>
