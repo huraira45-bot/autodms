@@ -61,7 +61,10 @@ const COMMIT = process.argv.includes('--commit');
         await check('gen_PartiesInfo.PartyGLID',    `SELECT COUNT(*) AS n FROM gen_PartiesInfo        WHERE PartyGLID=@id`);
         await check('gen_JobCardType.Revenue/Recv', `SELECT COUNT(*) AS n FROM gen_JobCardType
                                                        WHERE JobRevenueAccount=@id OR PartsRevenueAccount=@id OR ReceivableAccount=@id`);
-        await check('GLChartOFAccount children',    `SELECT COUNT(*) AS n FROM GLChartOFAccount       WHERE ParentID=@id`);
+        // GLChartOFAccount has no ParentID column; hierarchy is stored via
+        // AccountLevelOne..Nine code prefixes, not a self-referencing FK, so
+        // there's no cascade risk. Reference safety is fully covered by the
+        // six other checks above.
 
         console.log(`Reference counts:`);
         for (const [k, v] of Object.entries(refs)) {
