@@ -1,35 +1,39 @@
 /**
- * Job Card — Issue Spares With Depreciation print (owner ask 2026-07-05).
+ * Job Card — Issue Spares With Depreciation print.
+ * Matches C:\Users\ServerDeskop\Desktop\dep.pdf (owner ask 2026-07-05).
  *
- * Matches the sample dep.pdf layout:
- *   - Business band (left) + Print Date / Date In (right)
- *   - RO# / big italic title / Status
- *   - Customer / Vehicle / Color / Engine
- *   - Party / Company (broker) / Reg# / Chassis#
- *   - Parts-only table with ItemNumber, Item Name, Qty, SalesRate,
- *     Total Amount, Dep %, Dep Amount
- *   - Totals row (Total Items count + Qty / Total / Dep sums)
- *   - Terms & conditions + signature block
- *
- * Labour lines are EXCLUDED per owner spec — this slip is only for the
- * parts issued to the insurance-JC (that's what depreciates).
+ * Rules enforced here (per spec):
+ *   - Includes ONLY spare parts that carry depreciation data
+ *     (DepAmount > 0 or DepreciationPct > 0). Labour is skipped.
+ *   - Numeric columns right-aligned; ItemNumber monospace + ellipsis;
+ *     ItemName wraps within column, no overflow past page edge.
+ *   - A4 portrait, no card / shadow / colored UI chrome.
+ *   - Footer (terms + signature) glued near the bottom of the last page:
+ *     the whole page is a flex column so `.footer { margin-top: auto }`
+ *     pushes it down for short lists, and the browser's natural page
+ *     break still relocates it to page 2/3 when the line list spills.
+ *   - Business band is the shared PrintBusinessHeader (Business Profile);
+ *     no company name / address / NTN / GST hard-coded.
  */
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../components/PrintBusinessHeader';
+import { getBusinessProfile } from '../utils/businessProfile';
 
-const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+const fmt  = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 const fmtQ = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-const d   = v => v ? new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '';
+const d    = v => v ? new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '';
 
 export default function JobCardDepreciationPrint() {
     const { id } = useParams();
     const [jc, setJc]           = useState(null);
     const [insurance, setIns]   = useState(null);
+    const [profile, setProfile] = useState(null);
     const [err, setErr]         = useState(null);
 
     useEffect(() => {
+        getBusinessProfile().then(setProfile).catch(() => {});
         Promise.all([
             axios.get(`/api/workshop/job-cards/${id}`),
             axios.get(`/api/workshop/job-cards/${id}/insurance`),
@@ -43,9 +47,12 @@ export default function JobCardDepreciationPrint() {
     if (err) return <div style={{ padding: 40, color: '#b91c1c', fontFamily: 'Arial' }}>Cannot print: {err}</div>;
     if (!jc || !insurance) return <div style={{ padding: 40, fontFamily: 'Arial' }}>Loading…</div>;
 
-    // Insurance endpoint returns parts + labour combined in `parts` with a
-    // LineType field. Filter to parts only per owner spec.
-    const parts = (insurance.parts || []).filter(p => p.LineType === 'Part');
+    // Per spec: only include spare parts that actually have depreciation
+    // recorded. Labour ('Service' LineType) is always excluded.
+    const parts = (insurance.parts || []).filter(p =>
+        p.LineType === 'Part'
+        && ((Number(p.DepAmount) || 0) > 0 || (Number(p.DepreciationPct) || 0) > 0)
+    );
 
     const totals = parts.reduce((a, p) => ({
         items: a.items + 1,
@@ -54,19 +61,20 @@ export default function JobCardDepreciationPrint() {
         dep:   a.dep   + Number(p.DepAmount || 0),
     }), { items: 0, qty: 0, total: 0, dep: 0 });
 
-    // Vehicle description built from whatever the view exposes. vw_WorkshopJobCards
-    // has BrandName / VersionName / ModelName variants across setups; fall back
-    // sensibly.
+    // Vehicle description — vw_WorkshopJobCards exposes different fields
+    // depending on the setup; try the common ones and fall back to blank.
     const vehicleName = jc.VehicleName
         || [jc.BrandName, jc.VersionName || jc.ModelName].filter(Boolean).join(' ')
         || jc.Vehicle
         || '';
 
     const rowStatus = jc.IsFinalized ? 'Complete' : (jc.Status || 'Open');
+    const companyName = profile?.CompanyName || '';
 
     return (
         <div className="dep-print">
-            {/* Top band — business info left, print + entry date right */}
+            {/* Top band — shared business header (logo left, company centered)
+                with the Print Date + Date In stacked at the top-right. */}
             <div className="top">
                 <div className="top-biz"><PrintBusinessHeader showOnScreen /></div>
                 <div className="top-dates">
@@ -75,19 +83,19 @@ export default function JobCardDepreciationPrint() {
                 </div>
             </div>
 
-            {/* Title bar — RO# / Title / Status */}
+            {/* Title bar */}
             <div className="title-bar">
                 <div><label>RO#</label><span>{jc.jobCode || jc.JobCardNo || ''}</span></div>
                 <div className="title-text">Issue Spares With Depreciation</div>
                 <div><label>Status</label><span>{rowStatus}</span></div>
             </div>
 
-            {/* Party info block */}
+            {/* Header field block — customer / vehicle / insurance / IDs */}
             <table className="party">
                 <colgroup>
-                    <col style={{ width: '14%' }}/><col style={{ width: '22%' }}/>
+                    <col style={{ width: '13%' }}/><col style={{ width: '22%' }}/>
                     <col style={{ width: '8%' }}/><col style={{ width: '22%' }}/>
-                    <col style={{ width: '8%' }}/><col style={{ width: '13%' }}/>
+                    <col style={{ width: '7%' }}/><col style={{ width: '13%' }}/>
                     <col style={{ width: '8%' }}/><col style={{ width: 'auto' }}/>
                 </colgroup>
                 <tbody>
@@ -104,7 +112,7 @@ export default function JobCardDepreciationPrint() {
                     <tr>
                         <td className="lbl">Party</td>
                         <td className="val">{insurance.header?.CompanyName || ''}</td>
-                        <td className="lbl">Compay</td>
+                        <td className="lbl">Company</td>
                         <td className="val">{jc.PartyName || ''}</td>
                         <td className="lbl">Reg #</td>
                         <td className="val">{jc.VehicleRegNo || ''}</td>
@@ -114,33 +122,42 @@ export default function JobCardDepreciationPrint() {
                 </tbody>
             </table>
 
-            {/* Line items — parts only */}
+            {/* Line items — parts with depreciation only */}
             <table className="items">
+                <colgroup>
+                    <col style={{ width: 130 }}/>
+                    <col />
+                    <col style={{ width: 50 }}/>
+                    <col style={{ width: 78 }}/>
+                    <col style={{ width: 96 }}/>
+                    <col style={{ width: 46 }}/>
+                    <col style={{ width: 82 }}/>
+                </colgroup>
                 <thead>
                     <tr>
-                        <th style={{ width: 140 }}>ItemNumber</th>
+                        <th>ItemNumber</th>
                         <th>Item Name</th>
-                        <th style={{ width: 55 }}>Qty</th>
-                        <th style={{ width: 90 }}>SalesRate</th>
-                        <th style={{ width: 110 }}>Total Amount</th>
-                        <th style={{ width: 55 }}>Dep %</th>
-                        <th style={{ width: 90 }}>Dep Amount</th>
+                        <th className="c">Qty</th>
+                        <th className="r">SalesRate</th>
+                        <th className="r">Total Amount</th>
+                        <th className="c">Dep %</th>
+                        <th className="r">Dep Amount</th>
                     </tr>
                 </thead>
                 <tbody>
                     {parts.map((p, i) => (
                         <tr key={i}>
-                            <td className="mono">{p.ItemNumber || ''}</td>
-                            <td>{p.ItemName || ''}</td>
+                            <td className="mono trunc">{p.ItemNumber || ''}</td>
+                            <td className="wrap">{p.ItemName || ''}</td>
                             <td className="r">{fmt(p.Qty)}</td>
                             <td className="r">{fmt(p.Rate)}</td>
                             <td className="r">{fmt(p.TotalAmount)}</td>
-                            <td className="r">{fmtQ(p.DepreciationPct)}</td>
+                            <td className="c">{fmtQ(p.DepreciationPct)}</td>
                             <td className="r">{fmt(p.DepAmount)}</td>
                         </tr>
                     ))}
                     {parts.length === 0 && (
-                        <tr><td colSpan={7} className="c empty">No parts issued to this Job Card.</td></tr>
+                        <tr><td colSpan={7} className="c empty">No parts with depreciation data on this Job Card.</td></tr>
                     )}
                 </tbody>
                 <tfoot>
@@ -149,14 +166,17 @@ export default function JobCardDepreciationPrint() {
                         <td className="c b">{totals.items}</td>
                         <td className="c b box">{fmt(totals.qty)}</td>
                         <td></td>
-                        <td className="c b box">{fmt(totals.total)}</td>
+                        <td className="r b box">{fmt(totals.total)}</td>
                         <td></td>
-                        <td className="c b box">{fmt(totals.dep)}</td>
+                        <td className="r b box">{fmt(totals.dep)}</td>
                     </tr>
                 </tfoot>
             </table>
 
-            {/* Footer — terms + signature */}
+            {/* Footer — terms bottom-left, signature bottom-right. `margin-top:
+                auto` keeps it glued to the bottom of the last page even for
+                short line lists; long lists let the browser page-break
+                naturally and the footer lands on the final page. */}
             <div className="footer">
                 <div className="terms">
                     <div className="terms-h">TERMS AND CONDITION</div>
@@ -171,7 +191,7 @@ export default function JobCardDepreciationPrint() {
                 <div className="sig">
                     <div className="sig-line"></div>
                     <div><strong>CUSTOMER SIGNATURE</strong></div>
-                    <div className="sig-for">For: CHANGAN MULTAN MOTORS</div>
+                    <div className="sig-for">For: {companyName || 'CHANGAN MULTAN MOTORS'}</div>
                 </div>
             </div>
 
@@ -184,13 +204,21 @@ export default function JobCardDepreciationPrint() {
                 .dep-print {
                     font-family: Arial, Tahoma, sans-serif;
                     color: #000;
-                    max-width: 210mm;
+                    width: 210mm;
+                    min-height: 297mm;
                     margin: 0 auto;
                     padding: 8mm 6mm 6mm;
                     box-sizing: border-box;
                     font-size: 10px;
+                    display: flex;
+                    flex-direction: column;
                 }
-                .top { display: grid; grid-template-columns: 1fr 130px; gap: 8px; align-items: flex-start; }
+                .top {
+                    display: grid;
+                    grid-template-columns: 1fr 130px;
+                    gap: 8px;
+                    align-items: flex-start;
+                }
                 .top-biz .pbh { padding: 0; }
                 .top-dates { font-size: 10px; text-align: right; padding-top: 4px; }
                 .top-dates > div { padding: 1px 0; }
@@ -200,7 +228,7 @@ export default function JobCardDepreciationPrint() {
                     grid-template-columns: 200px 1fr 130px;
                     gap: 8px;
                     align-items: center;
-                    margin: 6px 0 6px;
+                    margin: 6px 0;
                     padding: 4px 8px;
                     background: #f2f2f2;
                     border: 1px solid #000;
@@ -220,21 +248,55 @@ export default function JobCardDepreciationPrint() {
                     border-collapse: collapse;
                     margin-bottom: 4px;
                     font-size: 10px;
+                    table-layout: fixed;
                 }
-                .party td { border: 1px solid #000; padding: 2px 5px; vertical-align: middle; }
-                .party td.lbl { font-weight: 700; background: #fafafa; white-space: nowrap; }
+                .party td {
+                    border: 1px solid #000;
+                    padding: 2px 5px;
+                    vertical-align: middle;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .party td.lbl { font-weight: 700; background: #fafafa; }
                 .items {
                     width: 100%;
                     border-collapse: collapse;
                     font-size: 10px;
+                    table-layout: fixed;
                 }
-                .items th, .items td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; }
+                .items th, .items td {
+                    border: 1px solid #000;
+                    padding: 3px 5px;
+                    vertical-align: middle;
+                }
                 .items th { background: #f2f2f2; font-weight: 700; text-align: left; }
-                .items td.c { text-align: center; }
-                .items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+                .items th.c, .items td.c { text-align: center; }
+                .items th.r, .items td.r {
+                    text-align: right;
+                    font-variant-numeric: tabular-nums;
+                    white-space: nowrap;
+                }
                 .items td.b { font-weight: 700; }
-                .items td.mono { font-family: 'Consolas', 'Courier New', monospace; font-size: 9.5px; }
-                .items td.empty { padding: 14px; color: #666; font-style: italic; }
+                .items td.mono {
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 9.5px;
+                }
+                .items td.trunc {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .items td.wrap {
+                    overflow: hidden;
+                    word-break: break-word;
+                }
+                .items td.empty {
+                    padding: 14px;
+                    color: #666;
+                    font-style: italic;
+                    text-align: center;
+                }
                 .items tfoot .tot { background: white; }
                 .items tfoot .tot td.box { border: 2px solid #000; }
                 .items tfoot .tot td:first-child {
@@ -243,12 +305,16 @@ export default function JobCardDepreciationPrint() {
                     font-size: 11px;
                     color: #666;
                 }
+                /* Footer glued to bottom of the last page for short lists,
+                   naturally relocated by page-break for long ones. */
                 .footer {
                     display: grid;
                     grid-template-columns: 1fr 200px;
                     gap: 20px;
-                    margin-top: 28mm;
+                    margin-top: auto;
+                    padding-top: 6mm;
                     font-size: 8.5px;
+                    page-break-inside: avoid;
                 }
                 .terms .terms-h { font-weight: 700; font-size: 10px; margin-bottom: 3px; }
                 .terms ol { margin: 0; padding-left: 16px; }
@@ -256,6 +322,12 @@ export default function JobCardDepreciationPrint() {
                 .sig { text-align: center; }
                 .sig .sig-line { border-top: 1px solid #000; margin: 24px 8px 4px; }
                 .sig .sig-for { margin-top: 20px; }
+                /* Repeat table head on paged spillover so page 2 keeps context */
+                @media print {
+                    .items thead { display: table-header-group; }
+                    .items tfoot { display: table-row-group; }
+                    tr { page-break-inside: avoid; }
+                }
             `}</style>
         </div>
     );

@@ -738,7 +738,8 @@ function AppShell() {
                         <Route path="/workshop/jobs/:id/credit-invoice" element={<CreditInvoicePrint />} />
                         <Route path="/workshop/jobs/:id/gst-invoice"    element={<JobCardGSTPrint />} />
                         <Route path="/workshop/jobs/:id/pst-invoice"    element={<JobCardPSTPrint />} />
-                        <Route path="/workshop/jobs/:id/dep-print"      element={<JobCardDepreciationPrint />} />
+                        <Route path="/workshop/jobs/:id/dep-print"          element={<JobCardDepreciationPrint />} />
+                        <Route path="/workshop/jobs/:id/depreciation-print"  element={<JobCardDepreciationPrint />} />
                         <Route path="/store-sale/:id/print"    element={<StoreSalePrint />} />
                         <Route path="/grn/:id/print"           element={<GRNPrint />} />
                         <Route path="/grtn/:id/print"          element={<GRTNPrint />} />
@@ -919,6 +920,9 @@ function AppShell() {
                         <ProtectedRoute moduleKey="workshop_jobs"><JobCardPSTPrint /></ProtectedRoute>
                     } />
                     <Route path="/workshop/jobs/:id/dep-print" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><JobCardDepreciationPrint /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/jobs/:id/depreciation-print" element={
                         <ProtectedRoute moduleKey="workshop_jobs"><JobCardDepreciationPrint /></ProtectedRoute>
                     } />
                     <Route path="/store-sale/:id/print" element={
