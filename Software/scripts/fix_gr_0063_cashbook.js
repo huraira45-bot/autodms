@@ -26,6 +26,10 @@ const { nextVoucherNo } = require('../utils/voucherNumbering');
 const JC_NO      = 'GR-0063';
 const JC_ID      = 182;
 const AMOUNT     = 5093.78;
+// Owner ask: post the correction on the SAME date as the original
+// receipt (BRV-0268) so the cash book and POS clearing show the
+// activity on the day the customer actually paid.
+const VOUCHER_DATE = '2026-07-03';
 const COMMIT     = process.argv.includes('--commit');
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -43,6 +47,7 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigit
     }
 
     console.log(`  Job Card:      ${JC_NO} (JobCardId=${JC_ID})`);
+    console.log(`  Voucher date:  ${VOUCHER_DATE}   (same day as original receipt)`);
     console.log(`  Cash Dr:       ${fmt(AMOUNT).padStart(12)}   GLCAID=${rm.CASH_BOOK}`);
     console.log(`  POS Clear Cr:  ${fmt(AMOUNT).padStart(12)}   GLCAID=${rm.POS_CLEARING}`);
 
@@ -65,7 +70,7 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigit
         const narration = `Cash-book correction for ${JC_NO} — reallocate Rs ${fmt(AMOUNT)} from POS_CLEARING (over-stated by finalize auto-settle) to CASH_IN_HAND (actual cash received)`;
 
         const hdr = await new sql.Request(tx)
-            .input('vd',   sql.DateTime,     new Date())
+            .input('vd',   sql.DateTime,     new Date(VOUCHER_DATE + 'T12:00:00'))
             .input('vno',  sql.NVarChar(50), voucherNo)
             .input('vtId', sql.Int,          voucherTypeId)
             .input('rem',  sql.NVarChar(sql.MAX), narration)
