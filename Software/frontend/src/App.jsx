@@ -77,6 +77,8 @@ import SSR                from './pages/SSR';
 import ChartOfAccounts    from './pages/ChartOfAccounts';
 import BusinessProfile    from './pages/BusinessProfile';
 import CreditInvoicePrint from './pages/CreditInvoicePrint';
+import JobCardGSTPrint    from './pages/JobCardGSTPrint';
+import JobCardPSTPrint    from './pages/JobCardPSTPrint';
 import VehicleHistory     from './pages/VehicleHistory';
 import VoucherEntry       from './pages/VoucherEntry';
 import WorkshopCustomers  from './pages/WorkshopCustomers';
@@ -733,6 +735,8 @@ function AppShell() {
                     <Routes>
                         <Route path="/workshop/jobs/:id/print" element={<WorkOrderPrint />} />
                         <Route path="/workshop/jobs/:id/credit-invoice" element={<CreditInvoicePrint />} />
+                        <Route path="/workshop/jobs/:id/gst-invoice"    element={<JobCardGSTPrint />} />
+                        <Route path="/workshop/jobs/:id/pst-invoice"    element={<JobCardPSTPrint />} />
                         <Route path="/store-sale/:id/print"    element={<StoreSalePrint />} />
                         <Route path="/grn/:id/print"           element={<GRNPrint />} />
                         <Route path="/grtn/:id/print"          element={<GRTNPrint />} />
@@ -905,6 +909,12 @@ function AppShell() {
                     } />
                     <Route path="/workshop/jobs/:id/credit-invoice" element={
                         <ProtectedRoute moduleKey="workshop_jobs"><CreditInvoicePrint /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/jobs/:id/gst-invoice" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><JobCardGSTPrint /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/jobs/:id/pst-invoice" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><JobCardPSTPrint /></ProtectedRoute>
                     } />
                     <Route path="/store-sale/:id/print" element={
                         <ProtectedRoute moduleKey="sales_store"><StoreSalePrint /></ProtectedRoute>

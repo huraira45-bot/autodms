@@ -33,6 +33,7 @@ router.get(   '/job-cards',                 requirePerm('workshop_jobs', 'view')
 router.get(   '/vehicle-history',           requirePerm('workshop_jobs', 'view'),        wc.getVehicleHistory);
 router.get(   '/job-cards/resolve-ro',      requirePerm('workshop_jobs', 'view'),        wc.resolveByRO);
 router.get(   '/job-cards/:id/print-data',  requirePerm('workshop_jobs', 'view'),        wc.getJobCardPrintData);
+router.get(   '/job-cards/:id/invoice-data', requirePerm('workshop_jobs', 'view'),       wc.getJobCardInvoiceData);
 router.get(   '/job-cards/:id',             requirePerm('workshop_jobs', 'view'),        wc.getJobCardById);
 router.post(  '/job-cards',                 requirePerm('workshop_jobs', 'insert'),      wc.saveJobCard);
 router.patch( '/job-cards/:id/status',      requirePerm('workshop_jobs', 'edit'),        wc.updateJobStatus);

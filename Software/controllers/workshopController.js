@@ -443,6 +443,137 @@ exports.getJobCardPrintData = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+// Focused endpoint for the GST/PST invoice prints (owner ask 2026-07-05).
+// Returns exactly what the old-format tax invoices need:
+//  - Job Card header (jobCode → invoice number)
+//  - Recipient block (insurance company > party > customer, with address/NTN
+//    fields taken from whichever wins) — nothing is invented; empty is empty.
+//  - Parts lines (item name, qty, rate, GST amount) for the GST invoice
+//  - Labour lines (description, net amount, PST amount) for the PST invoice
+//  - Current tax rates so the totals header ("Total 18% GST", "Total 16% PST")
+//    matches the config.
+//
+// 409 when JC is not finalized — matches the print-data gating convention.
+exports.getJobCardInvoiceData = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const pool = await getPool();
+
+        const head = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT jc.JobCardId, jc.JobCardNo, jc.jobCode, jc.IsFinalized,
+                           jc.Remarks, jc.VOCRemarks, jc.EstimatedRONo, jc.IsEstimatedRO,
+                           jc.EndUserID, jc.PartyID,
+                           jc.VehicleRegNo, jc.FinalizedAt,
+                           p.PartyName, p.AddressOne AS PartyAddress1, p.AddressTwo AS PartyAddress2,
+                           p.NTNNO AS PartyNTN, p.CNIC AS PartyCNIC,
+                           cust.endUserName AS CustomerName, cust.Address AS CustomerAddress,
+                           cust.CNIC AS CustomerCNIC
+                    FROM Addata_JobCardInfo jc
+                    LEFT JOIN gen_PartiesInfo p ON jc.PartyID = p.PartyID
+                    LEFT JOIN addata_CustomerInfo cust ON jc.EndUserID = cust.ProfileID
+                    WHERE jc.JobCardId=@id`);
+        if (!head.recordset.length) return res.status(404).json({ error: 'Job Card not found' });
+        const jc = head.recordset[0];
+        if (!jc.IsFinalized) return res.status(409).json({ error: 'Job Card must be finalized before printing an invoice.' });
+
+        const ins = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT CompanyName, InsClaimNo FROM dms_JobCardInsurance WHERE JobCardId=@id`);
+        const insurance = ins.recordset[0] || null;
+
+        // Parts issued to the JC (for the GST invoice). Snapshotted TaxAmount
+        // is the GST because parts snapshot the configured GST rate at issue.
+        const parts = await pool.request().input('id', sql.Int, id).query(`
+            SELECT sid.StockIssueDetailID AS LineID,
+                   COALESCE(CAST(i.ItemNumber AS NVARCHAR(50)), i.ManualNumber) AS ItemCode,
+                   i.ItenName AS ItemName,
+                   sid.IssueQuantity AS Qty,
+                   sid.ItemRate       AS UnitRate,
+                   (sid.IssueQuantity * sid.ItemRate) AS Amount,
+                   ISNULL(sid.TaxRate, 0)   AS TaxRate,
+                   ISNULL(sid.TaxAmount, 0) AS TaxAmount
+            FROM data_StockIssuetoJobCardDetail sid
+            LEFT JOIN InventItems i ON sid.ItemId = i.ItemId
+            WHERE sid.JobCardId = @id
+            ORDER BY sid.StockIssueDetailID`);
+
+        // Labour lines net of discount (for the PST invoice). TaxAmount there
+        // is the PST snapshotted at save time from the configured PST rate.
+        const labour = await pool.request().input('id', sql.Int, id).query(`
+            SELECT l.DetailId AS LineID,
+                   l.Remarks  AS Description,
+                   l.Price    AS GrossAmount,
+                   ISNULL(l.DiscAmt, 0) AS DiscountAmt,
+                   (l.Price - ISNULL(l.DiscAmt, 0)) AS Amount,
+                   ISNULL(l.TaxRate, 0)   AS TaxRate,
+                   ISNULL(l.TaxAmount, 0) AS TaxAmount
+            FROM Addata_JobCardInfoDetail l
+            WHERE l.JobCardId = @id
+            ORDER BY l.DetailId`);
+
+        // Current tax rates (used for the headline "Total NN% GST" line).
+        let gstRate = 0, pstRate = 0;
+        try { gstRate = await resolveRate('GST'); } catch (_) {}
+        try { pstRate = await resolveRate('PST'); } catch (_) {}
+
+        // Recipient resolution — insurance company wins if a JC insurance row
+        // exists; else supplier/party; else end-user customer. Address / NTN
+        // travel with whichever wins. Nothing is invented — blank is blank.
+        let recipient;
+        if (insurance?.CompanyName) {
+            recipient = {
+                source:  'INSURANCE',
+                name:    insurance.CompanyName,
+                address: '',   // no address on dms_JobCardInsurance
+                ntn:     '',
+                gst:     '',
+                claimNo: insurance.InsClaimNo || '',
+            };
+        } else if (jc.PartyName) {
+            recipient = {
+                source:  'PARTY',
+                name:    jc.PartyName,
+                address: [jc.PartyAddress1, jc.PartyAddress2].filter(Boolean).join(', '),
+                ntn:     jc.PartyNTN || '',
+                gst:     '',   // no STRN/GST column on gen_PartiesInfo
+                claimNo: '',
+            };
+        } else {
+            recipient = {
+                source:  'CUSTOMER',
+                name:    jc.CustomerName || '',
+                address: jc.CustomerAddress || '',
+                ntn:     '',
+                gst:     '',
+                claimNo: '',
+            };
+        }
+
+        // Job description: prefer JC.Remarks; else VOCRemarks; else a rebuilt
+        // "AS PER ESTIMATE # NNN" from EstimatedRONo (matches old samples).
+        let jobDescription = (jc.Remarks || '').trim();
+        if (!jobDescription) jobDescription = (jc.VOCRemarks || '').trim();
+        if (!jobDescription && jc.IsEstimatedRO && jc.EstimatedRONo) {
+            jobDescription = `AS PER ESTIMATE # ${jc.EstimatedRONo}`;
+        }
+
+        res.json({
+            JobCardId:       jc.JobCardId,
+            InvoiceNo:       jc.jobCode || jc.JobCardNo || '',
+            IsFinalized:     !!jc.IsFinalized,
+            FinalizedAt:     jc.FinalizedAt,
+            VehicleRegNo:    jc.VehicleRegNo || '',
+            Recipient:       recipient,
+            JobDescription:  jobDescription,
+            Parts:           parts.recordset,
+            Labour:          labour.recordset,
+            TaxRates:        { GSTRate: Number(gstRate) || 0, PSTRate: Number(pstRate) || 0 },
+        });
+    } catch (err) {
+        console.error('getJobCardInvoiceData:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 exports.getJobCardById = async (req, res) => {
     try {
         const pool = await getPool();

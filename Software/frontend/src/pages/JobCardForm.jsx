@@ -1740,8 +1740,24 @@ export default function JobCardForm() {
                   </div>
                 </div>
               ))}
-              <button type="button" style={{ ...S.toolBtn, fontSize: 10, justifyContent: 'center' }}>PST Print</button>
-              <button type="button" style={{ ...S.toolBtn, fontSize: 10, justifyContent: 'center' }}>GST Print</button>
+              <button type="button"
+                disabled={!isFinalized || !id}
+                title={isFinalized ? 'Print PST invoice (labour / services)' : 'Finalize the Job Card first to print the PST invoice'}
+                onClick={() => window.open(`/workshop/jobs/${id}/pst-invoice`, '_blank', 'noopener')}
+                style={{ ...S.toolBtn, fontSize: 10, justifyContent: 'center',
+                         opacity: (!isFinalized || !id) ? 0.5 : 1,
+                         cursor: (!isFinalized || !id) ? 'not-allowed' : 'pointer' }}>
+                PST Print
+              </button>
+              <button type="button"
+                disabled={!isFinalized || !id}
+                title={isFinalized ? 'Print GST invoice (parts)' : 'Finalize the Job Card first to print the GST invoice'}
+                onClick={() => window.open(`/workshop/jobs/${id}/gst-invoice`, '_blank', 'noopener')}
+                style={{ ...S.toolBtn, fontSize: 10, justifyContent: 'center',
+                         opacity: (!isFinalized || !id) ? 0.5 : 1,
+                         cursor: (!isFinalized || !id) ? 'not-allowed' : 'pointer' }}>
+                GST Print
+              </button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4, marginTop: 4 }}>
               {(() => {
