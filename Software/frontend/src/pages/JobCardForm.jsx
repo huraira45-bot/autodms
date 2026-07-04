@@ -609,10 +609,11 @@ export default function JobCardForm() {
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Loader2 size={32} style={{ animation: 'spin 1s linear infinite' }} /></div>;
 
-  // Owner ask 2026-07-05: drop the "creator only" restriction on Finalize.
-  // Anyone with the `finalize` permission AND `admin_unfinalize` can finalize
-  // any Job Card, regardless of who created it.
-  const canFinalize = !isFinalized && hasModule('finalize') && hasModule('admin_unfinalize');
+  // Owner ask 2026-07-05: anyone with the `finalize` permission can finalize
+  // any Job Card. Previously the button was gated on (creator OR
+  // admin_unfinalize) — both gates dropped. The backend still enforces the
+  // `finalize` module on the POST /finalize/JOBCARD/:id request.
+  const canFinalize = !isFinalized && hasModule('finalize');
 
   return (
     <div style={S.page}>
