@@ -27,18 +27,20 @@
  *   3. Walk-in or unresolved party → Gen-Cust Dr − Gen-Cust Cr (tagged with the
  *      doc) must be ≤ 0.01.
  *   4. Same vehicle (RegNo OR ChasisNo) with another OPEN RO whose business
- *      type is B&P or CT (Body & Paint / Car Trim) → block. Other business
- *      types (GR / WR / FFS / SFS / PDS / PPM) never block gate-pass issue
- *      even if their RO is still open, per owner ask 2026-07-05.
+ *      type is GR, B&P or CT (General Repair / Body & Paint / Car Trim) →
+ *      block. Other business types (WR / FFS / SFS / PDS / PPM) never block
+ *      gate-pass issue even if their RO is still open, per owner ask
+ *      2026-07-05.
  *   5. POS_CLEARING legs on any receipt → warning to confirm the card swipe.
  */
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 
 // Only these JC business types block gate-pass issuance when another RO on
-// the same vehicle is still open (owner ask 2026-07-05). Anything else is
-// ignored — GR / WR / FFS / SFS / PDS / PPM don't affect the gate.
-const GATEPASS_BLOCKING_CARDCODES = ['B&P', 'CT'];
+// the same vehicle is still open (owner ask 2026-07-05): General Repair,
+// Body & Paint, Car Trim. Everything else — Warranty and the free-service /
+// PDS / PPM family — is ignored and the gate opens regardless.
+const GATEPASS_BLOCKING_CARDCODES = ['GR', 'B&P', 'CT'];
 
 async function loadJobCard(tx, jcId) {
     const r = await new sql.Request(tx)
