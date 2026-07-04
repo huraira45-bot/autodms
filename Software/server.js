@@ -63,6 +63,7 @@ app.use('/api/procurement/grtn', require('./routes/grtnRoutes'));
 app.use('/api/paint/grn',   require('./routes/paintGRNRoutes'));
 app.use('/api/paint/grtn',  require('./routes/paintGRTNRoutes'));
 app.use('/api/paint/issue', require('./routes/paintIssueRoutes'));
+app.use('/api/paint',       require('./routes/paintReportsRoutes'));
 app.use('/api/paint',       require('./routes/paintLabRoutes'));
 app.use('/api/sales/store-sale', require('./routes/saleRoutes'));
 app.use('/api/sales/ssr', require('./routes/ssrRoutes'));

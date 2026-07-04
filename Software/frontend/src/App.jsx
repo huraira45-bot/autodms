@@ -69,6 +69,7 @@ import PaintGRTN          from './pages/paint/PaintGRTN';
 import PaintGRTNPrint     from './pages/paint/PaintGRTNPrint';
 import PaintIssue         from './pages/paint/PaintIssue';
 import PaintIssuePrint    from './pages/paint/PaintIssuePrint';
+import PaintReports       from './pages/paint/PaintReports';
 import GRN                from './pages/GRN';
 import GRTN               from './pages/GRTN';
 import StoreSale          from './pages/StoreSale';
@@ -995,9 +996,7 @@ function AppShell() {
                         <ProtectedRoute moduleKey="paint_lab_issue"><PaintIssuePrint /></ProtectedRoute>
                     } />
                     <Route path="/paint/reports" element={
-                        <ProtectedRoute moduleKey="paint_lab_reports">
-                            <PaintPlaceholder title="Paint Reports" subtitle="Stock balance, ledger, purchase, consumption reports." phase="Phase 4" />
-                        </ProtectedRoute>
+                        <ProtectedRoute moduleKey="paint_lab_reports"><PaintReports /></ProtectedRoute>
                     } />
                     <Route path="/paint/settings" element={
                         <ProtectedRoute moduleKey="paint_lab_settings"><PaintSettings /></ProtectedRoute>
