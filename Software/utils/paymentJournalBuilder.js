@@ -78,10 +78,20 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
     }
 
     const allocatedSum = round2(allocations.reduce((a, x) => a + (Number(x.Amount) || 0), 0));
-    if (allocatedSum > totalAmount + 0.01) {
-        throw new Error(`Allocated amount (${allocatedSum}) exceeds payment total (${totalAmount}).`);
+    // Allocation vs cash mismatch:
+    //   * >  0  → customer paid more than allocated  (surplus / advance / rounding gain)
+    //   * <  0  → customer paid less than allocated  (shortfall / rounding loss)
+    //   * = 0   → clean settlement
+    // A shortfall up to ROUNDING_TOLERANCE (Rs 10) is absorbed into
+    // ROUNDING_ADJUSTMENT so a Rs 928 cash tender settles a Rs 928.50 invoice
+    // without leaving a 50-paisa dangling AR (owner ask 2026-07-05). Anything
+    // larger is still rejected — that's a real short-payment the operator has
+    // to reconcile.
+    const shortfallAmount = round2(Math.max(0, allocatedSum - totalAmount));
+    if (shortfallAmount > ROUNDING_TOLERANCE + 0.01) {
+        throw new Error(`Allocated amount (${allocatedSum}) exceeds payment total (${totalAmount}) by more than the rounding tolerance (${ROUNDING_TOLERANCE}).`);
     }
-    const advanceAmount = round2(totalAmount - allocatedSum);
+    const advanceAmount = round2(Math.max(0, totalAmount - allocatedSum));
 
     const journalLines = [];
     const subsidiaryWrites = [];
@@ -177,7 +187,22 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
             }
         }
 
-        // (3) Excess handling.
+        // (3a) Rounding SHORT-FALL — customer paid less than allocated (up to
+        //   ROUNDING_TOLERANCE). Dr ROUNDING_ADJUSTMENT so the invoice is
+        //   fully settled and the business absorbs the paisa.
+        if (shortfallAmount > 0) {
+            if (!accounts.ROUNDING_ADJUSTMENT?.GLCAID) {
+                throw new Error("ROUNDING_ADJUSTMENT system account is not mapped.");
+            }
+            journalLines.push({
+                GLCAID: accounts.ROUNDING_ADJUSTMENT.GLCAID,
+                Debit: shortfallAmount, Credit: 0,
+                Narration: `Rounding adjustment (short) — ${ref}`,
+                PartyID: null, JobCardID: null, AllocatedToVoucherID: null,
+            });
+        }
+
+        // (3b) Excess handling.
         //   Small gap (≤ ROUNDING_TOLERANCE) after allocation is treated as a
         //   rounding-off and credited to ROUNDING_ADJUSTMENT (income). Only
         //   applies when the customer paid against at least one invoice — a pure
@@ -237,6 +262,21 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
                 Debit: amt, Credit: 0,
                 PartyID: partyId, JobCardID: null, AllocatedToVoucherID: a.TargetVoucherID,
                 Narration: `Settle bill voucher #${a.TargetVoucherID} — ${ref}`,
+            });
+        }
+
+        // (1b) Rounding SHORT-FALL — we paid the supplier less than allocated
+        //   (up to ROUNDING_TOLERANCE). Cr ROUNDING_ADJUSTMENT so the supplier
+        //   bill is fully settled and the paisa becomes a small income for us.
+        if (shortfallAmount > 0) {
+            if (!accounts.ROUNDING_ADJUSTMENT?.GLCAID) {
+                throw new Error("ROUNDING_ADJUSTMENT system account is not mapped.");
+            }
+            journalLines.push({
+                GLCAID: accounts.ROUNDING_ADJUSTMENT.GLCAID,
+                Debit: 0, Credit: shortfallAmount,
+                Narration: `Rounding adjustment (short) — ${ref}`,
+                PartyID: null, JobCardID: null, AllocatedToVoucherID: null,
             });
         }
 

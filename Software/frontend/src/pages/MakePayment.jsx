@@ -94,7 +94,9 @@ export default function MakePayment() {
   const handleSubmit = async () => {
     if (!selectedParty) { flash('Select a supplier first.', true); return; }
     if (totalPayment <= 0) { flash('Enter at least one payment line.', true); return; }
-    if (allocatedSum > totalPayment + 0.01) { flash(`Allocations exceed payment total.`, true); return; }
+    // Small shortfall (≤ Rs 10) is booked to ROUNDING_ADJUSTMENT server-side
+    // (owner ask 2026-07-05). Only reject bigger over-allocations.
+    if (allocatedSum > totalPayment + 10.01) { flash(`Allocations exceed payment total by more than the Rs 10 rounding tolerance.`, true); return; }
     for (const p of paymentLines) {
       if (p.Mode === 'Bank Transfer' && !p.BankGLCAID) { flash('Pick a bank for Bank Transfer line.', true); return; }
       if (p.Mode === 'Cheque') {
@@ -342,19 +344,23 @@ export default function MakePayment() {
           <Stat label="Allocated to bills" value={allocatedSum} colour="#dc2626" />
           <Stat
             label={
-              excess < -0.005
+              excess < -10.01
                 ? 'Allocation OVER total!'
-                : (excess > 0 && excess <= 10 && allocatedSum > 0
-                    ? 'To rounding adjustment'
-                    : 'To supplier advance (excess)')
+                : excess < -0.005 && allocatedSum > 0
+                    ? 'To rounding (short)'
+                    : (excess > 0 && excess <= 10 && allocatedSum > 0
+                        ? 'To rounding adjustment'
+                        : 'To supplier advance (excess)')
             }
             value={Math.abs(excess)}
             colour={
-              excess < -0.005
+              excess < -10.01
                 ? '#ef4444'
-                : (excess > 0 && excess <= 10 && allocatedSum > 0 ? '#7c3aed' : (excess > 0 ? '#b45309' : '#94a3b8'))
+                : excess < -0.005 && allocatedSum > 0
+                    ? '#7c3aed'
+                    : (excess > 0 && excess <= 10 && allocatedSum > 0 ? '#7c3aed' : (excess > 0 ? '#b45309' : '#94a3b8'))
             }
-            warn={excess < -0.005}
+            warn={excess < -10.01}
           />
         </div>
         <div style={{ marginTop: 12 }}>
@@ -364,7 +370,7 @@ export default function MakePayment() {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-        <button onClick={handleSubmit} disabled={saving || totalPayment <= 0 || excess < -0.005 || !selectedParty} style={btn(saving || totalPayment <= 0 || excess < -0.005 || !selectedParty ? 'disabled' : 'primary')}>
+        <button onClick={handleSubmit} disabled={saving || totalPayment <= 0 || excess < -10.01 || !selectedParty} style={btn(saving || totalPayment <= 0 || excess < -10.01 || !selectedParty ? 'disabled' : 'primary')}>
           {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Post Payment
         </button>
       </div>

@@ -255,7 +255,9 @@ export default function ReceivePayment() {
       if (!depBalance || depBalance.depreciationBalance <= 0) { flash('No outstanding depreciation balance on this Job Card.', true); return; }
     }
     if (totalPayment <= 0) { flash('Enter at least one payment line with amount.', true); return; }
-    if (allocatedSum > totalPayment + 0.01) { flash(`Allocations (${allocatedSum.toFixed(2)}) exceed payment total (${totalPayment.toFixed(2)}).`, true); return; }
+    // Shortfall up to Rs 10 is absorbed into ROUNDING_ADJUSTMENT server-side
+    // (owner ask 2026-07-05). Only reject bigger over-allocations.
+    if (allocatedSum > totalPayment + 10.01) { flash(`Allocations (${allocatedSum.toFixed(2)}) exceed payment total (${totalPayment.toFixed(2)}) by more than the Rs 10 rounding tolerance.`, true); return; }
     for (const p of paymentLines) {
       if (p.Mode === 'Bank Transfer' && !p.BankGLCAID) {
         flash('Pick a bank for each Bank Transfer line.', true); return;
@@ -858,19 +860,23 @@ export default function ReceivePayment() {
           <Stat label="Allocated to invoices" value={allocatedSum} colour="#16a34a" />
           <Stat
             label={
-              excess < -0.005
+              excess < -10.01
                 ? 'Allocation OVER total!'
-                : (excess > 0 && excess <= 10 && allocatedSum > 0
-                    ? 'To rounding adjustment'
-                    : 'To advance (excess)')
+                : excess < -0.005 && allocatedSum > 0
+                    ? 'To rounding (short)'
+                    : (excess > 0 && excess <= 10 && allocatedSum > 0
+                        ? 'To rounding adjustment'
+                        : 'To advance (excess)')
             }
             value={Math.abs(excess)}
             colour={
-              excess < -0.005
+              excess < -10.01
                 ? '#ef4444'
-                : (excess > 0 && excess <= 10 && allocatedSum > 0 ? '#7c3aed' : (excess > 0 ? '#1d4ed8' : '#94a3b8'))
+                : excess < -0.005 && allocatedSum > 0
+                    ? '#7c3aed'
+                    : (excess > 0 && excess <= 10 && allocatedSum > 0 ? '#7c3aed' : (excess > 0 ? '#1d4ed8' : '#94a3b8'))
             }
-            warn={excess < -0.005}
+            warn={excess < -10.01}
           />
         </div>
         <div style={{ marginTop: 12 }}>
@@ -880,7 +886,7 @@ export default function ReceivePayment() {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-        <button onClick={handleSubmit} disabled={saving || totalPayment <= 0 || excess < -0.005} style={btn(saving || totalPayment <= 0 || excess < -0.005 ? 'disabled' : 'primary')}>
+        <button onClick={handleSubmit} disabled={saving || totalPayment <= 0 || excess < -10.01} style={btn(saving || totalPayment <= 0 || excess < -10.01 ? 'disabled' : 'primary')}>
           {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Post Receipt
         </button>
       </div>
