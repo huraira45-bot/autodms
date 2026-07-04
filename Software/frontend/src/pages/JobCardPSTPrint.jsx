@@ -41,14 +41,17 @@ export default function JobCardPSTPrint() {
     const linesRate  = labour.find(l => Number(l.TaxRate) > 0)?.TaxRate;
     const shownRate  = Number(linesRate ?? d.TaxRates?.PSTRate ?? 0);
 
-    // Description: prefer the JC.Remarks-style block; else concat per-line
-    // remarks; else "AS PER ESTIMATE …" fallback.
+    // Job Description = the actual labour/service line names (owner ask
+    // 2026-07-05). VOCRemarks / WAC checklist / JC.Remarks are NOT the
+    // "jobs performed" — they're intake notes — so those never appear
+    // here. If (rare) a JC has no labour lines at all, fall back to the
+    // backend-computed JobDescription (Remarks → estimate reference).
     const descLines = [];
-    if (d.JobDescription) descLines.push(d.JobDescription);
     for (const l of labour) {
         const t = (l.Description || '').trim();
         if (t && !descLines.includes(t)) descLines.push(t);
     }
+    if (descLines.length === 0 && d.JobDescription) descLines.push(d.JobDescription);
 
     return (
         <div className="tax-invoice">

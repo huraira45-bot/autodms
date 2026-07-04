@@ -605,10 +605,11 @@ exports.getJobCardInvoiceData = async (req, res) => {
             };
         }
 
-        // Job description: prefer JC.Remarks; else VOCRemarks; else a rebuilt
-        // "AS PER ESTIMATE # NNN" from EstimatedRONo (matches old samples).
+        // Job description fallback used ONLY when the JC has no labour
+        // lines at all (rare). The primary source is the labour line's
+        // own Remarks — see JobCardPSTPrint. VOCRemarks is skipped because
+        // it's the WAC checklist JSON, not a job description.
         let jobDescription = (jc.Remarks || '').trim();
-        if (!jobDescription) jobDescription = (jc.VOCRemarks || '').trim();
         if (!jobDescription && jc.IsEstimatedRO && jc.EstimatedRONo) {
             jobDescription = `AS PER ESTIMATE # ${jc.EstimatedRONo}`;
         }
