@@ -719,12 +719,13 @@ function AppShell() {
     const [commandOpen, setCommandOpen] = React.useState(false);
     const location = useLocation();
     // Print routes render bare — no sidebar, top bar, notification bell, etc.
-    // so the document prints cleanly without app chrome.
-    // Bare-shell print routes: no sidebar, no topbar, no breadcrumbs. Any
-    // path segment that starts with `print` or `credit-invoice` qualifies.
-    // Owner report 2026-07-02: Credit Invoice was rendering inside the
-    // main shell so print output carried the sidebar and breadcrumb strip.
-    const isPrintRoute = /\/(print|credit-invoice)(?:\/|$|\?)/.test(location.pathname);
+    // so the document prints cleanly without app chrome. Owner report
+    // 2026-07-02: Credit Invoice was rendering inside the main shell so print
+    // output carried the sidebar and breadcrumb strip. Owner report
+    // 2026-07-05: same problem for the Depreciation, GST, PST prints because
+    // the earlier regex only matched literal `/print` and `/credit-invoice`.
+    // Whitelist every print suffix explicitly.
+    const isPrintRoute = /\/(print|credit-invoice|gst-invoice|pst-invoice|dep-print|depreciation-print)(?:\/|$|\?)/.test(location.pathname);
 
     if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Loading…</div>;
     if (!user) return <Login />;

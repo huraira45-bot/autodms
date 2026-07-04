@@ -72,7 +72,7 @@ export default function JobCardDepreciationPrint() {
     const companyName = profile?.CompanyName || '';
 
     return (
-        <div className="dep-print">
+        <div className="dep-print-page">
             {/* Top band — shared business header (logo left, company centered)
                 with the Print Date + Date In stacked at the top-right. */}
             <div className="top">
@@ -122,16 +122,17 @@ export default function JobCardDepreciationPrint() {
                 </tbody>
             </table>
 
-            {/* Line items — parts with depreciation only */}
+            {/* Line items — parts with depreciation only.
+                Column widths (spec): 20 / 28 / 8 / 13 / 15 / 7 / 13 %. */}
             <table className="items">
                 <colgroup>
-                    <col style={{ width: 130 }}/>
-                    <col />
-                    <col style={{ width: 50 }}/>
-                    <col style={{ width: 78 }}/>
-                    <col style={{ width: 96 }}/>
-                    <col style={{ width: 46 }}/>
-                    <col style={{ width: 82 }}/>
+                    <col style={{ width: '20%' }}/>
+                    <col style={{ width: '28%' }}/>
+                    <col style={{ width: '8%' }}/>
+                    <col style={{ width: '13%' }}/>
+                    <col style={{ width: '15%' }}/>
+                    <col style={{ width: '7%' }}/>
+                    <col style={{ width: '13%' }}/>
                 </colgroup>
                 <thead>
                     <tr>
@@ -196,23 +197,44 @@ export default function JobCardDepreciationPrint() {
             </div>
 
             <style>{`
+                /* ── A4 page hard-sizing ─────────────────────────────── */
                 @page { size: A4 portrait; margin: 0; }
                 html, body {
-                    width: 210mm; margin: 0; background: white !important;
-                    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+                    margin: 0; padding: 0;
+                    background: #e5e7eb;               /* soft grey around the sheet on screen */
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
                 }
-                .dep-print {
-                    font-family: Arial, Tahoma, sans-serif;
-                    color: #000;
+                @media print {
+                    html, body { background: white !important; }
+                }
+                /* Full A4 sheet — flex column so the footer glues to the bottom
+                   of the last page for short lists, and browser page-break
+                   relocates it to page 2 when the row list spills over. */
+                .dep-print-page {
                     width: 210mm;
                     min-height: 297mm;
-                    margin: 0 auto;
-                    padding: 8mm 6mm 6mm;
+                    margin: 8px auto;                  /* screen preview only */
+                    padding: 8mm 9mm;
                     box-sizing: border-box;
+                    background: white;
+                    color: #000;
+                    font-family: Arial, Tahoma, sans-serif;
                     font-size: 10px;
                     display: flex;
                     flex-direction: column;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.15);  /* screen preview only */
                 }
+                @media print {
+                    .dep-print-page {
+                        margin: 0;
+                        box-shadow: none;
+                        width: 210mm;
+                        min-height: 297mm;
+                    }
+                }
+
+                /* ── Header band ─────────────────────────────────────── */
                 .top {
                     display: grid;
                     grid-template-columns: 1fr 130px;
@@ -223,6 +245,8 @@ export default function JobCardDepreciationPrint() {
                 .top-dates { font-size: 10px; text-align: right; padding-top: 4px; }
                 .top-dates > div { padding: 1px 0; }
                 .top-dates label { font-weight: 700; margin-right: 4px; }
+
+                /* Title bar */
                 .title-bar {
                     display: grid;
                     grid-template-columns: 200px 1fr 130px;
@@ -243,6 +267,8 @@ export default function JobCardDepreciationPrint() {
                     text-align: center;
                     color: #444;
                 }
+
+                /* Party header block */
                 .party {
                     width: 100%;
                     border-collapse: collapse;
@@ -259,6 +285,8 @@ export default function JobCardDepreciationPrint() {
                     white-space: nowrap;
                 }
                 .party td.lbl { font-weight: 700; background: #fafafa; }
+
+                /* ── Items table — spec column widths ────────────────── */
                 .items {
                     width: 100%;
                     border-collapse: collapse;
@@ -305,13 +333,13 @@ export default function JobCardDepreciationPrint() {
                     font-size: 11px;
                     color: #666;
                 }
-                /* Footer glued to bottom of the last page for short lists,
-                   naturally relocated by page-break for long ones. */
+
+                /* ── Footer glued to bottom of the last page ─────────── */
                 .footer {
                     display: grid;
-                    grid-template-columns: 1fr 200px;
+                    grid-template-columns: 1fr 220px;
                     gap: 20px;
-                    margin-top: auto;
+                    margin-top: auto;                   /* pushes to bottom in flex column */
                     padding-top: 6mm;
                     font-size: 8.5px;
                     page-break-inside: avoid;
@@ -322,7 +350,8 @@ export default function JobCardDepreciationPrint() {
                 .sig { text-align: center; }
                 .sig .sig-line { border-top: 1px solid #000; margin: 24px 8px 4px; }
                 .sig .sig-for { margin-top: 20px; }
-                /* Repeat table head on paged spillover so page 2 keeps context */
+
+                /* ── Print refinements ──────────────────────────────── */
                 @media print {
                     .items thead { display: table-header-group; }
                     .items tfoot { display: table-row-group; }
