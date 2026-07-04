@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ErpControlPanel, ErpPanel, ErpEmptyState, ErpStatusPill } from '../components/erp';
+import { getVisibleModuleGroups } from '../navigationConfig';
 
 const API = '/api/workshop';
 
@@ -35,6 +36,8 @@ const APP_TILES = [
     { name: 'Vouchers',        desc: 'CPV / CRV / BPV / BRV / JV',   icon: FileBarChart,  tone: 'steel', to: '/vouchers/browse',            moduleKey: 'finance_vouchers' },
     { name: 'Customers',       desc: 'Parties + statements',         icon: Users,         tone: 'plum',  to: '/customers',                  moduleKey: 'crm_parties' },
     { name: 'CRO Desk',        desc: 'Complaints + follow-ups',      icon: Headphones,    tone: 'red',   to: '/cro/workspace',              moduleKey: 'cro_workspace' },
+    { name: 'Paint Lab',       desc: 'Paint stock, GRN, issue',      icon: Layers,        tone: 'plum',  to: '/module/paint-lab',           anyModules: ['paint_lab_dashboard','paint_lab_items','paint_lab_grn','paint_lab_issue'] },
+    { name: 'Gate Pass',       desc: 'Issue and audit gate passes',  icon: ShieldCheck,   tone: 'amber', to: '/gatepass',                   moduleKey: 'workshop_gatepass' },
     { name: 'Bookings',        desc: 'New vehicle sales',            icon: Car,           tone: 'plum',  to: '/sales/bookings',             anyModules: ['sales_executive','sales_agm','sales_gm','sales_reports'] },
     { name: 'Bay Controller',  desc: 'Workshop bay board',           icon: Activity,      tone: 'teal',  to: '/workshop/controller',        moduleKey: 'workshop_controller' },
     { name: 'Reports',         desc: 'Trial Balance, revenue…',      icon: TrendingUp,    tone: 'steel', to: '/reports/trial-balance',      moduleKey: 'reports' },
@@ -121,6 +124,12 @@ export default function Dashboard() {
                     </>
                 }
             />
+
+            {/* Compact module strip — one entry per top-level group the user
+                can reach. Clicking opens the module launcher (all actions in
+                that group, filtered by access). Auto-hides for users with
+                no groups assigned; the empty state below covers that case. */}
+            <ModulesStrip />
 
             {visibleTiles.length === 0 ? (
                 <ErpEmptyState
@@ -263,5 +272,47 @@ function BirthdayList({ birthdays }) {
                 </>
             )}
         </div>
+    );
+}
+
+/**
+ * ModulesStrip — compact horizontal launcher of every module group the user
+ * has access to. Complements the Applications tile grid: each pill links to
+ * the group's landing page (see ModuleLauncher.jsx) where every accessible
+ * child action is listed.
+ */
+function ModulesStrip() {
+    const { hasModule, hasPermission } = useAuth();
+    const groups = getVisibleModuleGroups(hasModule, hasPermission)
+        // Dashboard is already the current page; don't self-link.
+        .filter(g => g.id !== 'dashboard');
+    if (groups.length === 0) return null;
+    return (
+        <ErpPanel title={<><Layers size={13} /> Modules <span className="count">{groups.length}</span></>}>
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: 6,
+            }}>
+                {groups.map(g => {
+                    const Icon = g.icon;
+                    return (
+                        <Link key={g.id} to={g.path} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '8px 10px',
+                            background: 'var(--erp-surface)',
+                            border: '1px solid var(--erp-border)',
+                            borderRadius: 4,
+                            color: 'var(--erp-text)',
+                            textDecoration: 'none',
+                            fontSize: 12.5,
+                        }}>
+                            <Icon size={14} color="var(--erp-brand)" />
+                            <span style={{ fontWeight: 600 }}>{g.label}</span>
+                        </Link>
+                    );
+                })}
+            </div>
+        </ErpPanel>
     );
 }

@@ -49,6 +49,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { isDemoMode } from './demoMode';
 
 import Dashboard          from './pages/Dashboard';
+import ModuleLauncher     from './pages/ModuleLauncher';
+import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
 import HRSettings         from './pages/HRSettings';
@@ -196,12 +198,39 @@ function ProtectedRoute({ moduleKey, anyModules, action = 'view', children }) {
 }
 
 function Sidebar() {
-    // User + logout controls live on the top bar now — see WorkspaceTopBar.
+    // Owner ask 2026-07-05: replaced the endless 100+ NavLink list with a
+    // compact 10-item module-group launcher. Detailed child screens live
+    // on module landing pages (see ModuleLauncher.jsx) — click a group in
+    // the sidebar to open its actions grid.
+    // Real security stays on the backend and on <ProtectedRoute>; the
+    // sidebar just hides groups whose child screens the user can't reach.
     const { hasModule, hasPermission } = useAuth();
-    // Short alias for "user has a specific report permission". Admin auto-passes
-    // via hasPermission (groupId === 1).
+    const groups = getVisibleModuleGroups(hasModule, hasPermission);
+
+    return (
+        <aside className="erp-sidebar">
+            <nav>
+                {groups.map(g => {
+                    const Icon = g.icon;
+                    return (
+                        <NavLink key={g.id} to={g.path}
+                            className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}
+                            end={g.id === 'dashboard'}
+                            title={g.description}>
+                            <Icon size={18} /> {g.label}
+                        </NavLink>
+                    );
+                })}
+            </nav>
+        </aside>
+    );
+}
+
+// Legacy detailed nav lives below — kept for the old scrolling sidebar if
+// we ever need to fall back. Not rendered by the current Sidebar.
+function LegacySidebar() {
+    const { hasModule, hasPermission } = useAuth();
     const canReport = (slug) => hasPermission(`report:${slug}`);
-    // True when the user has at least one report permission in the given list.
     const anyReport = (...slugs) => slugs.some(s => canReport(s));
 
     return (
@@ -786,6 +815,7 @@ function AppShell() {
                 )}
                 <Routes>
                     <Route path="/" element={<Dashboard />} />
+                    <Route path="/module/:groupId" element={<ModuleLauncher />} />
 
                     <Route path="/coa" element={
                         <ProtectedRoute moduleKey="finance_coa"><ChartOfAccounts /></ProtectedRoute>

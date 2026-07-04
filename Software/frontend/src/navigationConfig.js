@@ -1,0 +1,229 @@
+/**
+ * Central navigation config for the ERP-style module launcher.
+ * Owner ask 2026-07-05: replace the endless scrolling sidebar with 10 top-
+ * level module groups; each group opens a landing page listing only the
+ * screens the logged-in user has permission for.
+ *
+ * Design rules:
+ *   - Frontend-only. Real security stays on the backend ProtectedRoute.
+ *   - Each item declares either `moduleKey` (checked via hasModule) or
+ *     `permission` (report key checked via hasPermission('report:slug')).
+ *   - `moduleGroup` maps items to top-level groups in the sidebar +
+ *     module launcher.
+ *   - The dashboard tiles use the same `MODULE_GROUPS` list, so hidden
+ *     modules automatically drop off both the sidebar and dashboard.
+ *
+ * DO NOT hard-code visibility rules elsewhere. Add items here and the
+ * whole nav layer picks them up.
+ */
+import {
+    LayoutDashboard, Wrench, Package, Paintbrush, Wallet, HeartHandshake,
+    Car, Users, ShieldCheck, FileBarChart, Workflow,
+    Truck, Undo2, Store, RotateCcw, Award, Ticket, Boxes, Settings as SettingsIcon,
+    SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
+    ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
+    Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
+    Gauge, ScrollText,
+} from 'lucide-react';
+
+// Top-level module groups (order = sidebar order). Each has an id / label /
+// icon / description. `path` is the module landing route.
+export const MODULE_GROUPS = [
+    { id: 'dashboard',  label: 'Dashboard',        icon: LayoutDashboard, path: '/',                 description: 'Home overview' },
+    { id: 'workshop',   label: 'Workshop',         icon: Wrench,          path: '/module/workshop',  description: 'Job cards, service, labour, gate pass' },
+    { id: 'parts',      label: 'Parts & Inventory',icon: Package,         path: '/module/parts',     description: 'Spare parts, GRN, GRTN, store sale' },
+    { id: 'paint-lab',  label: 'Paint Lab',        icon: Paintbrush,      path: '/module/paint-lab', description: 'Paint stock, receiving, issue' },
+    { id: 'finance',    label: 'Finance',          icon: Wallet,          path: '/module/finance',   description: 'Vouchers, payments, cheques, setup' },
+    { id: 'crm',        label: 'CRM / CRO',        icon: HeartHandshake,  path: '/module/crm',       description: 'Follow-ups, complaints, surveys, KYC' },
+    { id: 'sales',      label: 'Vehicle Sales',    icon: Car,             path: '/module/sales',     description: 'Bookings, inventory, incentives' },
+    { id: 'hr',         label: 'HR',               icon: Users,           path: '/module/hr',        description: 'Employees, departments' },
+    { id: 'admin',      label: 'Admin',            icon: ShieldCheck,     path: '/module/admin',     description: 'Users, permissions' },
+    { id: 'reports',    label: 'Reports',          icon: FileBarChart,    path: '/module/reports',   description: 'Financial + operational reports' },
+    { id: 'workflow',   label: 'Workflow',         icon: Workflow,        path: '/module/workflow',  description: 'Unfinalize approvals' },
+];
+
+// Individual actions. Every item picks its group via `moduleGroup`.
+// Guard rule (`canAccess`):
+//   - If `moduleKey` is present → hasModule(moduleKey) must be true.
+//   - If `permission` is present → hasPermission(permission) must be true.
+//   - If both are present, EITHER passes.
+// `keywords` help future command-palette search.
+export const NAV_ITEMS = [
+    // ── Workshop ─────────────────────────────────────────────
+    { id: 'w-customers', moduleGroup: 'workshop', label: 'Workshop Customers',    path: '/workshop/customers',       icon: Users,          moduleKey: 'workshop_customers', description: 'Customer master used by Job Cards.', keywords: 'customer end-user' },
+    { id: 'w-jc-new',    moduleGroup: 'workshop', label: 'Create Job Card',       path: '/workshop/jobs/new',        icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open a new RO.', keywords: 'new ro repair' },
+    { id: 'w-jc-search', moduleGroup: 'workshop', label: 'Search Job Cards',      path: '/workshop/jobs',            icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open, active, finalized RO search.', keywords: 'ro job card search' },
+    { id: 'w-veh-hist',  moduleGroup: 'workshop', label: 'Vehicle History',       path: '/workshop/vehicle-history', icon: Car,            moduleKey: 'workshop_jobs',      description: 'Every RO ever run on a vehicle.', keywords: 'chassis reg' },
+    { id: 'w-labour',    moduleGroup: 'workshop', label: 'Labour & Services',    path: '/workshop/services',        icon: Wrench,         moduleKey: 'workshop_labour',    description: 'Labour catalogue master.', keywords: 'services' },
+    { id: 'w-sublet',    moduleGroup: 'workshop', label: 'Sublet Repairs',        path: '/workshop/sublet',          icon: Handshake,      moduleKey: 'workshop_sublet',    description: 'Sublet vendors + jobs.', keywords: 'sublet outsource' },
+    { id: 'w-settings',  moduleGroup: 'workshop', label: 'Workshop Settings',     path: '/workshop/settings',        icon: SettingsIcon,   moduleKey: 'workshop_settings',  description: 'Job types, departments, care-off.', keywords: 'setup config' },
+    { id: 'w-campaigns', moduleGroup: 'workshop', label: 'Campaigns',             path: '/workshop/campaigns',       icon: Ticket,         moduleKey: 'workshop_settings',  description: 'Free-service / MCML campaign master.', keywords: 'ffs sfs pds ppm' },
+    { id: 'w-careoff',   moduleGroup: 'workshop', label: 'Care-Off Discounts',    path: '/workshop/care-off',        icon: Percent,        moduleKey: 'workshop_careoff',   description: 'Discount authorization caps.', keywords: 'discount' },
+    { id: 'w-access',    moduleGroup: 'workshop', label: 'Accessories',           path: '/workshop/accessories',     icon: Boxes,          moduleKey: 'workshop_accessories', description: 'JC accessory checklist master.', keywords: 'accessory' },
+    { id: 'w-ctrl',      moduleGroup: 'workshop', label: 'Job Controller',        path: '/workshop/controller',      icon: Gauge,          moduleKey: 'workshop_controller', description: 'Real-time RO status board.', keywords: 'status bay' },
+    { id: 'w-gatepass',  moduleGroup: 'workshop', label: 'Gate Pass',             path: '/gatepass',                 icon: ClipboardCheck, moduleKey: 'workshop_gatepass',  description: 'Issue and audit vehicle gate passes.', keywords: 'gate exit' },
+
+    // ── Parts & Inventory ────────────────────────────────────
+    { id: 'p-spare',     moduleGroup: 'parts', label: 'Spare Parts',              path: '/parts',        icon: Package, moduleKey: 'parts_spare',           description: 'Parts master + stock.', keywords: 'inventory items' },
+    { id: 'p-grn',       moduleGroup: 'parts', label: 'GRN (Receiving)',          path: '/grn',          icon: Truck,   moduleKey: 'procurement_grn',       description: 'Receive parts from suppliers.', keywords: 'purchase receive' },
+    { id: 'p-grtn',      moduleGroup: 'parts', label: 'GRTN (Returns)',           path: '/grtn',         icon: Undo2,   moduleKey: 'procurement_grtn',      description: 'Return parts to supplier.', keywords: 'return supplier' },
+    { id: 'p-store',     moduleGroup: 'parts', label: 'Store Sale',               path: '/store-sale',   icon: Store,   moduleKey: 'sales_store',           description: 'Counter parts sale (SS invoice).', keywords: 'counter sale' },
+    { id: 'p-ssr',       moduleGroup: 'parts', label: 'Store Sale Returns (SSR)', path: '/ssr',          icon: RotateCcw, moduleKey: 'sales_ssr',           description: 'Customer returns from Store Sale.', keywords: 'return customer' },
+    { id: 'p-issue',     moduleGroup: 'parts', label: 'Parts Issue to JC',        path: '/workshop/parts-issue', icon: Package, moduleKey: 'workshop_parts_issue', description: 'Issue parts against a Job Card.', keywords: 'sir' },
+    { id: 'p-settings',  moduleGroup: 'parts', label: 'Inventory Settings',       path: '/inventory-settings', icon: SlidersHorizontal, moduleKey: 'inventory_settings', description: 'Tax rates, warehouses, brands.', keywords: 'config setup' },
+
+    // ── Paint Lab ────────────────────────────────────────────
+    { id: 'pl-dash',     moduleGroup: 'paint-lab', label: 'Paint Dashboard',      path: '/paint/dashboard', icon: PieChart,    moduleKey: 'paint_lab_dashboard', description: 'Stock KPIs + recent activity.', keywords: 'kpi' },
+    { id: 'pl-items',    moduleGroup: 'paint-lab', label: 'Paint Items',          path: '/paint/items',     icon: Palette,     moduleKey: 'paint_lab_items',     description: 'Paint master.', keywords: 'inventory' },
+    { id: 'pl-grn',      moduleGroup: 'paint-lab', label: 'Paint GRN',            path: '/paint/grn',       icon: Truck,       moduleKey: 'paint_lab_grn',       description: 'Receive paint from supplier.', keywords: 'purchase' },
+    { id: 'pl-grtn',     moduleGroup: 'paint-lab', label: 'Paint GRTN',           path: '/paint/grtn',      icon: Undo2,       moduleKey: 'paint_lab_grtn',      description: 'Return paint to supplier.', keywords: 'return' },
+    { id: 'pl-issue',    moduleGroup: 'paint-lab', label: 'Paint Issue',          path: '/paint/issue',     icon: Wrench,      moduleKey: 'paint_lab_issue',     description: 'Issue paint to Job Card.', keywords: 'consume' },
+    { id: 'pl-reports',  moduleGroup: 'paint-lab', label: 'Paint Reports',        path: '/paint/reports',   icon: FileBarChart,moduleKey: 'paint_lab_reports',   description: 'Stock ledger, purchase, consumption.', keywords: 'reports' },
+    { id: 'pl-settings', moduleGroup: 'paint-lab', label: 'Paint Settings',       path: '/paint/settings',  icon: SettingsIcon,moduleKey: 'paint_lab_settings',  description: 'UOM, categories, warehouses.', keywords: 'config' },
+
+    // ── Finance ──────────────────────────────────────────────
+    { id: 'f-coa',       moduleGroup: 'finance', label: 'Chart of Accounts',      path: '/coa',                     icon: Landmark,    moduleKey: 'finance_coa',       description: 'COA hierarchy master.', keywords: 'gl accounts' },
+    { id: 'f-cpv',       moduleGroup: 'finance', label: 'Cash Payment (CPV)',     path: '/vouchers/cpv',            icon: Wallet,      moduleKey: 'finance_vouchers',  description: 'Cash-out voucher.', keywords: 'voucher' },
+    { id: 'f-crv',       moduleGroup: 'finance', label: 'Cash Receipt (CRV)',     path: '/vouchers/crv',            icon: Receipt,     moduleKey: 'finance_vouchers',  description: 'Cash-in voucher.', keywords: 'voucher' },
+    { id: 'f-bpv',       moduleGroup: 'finance', label: 'Bank Payment (BPV)',     path: '/vouchers/bpv',            icon: CreditCard,  moduleKey: 'finance_vouchers',  description: 'Bank payment voucher.', keywords: 'voucher' },
+    { id: 'f-brv',       moduleGroup: 'finance', label: 'Bank Receipt (BRV)',     path: '/vouchers/brv',            icon: Landmark,    moduleKey: 'finance_vouchers',  description: 'Bank receipt voucher.', keywords: 'voucher' },
+    { id: 'f-jv',        moduleGroup: 'finance', label: 'Journal Voucher (JV)',   path: '/vouchers/jv',             icon: ScrollText,  moduleKey: 'finance_vouchers',  description: 'General journal voucher.', keywords: 'voucher' },
+    { id: 'f-vsearch',   moduleGroup: 'finance', label: 'Voucher Search',         path: '/vouchers',                icon: ListChecks,  moduleKey: 'finance_vouchers',  description: 'Find any posted voucher.', keywords: 'search' },
+    { id: 'f-rcv',       moduleGroup: 'finance', label: 'Receive Payment',        path: '/payments/receive',        icon: Receipt,     moduleKey: 'payments',          description: 'Customer receipts with allocation.', keywords: 'payment' },
+    { id: 'f-mkp',       moduleGroup: 'finance', label: 'Make Payment',           path: '/payments/make',           icon: Wallet,      moduleKey: 'payments',          description: 'Supplier / vendor payments.', keywords: 'payment' },
+    { id: 'f-pos',       moduleGroup: 'finance', label: 'POS Settlement',         path: '/payments/pos-settlement', icon: CreditCard,  moduleKey: 'payments',          description: 'POS clearance to bank.', keywords: 'card' },
+    { id: 'f-cheques',   moduleGroup: 'finance', label: 'Cheque Clearance',       path: '/payments/cheques',        icon: Receipt,     moduleKey: 'finance_cheques',   description: 'Move cheques from holding to bank.', keywords: 'cheque' },
+    { id: 'f-acc-setup', moduleGroup: 'finance', label: 'Accounting Setup',       path: '/accounting/setup',        icon: SettingsIcon,moduleKey: 'accounting_setup',  description: 'System-account GL role mapping.', keywords: 'setup' },
+    { id: 'f-tax-rates', moduleGroup: 'finance', label: 'Tax Rates',              path: '/accounting/tax-rates',    icon: SlidersHorizontal, moduleKey: 'accounting_setup', description: 'GST + PST rate config.', keywords: 'gst pst' },
+    { id: 'f-banks',     moduleGroup: 'finance', label: 'Bank Accounts',          path: '/accounting/bank-accounts',icon: Landmark,    moduleKey: 'accounting_setup',  description: 'Registered bank accounts.', keywords: 'bank' },
+    { id: 'f-biz-prof',  moduleGroup: 'finance', label: 'Business Profile',       path: '/settings/business-profile', icon: SettingsIcon, moduleKey: 'settings_business_profile', description: 'Legal name, NTN, letterhead.', keywords: 'company' },
+
+    // ── CRM / CRO ────────────────────────────────────────────
+    { id: 'crm-fu',      moduleGroup: 'crm', label: 'CRD Follow-Ups',           path: '/crd/follow-ups',       icon: Bell,           moduleKey: 'crd_followups',    description: 'Post-JC customer follow-up queue.', keywords: 'callback' },
+    { id: 'crm-ws',      moduleGroup: 'crm', label: 'CRO Workspace',            path: '/cro/workspace',        icon: MessageSquare,  moduleKey: 'cro_workspace',    description: 'Complaint intake + assignment.', keywords: 'complaint' },
+    { id: 'crm-ws-r',    moduleGroup: 'crm', label: 'My Complaints (Advisor)',  path: '/cro/workspace',        icon: MessageSquare,  moduleKey: 'cro_dept_responder', description: 'My assigned complaints.', keywords: 'complaint' },
+    { id: 'crm-srv',     moduleGroup: 'crm', label: 'Post-Service Surveys',     path: '/cro/surveys',          icon: ClipboardCheck, moduleKey: 'cro_surveys',      description: 'Survey results.', keywords: 'nps' },
+    { id: 'crm-srv-t',   moduleGroup: 'crm', label: 'Survey Templates',         path: '/cro/survey-templates', icon: SettingsIcon,   moduleKey: 'cro_admin',        description: 'Question set master.', keywords: 'template' },
+    { id: 'crm-rem',     moduleGroup: 'crm', label: 'Service Reminders',        path: '/cro/reminders',        icon: Bell,           moduleKey: 'cro_reminders',    description: 'Upcoming service reminders.', keywords: 'reminder' },
+    { id: 'crm-kyc',     moduleGroup: 'crm', label: 'KYC Flags',                path: '/cro/kyc-flags',        icon: Fingerprint,    moduleKey: 'cro_kyc',          description: 'Customer KYC anomalies.', keywords: 'kyc' },
+    { id: 'crm-inq',     moduleGroup: 'crm', label: 'CRO Inquiries',            path: '/cro/inquiries',        icon: MessageSquare,  moduleKey: 'cro_inquiries',    description: 'General customer inquiries.', keywords: 'inquiry' },
+    { id: 'crm-camp',    moduleGroup: 'crm', label: 'CRO Campaigns',            path: '/cro/campaigns',        icon: Ticket,         moduleKey: 'cro_admin',        description: 'Campaign broadcast manager.', keywords: 'campaign' },
+
+    // ── Vehicle Sales ────────────────────────────────────────
+    { id: 's-models',    moduleGroup: 'sales', label: 'Models',                path: '/sales/models',            icon: Car,          moduleKey: 'sales_models',        description: 'Model master.', keywords: 'car' },
+    { id: 's-variants',  moduleGroup: 'sales', label: 'Variants',              path: '/sales/variants',          icon: Car,          moduleKey: 'sales_variants',      description: 'Variant + pricing.', keywords: 'trim' },
+    { id: 's-inv',       moduleGroup: 'sales', label: 'Vehicle Inventory',     path: '/sales/inventory',         icon: Package,      moduleKey: 'sales_inventory',     description: 'On-hand chassis.', keywords: 'chassis' },
+    { id: 's-book',      moduleGroup: 'sales', label: 'Bookings',              path: '/sales/bookings',          icon: ClipboardList,moduleKey: 'sales_bookings',      description: 'Customer bookings.', keywords: 'sales' },
+    { id: 's-inq',       moduleGroup: 'sales', label: 'Sales Inquiries',       path: '/sales/inquiries',         icon: MessageSquare,moduleKey: 'sales_inquiries',     description: 'Pre-booking inquiries.', keywords: 'lead' },
+    { id: 's-neg',       moduleGroup: 'sales', label: 'Negotiations',          path: '/sales/negotiations',      icon: Handshake,    moduleKey: 'sales_negotiations',  description: 'Price + discount approvals.', keywords: 'discount' },
+    { id: 's-cancel',    moduleGroup: 'sales', label: 'Cancellations',         path: '/sales/cancellations',     icon: Undo2,        moduleKey: 'sales_cancellations', description: 'Booking cancellations.', keywords: 'cancel' },
+    { id: 's-inc-pol',   moduleGroup: 'sales', label: 'Incentive Policies',    path: '/sales/incentive-policies',icon: SlidersHorizontal, moduleKey: 'sales_incentive_policies', description: 'Sales-staff incentive rules.', keywords: 'incentive' },
+    { id: 's-inc-disb',  moduleGroup: 'sales', label: 'Incentive Disbursement',path: '/sales/incentive-disbursement', icon: DollarSign, moduleKey: 'sales_incentive_disbursement', description: 'Pay incentives to staff.', keywords: 'incentive' },
+    { id: 's-mst-inc',   moduleGroup: 'sales', label: 'Master Incentive',      path: '/sales/master-incentive',  icon: Award,        moduleKey: 'sales_master_incentive', description: 'Master-Changan incentive tracking.', keywords: 'master' },
+    { id: 's-recov',     moduleGroup: 'sales', label: 'Sales Recovery',        path: '/sales/recovery',          icon: TrendingUp,   moduleKey: 'sales_recovery',      description: 'Payment recovery queue.', keywords: 'recovery' },
+    { id: 's-targets',   moduleGroup: 'sales', label: 'Hierarchy & Targets',   path: '/sales/hierarchy-targets', icon: TrendingUp,   moduleKey: 'sales_targets',       description: 'Sales-staff structure + monthly targets.', keywords: 'target' },
+    { id: 's-reports',   moduleGroup: 'sales', label: 'Sales Reports',         path: '/sales/reports',           icon: LineChart,    moduleKey: 'sales_reports',       description: 'Booking, inventory, executive-performance.', keywords: 'reports' },
+    { id: 's-cro-rep',   moduleGroup: 'sales', label: 'CRO Reports',           path: '/cro/reports',             icon: LineChart,    moduleKey: 'cro_admin',           description: 'Customer-relations reports.', keywords: 'cro' },
+
+    // ── HR ───────────────────────────────────────────────────
+    { id: 'hr-emp',      moduleGroup: 'hr', label: 'Employees',                 path: '/employees',   icon: Users,        moduleKey: 'hr_employees', description: 'Employee master.', keywords: 'staff' },
+    { id: 'hr-cfg',      moduleGroup: 'hr', label: 'HR Settings',               path: '/hr-settings', icon: SettingsIcon, moduleKey: 'hr_settings',  description: 'Departments, designations.', keywords: 'setup' },
+
+    // ── Admin ────────────────────────────────────────────────
+    { id: 'a-users',     moduleGroup: 'admin', label: 'User Management',      path: '/admin/users',       icon: UserCog,     moduleKey: 'admin_users',       description: 'Create / edit users.', keywords: 'user' },
+    { id: 'a-perms',     moduleGroup: 'admin', label: 'Role Permissions',      path: '/admin/permissions', icon: KeyRound,    moduleKey: 'admin_permissions', description: 'Group ⇢ permission matrix.', keywords: 'rbac' },
+
+    // ── Parties (grouped under Admin section for compactness) ─
+    { id: 'a-parties',   moduleGroup: 'admin', label: 'Credit Parties',        path: '/customers',            icon: Users, moduleKey: 'crm_parties',    description: 'Named customer / supplier master.', keywords: 'party' },
+    { id: 'a-pba',       moduleGroup: 'admin', label: 'Party Business Access', path: '/party-business-access', icon: ShieldCheck, moduleKey: 'crm_parties', description: 'Which business each party belongs to.', keywords: 'access' },
+
+    // ── Reports ──────────────────────────────────────────────
+    { id: 'r-tb',        moduleGroup: 'reports', label: 'Trial Balance',       path: '/reports/trial-balance',       icon: FileBarChart, permission: 'report:trial_balance' },
+    { id: 'r-tbx',       moduleGroup: 'reports', label: 'TB Extract',          path: '/reports/trial-balance-extract',icon: FileBarChart, permission: 'report:trial_balance_extract' },
+    { id: 'r-gl',        moduleGroup: 'reports', label: 'GL Detail',           path: '/reports/gl-detail',           icon: ListChecks,   permission: 'report:gl_detail' },
+    { id: 'r-pnl',       moduleGroup: 'reports', label: 'Profit & Loss',       path: '/reports/pnl',                 icon: ListChecks,   permission: 'report:pnl' },
+    { id: 'r-bs',        moduleGroup: 'reports', label: 'Balance Sheet',       path: '/reports/balance-sheet',       icon: ListChecks,   permission: 'report:balance_sheet' },
+    { id: 'r-daybook',   moduleGroup: 'reports', label: 'Day Book',            path: '/reports/day-book',            icon: ListChecks,   permission: 'report:day_book' },
+    { id: 'r-cust-stmt', moduleGroup: 'reports', label: 'Customer Statement',  path: '/reports/customer-statement',  icon: UserCog,      permission: 'report:customer_statement' },
+    { id: 'r-sup-stmt',  moduleGroup: 'reports', label: 'Supplier Statement',  path: '/reports/supplier-statement',  icon: Truck,        permission: 'report:supplier_statement' },
+    { id: 'r-ra',        moduleGroup: 'reports', label: 'Receivables Aging',   path: '/reports/receivables-aging',   icon: ListChecks,   permission: 'report:receivables_aging' },
+    { id: 'r-pa',        moduleGroup: 'reports', label: 'Payables Aging',      path: '/reports/payables-aging',      icon: ListChecks,   permission: 'report:payables_aging' },
+    { id: 'r-ia',        moduleGroup: 'reports', label: 'Insurance Aging',     path: '/reports/insurance-aging',     icon: ListChecks,   permission: 'report:insurance_aging' },
+    { id: 'r-walk',      moduleGroup: 'reports', label: 'Walk-in JC Pending',  path: '/reports/walkin-outstanding',  icon: ListChecks,   permission: 'report:walkin_outstanding' },
+    { id: 'r-cash',      moduleGroup: 'reports', label: 'Daily Cash Book',     path: '/reports/daily-cash-book',     icon: Wallet,       permission: 'report:daily_cash_book' },
+    { id: 'r-bank',      moduleGroup: 'reports', label: 'Bank Balances',       path: '/reports/bank-balances',       icon: Landmark,     permission: 'report:bank_balances' },
+    { id: 'r-pos-p',     moduleGroup: 'reports', label: 'POS Pending',         path: '/reports/pos-pending',         icon: CreditCard,   permission: 'report:pos_pending' },
+    { id: 'r-chq',       moduleGroup: 'reports', label: 'Cheques on Hand',     path: '/reports/cheques-on-hand',     icon: Receipt,      permission: 'report:cheques_on_hand' },
+    { id: 'r-tax-s',     moduleGroup: 'reports', label: 'Tax Summary',         path: '/reports/tax-summary',         icon: Percent,      permission: 'report:tax_summary' },
+    { id: 'r-tax-h',     moduleGroup: 'reports', label: 'Tax Rate History',    path: '/reports/tax-rate-history',    icon: Percent,      permission: 'report:tax_rate_history' },
+    { id: 'r-sales',     moduleGroup: 'reports', label: 'Sales Register',      path: '/reports/sales-register',      icon: ListChecks,   permission: 'report:sales_register' },
+    { id: 'r-gm',        moduleGroup: 'reports', label: 'Gross Margin',        path: '/reports/gross-margin',        icon: ListChecks,   permission: 'report:gross_margin' },
+    { id: 'r-disc',      moduleGroup: 'reports', label: 'Discount Given',      path: '/reports/discount-given',      icon: ListChecks,   permission: 'report:discount_given' },
+    { id: 'r-gcr',       moduleGroup: 'reports', label: 'Gen-Customer Recon',  path: '/reports/gencust-reconciliation', icon: ListChecks,permission: 'report:gencust_reconciliation' },
+    { id: 'r-va',        moduleGroup: 'reports', label: 'Voucher Audit Trail', path: '/reports/voucher-audit',       icon: ListChecks,   permission: 'report:voucher_audit' },
+    { id: 'r-saa',       moduleGroup: 'reports', label: 'System Account Audit',path: '/reports/system-account-audit',icon: ShieldCheck,  permission: 'report:system_account_audit' },
+    { id: 'r-jcr',       moduleGroup: 'reports', label: 'Job Card Register',   path: '/reports/service/job-card-register',   icon: ListChecks, permission: 'report:job_card_register' },
+    { id: 'r-adv',       moduleGroup: 'reports', label: 'Advisor Performance', path: '/reports/service/advisor-performance', icon: ListChecks, permission: 'report:advisor_performance' },
+    { id: 'r-rev',       moduleGroup: 'reports', label: 'Revenue Summary',     path: '/reports/service/revenue-summary',     icon: ListChecks, permission: 'report:revenue_summary' },
+    { id: 'r-ins',       moduleGroup: 'reports', label: 'Insurance Claims',    path: '/reports/service/insurance-claims',    icon: ListChecks, permission: 'report:insurance_claims' },
+    { id: 'r-mech',      moduleGroup: 'reports', label: 'Mechanic Productivity',path: '/reports/service/mechanic-productivity', icon: ListChecks, permission: 'report:mechanic_productivity' },
+    { id: 'r-inv-val',   moduleGroup: 'reports', label: 'Inventory Valuation', path: '/reports/inventory-valuation', icon: ListChecks,   permission: 'report:inventory_valuation' },
+    { id: 'r-stk-mvt',   moduleGroup: 'reports', label: 'Stock Movement',      path: '/reports/parts/stock-movement',icon: ListChecks,   permission: 'report:stock_movement' },
+    { id: 'r-reord',     moduleGroup: 'reports', label: 'Reorder Alert',       path: '/reports/parts/reorder-alert', icon: ListChecks,   permission: 'report:reorder_alert' },
+    { id: 'r-p-sales',   moduleGroup: 'reports', label: 'Parts Sales Register',path: '/reports/parts/sales-register',icon: ListChecks,   permission: 'report:parts_sales_register' },
+    { id: 'r-p-purch',   moduleGroup: 'reports', label: 'Purchase Summary',    path: '/reports/parts/purchase-summary',icon: ListChecks,  permission: 'report:purchase_summary' },
+    { id: 'r-p-issued',  moduleGroup: 'reports', label: 'Parts Issued to JC',  path: '/reports/parts/issued-to-jc',  icon: ListChecks,   permission: 'report:parts_issued_to_jc' },
+    { id: 'r-s-book',    moduleGroup: 'reports', label: 'Booking Register',    path: '/reports/sales/booking-register',    icon: ListChecks, permission: 'report:booking_register' },
+    { id: 'r-s-inv',     moduleGroup: 'reports', label: 'Vehicle Inventory',   path: '/reports/sales/vehicle-inventory',   icon: ListChecks, permission: 'report:vehicle_inventory' },
+    { id: 'r-s-exec',    moduleGroup: 'reports', label: 'Executive Performance',path: '/reports/sales/executive-performance',icon: ListChecks,permission: 'report:executive_performance' },
+    { id: 'r-s-adv',     moduleGroup: 'reports', label: 'Customer Advances Aging', path: '/reports/sales/customer-advances-aging', icon: ListChecks, permission: 'report:customer_advances_aging' },
+
+    // ── Workflow ─────────────────────────────────────────────
+    { id: 'wf-unfin',    moduleGroup: 'workflow', label: 'Unfinalize Requests', path: '/unfinalize-requests', icon: Workflow, moduleKey: 'am_approve', description: 'Approve reversal requests.', keywords: 'reverse approve' },
+];
+
+// ────────────────────────────────────────────────────────────
+// Access helpers
+// ────────────────────────────────────────────────────────────
+
+/**
+ * True if the given nav item's guard passes for the current user.
+ * `hasModule` and `hasPermission` come from useAuth().
+ */
+export function canAccessNavItem(item, hasModule, hasPermission) {
+    if (!item) return false;
+    const okModule = item.moduleKey ? !!hasModule(item.moduleKey) : false;
+    const okPerm   = item.permission
+        ? !!(hasPermission && hasPermission(item.permission))
+        : false;
+    if (item.moduleKey && item.permission) return okModule || okPerm;
+    if (item.moduleKey) return okModule;
+    if (item.permission) return okPerm;
+    return true;   // no guards → public
+}
+
+/** All nav items the current user can access. */
+export function getVisibleNavItems(hasModule, hasPermission) {
+    return NAV_ITEMS.filter(it => canAccessNavItem(it, hasModule, hasPermission));
+}
+
+/** Module groups (with items) that have at least one visible item. */
+export function getVisibleModuleGroups(hasModule, hasPermission) {
+    const visible = getVisibleNavItems(hasModule, hasPermission);
+    const groupsInUse = new Set(visible.map(v => v.moduleGroup));
+    // Always include the Dashboard group so `/` never disappears.
+    groupsInUse.add('dashboard');
+    return MODULE_GROUPS.filter(g => groupsInUse.has(g.id));
+}
+
+/** Items belonging to one group, filtered by access. */
+export function getModuleActions(groupId, hasModule, hasPermission) {
+    return NAV_ITEMS
+        .filter(it => it.moduleGroup === groupId)
+        .filter(it => canAccessNavItem(it, hasModule, hasPermission));
+}
+
+/** Look up a group's metadata by id. */
+export function getGroup(groupId) {
+    return MODULE_GROUPS.find(g => g.id === groupId) || null;
+}
