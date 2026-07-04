@@ -168,6 +168,9 @@ const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits:
             const voucherNo = await nextVoucherNo(tx, 'JV');
             const narration = `Paint Lab opening stock — ${toInsert.length} items @ ${OPENING_DATE}`;
 
+            // SourceDocType left NULL — pure journal voucher, no source doc.
+            // The CK_VoucherInfo_SourceDocType whitelist doesn't accept
+            // arbitrary values so we avoid it entirely for opening entries.
             const hdr = await new sql.Request(tx)
                 .input('vd',   sql.DateTime,          new Date(OPENING_DATE + 'T12:00:00'))
                 .input('vno',  sql.NVarChar(50),      voucherNo)
@@ -177,10 +180,10 @@ const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits:
                 .input('cbn',  sql.NVarChar(100),     'system-paint-opening-stock')
                 .query(`INSERT INTO data_FinanceVoucherInfo
                             (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
-                             Status, Posted, SourceDocType, CreatedByName)
+                             Status, Posted, CreatedByName)
                         OUTPUT INSERTED.VoucherID
                         VALUES (@vd, @vno, @vtId, @rem, @tot,
-                                'Draft', 0, 'OPENING', @cbn)`);
+                                'Draft', 0, @cbn)`);
             const vid = hdr.recordset[0].VoucherID;
 
             await new sql.Request(tx)
