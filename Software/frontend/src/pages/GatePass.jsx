@@ -96,7 +96,7 @@ export default function GatePass() {
             ? `Credit${gp.PartyName ? ' — ' + gp.PartyName : ''}`
             : (gp.PaymentMode || gp.PaymentModes || '—');
         const ro = gp.RONumber || gp.InvoiceNo || `${gp.DocType} #${gp.DocID}`;
-        // Inline the same .pbh business header shared by every AutoDMS
+        // Inline the same .pbh business header shared by every DealerDesk
         // print — see utils/businessProfile.js.
         const headerHtml = businessHeaderHtml(profile, {
             docTitle: 'Gate Pass',

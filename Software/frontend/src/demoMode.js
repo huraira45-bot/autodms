@@ -99,5 +99,5 @@ function demoAdapter(config) {
 if (isDemoMode) {
     axios.defaults.adapter = demoAdapter;
     // eslint-disable-next-line no-console
-    console.info('[AutoDMS] Running in DEMO MODE — no backend calls are made.');
+    console.info('[DealerDesk] Running in DEMO MODE — no backend calls are made.');
 }

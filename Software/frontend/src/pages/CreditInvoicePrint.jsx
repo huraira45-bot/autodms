@@ -22,7 +22,7 @@ export default function CreditInvoicePrint() {
 
     useEffect(() => {
         // Blank the tab title before printing so browsers (Chrome, Edge)
-        // don't stamp "Job Card — AutoDMS" at the top of every printed page.
+        // don't stamp "Job Card — DealerDesk" at the top of every printed page.
         // A single space still shows something in the tab bar without
         // dumping meaningful text on the printout. URL/date headers are
         // separate; the user must uncheck "Headers and footers" in the

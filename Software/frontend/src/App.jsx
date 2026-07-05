@@ -785,8 +785,8 @@ function AppShell() {
         <div className="erp-shell">
             {/* Brand cell (top-left corner) */}
             <div className="erp-brand">
-                <div className="erp-brand-badge">A</div>
-                <span className="erp-brand-name">AutoDMS</span>
+                <div className="erp-brand-badge">D</div>
+                <span className="erp-brand-name">DealerDesk</span>
             </div>
 
             {/* Top bar: breadcrumbs, search, user */}

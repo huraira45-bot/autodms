@@ -1,6 +1,6 @@
 /**
  * PrintBusinessHeader — the ONE business header at the top of every
- * printed AutoDMS document (owner ask 2026-07-04).
+ * printed DealerDesk document (owner ask 2026-07-04).
  *
  * Used by:
  *   - ReportShell (through ReportPrintHeader.jsx which re-exports this)

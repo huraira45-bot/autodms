@@ -2,7 +2,7 @@
 
 /* ----------------------------------------------------------------
    Odoo-style ERP design tokens (owner ask 2026-07-03: redesign
-   AutoDMS as a dense desktop ERP shell). Avoid Odoo branding.
+   DealerDesk as a dense desktop ERP shell). Avoid Odoo branding.
    ---------------------------------------------------------------- */
 :root {
   /* Legacy names kept for backwards compatibility with older code that
