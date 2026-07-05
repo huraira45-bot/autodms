@@ -50,34 +50,37 @@ export const MODULE_GROUPS = [
 // `keywords` help future command-palette search.
 export const NAV_ITEMS = [
     // ── Workshop ─────────────────────────────────────────────
-    { id: 'w-customers', moduleGroup: 'workshop', label: 'Workshop Customers',    path: '/workshop/customers',       icon: Users,          moduleKey: 'workshop_customers', description: 'Customer master used by Job Cards.', keywords: 'customer end-user' },
-    { id: 'w-jc-new',    moduleGroup: 'workshop', label: 'Create Job Card',       path: '/workshop/jobs/new',        icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open a new RO.', keywords: 'new ro repair' },
-    { id: 'w-jc-search', moduleGroup: 'workshop', label: 'Search Job Cards',      path: '/workshop/jobs',            icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open, active, finalized RO search.', keywords: 'ro job card search' },
-    { id: 'w-veh-hist',  moduleGroup: 'workshop', label: 'Vehicle History',       path: '/workshop/vehicle-history', icon: Car,            moduleKey: 'workshop_jobs',      description: 'Every RO ever run on a vehicle.', keywords: 'chassis reg' },
-    { id: 'w-labour',    moduleGroup: 'workshop', label: 'Labour & Services',    path: '/workshop/services',        icon: Wrench,         moduleKey: 'workshop_labour',    description: 'Labour catalogue master.', keywords: 'services' },
-    { id: 'w-sublet',    moduleGroup: 'workshop', label: 'Sublet Repairs',        path: '/workshop/sublet',          icon: Handshake,      moduleKey: 'workshop_sublet',    description: 'Sublet vendors + jobs.', keywords: 'sublet outsource' },
-    { id: 'w-settings',  moduleGroup: 'workshop', label: 'Workshop Settings',     path: '/workshop/settings',        icon: SettingsIcon,   moduleKey: 'workshop_settings',  description: 'Job types, departments, care-off.', keywords: 'setup config' },
-    { id: 'w-campaigns', moduleGroup: 'workshop', label: 'Campaigns',             path: '/workshop/campaigns',       icon: Ticket,         moduleKey: 'workshop_settings',  description: 'Free-service / MCML campaign master.', keywords: 'ffs sfs pds ppm' },
-    { id: 'w-careoff',   moduleGroup: 'workshop', label: 'Care-Off Discounts',    path: '/workshop/care-off',        icon: Percent,        moduleKey: 'workshop_careoff',   description: 'Discount authorization caps.', keywords: 'discount' },
-    { id: 'w-access',    moduleGroup: 'workshop', label: 'Accessories',           path: '/workshop/accessories',     icon: Boxes,          moduleKey: 'workshop_accessories', description: 'JC accessory checklist master.', keywords: 'accessory' },
-    { id: 'w-ctrl',      moduleGroup: 'workshop', label: 'Job Controller',        path: '/workshop/controller',      icon: Gauge,          moduleKey: 'workshop_controller', description: 'Real-time RO status board.', keywords: 'status bay' },
-    { id: 'w-gatepass',  moduleGroup: 'workshop', label: 'Gate Pass',             path: '/gatepass',                 icon: ClipboardCheck, moduleKey: 'workshop_gatepass',  description: 'Issue and audit vehicle gate passes.', keywords: 'gate exit' },
+    // `priority` promotes an item into the dashboard's "My Workspace" strip
+    // (higher = more prominent). `isQueue` flags items that represent an
+    // inbox / worklist for the "My Queues" section.
+    { id: 'w-customers', moduleGroup: 'workshop', label: 'Workshop Customers',   path: '/workshop/customers',       icon: Users,          moduleKey: 'workshop_customers', description: 'Customer master used by Job Cards.', keywords: 'customer end-user' },
+    { id: 'w-jc-new',    moduleGroup: 'workshop', label: 'Create Job Card',      path: '/workshop/jobs/new',        icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open a new RO.', keywords: 'new ro repair', priority: 10 },
+    { id: 'w-jc-search', moduleGroup: 'workshop', label: 'Search Job Cards',     path: '/workshop/jobs',            icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open, active, finalized RO search.', keywords: 'ro job card search', priority: 9 },
+    { id: 'w-veh-hist',  moduleGroup: 'workshop', label: 'Vehicle History',      path: '/workshop/vehicle-history', icon: Car,            moduleKey: 'workshop_jobs',      description: 'Every RO ever run on a vehicle.', keywords: 'chassis reg' },
+    { id: 'w-labour',    moduleGroup: 'workshop', label: 'Labour & Services',   path: '/workshop/services',        icon: Wrench,         moduleKey: 'workshop_labour',    description: 'Labour catalogue master.', keywords: 'services' },
+    { id: 'w-sublet',    moduleGroup: 'workshop', label: 'Sublet Repairs',       path: '/workshop/sublet',          icon: Handshake,      moduleKey: 'workshop_sublet',    description: 'Sublet vendors + jobs.', keywords: 'sublet outsource' },
+    { id: 'w-settings',  moduleGroup: 'workshop', label: 'Workshop Settings',    path: '/workshop/settings',        icon: SettingsIcon,   moduleKey: 'workshop_settings',  description: 'Job types, departments, care-off.', keywords: 'setup config' },
+    { id: 'w-campaigns', moduleGroup: 'workshop', label: 'Campaigns',            path: '/workshop/campaigns',       icon: Ticket,         moduleKey: 'workshop_settings',  description: 'Free-service / MCML campaign master.', keywords: 'ffs sfs pds ppm' },
+    { id: 'w-careoff',   moduleGroup: 'workshop', label: 'Care-Off Discounts',   path: '/workshop/care-off',        icon: Percent,        moduleKey: 'workshop_careoff',   description: 'Discount authorization caps.', keywords: 'discount' },
+    { id: 'w-access',    moduleGroup: 'workshop', label: 'Accessories',          path: '/workshop/accessories',     icon: Boxes,          moduleKey: 'workshop_accessories', description: 'JC accessory checklist master.', keywords: 'accessory' },
+    { id: 'w-ctrl',      moduleGroup: 'workshop', label: 'Job Controller',       path: '/workshop/controller',      icon: Gauge,          moduleKey: 'workshop_controller', description: 'Real-time RO status board.', keywords: 'status bay', isQueue: true },
+    { id: 'w-gatepass',  moduleGroup: 'workshop', label: 'Gate Pass',            path: '/gatepass',                 icon: ClipboardCheck, moduleKey: 'workshop_gatepass',  description: 'Issue and audit vehicle gate passes.', keywords: 'gate exit' },
 
     // ── Parts & Inventory ────────────────────────────────────
-    { id: 'p-spare',     moduleGroup: 'parts', label: 'Spare Parts',              path: '/parts',        icon: Package, moduleKey: 'parts_spare',           description: 'Parts master + stock.', keywords: 'inventory items' },
-    { id: 'p-grn',       moduleGroup: 'parts', label: 'GRN (Receiving)',          path: '/grn',          icon: Truck,   moduleKey: 'procurement_grn',       description: 'Receive parts from suppliers.', keywords: 'purchase receive' },
+    { id: 'p-spare',     moduleGroup: 'parts', label: 'Spare Parts',              path: '/parts',        icon: Package, moduleKey: 'parts_spare',           description: 'Parts master + stock.', keywords: 'inventory items', priority: 6 },
+    { id: 'p-grn',       moduleGroup: 'parts', label: 'GRN (Receiving)',          path: '/grn',          icon: Truck,   moduleKey: 'procurement_grn',       description: 'Receive parts from suppliers.', keywords: 'purchase receive', priority: 8 },
     { id: 'p-grtn',      moduleGroup: 'parts', label: 'GRTN (Returns)',           path: '/grtn',         icon: Undo2,   moduleKey: 'procurement_grtn',      description: 'Return parts to supplier.', keywords: 'return supplier' },
-    { id: 'p-store',     moduleGroup: 'parts', label: 'Store Sale',               path: '/store-sale',   icon: Store,   moduleKey: 'sales_store',           description: 'Counter parts sale (SS invoice).', keywords: 'counter sale' },
+    { id: 'p-store',     moduleGroup: 'parts', label: 'Store Sale',               path: '/store-sale',   icon: Store,   moduleKey: 'sales_store',           description: 'Counter parts sale (SS invoice).', keywords: 'counter sale', priority: 7 },
     { id: 'p-ssr',       moduleGroup: 'parts', label: 'Store Sale Returns (SSR)', path: '/ssr',          icon: RotateCcw, moduleKey: 'sales_ssr',           description: 'Customer returns from Store Sale.', keywords: 'return customer' },
-    { id: 'p-issue',     moduleGroup: 'parts', label: 'Parts Issue to JC',        path: '/workshop/parts-issue', icon: Package, moduleKey: 'workshop_parts_issue', description: 'Issue parts against a Job Card.', keywords: 'sir' },
+    { id: 'p-issue',     moduleGroup: 'parts', label: 'Parts Issue to JC',        path: '/workshop/parts-issue', icon: Package, moduleKey: 'workshop_parts_issue', description: 'Issue parts against a Job Card.', keywords: 'sir', priority: 8 },
     { id: 'p-settings',  moduleGroup: 'parts', label: 'Inventory Settings',       path: '/inventory-settings', icon: SlidersHorizontal, moduleKey: 'inventory_settings', description: 'Tax rates, warehouses, brands.', keywords: 'config setup' },
 
     // ── Paint Lab ────────────────────────────────────────────
     { id: 'pl-dash',     moduleGroup: 'paint-lab', label: 'Paint Dashboard',      path: '/paint/dashboard', icon: PieChart,    moduleKey: 'paint_lab_dashboard', description: 'Stock KPIs + recent activity.', keywords: 'kpi' },
     { id: 'pl-items',    moduleGroup: 'paint-lab', label: 'Paint Items',          path: '/paint/items',     icon: Palette,     moduleKey: 'paint_lab_items',     description: 'Paint master.', keywords: 'inventory' },
-    { id: 'pl-grn',      moduleGroup: 'paint-lab', label: 'Paint GRN',            path: '/paint/grn',       icon: Truck,       moduleKey: 'paint_lab_grn',       description: 'Receive paint from supplier.', keywords: 'purchase' },
+    { id: 'pl-grn',      moduleGroup: 'paint-lab', label: 'Paint GRN',            path: '/paint/grn',       icon: Truck,       moduleKey: 'paint_lab_grn',       description: 'Receive paint from supplier.', keywords: 'purchase', priority: 7, isQueue: true },
     { id: 'pl-grtn',     moduleGroup: 'paint-lab', label: 'Paint GRTN',           path: '/paint/grtn',      icon: Undo2,       moduleKey: 'paint_lab_grtn',      description: 'Return paint to supplier.', keywords: 'return' },
-    { id: 'pl-issue',    moduleGroup: 'paint-lab', label: 'Paint Issue',          path: '/paint/issue',     icon: Wrench,      moduleKey: 'paint_lab_issue',     description: 'Issue paint to Job Card.', keywords: 'consume' },
+    { id: 'pl-issue',    moduleGroup: 'paint-lab', label: 'Paint Issue',          path: '/paint/issue',     icon: Wrench,      moduleKey: 'paint_lab_issue',     description: 'Issue paint to Job Card.', keywords: 'consume', priority: 8 },
     { id: 'pl-reports',  moduleGroup: 'paint-lab', label: 'Paint Reports',        path: '/paint/reports',   icon: FileBarChart,moduleKey: 'paint_lab_reports',   description: 'Stock ledger, purchase, consumption.', keywords: 'reports' },
     { id: 'pl-settings', moduleGroup: 'paint-lab', label: 'Paint Settings',       path: '/paint/settings',  icon: SettingsIcon,moduleKey: 'paint_lab_settings',  description: 'UOM, categories, warehouses.', keywords: 'config' },
 
@@ -88,20 +91,20 @@ export const NAV_ITEMS = [
     { id: 'f-bpv',       moduleGroup: 'finance', label: 'Bank Payment (BPV)',     path: '/vouchers/bpv',            icon: CreditCard,  moduleKey: 'finance_vouchers',  description: 'Bank payment voucher.', keywords: 'voucher' },
     { id: 'f-brv',       moduleGroup: 'finance', label: 'Bank Receipt (BRV)',     path: '/vouchers/brv',            icon: Landmark,    moduleKey: 'finance_vouchers',  description: 'Bank receipt voucher.', keywords: 'voucher' },
     { id: 'f-jv',        moduleGroup: 'finance', label: 'Journal Voucher (JV)',   path: '/vouchers/jv',             icon: ScrollText,  moduleKey: 'finance_vouchers',  description: 'General journal voucher.', keywords: 'voucher' },
-    { id: 'f-vsearch',   moduleGroup: 'finance', label: 'Voucher Search',         path: '/vouchers',                icon: ListChecks,  moduleKey: 'finance_vouchers',  description: 'Find any posted voucher.', keywords: 'search' },
-    { id: 'f-rcv',       moduleGroup: 'finance', label: 'Receive Payment',        path: '/payments/receive',        icon: Receipt,     moduleKey: 'payments',          description: 'Customer receipts with allocation.', keywords: 'payment' },
-    { id: 'f-mkp',       moduleGroup: 'finance', label: 'Make Payment',           path: '/payments/make',           icon: Wallet,      moduleKey: 'payments',          description: 'Supplier / vendor payments.', keywords: 'payment' },
-    { id: 'f-pos',       moduleGroup: 'finance', label: 'POS Settlement',         path: '/payments/pos-settlement', icon: CreditCard,  moduleKey: 'payments',          description: 'POS clearance to bank.', keywords: 'card' },
-    { id: 'f-cheques',   moduleGroup: 'finance', label: 'Cheque Clearance',       path: '/payments/cheques',        icon: Receipt,     moduleKey: 'finance_cheques',   description: 'Move cheques from holding to bank.', keywords: 'cheque' },
+    { id: 'f-vsearch',   moduleGroup: 'finance', label: 'Voucher Search',         path: '/vouchers',                icon: ListChecks,  moduleKey: 'finance_vouchers',  description: 'Find any posted voucher.', keywords: 'search', priority: 8 },
+    { id: 'f-rcv',       moduleGroup: 'finance', label: 'Receive Payment',        path: '/payments/receive',        icon: Receipt,     moduleKey: 'payments',          description: 'Customer receipts with allocation.', keywords: 'payment', priority: 10 },
+    { id: 'f-mkp',       moduleGroup: 'finance', label: 'Make Payment',           path: '/payments/make',           icon: Wallet,      moduleKey: 'payments',          description: 'Supplier / vendor payments.', keywords: 'payment', priority: 9 },
+    { id: 'f-pos',       moduleGroup: 'finance', label: 'POS Settlement',         path: '/payments/pos-settlement', icon: CreditCard,  moduleKey: 'payments',          description: 'POS clearance to bank.', keywords: 'card', isQueue: true },
+    { id: 'f-cheques',   moduleGroup: 'finance', label: 'Cheque Clearance',       path: '/payments/cheques',        icon: Receipt,     moduleKey: 'finance_cheques',   description: 'Move cheques from holding to bank.', keywords: 'cheque', isQueue: true },
     { id: 'f-acc-setup', moduleGroup: 'finance', label: 'Accounting Setup',       path: '/accounting/setup',        icon: SettingsIcon,moduleKey: 'accounting_setup',  description: 'System-account GL role mapping.', keywords: 'setup' },
     { id: 'f-tax-rates', moduleGroup: 'finance', label: 'Tax Rates',              path: '/accounting/tax-rates',    icon: SlidersHorizontal, moduleKey: 'accounting_setup', description: 'GST + PST rate config.', keywords: 'gst pst' },
     { id: 'f-banks',     moduleGroup: 'finance', label: 'Bank Accounts',          path: '/accounting/bank-accounts',icon: Landmark,    moduleKey: 'accounting_setup',  description: 'Registered bank accounts.', keywords: 'bank' },
     { id: 'f-biz-prof',  moduleGroup: 'finance', label: 'Business Profile',       path: '/settings/business-profile', icon: SettingsIcon, moduleKey: 'settings_business_profile', description: 'Legal name, NTN, letterhead.', keywords: 'company' },
 
     // ── CRM / CRO ────────────────────────────────────────────
-    { id: 'crm-fu',      moduleGroup: 'crm', label: 'CRD Follow-Ups',           path: '/crd/follow-ups',       icon: Bell,           moduleKey: 'crd_followups',    description: 'Post-JC customer follow-up queue.', keywords: 'callback' },
-    { id: 'crm-ws',      moduleGroup: 'crm', label: 'CRO Workspace',            path: '/cro/workspace',        icon: MessageSquare,  moduleKey: 'cro_workspace',    description: 'Complaint intake + assignment.', keywords: 'complaint' },
-    { id: 'crm-ws-r',    moduleGroup: 'crm', label: 'My Complaints (Advisor)',  path: '/cro/workspace',        icon: MessageSquare,  moduleKey: 'cro_dept_responder', description: 'My assigned complaints.', keywords: 'complaint' },
+    { id: 'crm-fu',      moduleGroup: 'crm', label: 'CRD Follow-Ups',           path: '/crd/follow-ups',       icon: Bell,           moduleKey: 'crd_followups',    description: 'Post-JC customer follow-up queue.', keywords: 'callback', priority: 8, isQueue: true },
+    { id: 'crm-ws',      moduleGroup: 'crm', label: 'CRO Workspace',            path: '/cro/workspace',        icon: MessageSquare,  moduleKey: 'cro_workspace',    description: 'Complaint intake + assignment.', keywords: 'complaint', priority: 9, isQueue: true },
+    { id: 'crm-ws-r',    moduleGroup: 'crm', label: 'My Complaints (Advisor)',  path: '/cro/workspace',        icon: MessageSquare,  moduleKey: 'cro_dept_responder', description: 'My assigned complaints.', keywords: 'complaint', priority: 10, isQueue: true },
     { id: 'crm-srv',     moduleGroup: 'crm', label: 'Post-Service Surveys',     path: '/cro/surveys',          icon: ClipboardCheck, moduleKey: 'cro_surveys',      description: 'Survey results.', keywords: 'nps' },
     { id: 'crm-srv-t',   moduleGroup: 'crm', label: 'Survey Templates',         path: '/cro/survey-templates', icon: SettingsIcon,   moduleKey: 'cro_admin',        description: 'Question set master.', keywords: 'template' },
     { id: 'crm-rem',     moduleGroup: 'crm', label: 'Service Reminders',        path: '/cro/reminders',        icon: Bell,           moduleKey: 'cro_reminders',    description: 'Upcoming service reminders.', keywords: 'reminder' },
@@ -113,9 +116,9 @@ export const NAV_ITEMS = [
     { id: 's-models',    moduleGroup: 'sales', label: 'Models',                path: '/sales/models',            icon: Car,          moduleKey: 'sales_models',        description: 'Model master.', keywords: 'car' },
     { id: 's-variants',  moduleGroup: 'sales', label: 'Variants',              path: '/sales/variants',          icon: Car,          moduleKey: 'sales_variants',      description: 'Variant + pricing.', keywords: 'trim' },
     { id: 's-inv',       moduleGroup: 'sales', label: 'Vehicle Inventory',     path: '/sales/inventory',         icon: Package,      moduleKey: 'sales_inventory',     description: 'On-hand chassis.', keywords: 'chassis' },
-    { id: 's-book',      moduleGroup: 'sales', label: 'Bookings',              path: '/sales/bookings',          icon: ClipboardList,moduleKey: 'sales_bookings',      description: 'Customer bookings.', keywords: 'sales' },
+    { id: 's-book',      moduleGroup: 'sales', label: 'Bookings',              path: '/sales/bookings',          icon: ClipboardList,moduleKey: 'sales_bookings',      description: 'Customer bookings.', keywords: 'sales', priority: 9 },
     { id: 's-inq',       moduleGroup: 'sales', label: 'Sales Inquiries',       path: '/sales/inquiries',         icon: MessageSquare,moduleKey: 'sales_inquiries',     description: 'Pre-booking inquiries.', keywords: 'lead' },
-    { id: 's-neg',       moduleGroup: 'sales', label: 'Negotiations',          path: '/sales/negotiations',      icon: Handshake,    moduleKey: 'sales_negotiations',  description: 'Price + discount approvals.', keywords: 'discount' },
+    { id: 's-neg',       moduleGroup: 'sales', label: 'Negotiations',          path: '/sales/negotiations',      icon: Handshake,    moduleKey: 'sales_negotiations',  description: 'Price + discount approvals.', keywords: 'discount', isQueue: true },
     { id: 's-cancel',    moduleGroup: 'sales', label: 'Cancellations',         path: '/sales/cancellations',     icon: Undo2,        moduleKey: 'sales_cancellations', description: 'Booking cancellations.', keywords: 'cancel' },
     { id: 's-inc-pol',   moduleGroup: 'sales', label: 'Incentive Policies',    path: '/sales/incentive-policies',icon: SlidersHorizontal, moduleKey: 'sales_incentive_policies', description: 'Sales-staff incentive rules.', keywords: 'incentive' },
     { id: 's-inc-disb',  moduleGroup: 'sales', label: 'Incentive Disbursement',path: '/sales/incentive-disbursement', icon: DollarSign, moduleKey: 'sales_incentive_disbursement', description: 'Pay incentives to staff.', keywords: 'incentive' },
@@ -179,7 +182,7 @@ export const NAV_ITEMS = [
     { id: 'r-s-adv',     moduleGroup: 'reports', label: 'Customer Advances Aging', path: '/reports/sales/customer-advances-aging', icon: ListChecks, permission: 'report:customer_advances_aging' },
 
     // ── Workflow ─────────────────────────────────────────────
-    { id: 'wf-unfin',    moduleGroup: 'workflow', label: 'Unfinalize Requests', path: '/unfinalize-requests', icon: Workflow, moduleKey: 'am_approve', description: 'Approve reversal requests.', keywords: 'reverse approve' },
+    { id: 'wf-unfin',    moduleGroup: 'workflow', label: 'Unfinalize Requests', path: '/unfinalize-requests', icon: Workflow, moduleKey: 'am_approve', description: 'Approve reversal requests.', keywords: 'reverse approve', priority: 8, isQueue: true },
 ];
 
 // ────────────────────────────────────────────────────────────
@@ -226,4 +229,40 @@ export function getModuleActions(groupId, hasModule, hasPermission) {
 /** Look up a group's metadata by id. */
 export function getGroup(groupId) {
     return MODULE_GROUPS.find(g => g.id === groupId) || null;
+}
+
+/**
+ * Top-priority actions the user can access, ranked by `priority` descending.
+ * Used by the dashboard's "My Workspace" strip. Pass `limit` (default 8) to
+ * cap the returned list.
+ */
+export function getWorkspaceActions(hasModule, hasPermission, limit = 8) {
+    return getVisibleNavItems(hasModule, hasPermission)
+        .filter(it => Number(it.priority) > 0)
+        .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0))
+        .slice(0, limit);
+}
+
+/** Queue/worklist items the user can access (My Queues section). */
+export function getQueueActions(hasModule, hasPermission) {
+    return getVisibleNavItems(hasModule, hasPermission)
+        .filter(it => it.isQueue);
+}
+
+/** Report items the user can access (My Reports section). */
+export function getVisibleReports(hasModule, hasPermission) {
+    return getVisibleNavItems(hasModule, hasPermission)
+        .filter(it => it.moduleGroup === 'reports');
+}
+
+/** All content the dashboard needs, computed in one pass for a given auth. */
+export function getDashboardForUser(hasModule, hasPermission) {
+    const groups     = getVisibleModuleGroups(hasModule, hasPermission);
+    const workspace  = getWorkspaceActions(hasModule, hasPermission);
+    const queues     = getQueueActions(hasModule, hasPermission);
+    const reports    = getVisibleReports(hasModule, hasPermission);
+    // Non-Dashboard, non-Reports groups — used by "My Modules".
+    const moduleCards = groups.filter(g => g.id !== 'dashboard' && g.id !== 'reports');
+    const hasAnything = groups.some(g => g.id !== 'dashboard');
+    return { groups, workspace, queues, reports, moduleCards, hasAnything };
 }

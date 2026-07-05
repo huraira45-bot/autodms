@@ -1,318 +1,344 @@
 /**
- * Dashboard — Odoo-style ERP app launcher + daily work queue.
- * Owner ask 2026-07-03: dense desktop dashboard, no hero sections.
+ * DealerDesk Dashboard — permission-personalized.
+ * Owner ask 2026-07-06: what the user sees on the dashboard is derived
+ * ENTIRELY from their permissions via navigationConfig.js. Adding a new
+ * module or action to the config surfaces it automatically for any user
+ * who can access it — no changes here needed.
  *
- * Layout (1366×768 optimised):
- *   Row 1  Control panel (greeting + quick-nav search + counters)
- *   Row 2  App tiles grid (RBAC-filtered)
- *   Row 3  Two-column work queue (Service desk / Cash & stock / CRO)
- *   Row 4  Right column: Birthdays + Report shortcuts
+ * Sections (each hides if its list is empty):
+ *   1. Greeting header  — Welcome + role + date
+ *   2. My Workspace     — top-priority quick actions
+ *   3. My Modules       — module cards to open the launcher for each
+ *   4. My Reports       — reports the user has access to
+ *   5. My Queues        — inbox / worklist items
+ *   6. Empty state      — if the user has ZERO modules assigned
+ *
+ * Existing side-content (Birthdays panel) is preserved and access-gated.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import {
-    Wrench, ClipboardList, Activity, Package, ShoppingCart, Receipt, CreditCard,
-    Headphones, ShieldCheck, Car, FileBarChart, Landmark, Cake, Users, ArrowRight,
-    Bell, Layers, Truck, TrendingUp,
+    Cake, Layers, FileBarChart, Bell, ArrowRight, ShieldCheck, Wrench,
+    ShoppingCart, Inbox,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { ErpControlPanel, ErpPanel, ErpEmptyState, ErpStatusPill } from '../components/erp';
-import { getVisibleModuleGroups } from '../navigationConfig';
+import { ErpControlPanel, ErpPanel, ErpEmptyState } from '../components/erp';
+import { getDashboardForUser } from '../navigationConfig';
 
 const API = '/api/workshop';
 
-// App tiles — RBAC-filtered launcher grid.
-const APP_TILES = [
-    { name: 'Job Cards',       desc: 'Open + finalize workshop jobs', icon: Wrench,        tone: 'plum',  to: '/workshop/jobs',              moduleKey: 'workshop_jobs' },
-    { name: 'New Job Card',    desc: 'Start a new RO',               icon: ClipboardList, tone: 'plum',  to: '/workshop/jobs/new',          moduleKey: 'workshop_jobs' },
-    { name: 'Parts Issue',     desc: 'Consume parts on a JC',        icon: Package,       tone: 'amber', to: '/parts-issue',                moduleKey: 'workshop_parts_issue' },
-    { name: 'Spare Parts',     desc: 'Catalog + stock levels',       icon: Layers,        tone: 'amber', to: '/parts',                      moduleKey: 'parts_spare' },
-    { name: 'GRN',             desc: 'Supplier receiving',           icon: Truck,         tone: 'teal',  to: '/grn',                        moduleKey: 'procurement_grn' },
-    { name: 'Store Sale',      desc: 'Counter parts sale',           icon: ShoppingCart,  tone: 'teal',  to: '/store-sale',                 moduleKey: 'sales_store' },
-    { name: 'Receive Payment', desc: 'Customer receipt',             icon: Receipt,       tone: 'green', to: '/payments/receive',           moduleKey: 'payments' },
-    { name: 'Make Payment',    desc: 'Supplier/staff payment',       icon: CreditCard,    tone: 'green', to: '/payments/make',              moduleKey: 'payments' },
-    { name: 'Chart of Accts',  desc: 'GL accounts + hierarchy',      icon: Landmark,      tone: 'steel', to: '/coa',                        moduleKey: 'finance_coa' },
-    { name: 'Vouchers',        desc: 'CPV / CRV / BPV / BRV / JV',   icon: FileBarChart,  tone: 'steel', to: '/vouchers/browse',            moduleKey: 'finance_vouchers' },
-    { name: 'Customers',       desc: 'Parties + statements',         icon: Users,         tone: 'plum',  to: '/customers',                  moduleKey: 'crm_parties' },
-    { name: 'CRO Desk',        desc: 'Complaints + follow-ups',      icon: Headphones,    tone: 'red',   to: '/cro/workspace',              moduleKey: 'cro_workspace' },
-    { name: 'Paint Lab',       desc: 'Paint stock, GRN, issue',      icon: Layers,        tone: 'plum',  to: '/module/paint-lab',           anyModules: ['paint_lab_dashboard','paint_lab_items','paint_lab_grn','paint_lab_issue'] },
-    { name: 'Gate Pass',       desc: 'Issue and audit gate passes',  icon: ShieldCheck,   tone: 'amber', to: '/gatepass',                   moduleKey: 'workshop_gatepass' },
-    { name: 'Bookings',        desc: 'New vehicle sales',            icon: Car,           tone: 'plum',  to: '/sales/bookings',             anyModules: ['sales_executive','sales_agm','sales_gm','sales_reports'] },
-    { name: 'Bay Controller',  desc: 'Workshop bay board',           icon: Activity,      tone: 'teal',  to: '/workshop/controller',        moduleKey: 'workshop_controller' },
-    { name: 'Reports',         desc: 'Trial Balance, revenue…',      icon: TrendingUp,    tone: 'steel', to: '/reports/trial-balance',      moduleKey: 'reports' },
-    { name: 'Unfinalize',      desc: 'Approval workflow',            icon: ShieldCheck,   tone: 'amber', to: '/unfinalize-requests',        anyModules: ['am_approve','admin_unfinalize'] },
-];
-
-const WORK_AREAS = [
-    {
-        title: 'Service Desk', icon: Wrench,
-        items: [
-            { label: 'Open job cards',    to: '/workshop/jobs',              moduleKey: 'workshop_jobs' },
-            { label: 'Bay controller',    to: '/workshop/controller',        moduleKey: 'workshop_controller' },
-            { label: 'Vehicle history',   to: '/workshop/vehicle-history',   moduleKey: 'workshop_jobs' },
-            { label: 'Service campaigns', to: '/workshop/campaigns',         moduleKey: 'workshop_settings' },
-        ],
-    },
-    {
-        title: 'Cash & Stock', icon: Layers,
-        items: [
-            { label: 'Receive payments',  to: '/payments/receive',                                            moduleKey: 'payments' },
-            { label: 'GRN receiving',     to: '/grn',                                                         moduleKey: 'procurement_grn' },
-            { label: 'Store sale',        to: '/store-sale',                                                  moduleKey: 'sales_store' },
-            { label: 'Stock movement',    to: '/reports/parts/stock-movement', anyModules: ['parts_spare','inventory_settings','reports'] },
-        ],
-    },
-    {
-        title: 'Customer Follow-Up', icon: Headphones,
-        items: [
-            { label: 'CRD follow-ups',    to: '/crd/follow-ups',   moduleKey: 'crd_followups' },
-            { label: 'CRO complaints',    to: '/cro/workspace',    moduleKey: 'cro_workspace' },
-            { label: 'Service reminders', to: '/cro/reminders',    anyModules: ['cro_workspace','cro_admin','cro_reports'] },
-            { label: 'Sales inquiries',   to: '/cro/inquiries',    moduleKey: 'cro_admin' },
-        ],
-    },
-];
-
-const REPORT_SHORTCUTS = [
-    { label: 'Trial Balance',     to: '/reports/trial-balance',                moduleKey: 'reports' },
-    { label: 'Job Card Register', to: '/reports/service/job-card-register',    anyModules: ['workshop_jobs','reports'] },
-    { label: 'Inventory On-Hand', to: '/reports/inventory-valuation',          anyModules: ['parts_spare','inventory_settings','reports'] },
-    { label: 'Parts Issued to JC',to: '/reports/parts/issued-to-jc',           anyModules: ['workshop_parts_issue','reports'] },
-    { label: 'Booking Register',  to: '/reports/sales/booking-register',      anyModules: ['sales_executive','sales_agm','sales_gm','sales_reports'] },
-];
-
-function canUse(item, hasModule) {
-    if (item.moduleKey && !hasModule(item.moduleKey)) return false;
-    if (item.anyModules && !item.anyModules.some(hasModule)) return false;
-    return true;
-}
-
 export default function Dashboard() {
-    const { user, hasModule } = useAuth();
-    const [birthdays, setBirthdays] = useState([]);
-    const [birthdayError, setBirthdayError] = useState('');
+    const { user, hasModule, hasPermission } = useAuth();
+    const todayLabel = new Date().toLocaleDateString('en-PK', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    });
 
-    useEffect(() => {
-        axios.get(`${API}/birthdays`)
-            .then(r => { setBirthdays(Array.isArray(r.data) ? r.data : []); setBirthdayError(''); })
-            .catch(() => setBirthdayError('Birthdays could not be loaded.'));
-    }, []);
-
-    const visibleTiles = useMemo(
-        () => APP_TILES.filter(t => canUse(t, hasModule)),
-        [hasModule]
+    // Compute the whole dashboard shape from the user's auth in one pass —
+    // avoids scanning the config 5 different times per render.
+    const {
+        workspace, moduleCards, reports, queues, hasAnything,
+    } = useMemo(
+        () => getDashboardForUser(hasModule, hasPermission),
+        [hasModule, hasPermission]
     );
 
-    const todayLabel = new Intl.DateTimeFormat('en-PK', {
-        weekday: 'long', day: '2-digit', month: 'short', year: 'numeric',
-    }).format(new Date());
+    // Birthdays — legacy convenience; gated to workshop_customers so a
+    // finance-only user doesn't see customer PII on their landing screen.
+    const [birthdays, setBirthdays]     = useState([]);
+    const [birthdayError, setBirthErr]  = useState(null);
+    useEffect(() => {
+        if (!hasModule('workshop_customers')) return;
+        axios.get(`${API}/customer-birthdays`)
+            .then(r => setBirthdays(r.data || []))
+            .catch(e => setBirthErr(e.response?.data?.error || e.message));
+    }, [hasModule]);
+
+    // Quick-action buttons in the greeting header — only shown when the
+    // user can actually reach the target.
+    const canCreateJC = hasModule('workshop_jobs');
+    const canStoreSale = hasModule('sales_store');
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* ── 1. Greeting header ────────────────────────────── */}
             <ErpControlPanel
                 title={`Welcome${user?.userName ? `, ${user.userName}` : ''}`}
                 subtitle={`${todayLabel} · ${user?.groupTitle || 'User'}`}
                 actions={
                     <>
-                        <Link to="/workshop/jobs/new" className="erp-btn erp-btn-primary">
-                            <Wrench size={14} /> New Job Card
-                        </Link>
-                        <Link to="/store-sale" className="erp-btn">
-                            <ShoppingCart size={14} /> Counter Sale
-                        </Link>
+                        {canCreateJC && (
+                            <Link to="/workshop/jobs/new" className="erp-btn erp-btn-primary">
+                                <Wrench size={14} /> New Job Card
+                            </Link>
+                        )}
+                        {canStoreSale && (
+                            <Link to="/store-sale" className="erp-btn">
+                                <ShoppingCart size={14} /> Counter Sale
+                            </Link>
+                        )}
                     </>
                 }
             />
 
-            {/* Compact module strip — one entry per top-level group the user
-                can reach. Clicking opens the module launcher (all actions in
-                that group, filtered by access). Auto-hides for users with
-                no groups assigned; the empty state below covers that case. */}
-            <ModulesStrip />
-
-            {visibleTiles.length === 0 ? (
+            {/* ── Empty state — no modules at all ───────────────── */}
+            {!hasAnything ? (
                 <ErpEmptyState
                     icon={ShieldCheck}
                     title="No modules assigned"
-                    message="Ask an administrator to assign the modules for your daily work."
+                    message="Contact administrator."
                 />
             ) : (
-                <ErpPanel title={<><Layers size={13} /> Applications <span className="count">{visibleTiles.length}</span></>}>
-                    <div className="erp-tile-grid">
-                        {visibleTiles.map(t => {
-                            const Icon = t.icon;
-                            return (
-                                <Link key={t.to} to={t.to} className="erp-tile">
-                                    <div className={`icon tone-${t.tone}`}><Icon size={18} /></div>
-                                    <div className="name">{t.name}</div>
-                                    <div className="desc">{t.desc}</div>
-                                </Link>
-                            );
-                        })}
+                <>
+                    {/* ── 2. My Workspace — top-priority quick actions ── */}
+                    {workspace.length > 0 && (
+                        <ErpPanel title={<><Layers size={13} /> My Workspace <span className="count">{workspace.length}</span></>}>
+                            <div className="dd-quick-grid">
+                                {workspace.map(w => {
+                                    const Icon = w.icon;
+                                    return (
+                                        <Link key={w.id} to={w.path} className="dd-quick" title={w.description}>
+                                            <div className="dd-quick-icn"><Icon size={16} /></div>
+                                            <div className="dd-quick-body">
+                                                <div className="dd-quick-title">{w.label}</div>
+                                                <div className="dd-quick-desc">{w.description}</div>
+                                            </div>
+                                            <ArrowRight size={12} className="dd-quick-arrow" />
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                        </ErpPanel>
+                    )}
+
+                    {/* ── 3. My Modules — module launcher cards ─────── */}
+                    {moduleCards.length > 0 && (
+                        <ErpPanel title={<><Layers size={13} /> My Modules <span className="count">{moduleCards.length}</span></>}>
+                            <div className="dd-module-grid">
+                                {moduleCards.map(g => {
+                                    const Icon = g.icon;
+                                    return (
+                                        <Link key={g.id} to={g.path} className="dd-mod-card" title={g.description}>
+                                            <div className="dd-mod-icn"><Icon size={18} /></div>
+                                            <div className="dd-mod-body">
+                                                <div className="dd-mod-title">{g.label}</div>
+                                                <div className="dd-mod-desc">{g.description}</div>
+                                            </div>
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                        </ErpPanel>
+                    )}
+
+                    {/* Two-column: Queues + Birthdays */}
+                    <div className="dd-two-col">
+                        {/* ── 5. My Queues ─────────────────────────── */}
+                        {queues.length > 0 && (
+                            <ErpPanel title={<><Inbox size={13} /> My Queues <span className="count">{queues.length}</span></>}>
+                                <ul className="dd-queue-list">
+                                    {queues.map(q => {
+                                        const Icon = q.icon;
+                                        return (
+                                            <li key={q.id + '-' + q.path}>
+                                                <Link to={q.path} className="dd-queue-row" title={q.description}>
+                                                    <Icon size={14} />
+                                                    <span className="dd-queue-lbl">{q.label}</span>
+                                                    <span className="dd-queue-desc">{q.description}</span>
+                                                    <ArrowRight size={12} />
+                                                </Link>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </ErpPanel>
+                        )}
+
+                        {/* Birthdays — only if user can view customers */}
+                        {hasModule('workshop_customers') && (
+                            <ErpPanel title={<><Cake size={13} /> Customer Birthdays <span className="count">{birthdays.length}</span></>}>
+                                {birthdayError ? (
+                                    <div className="erp-alert danger">{birthdayError}</div>
+                                ) : (
+                                    <BirthdayList birthdays={birthdays} />
+                                )}
+                            </ErpPanel>
+                        )}
                     </div>
-                </ErpPanel>
+
+                    {/* ── 4. My Reports ────────────────────────────── */}
+                    {reports.length > 0 && (
+                        <ErpPanel title={<><FileBarChart size={13} /> My Reports <span className="count">{reports.length}</span></>}>
+                            <div className="dd-report-grid">
+                                {reports.map(r => {
+                                    const Icon = r.icon;
+                                    return (
+                                        <Link key={r.id} to={r.path} className="dd-report-row" title={r.description}>
+                                            <Icon size={13} /> {r.label}
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                        </ErpPanel>
+                    )}
+                </>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                    {WORK_AREAS.map(area => (
-                        <WorkArea key={area.title} area={area} hasModule={hasModule} />
-                    ))}
-                </div>
+            <style>{`
+                .dd-quick-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                    gap: 8px;
+                }
+                .dd-quick {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 10px 12px;
+                    background: var(--erp-surface);
+                    border: 1px solid var(--erp-border);
+                    border-radius: 4px;
+                    color: var(--erp-text);
+                    text-decoration: none;
+                    transition: background 0.12s, border-color 0.12s;
+                }
+                .dd-quick:hover { background: #fafbfc; border-color: var(--erp-brand); }
+                .dd-quick-icn {
+                    width: 32px; height: 32px;
+                    border-radius: 4px;
+                    background: var(--erp-brand-soft);
+                    color: var(--erp-brand);
+                    display: flex; align-items: center; justify-content: center;
+                    flex-shrink: 0;
+                }
+                .dd-quick-body { flex: 1; min-width: 0; }
+                .dd-quick-title { font-size: 12.5px; font-weight: 600; }
+                .dd-quick-desc {
+                    font-size: 10.5px;
+                    color: var(--erp-text-muted);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    margin-top: 1px;
+                }
+                .dd-quick-arrow { color: var(--erp-text-muted); }
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <ErpPanel title={<><Cake size={13} /> Customer Birthdays <span className="count">{birthdays.length}</span></>}>
-                        {birthdayError ? (
-                            <div className="erp-alert danger">{birthdayError}</div>
-                        ) : (
-                            <BirthdayList birthdays={birthdays} />
-                        )}
-                    </ErpPanel>
+                .dd-module-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                    gap: 8px;
+                }
+                .dd-mod-card {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    padding: 10px 12px;
+                    background: var(--erp-surface);
+                    border: 1px solid var(--erp-border);
+                    border-radius: 4px;
+                    color: var(--erp-text);
+                    text-decoration: none;
+                    min-height: 60px;
+                }
+                .dd-mod-card:hover { background: #fafbfc; border-color: var(--erp-brand); }
+                .dd-mod-icn {
+                    width: 32px; height: 32px;
+                    border-radius: 4px;
+                    background: var(--erp-brand-soft);
+                    color: var(--erp-brand);
+                    display: flex; align-items: center; justify-content: center;
+                    flex-shrink: 0;
+                }
+                .dd-mod-body { min-width: 0; }
+                .dd-mod-title { font-size: 13px; font-weight: 600; }
+                .dd-mod-desc { font-size: 11px; color: var(--erp-text-muted); margin-top: 2px; line-height: 1.3; }
 
-                    <ErpPanel title={<><FileBarChart size={13} /> Reports</>}>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            {REPORT_SHORTCUTS.filter(r => canUse(r, hasModule)).map(r => (
-                                <Link key={r.to} to={r.to}
-                                    style={{
-                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                        padding: '6px 4px', borderBottom: '1px solid var(--erp-border)',
-                                        color: 'var(--erp-text)', textDecoration: 'none', fontSize: 12.5,
-                                    }}>
-                                    {r.label}
-                                    <ArrowRight size={13} style={{ color: 'var(--erp-text-muted)' }} />
-                                </Link>
-                            ))}
-                        </div>
-                    </ErpPanel>
-                </div>
-            </div>
+                .dd-two-col {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 12px;
+                }
+                @media (max-width: 900px) {
+                    .dd-two-col { grid-template-columns: 1fr; }
+                }
+
+                .dd-queue-list { list-style: none; margin: 0; padding: 0; }
+                .dd-queue-row {
+                    display: grid;
+                    grid-template-columns: 16px 1fr auto 12px;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 6px 4px;
+                    color: var(--erp-text);
+                    text-decoration: none;
+                    border-bottom: 1px solid #eef0f3;
+                }
+                .dd-queue-row:hover { background: #fafbfc; }
+                .dd-queue-lbl { font-size: 12.5px; font-weight: 600; }
+                .dd-queue-desc {
+                    font-size: 11px;
+                    color: var(--erp-text-muted);
+                    text-align: right;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    max-width: 260px;
+                }
+
+                .dd-report-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+                    gap: 4px;
+                }
+                .dd-report-row {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    padding: 6px 8px;
+                    font-size: 12px;
+                    color: var(--erp-text);
+                    text-decoration: none;
+                    border: 1px solid var(--erp-border);
+                    border-radius: 3px;
+                    background: var(--erp-surface);
+                }
+                .dd-report-row:hover { background: #fafbfc; border-color: var(--erp-brand); }
+            `}</style>
         </div>
     );
 }
 
-function WorkArea({ area, hasModule }) {
-    const items = area.items.filter(item => canUse(item, hasModule));
-    if (!items.length) return null;
-    const Icon = area.icon;
-
-    return (
-        <ErpPanel title={<><Icon size={13} /> {area.title} <span className="count">{items.length}</span></>}>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {items.map(item => (
-                    <Link key={item.to} to={item.to}
-                        style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '6px 4px', borderBottom: '1px solid var(--erp-border)',
-                            color: 'var(--erp-text)', textDecoration: 'none', fontSize: 12.5,
-                        }}>
-                        <span>{item.label}</span>
-                        <ArrowRight size={13} style={{ color: 'var(--erp-text-muted)' }} />
-                    </Link>
-                ))}
-            </div>
-        </ErpPanel>
-    );
-}
-
+// ─────────────────────────────────────────────────────────────
+// Birthday list — kept from the previous dashboard as-is
+// ─────────────────────────────────────────────────────────────
 function BirthdayList({ birthdays }) {
+    if (!birthdays.length) {
+        return <div style={{ padding: 8, color: 'var(--erp-text-muted)', fontSize: 12 }}>No upcoming birthdays.</div>;
+    }
     const today = birthdays.filter(b => b.IsToday);
     const upcoming = birthdays.filter(b => !b.IsToday);
-
-    if (!birthdays.length) {
-        return (
-            <div style={{ padding: '12px 4px', fontSize: 12, color: 'var(--erp-text-muted)', textAlign: 'center' }}>
-                No customer birthdays this week.
+    const row = (b) => (
+        <div key={b.CustomerID || b.PhoneNo} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 2px', borderBottom: '1px solid #eef0f3', fontSize: 12 }}>
+            <div>
+                <strong>{b.CustomerName}</strong>
+                {b.PhoneNo && <span style={{ color: 'var(--erp-text-muted)', marginLeft: 6 }}>{b.PhoneNo}</span>}
             </div>
-        );
-    }
-
-    const row = (b, highlight = false) => {
-        const dobDate = new Date(b.DOB);
-        const label = Number.isNaN(dobDate.getTime())
-            ? ''
-            : `${dobDate.toLocaleString('default', { month: 'short' })} ${dobDate.getDate()}`;
-        return (
-            <div key={b.ProfileID} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '6px 4px', borderBottom: '1px solid var(--erp-border)',
-            }}>
-                <span style={{
-                    width: 24, height: 24, borderRadius: '50%',
-                    background: highlight ? 'var(--erp-brand)' : 'var(--erp-surface-alt)',
-                    color: highlight ? 'white' : 'var(--erp-text-muted)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 11, fontWeight: 600, flexShrink: 0,
-                }}>{(b.CustomerName || '?').charAt(0).toUpperCase()}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--erp-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.CustomerName}</div>
-                    <div style={{ fontSize: 11, color: 'var(--erp-text-muted)' }}>{b.PhoneNo || 'No phone'}</div>
-                </div>
-                {highlight
-                    ? <ErpStatusPill tone="plum">Today</ErpStatusPill>
-                    : <span style={{ fontSize: 11, color: 'var(--erp-text-muted)' }}>{label}</span>}
+            <div style={{ color: b.IsToday ? '#059669' : 'var(--erp-text-muted)' }}>
+                {b.IsToday ? '🎂 Today' : (b.MonthDay || '')}
             </div>
-        );
-    };
-
+        </div>
+    );
     return (
         <div>
-            {today.length > 0 && (
-                <>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--erp-brand)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0 2px' }}>Today</div>
-                    {today.map(b => row(b, true))}
-                </>
-            )}
+            {today.length > 0 && today.map(row)}
             {upcoming.length > 0 && (
                 <>
                     {today.length > 0 && (
                         <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--erp-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '6px 0 2px' }}>Upcoming</div>
                     )}
-                    {upcoming.map(b => row(b))}
+                    {upcoming.map(row)}
                 </>
             )}
         </div>
-    );
-}
-
-/**
- * ModulesStrip — compact horizontal launcher of every module group the user
- * has access to. Complements the Applications tile grid: each pill links to
- * the group's landing page (see ModuleLauncher.jsx) where every accessible
- * child action is listed.
- */
-function ModulesStrip() {
-    const { hasModule, hasPermission } = useAuth();
-    const groups = getVisibleModuleGroups(hasModule, hasPermission)
-        // Dashboard is already the current page; don't self-link.
-        .filter(g => g.id !== 'dashboard');
-    if (groups.length === 0) return null;
-    return (
-        <ErpPanel title={<><Layers size={13} /> Modules <span className="count">{groups.length}</span></>}>
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                gap: 6,
-            }}>
-                {groups.map(g => {
-                    const Icon = g.icon;
-                    return (
-                        <Link key={g.id} to={g.path} style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            padding: '8px 10px',
-                            background: 'var(--erp-surface)',
-                            border: '1px solid var(--erp-border)',
-                            borderRadius: 4,
-                            color: 'var(--erp-text)',
-                            textDecoration: 'none',
-                            fontSize: 12.5,
-                        }}>
-                            <Icon size={14} color="var(--erp-brand)" />
-                            <span style={{ fontWeight: 600 }}>{g.label}</span>
-                        </Link>
-                    );
-                })}
-            </div>
-        </ErpPanel>
     );
 }
