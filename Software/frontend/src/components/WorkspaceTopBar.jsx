@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Bell, Menu, LogOut } from 'lucide-react';
+import { Search, Menu, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 
 const EXACT_TITLES = {
     '/': 'Dashboard',
@@ -150,6 +151,14 @@ function todayLabel() {
     }).format(new Date());
 }
 
+function shortTodayLabel() {
+    return new Intl.DateTimeFormat('en-PK', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    }).format(new Date());
+}
+
 export default function WorkspaceTopBar({ onOpenCommand, onToggleSidebar }) {
     const location = useLocation();
     const { user, logout } = useAuth();
@@ -190,30 +199,28 @@ export default function WorkspaceTopBar({ onOpenCommand, onToggleSidebar }) {
             <button type="button" className="erp-topbar-search" onClick={onOpenCommand}
                 title="Open command palette (Ctrl+K)">
                 <Search size={13} />
-                <span style={{ flex: 1, fontSize: 12 }}>Search anything…</span>
+                <span className="erp-topbar-search-label">Search anything…</span>
                 <span className="kbd">Ctrl K</span>
             </button>
 
             <div className="erp-topbar-right">
-                <button type="button" className="erp-topbar-icon" title="Today">
-                    <span style={{ fontSize: 11, padding: '0 4px', color: 'var(--erp-text)' }}>{todayLabel()}</span>
-                </button>
-                <button type="button" className="erp-topbar-icon" title="Notifications">
-                    <Bell size={15} />
-                </button>
+                <div className="erp-topbar-date" title={todayLabel()}>
+                    <span className="erp-topbar-date-full">{todayLabel()}</span>
+                    <span className="erp-topbar-date-short">{shortTodayLabel()}</span>
+                </div>
+
+                <NotificationBell />
+
                 <div className="erp-topbar-user" title={user?.groupTitle || ''}>
                     <span className="avatar">{initials}</span>
-                    <span>{user?.userName || 'User'}</span>
+                    <span className="erp-topbar-user-name">{user?.userName || 'User'}</span>
                 </div>
-                {/* Owner ask 2026-07-04: prominent Sign Out button in the
-                    top bar. The tiny "×" beside the user chip earlier was
-                    hard to notice. */}
+
                 <button type="button" onClick={logout}
-                    className="erp-topbar-icon"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 8, width: 'auto' }}
+                    className="erp-topbar-icon erp-topbar-icon-wide"
                     title="Sign out">
                     <LogOut size={14} />
-                    <span style={{ fontSize: 12 }}>Sign out</span>
+                    <span className="erp-topbar-signout-label">Sign out</span>
                 </button>
             </div>
         </header>

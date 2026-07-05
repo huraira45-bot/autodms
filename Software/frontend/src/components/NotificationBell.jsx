@@ -85,23 +85,20 @@ export default function NotificationBell() {
     if (!user) return null;
 
     return (
-        <div ref={containerRef} style={{ position: 'fixed', top: 12, right: 16, zIndex: 900 }}>
+        <div ref={containerRef} className="erp-topbar-bell">
             <button
+                type="button"
                 onClick={() => setOpen(v => !v)}
                 title={unread ? `${unread} unread` : 'No new notifications'}
-                style={{
-                    position: 'relative', background: 'white', border: '1px solid #e2e8f0',
-                    borderRadius: 99, width: 38, height: 38, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                }}>
-                <Bell size={18} color={unread > 0 ? '#b91c1c' : '#475569'} />
+                className="erp-topbar-icon"
+                style={{ position: 'relative' }}>
+                <Bell size={16} color={unread > 0 ? '#b91c1c' : 'var(--erp-text-muted)'} />
                 {unread > 0 && (
                     <span style={{
-                        position: 'absolute', top: -4, right: -4,
-                        minWidth: 18, height: 18, padding: '0 4px',
-                        background: '#dc2626', color: 'white', borderRadius: 99,
-                        fontSize: '0.7rem', fontWeight: 700,
+                        position: 'absolute', top: 2, right: 2,
+                        minWidth: 14, height: 14, padding: '0 3px',
+                        background: '#dc2626', color: 'white', borderRadius: 9,
+                        fontSize: 9, fontWeight: 700, lineHeight: 1,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
                         {unread > 99 ? '99+' : unread}
@@ -111,9 +108,10 @@ export default function NotificationBell() {
 
             {open && (
                 <div style={{
-                    position: 'absolute', top: 46, right: 0, width: 360,
+                    position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 360,
                     background: 'white', border: '1px solid #e2e8f0', borderRadius: 10,
                     boxShadow: '0 10px 30px rgba(0,0,0,0.15)', overflow: 'hidden',
+                    zIndex: 900,
                 }}>
                     <div style={{
                         padding: '10px 14px', borderBottom: '1px solid #e2e8f0',

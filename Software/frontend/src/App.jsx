@@ -156,7 +156,6 @@ import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceCl
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
-import NotificationBell     from './components/NotificationBell';
 import CommandPalette       from './components/CommandPalette';
 import WorkspaceTopBar      from './components/WorkspaceTopBar';
 import { FeedbackProvider } from './components/FeedbackProvider';
@@ -796,9 +795,9 @@ function AppShell() {
             {/* Sidebar with grouped nav (Workshop / Parts / Finance / …) */}
             <Sidebar />
 
-            {/* Toast + command palette live outside grid so their fixed
-                positioning isn't clipped by the workspace overflow */}
-            <NotificationBell />
+            {/* Command palette lives outside grid so its fixed positioning
+                isn't clipped by the workspace overflow. NotificationBell now
+                renders inline inside WorkspaceTopBar. */}
             <CommandPalette
                 open={commandOpen}
                 onOpen={() => setCommandOpen(true)}
