@@ -582,7 +582,17 @@ export default function JobCardForm() {
   };
 
   const totalLabour = labourItems.reduce((s, i) => s + parseFloat(i.Price || 0), 0);
-  const totalParts = issuedParts.reduce((s, p) => s + (parseFloat(p.IssueQuantity || 0) * parseFloat(p.ItemRate || 0)), 0);
+  // Parts gross = Σ qty × rate. Parts discount comes from the Parts Issue slip
+  // (data_StockIssuetoJobCardDetail.DiscAmt) — owner reported 2026-07-06 that
+  // it wasn't being subtracted here. Now it is.
+  const totalParts = issuedParts.reduce(
+    (s, p) => s + (parseFloat(p.IssueQuantity || 0) * parseFloat(p.ItemRate || 0)),
+    0
+  );
+  const totalPartsDisc = issuedParts.reduce(
+    (s, p) => s + (parseFloat(p.DiscAmt || 0)),
+    0
+  );
   // Sublet revenue = PayableAmount (what we charge customer). InvoiceAmount is our cost to vendor.
   const totalSublet = subletItems.reduce((s, sl) => s + parseFloat(sl.PayableAmount || sl.InvoiceAmount || 0), 0);
   const grandTotal = totalLabour + totalParts + totalSublet;
@@ -593,19 +603,26 @@ export default function JobCardForm() {
     if (item.DiscType === 'Percent') return +(price * disc / 100).toFixed(3);
     return +Math.min(disc, price).toFixed(3);
   };
-  const totalDiscountUsed = +labourItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
+  const totalLabourDisc = +labourItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
+  // Combined discount = labour (care-off) + per-part Parts Issue discounts.
+  const totalDiscountUsed = +(totalLabourDisc + totalPartsDisc).toFixed(2);
   const maxDiscountAllowed = careOff ? +(totalLabour * (careOff.MaxDiscountPct / 100)).toFixed(2) : 0;
 
   // Tax per §14.4 — calculated on NET amount (discount before tax):
-  //   PST = (labour - discount + sublet) × PST rate / 100
-  //   GST = parts × GST rate / 100
+  //   PST = (labour - labour_disc + sublet) × PST rate / 100
+  //   GST = sum of snapshotted per-line TaxAmount (already net of discount +
+  //         respects per-line IsGST toggle). Falls back to (parts − parts_disc)
+  //         × gstRate for legacy rows that predate the snapshot.
   const pstRate = parseFloat(taxRates.PST) || 0;
   const gstRate = parseFloat(taxRates.GST) || 0;
-  const totalPST = +(((totalLabour - totalDiscountUsed) + totalSublet) * pstRate / 100).toFixed(2);
-  const totalGST = +(totalParts * gstRate / 100).toFixed(2);
+  const totalPST = +(((totalLabour - totalLabourDisc) + totalSublet) * pstRate / 100).toFixed(2);
+  const snapshotGST = issuedParts.reduce((s, p) => s + (parseFloat(p.TaxAmount || 0)), 0);
+  const totalGST = snapshotGST > 0
+    ? +snapshotGST.toFixed(2)
+    : +(Math.max(0, totalParts - totalPartsDisc) * gstRate / 100).toFixed(2);
   const totalTax = totalPST + totalGST;
   const totalPayable = +(grandTotal - totalDiscountUsed + totalTax).toFixed(2);
-  const capOver = !!careOff && totalDiscountUsed > maxDiscountAllowed + 0.005;
+  const capOver = !!careOff && totalLabourDisc > maxDiscountAllowed + 0.005;
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Loader2 size={32} style={{ animation: 'spin 1s linear infinite' }} /></div>;
 
@@ -1528,18 +1545,24 @@ export default function JobCardForm() {
                     ? <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>No parts issued. Use "Parts Issue (Job Card)" from the sidebar to issue parts.</div>
                     : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                         <thead><tr style={{ background: '#e8edf2' }}>
-                          {['Part Name', 'Number', 'Issue #', 'Qty', 'Rate', 'Total'].map(h => <th key={h} style={{ padding: '4px 8px', textAlign: 'left', border: '1px solid #c8d4e4' }}>{h}</th>)}
+                          {['Part Name', 'Number', 'Issue #', 'Qty', 'Rate', 'Discount', 'Net'].map(h => <th key={h} style={{ padding: '4px 8px', textAlign: 'left', border: '1px solid #c8d4e4' }}>{h}</th>)}
                         </tr></thead>
-                        <tbody>{issuedParts.map((p, i) => (
-                          <tr key={i} style={{ borderBottom: '1px solid #e8edf2' }}>
-                            <td style={{ padding: '3px 8px' }}><strong>{p.ItemName}</strong></td>
-                            <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>{p.ItemNumber ?? p.ManualNumber ?? '—'}</td>
-                            <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>#{p.IssueNo}</td>
-                            <td style={{ padding: '3px 8px', textAlign: 'right' }}>{p.IssueQuantity}</td>
-                            <td style={{ padding: '3px 8px', textAlign: 'right' }}>{parseFloat(p.ItemRate || 0).toLocaleString()}</td>
-                            <td style={{ padding: '3px 8px', textAlign: 'right', fontWeight: 700 }}>{(parseFloat(p.IssueQuantity || 0) * parseFloat(p.ItemRate || 0)).toLocaleString()}</td>
-                          </tr>
-                        ))}</tbody>
+                        <tbody>{issuedParts.map((p, i) => {
+                          const gross = parseFloat(p.IssueQuantity || 0) * parseFloat(p.ItemRate || 0);
+                          const disc  = parseFloat(p.DiscAmt || 0);
+                          const net   = gross - disc;
+                          return (
+                            <tr key={i} style={{ borderBottom: '1px solid #e8edf2' }}>
+                              <td style={{ padding: '3px 8px' }}><strong>{p.ItemName}</strong></td>
+                              <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>{p.ItemNumber ?? p.ManualNumber ?? '—'}</td>
+                              <td style={{ padding: '3px 8px', fontFamily: 'monospace' }}>#{p.IssueNo}</td>
+                              <td style={{ padding: '3px 8px', textAlign: 'right' }}>{p.IssueQuantity}</td>
+                              <td style={{ padding: '3px 8px', textAlign: 'right' }}>{parseFloat(p.ItemRate || 0).toLocaleString()}</td>
+                              <td style={{ padding: '3px 8px', textAlign: 'right', color: disc > 0 ? '#059669' : '#94a3b8' }}>{disc > 0 ? `-${disc.toLocaleString()}` : '—'}</td>
+                              <td style={{ padding: '3px 8px', textAlign: 'right', fontWeight: 700 }}>{net.toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}</tbody>
                       </table>
                   }
                 </div>
