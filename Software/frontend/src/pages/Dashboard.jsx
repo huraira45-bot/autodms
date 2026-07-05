@@ -15,18 +15,15 @@
  *
  * Existing side-content (Birthdays panel) is preserved and access-gated.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import {
-    Cake, Layers, FileBarChart, Bell, ArrowRight, ShieldCheck, Wrench,
+    Layers, FileBarChart, ArrowRight, ShieldCheck, Wrench,
     ShoppingCart, Inbox,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ErpControlPanel, ErpPanel, ErpEmptyState } from '../components/erp';
 import { getDashboardForUser } from '../navigationConfig';
-
-const API = '/api/workshop';
 
 export default function Dashboard() {
     const { user, hasModule, hasPermission } = useAuth();
@@ -42,17 +39,6 @@ export default function Dashboard() {
         () => getDashboardForUser(hasModule, hasPermission),
         [hasModule, hasPermission]
     );
-
-    // Birthdays — legacy convenience; gated to workshop_customers so a
-    // finance-only user doesn't see customer PII on their landing screen.
-    const [birthdays, setBirthdays]     = useState([]);
-    const [birthdayError, setBirthErr]  = useState(null);
-    useEffect(() => {
-        if (!hasModule('workshop_customers')) return;
-        axios.get(`${API}/customer-birthdays`)
-            .then(r => setBirthdays(r.data || []))
-            .catch(e => setBirthErr(e.response?.data?.error || e.message));
-    }, [hasModule]);
 
     // Quick-action buttons in the greeting header — only shown when the
     // user can actually reach the target.
@@ -131,40 +117,26 @@ export default function Dashboard() {
                         </ErpPanel>
                     )}
 
-                    {/* Two-column: Queues + Birthdays */}
-                    <div className="dd-two-col">
-                        {/* ── 5. My Queues ─────────────────────────── */}
-                        {queues.length > 0 && (
-                            <ErpPanel title={<><Inbox size={13} /> My Queues <span className="count">{queues.length}</span></>}>
-                                <ul className="dd-queue-list">
-                                    {queues.map(q => {
-                                        const Icon = q.icon;
-                                        return (
-                                            <li key={q.id + '-' + q.path}>
-                                                <Link to={q.path} className="dd-queue-row" title={q.description}>
-                                                    <Icon size={14} />
-                                                    <span className="dd-queue-lbl">{q.label}</span>
-                                                    <span className="dd-queue-desc">{q.description}</span>
-                                                    <ArrowRight size={12} />
-                                                </Link>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            </ErpPanel>
-                        )}
-
-                        {/* Birthdays — only if user can view customers */}
-                        {hasModule('workshop_customers') && (
-                            <ErpPanel title={<><Cake size={13} /> Customer Birthdays <span className="count">{birthdays.length}</span></>}>
-                                {birthdayError ? (
-                                    <div className="erp-alert danger">{birthdayError}</div>
-                                ) : (
-                                    <BirthdayList birthdays={birthdays} />
-                                )}
-                            </ErpPanel>
-                        )}
-                    </div>
+                    {/* ── 5. My Queues ─────────────────────────── */}
+                    {queues.length > 0 && (
+                        <ErpPanel title={<><Inbox size={13} /> My Queues <span className="count">{queues.length}</span></>}>
+                            <ul className="dd-queue-list">
+                                {queues.map(q => {
+                                    const Icon = q.icon;
+                                    return (
+                                        <li key={q.id + '-' + q.path}>
+                                            <Link to={q.path} className="dd-queue-row" title={q.description}>
+                                                <Icon size={14} />
+                                                <span className="dd-queue-lbl">{q.label}</span>
+                                                <span className="dd-queue-desc">{q.description}</span>
+                                                <ArrowRight size={12} />
+                                            </Link>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </ErpPanel>
+                    )}
 
                     {/* ── 4. My Reports ────────────────────────────── */}
                     {reports.length > 0 && (
@@ -253,15 +225,6 @@ export default function Dashboard() {
                 .dd-mod-title { font-size: 13px; font-weight: 600; }
                 .dd-mod-desc { font-size: 11px; color: var(--erp-text-muted); margin-top: 2px; line-height: 1.3; }
 
-                .dd-two-col {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 12px;
-                }
-                @media (max-width: 900px) {
-                    .dd-two-col { grid-template-columns: 1fr; }
-                }
-
                 .dd-queue-list { list-style: none; margin: 0; padding: 0; }
                 .dd-queue-row {
                     display: grid;
@@ -308,37 +271,3 @@ export default function Dashboard() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Birthday list — kept from the previous dashboard as-is
-// ─────────────────────────────────────────────────────────────
-function BirthdayList({ birthdays }) {
-    if (!birthdays.length) {
-        return <div style={{ padding: 8, color: 'var(--erp-text-muted)', fontSize: 12 }}>No upcoming birthdays.</div>;
-    }
-    const today = birthdays.filter(b => b.IsToday);
-    const upcoming = birthdays.filter(b => !b.IsToday);
-    const row = (b) => (
-        <div key={b.CustomerID || b.PhoneNo} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 2px', borderBottom: '1px solid #eef0f3', fontSize: 12 }}>
-            <div>
-                <strong>{b.CustomerName}</strong>
-                {b.PhoneNo && <span style={{ color: 'var(--erp-text-muted)', marginLeft: 6 }}>{b.PhoneNo}</span>}
-            </div>
-            <div style={{ color: b.IsToday ? '#059669' : 'var(--erp-text-muted)' }}>
-                {b.IsToday ? '🎂 Today' : (b.MonthDay || '')}
-            </div>
-        </div>
-    );
-    return (
-        <div>
-            {today.length > 0 && today.map(row)}
-            {upcoming.length > 0 && (
-                <>
-                    {today.length > 0 && (
-                        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--erp-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '6px 0 2px' }}>Upcoming</div>
-                    )}
-                    {upcoming.map(row)}
-                </>
-            )}
-        </div>
-    );
-}
