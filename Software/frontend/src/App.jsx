@@ -838,6 +838,7 @@ function AppShell() {
                     <Route path="/vouchers/browse" element={
                         <ProtectedRoute moduleKey="finance_vouchers"><VoucherBrowser /></ProtectedRoute>
                     } />
+                    <Route path="/vouchers" element={<Navigate to="/vouchers/browse" replace />} />
                     <Route path="/accounting/setup" element={
                         <ProtectedRoute moduleKey="accounting_setup"><SystemAccounts /></ProtectedRoute>
                     } />
