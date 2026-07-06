@@ -647,7 +647,7 @@ exports.getJobCardById = async (req, res) => {
         const parts = await pool.request()
             .input('id', sql.Int, req.params.id)
             .query(`SELECT sid.StockIssueDetailID, sid.ItemId, sid.Quantity, sid.StockRate, sid.ItemRate, sid.IssueQuantity,
-                    sid.TaxRate, sid.TaxAmount,
+                    sid.TaxRate, sid.TaxAmount, sid.Discount, sid.DiscAmt,
                     i.ItenName AS ItemName, i.ItemNumber, i.ManualNumber, si.IssueDate, si.IssueNo
                     FROM data_StockIssuetoJobCardDetail sid
                     JOIN data_StockIssuetoJobCard si ON sid.StockIssueID = si.StockIssueID

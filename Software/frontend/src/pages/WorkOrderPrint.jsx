@@ -37,7 +37,7 @@ export default function WorkOrderPrint() {
     const labourDisc  = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.DiscAmt) || 0), 0);
     const labourNet   = labourGross - labourDisc;
     const partsGross  = (jc.PartsItems || []).reduce((s, p) => s + (Number(p.StockRate || p.ItemRate) || 0) * (Number(p.IssueQuantity || p.Quantity) || 1), 0);
-    const partsDisc   = 0;   // not tracked per-line in current schema
+    const partsDisc   = (jc.PartsItems || []).reduce((s, p) => s + (Number(p.DiscAmt) || 0), 0);
     const partsNet    = partsGross - partsDisc;
     const sublet      = (jc.SubletItems || []).reduce((s, x) => s + (Number(x.Amount) || 0), 0);
     const pst         = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.TaxAmount) || 0), 0);
@@ -234,7 +234,7 @@ export default function WorkOrderPrint() {
                             <td>{d(p.IssueDate || jc.JobCardDate)}</td>
                             <td>{p.ItemName || ''}</td>
                             <td style={{ textAlign: 'right' }}>{Number(p.IssueQuantity || p.Quantity || 1).toFixed(1)}</td>
-                            <td style={{ textAlign: 'right' }}>{fmt((Number(p.StockRate || p.ItemRate) || 0) * (Number(p.IssueQuantity || p.Quantity) || 1))}</td>
+                            <td style={{ textAlign: 'right' }}>{fmt((Number(p.StockRate || p.ItemRate) || 0) * (Number(p.IssueQuantity || p.Quantity) || 1) - (Number(p.DiscAmt) || 0))}</td>
                         </tr>
                     ))}
                     {(!jc.PartsItems || jc.PartsItems.length === 0) && (
