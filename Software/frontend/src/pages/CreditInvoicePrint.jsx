@@ -54,14 +54,15 @@ export default function CreditInvoicePrint() {
 
     // Totals (per the PDF's calc):
     //   Labour + Sublet without PST — sum of Price-Disc for labour + PayableAmount for sublet
-    //   16% PST                     — sum of TaxAmount on labour lines
+    //   16% PST                     — sum of TaxAmount on labour lines + sublet lines
     //   Parts Without GST           — sum of parts amounts (raw)
     //   18% GST                     — sum of parts TaxAmount
     //   Depreciation                — sum of DepAmount from insurance grid (parts side)
     //   Total Payable by Party      = (Labour+Sublet) + PST + Parts + GST - Depreciation
     const labourNet = labourItems.reduce((s, l) => s + (Number(l.Price)||0) - (Number(l.DiscAmt)||0), 0);
     const sublet    = subletItems.reduce((s, x) => s + (Number(x.PayableAmount)||0), 0);
-    const pst       = labourItems.reduce((s, l) => s + (Number(l.TaxAmount)||0), 0);
+    const pst       = labourItems.reduce((s, l) => s + (Number(l.TaxAmount)||0), 0)
+                    + subletItems.reduce((s, x) => s + (Number(x.TaxAmount)||0), 0);
     // Parts figures pulled from insurance view when available (accurate,
     // includes GST separately). Falls back to jc.PartsItems.
     const partsRows = insParts.length ? insParts : (jc.PartsItems || []).map(p => ({
