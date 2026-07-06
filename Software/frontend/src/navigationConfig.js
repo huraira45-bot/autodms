@@ -72,7 +72,7 @@ export const NAV_ITEMS = [
     { id: 'p-grtn',      moduleGroup: 'parts', label: 'GRTN (Returns)',           path: '/grtn',         icon: Undo2,   moduleKey: 'procurement_grtn',      description: 'Return parts to supplier.', keywords: 'return supplier' },
     { id: 'p-store',     moduleGroup: 'parts', label: 'Store Sale',               path: '/store-sale',   icon: Store,   moduleKey: 'sales_store',           description: 'Counter parts sale (SS invoice).', keywords: 'counter sale', priority: 7 },
     { id: 'p-ssr',       moduleGroup: 'parts', label: 'Store Sale Returns (SSR)', path: '/ssr',          icon: RotateCcw, moduleKey: 'sales_ssr',           description: 'Customer returns from Store Sale.', keywords: 'return customer' },
-    { id: 'p-issue',     moduleGroup: 'parts', label: 'Parts Issue to JC',        path: '/workshop/parts-issue', icon: Package, moduleKey: 'workshop_parts_issue', description: 'Issue parts against a Job Card.', keywords: 'sir', priority: 8 },
+    { id: 'p-issue',     moduleGroup: 'parts', label: 'Parts Issue to JC',        path: '/parts-issue', icon: Package, moduleKey: 'workshop_parts_issue', description: 'Issue parts against a Job Card.', keywords: 'sir', priority: 8 },
     { id: 'p-settings',  moduleGroup: 'parts', label: 'Inventory Settings',       path: '/inventory-settings', icon: SlidersHorizontal, moduleKey: 'inventory_settings', description: 'Tax rates, warehouses, brands.', keywords: 'config setup' },
 
     // ── Paint Lab ────────────────────────────────────────────
