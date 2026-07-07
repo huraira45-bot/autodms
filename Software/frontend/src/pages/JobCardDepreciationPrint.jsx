@@ -135,7 +135,7 @@ export default function JobCardDepreciationPrint() {
                     <tr>
                         <td className="lbl">Party:</td>
                         <td className="val">{jc.PartyName || ''}</td>
-                        <td className="lbl">Company:</td>
+                        <td className="lbl">Surveyor:</td>
                         <td className="val">{insurance.header?.CompanyName || ''}</td>
                         <td className="lbl">Reg #:</td>
                         <td className="val">{jc.VehicleRegNo || ''}</td>
