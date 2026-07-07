@@ -1,19 +1,14 @@
 /**
  * Job Card — Issue Spares With Depreciation print.
  * Matches C:\Users\ServerDeskop\Desktop\dep.pdf (owner ask 2026-07-05).
- *
- * Rules enforced here (per spec):
- *   - Includes ONLY spare parts that carry depreciation data
- *     (DepAmount > 0 or DepreciationPct > 0). Labour is skipped.
- *   - Numeric columns right-aligned; ItemNumber monospace + ellipsis;
- *     ItemName wraps within column, no overflow past page edge.
- *   - A4 portrait, no card / shadow / colored UI chrome.
- *   - Footer (terms + signature) glued near the bottom of the last page:
- *     the whole page is a flex column so `.footer { margin-top: auto }`
- *     pushes it down for short lists, and the browser's natural page
- *     break still relocates it to page 2/3 when the line list spills.
- *   - Business band is the shared PrintBusinessHeader (Business Profile);
- *     no company name / address / NTN / GST hard-coded.
+ * Alignment rewrite 2026-07-07:
+ *   - Dedicated .jc-dep-print wrapper that resets inherited app styles.
+ *   - Details area is a proper HTML table with fixed mm widths per column
+ *     so labels can never overlap values and long text wraps in-cell.
+ *   - vertical-align: top on every cell so a two-line value on one side
+ *     doesn't push the label opposite it off-centre.
+ *   - No overflow: hidden, no ellipsis, no flex/grid inside cells,
+ *     no absolute positioning, no transforms.
  */
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -62,20 +57,18 @@ export default function JobCardDepreciationPrint() {
     }), { items: 0, qty: 0, total: 0, dep: 0 });
 
     // Vehicle description — vw_WorkshopJobCards stores the model text in
-    // VersionCode (same field WorkOrderPrint uses on the Model row). Fall
-    // back to Brand / VehicleCode for older data-entry patterns.
+    // VersionCode (same field WorkOrderPrint uses on the Model row).
     const vehicleName = jc.VersionCode
         || [jc.BrandCode, jc.VehicleCode].filter(Boolean).join(' ')
         || jc.VehicleName
         || '';
 
-    const rowStatus = jc.IsFinalized ? 'Complete' : (jc.Status || 'Open');
+    const rowStatus   = jc.IsFinalized ? 'Complete' : (jc.Status || 'Open');
     const companyName = profile?.CompanyName || '';
 
     return (
-        <div className="dep-print-page">
-            {/* Top band — shared business header (logo left, company centered)
-                with the Print Date + Date In stacked at the top-right. */}
+        <div className="jc-dep-print">
+            {/* Top band — business header left, print + date-in stack right. */}
             <div className="top">
                 <div className="top-biz"><PrintBusinessHeader showOnScreen /></div>
                 <div className="top-dates">
@@ -84,25 +77,41 @@ export default function JobCardDepreciationPrint() {
                 </div>
             </div>
 
-            {/* Title bar */}
-            <div className="title-bar">
-                <div><label>RO#</label><span>{jc.JobCardNo || jc.jobCode || ''}</span></div>
-                <div className="title-text">Issue Spares With Depreciation</div>
-                <div><label>Status</label><span>{rowStatus}</span></div>
-            </div>
-
-            {/* Header field block — customer / vehicle / insurance / IDs.
-                Fixed 8-col grid (4 label/value pairs per row). Labels are
-                bold and fixed-width; values wrap freely so long chassis /
-                engine / company names never get ellipsised. */}
-            {/* Row 1 — customer/vehicle/color/engine. Its own colgroup
-                lets each pair get widths matched to its expected length. */}
-            <table className="party">
+            {/* Title bar — RO# | title | Status */}
+            <table className="title-bar">
                 <colgroup>
-                    <col style={{ width: '13%' }}/><col style={{ width: '20%' }}/>
-                    <col style={{ width: '8%' }}/><col style={{ width: '18%' }}/>
-                    <col style={{ width: '6%' }}/><col style={{ width: '8%' }}/>
-                    <col style={{ width: '9%' }}/><col style={{ width: '18%' }}/>
+                    <col style={{ width: '40mm' }}/>
+                    <col />
+                    <col style={{ width: '38mm' }}/>
+                </colgroup>
+                <tbody>
+                    <tr>
+                        <td className="title-side"><b>RO#</b>&nbsp;&nbsp;{jc.JobCardNo || jc.jobCode || ''}</td>
+                        <td className="title-mid">Issue Spares With Depreciation</td>
+                        <td className="title-side"><b>Status</b>&nbsp;&nbsp;{rowStatus}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            {/*
+              Details section — one plain HTML table.
+              8 columns per row (label, value × 4) with fixed mm widths.
+              Row 1: Customer Name | Vehicle | Color | Engine #
+              Row 2: Party         | Company | Reg # | Chassis #
+              Content width available: 210mm − (9mm × 2 padding) = 192mm.
+              Label/value column widths total exactly 192mm so the
+              rightmost value cannot overflow the page.
+            */}
+            <table className="details">
+                <colgroup>
+                    <col style={{ width: '24mm' }}/>{/* label 1 */}
+                    <col style={{ width: '40mm' }}/>{/* value 1 */}
+                    <col style={{ width: '18mm' }}/>{/* label 2 */}
+                    <col style={{ width: '40mm' }}/>{/* value 2 */}
+                    <col style={{ width: '14mm' }}/>{/* label 3 */}
+                    <col style={{ width: '20mm' }}/>{/* value 3 */}
+                    <col style={{ width: '18mm' }}/>{/* label 4 */}
+                    <col style={{ width: '18mm' }}/>{/* value 4 */}
                 </colgroup>
                 <tbody>
                     <tr>
@@ -115,20 +124,6 @@ export default function JobCardDepreciationPrint() {
                         <td className="lbl">Engine #:</td>
                         <td className="val">{jc.EngineNo || ''}</td>
                     </tr>
-                </tbody>
-            </table>
-
-            {/* Row 2 — party/company/reg/chassis. Given its own table so
-                the Party value column can be wider (26%%) and not force
-                \"Adamjee Insurance Company Limited\" onto 4 lines. */}
-            <table className="party party-2">
-                <colgroup>
-                    <col style={{ width: '6%' }}/><col style={{ width: '26%' }}/>
-                    <col style={{ width: '9%' }}/><col style={{ width: '21%' }}/>
-                    <col style={{ width: '6%' }}/><col style={{ width: '8%' }}/>
-                    <col style={{ width: '9%' }}/><col style={{ width: '15%' }}/>
-                </colgroup>
-                <tbody>
                     <tr>
                         <td className="lbl">Party:</td>
                         <td className="val">{jc.PartyName || ''}</td>
@@ -142,44 +137,47 @@ export default function JobCardDepreciationPrint() {
                 </tbody>
             </table>
 
-            {/* Line items — parts with depreciation only.
-                Column widths (spec): 20 / 28 / 8 / 13 / 15 / 7 / 13 %. */}
+            {/*
+              Line items — fixed mm widths per spec.
+              Content width 192mm. Fixed cols total 131mm; ITEM NAME
+              (flexible) gets the remaining 61mm.
+            */}
             <table className="items">
                 <colgroup>
-                    <col style={{ width: '17%' }}/>
-                    <col style={{ width: '30%' }}/>
-                    <col style={{ width: '7%' }}/>
-                    <col style={{ width: '12%' }}/>
-                    <col style={{ width: '14%' }}/>
-                    <col style={{ width: '7%' }}/>
-                    <col style={{ width: '13%' }}/>
+                    <col style={{ width: '29mm' }}/>{/* ITEMNUMBER   */}
+                    <col style={{ width: '61mm' }}/>{/* ITEM NAME    */}
+                    <col style={{ width: '12mm' }}/>{/* QTY          */}
+                    <col style={{ width: '24mm' }}/>{/* SALESRATE    */}
+                    <col style={{ width: '27mm' }}/>{/* TOTAL AMOUNT */}
+                    <col style={{ width: '12mm' }}/>{/* DEP %        */}
+                    <col style={{ width: '27mm' }}/>{/* DEP AMOUNT   */}
                 </colgroup>
                 <thead>
                     <tr>
-                        <th>ItemNumber</th>
-                        <th>Item Name</th>
-                        <th className="c">Qty</th>
-                        <th className="r">SalesRate</th>
-                        <th className="r">Total Amount</th>
-                        <th className="c">Dep %</th>
-                        <th className="r">Dep Amount</th>
+                        <th>ITEMNUMBER</th>
+                        <th>ITEM NAME</th>
+                        <th className="c">QTY</th>
+                        <th className="r">SALESRATE</th>
+                        <th className="r">TOTAL AMOUNT</th>
+                        <th className="c">DEP %</th>
+                        <th className="r">DEP AMOUNT</th>
                     </tr>
                 </thead>
                 <tbody>
                     {parts.map((p, i) => {
-                        const qty = Number(p.Qty) || 0;
+                        const qty       = Number(p.Qty) || 0;
                         const totalIncl = Number(p.TotalWithTax) || 0;
                         const rateIncl  = qty > 0 ? totalIncl / qty : Number(p.Rate) || 0;
                         return (
-                        <tr key={i}>
-                            <td className="mono wrap">{p.ItemNumber || ''}</td>
-                            <td className="wrap">{p.ItemName || ''}</td>
-                            <td className="r">{fmt(p.Qty)}</td>
-                            <td className="r">{fmt(rateIncl)}</td>
-                            <td className="r">{fmt(totalIncl)}</td>
-                            <td className="c">{fmtQ(p.DepreciationPct)}</td>
-                            <td className="r">{fmt(p.DepAmount)}</td>
-                        </tr>
+                            <tr key={i}>
+                                <td className="mono">{p.ItemNumber || ''}</td>
+                                <td>{p.ItemName || ''}</td>
+                                <td className="r">{fmt(p.Qty)}</td>
+                                <td className="r">{fmt(rateIncl)}</td>
+                                <td className="r">{fmt(totalIncl)}</td>
+                                <td className="c">{fmtQ(p.DepreciationPct)}</td>
+                                <td className="r">{fmt(p.DepAmount)}</td>
+                            </tr>
                         );
                     })}
                     {parts.length === 0 && (
@@ -190,19 +188,16 @@ export default function JobCardDepreciationPrint() {
                     <tr className="tot">
                         <td className="b">Total Items</td>
                         <td className="c b">{totals.items}</td>
-                        <td className="c b box">{fmt(totals.qty)}</td>
+                        <td className="c b">{fmt(totals.qty)}</td>
                         <td></td>
-                        <td className="r b box">{fmt(totals.total)}</td>
+                        <td className="r b">{fmt(totals.total)}</td>
                         <td></td>
-                        <td className="r b box">{fmt(totals.dep)}</td>
+                        <td className="r b">{fmt(totals.dep)}</td>
                     </tr>
                 </tfoot>
             </table>
 
-            {/* Footer — terms bottom-left, signature bottom-right. `margin-top:
-                auto` keeps it glued to the bottom of the last page even for
-                short line lists; long lists let the browser page-break
-                naturally and the footer lands on the final page. */}
+            {/* Footer glued to bottom of last page (via margin-top:auto on the flex column). */}
             <div className="footer">
                 <div className="terms">
                     <div className="terms-h">TERMS AND CONDITION</div>
@@ -222,154 +217,146 @@ export default function JobCardDepreciationPrint() {
             </div>
 
             <style>{`
-                /* ── A4 page hard-sizing ─────────────────────────────── */
+                /* ── A4 hard-sizing ──────────────────────────────────── */
                 @page { size: A4 portrait; margin: 0; }
                 html, body {
                     margin: 0; padding: 0;
-                    background: #e5e7eb;               /* soft grey around the sheet on screen */
+                    background: #e5e7eb;
                     -webkit-print-color-adjust: exact;
                     print-color-adjust: exact;
                 }
                 @media print {
                     html, body { background: white !important; }
                 }
-                /* Full A4 sheet — flex column so the footer glues to the bottom
-                   of the last page for short lists, and browser page-break
-                   relocates it to page 2 when the row list spills over. */
-                .dep-print-page {
+
+                /* Dedicated wrapper — reset app-inherited styles so nothing
+                   leaks in from cards / forms / inputs. */
+                .jc-dep-print {
                     width: 210mm;
                     min-height: 297mm;
-                    margin: 8px auto;                  /* screen preview only */
-                    padding: 10mm 12mm;
+                    margin: 8px auto;
+                    padding: 8mm 9mm;
                     box-sizing: border-box;
                     background: white;
                     color: #000;
                     font-family: Arial, Tahoma, sans-serif;
-                    font-size: 10.5px;
+                    font-size: 10pt;
+                    line-height: 1.15;
                     display: flex;
                     flex-direction: column;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.15);  /* screen preview only */
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.15);   /* preview only */
                 }
+                .jc-dep-print * { box-sizing: border-box; }
+                .jc-dep-print table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    table-layout: fixed;
+                }
+                .jc-dep-print td, .jc-dep-print th { border: 1px solid #111; }
+
                 @media print {
-                    .dep-print-page {
+                    .jc-dep-print {
                         margin: 0;
                         box-shadow: none;
-                        width: 210mm;
-                        min-height: 297mm;
                     }
                 }
 
-                /* ── Header band ─────────────────────────────────────── */
-                /* Give the business band all the room it needs — the dates
-                   block is narrow enough not to squeeze the company header. */
+                /* ── Top band (business header + dates) ─────────────── */
                 .top {
-                    display: grid;
-                    grid-template-columns: 1fr 100px;
-                    gap: 10px;
-                    align-items: flex-start;
+                    display: table;
+                    width: 100%;
+                    border: 0;
                 }
-                .top-biz .pbh { padding: 0; }
-                .top-dates {
-                    font-size: 10px;
+                .top .top-biz {
+                    display: table-cell;
+                    vertical-align: top;
+                    border: 0;
+                }
+                .top .top-dates {
+                    display: table-cell;
+                    vertical-align: top;
                     text-align: right;
-                    padding-top: 4px;
+                    width: 40mm;
+                    padding-top: 2mm;
+                    font-size: 9pt;
                     white-space: nowrap;
+                    border: 0;
                 }
-                .top-dates > div { padding: 1px 0; }
-                .top-dates label { font-weight: 700; margin-right: 4px; }
+                .top .top-dates > div { padding: 0.4mm 0; }
+                .top .top-dates label { font-weight: 700; margin-right: 1mm; }
+                .top-biz .pbh { padding: 0; }
 
-                /* Title bar */
+                /* ── Title bar ──────────────────────────────────────── */
                 .title-bar {
-                    display: grid;
-                    grid-template-columns: 160px 1fr 140px;
-                    gap: 10px;
-                    align-items: center;
-                    margin: 8px 0 6px;
-                    padding: 6px 12px;
+                    margin: 3mm 0 2.5mm;
                     background: #f2f2f2;
-                    border: 1px solid #000;
                 }
-                .title-bar > div { display: flex; align-items: center; gap: 8px; font-size: 11px; }
-                .title-bar label { font-weight: 700; }
-                .title-text {
+                .title-bar td {
+                    padding: 2mm 3mm;
+                    vertical-align: middle;
+                    font-size: 10.5pt;
+                }
+                .title-bar .title-side { white-space: nowrap; }
+                .title-bar .title-mid {
                     font-family: 'Georgia', 'Times New Roman', serif;
                     font-style: italic;
                     font-weight: 700;
-                    font-size: 16px;
+                    font-size: 13pt;
                     text-align: center;
                     color: #444;
                 }
+                .title-bar tr:nth-child(1) td:nth-child(3) { text-align: right; }
 
-                /* Party header block — values wrap; NO ellipsis in print. */
-                .party {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-bottom: 6px;
-                    font-size: 10px;
-                    table-layout: fixed;
-                }
-                .party td {
-                    border: 1px solid #000;
-                    padding: 5px 7px;
-                    vertical-align: middle;
+                /* ── Details table ──────────────────────────────────── */
+                .details { margin-bottom: 3mm; }
+                .details td {
+                    padding: 2mm 1.5mm;
+                    vertical-align: top;
+                    line-height: 1.15;
+                    /* Fully-visible values — long strings wrap onto the next
+                       line within the same cell; nothing is ellipsised or
+                       clipped and nothing bleeds into the next cell. */
                     overflow: visible;
-                    text-overflow: clip;
                     white-space: normal;
                     word-break: break-word;
-                    line-height: 1.35;
+                    overflow-wrap: anywhere;
                 }
-                .party td.lbl {
+                .details .lbl {
                     font-weight: 700;
                     background: #f5f5f5;
-                    white-space: nowrap;
-                    color: #333;
+                    white-space: nowrap;      /* labels stay on one line */
+                    color: #222;
                 }
-                .party td.val { min-height: 16px; }
-                /* Second party table sits directly under the first — kill
-                   its top border so the two rows share a single line. */
-                .party-2 { margin-top: -1px; }
 
-                /* ── Items table — spec column widths ────────────────── */
-                .items {
-                    width: 100%;
-                    border-collapse: collapse;
-                    font-size: 10px;
-                    table-layout: fixed;
-                }
+                /* ── Items table ────────────────────────────────────── */
+                .items { margin-bottom: 3mm; }
                 .items th, .items td {
-                    border: 1px solid #000;
-                    padding: 6px 7px;
-                    vertical-align: middle;
-                    line-height: 1.35;
+                    padding: 1.8mm 2mm;
+                    vertical-align: top;
+                    line-height: 1.2;
+                    overflow: visible;
+                    white-space: normal;
+                    word-break: break-word;
+                    overflow-wrap: anywhere;
                 }
                 .items th {
                     background: #f2f2f2;
                     font-weight: 700;
                     text-align: left;
-                    font-size: 9.5px;
+                    font-size: 9pt;
                     letter-spacing: 0.2px;
                     white-space: nowrap;
-                    text-transform: uppercase;
                 }
                 .items th.c, .items td.c { text-align: center; }
                 .items th.r, .items td.r {
                     text-align: right;
                     font-variant-numeric: tabular-nums;
-                    white-space: nowrap;
                 }
-                .items td.b { font-weight: 700; }
                 .items td.mono {
                     font-family: 'Consolas', 'Courier New', monospace;
-                    font-size: 9.5px;
+                    font-size: 9pt;
                 }
-                /* Never truncate values in print — wrap onto the next line. */
-                .items td.wrap {
-                    overflow: visible;
-                    word-break: break-word;
-                    white-space: normal;
-                    line-height: 1.25;
-                    vertical-align: top;
-                }
+                .items td.b { font-weight: 700; }
                 .items td.empty {
                     padding: 14px;
                     color: #666;
@@ -377,30 +364,39 @@ export default function JobCardDepreciationPrint() {
                     text-align: center;
                 }
                 .items tfoot .tot { background: white; }
-                .items tfoot .tot td.box { border: 2px solid #000; }
                 .items tfoot .tot td:first-child {
                     font-family: 'Georgia', 'Times New Roman', serif;
                     font-style: italic;
-                    font-size: 11px;
+                    font-size: 10.5pt;
                     color: #666;
                 }
 
-                /* ── Footer glued to bottom of the last page ─────────── */
+                /* ── Footer (terms + signature) ─────────────────────── */
                 .footer {
-                    display: grid;
-                    grid-template-columns: 1fr 220px;
-                    gap: 20px;
-                    margin-top: auto;                   /* pushes to bottom in flex column */
-                    padding-top: 6mm;
-                    font-size: 8.5px;
+                    display: table;
+                    width: 100%;
+                    margin-top: auto;
+                    padding-top: 5mm;
+                    font-size: 8pt;
                     page-break-inside: avoid;
                 }
-                .terms .terms-h { font-weight: 700; font-size: 10px; margin-bottom: 3px; }
-                .terms ol { margin: 0; padding-left: 16px; }
-                .terms li { padding: 1px 0; }
-                .sig { text-align: center; }
-                .sig .sig-line { border-top: 1px solid #000; margin: 24px 8px 4px; }
-                .sig .sig-for { margin-top: 20px; }
+                .footer .terms {
+                    display: table-cell;
+                    vertical-align: top;
+                    width: auto;
+                    padding-right: 6mm;
+                }
+                .footer .sig {
+                    display: table-cell;
+                    vertical-align: top;
+                    width: 60mm;
+                    text-align: center;
+                }
+                .terms .terms-h { font-weight: 700; font-size: 9.5pt; margin-bottom: 1mm; }
+                .terms ol { margin: 0; padding-left: 4mm; }
+                .terms li { padding: 0.4mm 0; }
+                .sig .sig-line { border-top: 1px solid #000; margin: 8mm 3mm 1mm; }
+                .sig .sig-for { margin-top: 6mm; }
 
                 /* ── Print refinements ──────────────────────────────── */
                 @media print {
