@@ -96,10 +96,10 @@ export default function JobCardDepreciationPrint() {
                 engine / company names never get ellipsised. */}
             <table className="party">
                 <colgroup>
-                    <col style={{ width: '11%' }}/><col style={{ width: '14%' }}/>
-                    <col style={{ width: '9%' }}/><col style={{ width: '19%' }}/>
-                    <col style={{ width: '7%' }}/><col style={{ width: '14%' }}/>
+                    <col style={{ width: '14%' }}/><col style={{ width: '17%' }}/>
                     <col style={{ width: '9%' }}/><col style={{ width: '17%' }}/>
+                    <col style={{ width: '8%' }}/><col style={{ width: '10%' }}/>
+                    <col style={{ width: '10%' }}/><col style={{ width: '15%' }}/>
                 </colgroup>
                 <tbody>
                     <tr>
@@ -129,11 +129,11 @@ export default function JobCardDepreciationPrint() {
                 Column widths (spec): 20 / 28 / 8 / 13 / 15 / 7 / 13 %. */}
             <table className="items">
                 <colgroup>
-                    <col style={{ width: '20%' }}/>
-                    <col style={{ width: '28%' }}/>
-                    <col style={{ width: '8%' }}/>
-                    <col style={{ width: '13%' }}/>
-                    <col style={{ width: '15%' }}/>
+                    <col style={{ width: '17%' }}/>
+                    <col style={{ width: '30%' }}/>
+                    <col style={{ width: '7%' }}/>
+                    <col style={{ width: '12%' }}/>
+                    <col style={{ width: '14%' }}/>
                     <col style={{ width: '7%' }}/>
                     <col style={{ width: '13%' }}/>
                 </colgroup>
@@ -223,12 +223,12 @@ export default function JobCardDepreciationPrint() {
                     width: 210mm;
                     min-height: 297mm;
                     margin: 8px auto;                  /* screen preview only */
-                    padding: 8mm 9mm;
+                    padding: 10mm 12mm;
                     box-sizing: border-box;
                     background: white;
                     color: #000;
                     font-family: Arial, Tahoma, sans-serif;
-                    font-size: 10px;
+                    font-size: 10.5px;
                     display: flex;
                     flex-direction: column;
                     box-shadow: 0 2px 10px rgba(0,0,0,0.15);  /* screen preview only */
@@ -264,21 +264,21 @@ export default function JobCardDepreciationPrint() {
                 /* Title bar */
                 .title-bar {
                     display: grid;
-                    grid-template-columns: 200px 1fr 130px;
-                    gap: 8px;
+                    grid-template-columns: 160px 1fr 140px;
+                    gap: 10px;
                     align-items: center;
-                    margin: 6px 0;
-                    padding: 4px 8px;
+                    margin: 8px 0 6px;
+                    padding: 6px 12px;
                     background: #f2f2f2;
                     border: 1px solid #000;
                 }
-                .title-bar > div { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+                .title-bar > div { display: flex; align-items: center; gap: 8px; font-size: 11px; }
                 .title-bar label { font-weight: 700; }
                 .title-text {
                     font-family: 'Georgia', 'Times New Roman', serif;
                     font-style: italic;
                     font-weight: 700;
-                    font-size: 17px;
+                    font-size: 16px;
                     text-align: center;
                     color: #444;
                 }
@@ -287,29 +287,27 @@ export default function JobCardDepreciationPrint() {
                 .party {
                     width: 100%;
                     border-collapse: collapse;
-                    margin-bottom: 4px;
-                    font-size: 9.5px;
+                    margin-bottom: 6px;
+                    font-size: 10px;
                     table-layout: fixed;
                 }
                 .party td {
                     border: 1px solid #000;
-                    padding: 2px 4px;
-                    vertical-align: top;
-                    /* Long chassis / engine / company strings must wrap onto
-                       a second line instead of being ellipsised. */
+                    padding: 5px 7px;
+                    vertical-align: middle;
                     overflow: visible;
                     text-overflow: clip;
                     white-space: normal;
                     word-break: break-word;
-                    line-height: 1.25;
+                    line-height: 1.35;
                 }
                 .party td.lbl {
                     font-weight: 700;
-                    background: #fafafa;
-                    white-space: nowrap;    /* labels themselves stay on one line */
+                    background: #f5f5f5;
+                    white-space: nowrap;
                     color: #333;
                 }
-                .party td.val { min-height: 14px; }
+                .party td.val { min-height: 16px; }
 
                 /* ── Items table — spec column widths ────────────────── */
                 .items {
@@ -320,10 +318,19 @@ export default function JobCardDepreciationPrint() {
                 }
                 .items th, .items td {
                     border: 1px solid #000;
-                    padding: 3px 5px;
+                    padding: 6px 7px;
                     vertical-align: middle;
+                    line-height: 1.35;
                 }
-                .items th { background: #f2f2f2; font-weight: 700; text-align: left; }
+                .items th {
+                    background: #f2f2f2;
+                    font-weight: 700;
+                    text-align: left;
+                    font-size: 9.5px;
+                    letter-spacing: 0.2px;
+                    white-space: nowrap;
+                    text-transform: uppercase;
+                }
                 .items th.c, .items td.c { text-align: center; }
                 .items th.r, .items td.r {
                     text-align: right;
