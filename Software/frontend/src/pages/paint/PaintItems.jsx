@@ -13,6 +13,7 @@ const emptyForm = {
     PaintCode: '', PaintName: '',
     PaintCategoryID: '', PaintBrandID: '', PaintUOMID: '',
     ReorderLevel: '', GSTDefaultOn: true, IsActive: true,
+    GramsPerUnit: '',
 };
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -66,6 +67,7 @@ export default function PaintItems() {
             ReorderLevel:    row.ReorderLevel ?? '',
             GSTDefaultOn:    row.GSTDefaultOn !== 0 && row.GSTDefaultOn !== false,
             IsActive:        row.IsActive !== 0 && row.IsActive !== false,
+            GramsPerUnit:    row.GramsPerUnit ?? '',
         });
         setOpenForm(true);
     };
@@ -198,6 +200,15 @@ export default function PaintItems() {
                                     Reorder Level
                                     <input className="field" type="number" step="0.001" value={form.ReorderLevel}
                                         onChange={e => setForm({ ...form, ReorderLevel: e.target.value })} />
+                                </label>
+                                <label>
+                                    Grams per Unit
+                                    <input className="field" type="number" step="0.0001" value={form.GramsPerUnit}
+                                        onChange={e => setForm({ ...form, GramsPerUnit: e.target.value })}
+                                        placeholder="e.g. 4500 for a Gallon" />
+                                    <span style={{ fontSize: 10.5, color: 'var(--erp-text-muted)', display: 'block', marginTop: 2 }}>
+                                        How many grams equal 1 {uoms.find(u => Number(u.PaintUOMID) === Number(form.PaintUOMID))?.UOMName || '[unit]'}. Leave blank for Piece items.
+                                    </span>
                                 </label>
                                 <label className="span-2" style={{ flexDirection: 'row', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, fontSize: 12.5, color: 'var(--erp-text)' }}>
                                     <input type="checkbox" checked={form.GSTDefaultOn}

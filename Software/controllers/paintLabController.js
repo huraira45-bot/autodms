@@ -167,6 +167,7 @@ exports.itemList = async (req, res) => {
                    pi.PaintUOMID,      u.UOMName,
                    pi.ReorderLevel, pi.GSTDefaultOn, pi.IsActive,
                    pi.StockQty, pi.AvgCost, pi.StockValue,
+                   pi.GramsPerUnit,
                    pi.CreatedAt, pi.UpdatedAt
             FROM paint_Item pi
             LEFT JOIN paint_Category cat ON pi.PaintCategoryID = cat.PaintCategoryID
@@ -193,10 +194,11 @@ exports.itemCreate = async (req, res) => {
             .input('ui', sql.Int, b.PaintUOMID      || null)
             .input('rl', sql.Decimal(18,3), b.ReorderLevel != null && b.ReorderLevel !== '' ? Number(b.ReorderLevel) : null)
             .input('gst', sql.Bit, b.GSTDefaultOn === false ? 0 : 1)
+            .input('gpu', sql.Decimal(18,4), b.GramsPerUnit != null && b.GramsPerUnit !== '' ? Number(b.GramsPerUnit) : null)
             .query(`INSERT INTO paint_Item
-                        (PaintCode, PaintName, PaintCategoryID, PaintBrandID, PaintUOMID, ReorderLevel, GSTDefaultOn)
+                        (PaintCode, PaintName, PaintCategoryID, PaintBrandID, PaintUOMID, ReorderLevel, GSTDefaultOn, GramsPerUnit)
                     OUTPUT INSERTED.PaintItemID
-                    VALUES (@cd, @nm, @ci, @bi, @ui, @rl, @gst)`);
+                    VALUES (@cd, @nm, @ci, @bi, @ui, @rl, @gst, @gpu)`);
         res.status(201).json({ PaintItemID: r.recordset[0].PaintItemID });
     } catch (err) {
         if (err.number === 2601 || err.number === 2627) return res.status(409).json({ error: 'Paint code already exists.' });
@@ -217,6 +219,7 @@ exports.itemUpdate = async (req, res) => {
             .input('rl', sql.Decimal(18,3), b.ReorderLevel != null && b.ReorderLevel !== '' ? Number(b.ReorderLevel) : null)
             .input('gst', sql.Bit, b.GSTDefaultOn === false ? 0 : 1)
             .input('act', sql.Bit, b.IsActive === false ? 0 : 1)
+            .input('gpu', sql.Decimal(18,4), b.GramsPerUnit != null && b.GramsPerUnit !== '' ? Number(b.GramsPerUnit) : null)
             .query(`UPDATE paint_Item SET
                         PaintName        = COALESCE(@nm, PaintName),
                         PaintCategoryID  = @ci,
@@ -225,6 +228,7 @@ exports.itemUpdate = async (req, res) => {
                         ReorderLevel     = @rl,
                         GSTDefaultOn     = @gst,
                         IsActive         = @act,
+                        GramsPerUnit     = @gpu,
                         UpdatedAt        = GETDATE()
                     WHERE PaintItemID = @id`);
         res.json({ message: 'Paint item updated' });
