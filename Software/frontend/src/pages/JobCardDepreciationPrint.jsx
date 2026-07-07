@@ -104,14 +104,22 @@ export default function JobCardDepreciationPrint() {
             */}
             <table className="details">
                 <colgroup>
-                    <col style={{ width: '24mm' }}/>{/* label 1 */}
-                    <col style={{ width: '40mm' }}/>{/* value 1 */}
-                    <col style={{ width: '18mm' }}/>{/* label 2 */}
-                    <col style={{ width: '40mm' }}/>{/* value 2 */}
+                    {/* Label widths tuned to the widest label at 10pt bold:
+                         Customer Name / Party  → 28mm
+                         Vehicle       / Company → 20mm
+                         Color         / Reg #  → 14mm
+                         Engine #      / Chassis # → 22mm
+                       Value widths sized so long strings wrap in-cell
+                       instead of overflowing into the label opposite.
+                       Total = 192mm = A4 width − 18mm padding.          */}
+                    <col style={{ width: '28mm' }}/>{/* label 1 */}
+                    <col style={{ width: '34mm' }}/>{/* value 1 */}
+                    <col style={{ width: '20mm' }}/>{/* label 2 */}
+                    <col style={{ width: '32mm' }}/>{/* value 2 */}
                     <col style={{ width: '14mm' }}/>{/* label 3 */}
-                    <col style={{ width: '20mm' }}/>{/* value 3 */}
-                    <col style={{ width: '18mm' }}/>{/* label 4 */}
-                    <col style={{ width: '18mm' }}/>{/* value 4 */}
+                    <col style={{ width: '18mm' }}/>{/* value 3 */}
+                    <col style={{ width: '22mm' }}/>{/* label 4 */}
+                    <col style={{ width: '24mm' }}/>{/* value 4 */}
                 </colgroup>
                 <tbody>
                     <tr>
@@ -310,7 +318,7 @@ export default function JobCardDepreciationPrint() {
                 /* ── Details table ──────────────────────────────────── */
                 .details { margin-bottom: 3mm; }
                 .details td {
-                    padding: 2mm 1.5mm;
+                    padding: 2.5mm 3mm;
                     vertical-align: top;
                     line-height: 1.15;
                     /* Fully-visible values — long strings wrap onto the next
@@ -324,7 +332,10 @@ export default function JobCardDepreciationPrint() {
                 .details .lbl {
                     font-weight: 700;
                     background: #f5f5f5;
-                    white-space: nowrap;      /* labels stay on one line */
+                    /* Do NOT force nowrap. If a label somehow exceeds its
+                       cell width (bigger font, longer language), let it
+                       wrap onto a second line inside its own cell. */
+                    white-space: normal;
                     color: #222;
                 }
 
@@ -347,10 +358,11 @@ export default function JobCardDepreciationPrint() {
                     letter-spacing: 0.2px;
                     white-space: nowrap;
                 }
-                .items th.c, .items td.c { text-align: center; }
+                .items th.c, .items td.c { text-align: center; white-space: nowrap; }
                 .items th.r, .items td.r {
                     text-align: right;
                     font-variant-numeric: tabular-nums;
+                    white-space: nowrap;
                 }
                 .items td.mono {
                     font-family: 'Consolas', 'Courier New', monospace;
