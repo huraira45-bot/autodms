@@ -86,7 +86,7 @@ export default function JobCardDepreciationPrint() {
 
             {/* Title bar */}
             <div className="title-bar">
-                <div><label>RO#</label><span>{jc.jobCode || jc.JobCardNo || ''}</span></div>
+                <div><label>RO#</label><span>{jc.JobCardNo || jc.jobCode || ''}</span></div>
                 <div className="title-text">Issue Spares With Depreciation</div>
                 <div><label>Status</label><span>{rowStatus}</span></div>
             </div>
@@ -95,12 +95,14 @@ export default function JobCardDepreciationPrint() {
                 Fixed 8-col grid (4 label/value pairs per row). Labels are
                 bold and fixed-width; values wrap freely so long chassis /
                 engine / company names never get ellipsised. */}
+            {/* Row 1 — customer/vehicle/color/engine. Its own colgroup
+                lets each pair get widths matched to its expected length. */}
             <table className="party">
                 <colgroup>
-                    <col style={{ width: '14%' }}/><col style={{ width: '17%' }}/>
-                    <col style={{ width: '9%' }}/><col style={{ width: '17%' }}/>
-                    <col style={{ width: '8%' }}/><col style={{ width: '10%' }}/>
-                    <col style={{ width: '10%' }}/><col style={{ width: '15%' }}/>
+                    <col style={{ width: '13%' }}/><col style={{ width: '20%' }}/>
+                    <col style={{ width: '8%' }}/><col style={{ width: '18%' }}/>
+                    <col style={{ width: '6%' }}/><col style={{ width: '8%' }}/>
+                    <col style={{ width: '9%' }}/><col style={{ width: '18%' }}/>
                 </colgroup>
                 <tbody>
                     <tr>
@@ -113,6 +115,20 @@ export default function JobCardDepreciationPrint() {
                         <td className="lbl">Engine #:</td>
                         <td className="val">{jc.EngineNo || ''}</td>
                     </tr>
+                </tbody>
+            </table>
+
+            {/* Row 2 — party/company/reg/chassis. Given its own table so
+                the Party value column can be wider (26%%) and not force
+                \"Adamjee Insurance Company Limited\" onto 4 lines. */}
+            <table className="party party-2">
+                <colgroup>
+                    <col style={{ width: '6%' }}/><col style={{ width: '26%' }}/>
+                    <col style={{ width: '9%' }}/><col style={{ width: '21%' }}/>
+                    <col style={{ width: '6%' }}/><col style={{ width: '8%' }}/>
+                    <col style={{ width: '9%' }}/><col style={{ width: '15%' }}/>
+                </colgroup>
+                <tbody>
                     <tr>
                         <td className="lbl">Party:</td>
                         <td className="val">{jc.PartyName || ''}</td>
@@ -309,6 +325,9 @@ export default function JobCardDepreciationPrint() {
                     color: #333;
                 }
                 .party td.val { min-height: 16px; }
+                /* Second party table sits directly under the first — kill
+                   its top border so the two rows share a single line. */
+                .party-2 { margin-top: -1px; }
 
                 /* ── Items table — spec column widths ────────────────── */
                 .items {
