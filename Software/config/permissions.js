@@ -40,6 +40,23 @@ const SECTIONS = [
         ],
     },
     {
+        // Paint Lab — internal paint inventory + costing module
+        // (owner ask 2026-07-04). Mirrors config/modules.js.
+        name: 'PAINT LAB',
+        items: [
+            // All backend routes check `paint_lab_*:view` (see paintLabRoutes.js
+            // and paintReportsRoutes.js), so every key is a document — the
+            // registry expands into :view / :insert / :edit / :delete.
+            { key: 'paint_lab_dashboard', label: 'Paint Lab Dashboard',     kind: 'document' },
+            { key: 'paint_lab_items',     label: 'Paint Items',             kind: 'document' },
+            { key: 'paint_lab_grn',       label: 'Paint GRN (Receiving)',   kind: 'document' },
+            { key: 'paint_lab_grtn',      label: 'Paint GRTN (Returns)',    kind: 'document' },
+            { key: 'paint_lab_issue',     label: 'Paint Issue to Job Card', kind: 'document' },
+            { key: 'paint_lab_reports',   label: 'Paint Reports',           kind: 'document' },
+            { key: 'paint_lab_settings',  label: 'Paint Settings',          kind: 'document' },
+        ],
+    },
+    {
         name: 'FINANCE & ACCOUNTS',
         items: [
             { key: 'finance_coa',       label: 'Chart of Accounts',       kind: 'document' },
