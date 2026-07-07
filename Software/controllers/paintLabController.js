@@ -321,27 +321,53 @@ exports.itemUomReplace = async (req, res) => {
 };
 
 // Shared helper — GRN + Issue call this to convert a line's quantity from
-// its chosen UoM into the item's base UoM. Errors clearly if the operator
-// picked a UoM that isn't configured on that item.
+// its chosen UoM into the item's base UoM using the universal Scale on
+// paint_UOM (owner ask 2026-07-07 revised model, replaces the per-item
+// paint_ItemUOM grid).
+//
+//   paint_UOM.Scale > 0   → weight / volume family (grams-equivalent).
+//   paint_UOM.Scale = 0   → Piece / counting family. Cannot cross.
+//
+// Any two same-family UoMs convert via the Scale ratio:
+//   baseQty = qty * (line.Scale / itemBase.Scale)
+// Piece × Piece is just qty (factor 1).
 async function resolveBaseQty(tx, paintItemID, paintUomID, qty) {
     const r = await new sql.Request(tx)
         .input('i', sql.Int, paintItemID)
         .input('u', sql.Int, paintUomID)
-        .query('SELECT FactorToBase FROM paint_ItemUOM WHERE PaintItemID=@i AND PaintUOMID=@u');
-    if (!r.recordset.length) {
-        const n = await new sql.Request(tx)
-            .input('i', sql.Int, paintItemID).input('u', sql.Int, paintUomID)
-            .query(`SELECT (SELECT PaintCode FROM paint_Item WHERE PaintItemID=@i) AS PaintCode,
-                           (SELECT PaintName FROM paint_Item WHERE PaintItemID=@i) AS PaintName,
-                           (SELECT UOMName  FROM paint_UOM   WHERE PaintUOMID=@u)  AS UOMName`);
-        const row = n.recordset[0] || {};
+        .query(`SELECT i.PaintCode, i.PaintName,
+                       ib.UOMName AS BaseUOMName, ISNULL(ib.Scale, 0) AS BaseScale,
+                       lu.UOMName AS LineUOMName, ISNULL(lu.Scale, 0) AS LineScale
+                FROM   paint_Item i
+                LEFT   JOIN paint_UOM ib ON i.PaintUOMID = ib.PaintUOMID
+                LEFT   JOIN paint_UOM lu ON lu.PaintUOMID = @u
+                WHERE  i.PaintItemID = @i`);
+    if (!r.recordset.length) throw new Error(`Paint item ${paintItemID} not found.`);
+    const row = r.recordset[0];
+    if (!row.BaseUOMName) throw new Error(`Paint item "${row.PaintCode} ${row.PaintName}" has no base UoM set on the item master.`);
+    if (!row.LineUOMName) throw new Error(`Line UoM ${paintUomID} is not a valid Paint UoM.`);
+
+    const baseScale = Number(row.BaseScale);
+    const lineScale = Number(row.LineScale);
+
+    // Piece family — both sides must have Scale = 0 (counting units).
+    if (baseScale <= 0) {
+        if (lineScale > 0) {
+            throw new Error(
+                `"${row.PaintCode} ${row.PaintName}" is stocked in ${row.BaseUOMName} (a counting unit). ` +
+                `Cannot receive/issue in ${row.LineUOMName} which is a weight/volume unit.`
+            );
+        }
+        return { factor: 1, baseQty: Math.round((Number(qty) || 0) * 10000) / 10000 };
+    }
+    // Mass/volume family — line must also have Scale > 0.
+    if (lineScale <= 0) {
         throw new Error(
-            `Paint item "${row.PaintCode || paintItemID} ${row.PaintName || ''}" ` +
-            `is not configured to use UoM "${row.UOMName || paintUomID}". ` +
-            `Add it under Alternate Units on the item master (with a conversion factor to the base UoM).`
+            `"${row.PaintCode} ${row.PaintName}" is stocked in ${row.BaseUOMName} (a weight/volume unit). ` +
+            `Cannot receive/issue in ${row.LineUOMName} which is a counting unit.`
         );
     }
-    const factor = Number(r.recordset[0].FactorToBase);
+    const factor = lineScale / baseScale;
     return {
         factor,
         baseQty: Math.round((Number(qty) || 0) * factor * 10000) / 10000,

@@ -36,7 +36,6 @@ export default function PaintIssue() {
     const [lockedFilter, setLockedFilter] = useState('');
     const [items, setItems]           = useState([]);
     const [uoms, setUoms]             = useState([]);
-    const [itemUoms, setItemUoms]     = useState([]);
     const [warehouses, setWarehouses] = useState([]);
     const [jobs, setJobs]             = useState([]);
 
@@ -56,18 +55,16 @@ export default function PaintIssue() {
     useEffect(() => {
         (async () => {
             try {
-                const [i, u, w, j, iu] = await Promise.all([
+                const [i, u, w, j] = await Promise.all([
                     axios.get('/api/paint/items'),
                     axios.get('/api/paint/uom'),
                     axios.get('/api/paint/warehouses'),
                     axios.get('/api/paint/issue/eligible-jobs'),
-                    axios.get('/api/paint/item-uoms').catch(() => ({ data: [] })),
                 ]);
                 setItems(i.data || []);
                 setUoms(u.data || []);
                 setWarehouses(w.data || []);
                 setJobs(j.data || []);
-                setItemUoms(iu.data || []);
             } catch (e) { notify({ type: 'error', title: 'Setup load failed', message: e.response?.data?.error || e.message }); }
             reloadList();
         })();
@@ -204,17 +201,22 @@ export default function PaintIssue() {
     })), [jobs]);
     const whOpts = useMemo(() => warehouses.map(w => ({ id: w.PaintWHID, label: w.WHDesc, sub: w.WHCode })), [warehouses]);
     const uomOpts = useMemo(() => uoms.map(u => ({ id: u.PaintUOMID, label: u.UOMName })), [uoms]);
-    // Per-item allowed UoMs — falls back to full list when an item has
-    // no paint_ItemUOM rows yet (legacy / pre-migration data).
+    // Filter picker to the same family (weight/volume vs Piece) as the
+    // item's base UoM (paint_UOM.Scale > 0 = mass, Scale = 0 = counting).
     const uomOptsForItem = React.useCallback((paintItemID) => {
         if (!paintItemID) return uomOpts;
-        const allowed = itemUoms.filter(iu => Number(iu.PaintItemID) === Number(paintItemID));
-        if (!allowed.length) return uomOpts;
-        return allowed.map(iu => ({
-            id: iu.PaintUOMID,
-            label: iu.IsBase ? `${iu.UOMName} (base)` : iu.UOMName,
-        }));
-    }, [itemUoms, uomOpts]);
+        const it = items.find(x => Number(x.PaintItemID) === Number(paintItemID));
+        if (!it?.PaintUOMID) return uomOpts;
+        const baseUom = uoms.find(u => Number(u.PaintUOMID) === Number(it.PaintUOMID));
+        if (!baseUom) return uomOpts;
+        const baseIsCounting = !(Number(baseUom.Scale) > 0);
+        return uoms
+            .filter(u => (!(Number(u.Scale) > 0)) === baseIsCounting)
+            .map(u => ({
+                id: u.PaintUOMID,
+                label: Number(u.PaintUOMID) === Number(it.PaintUOMID) ? `${u.UOMName} (base)` : u.UOMName,
+            }));
+    }, [items, uoms, uomOpts]);
 
     return (
         <div className="paint-page">
