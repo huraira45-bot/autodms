@@ -57,7 +57,7 @@ export default function JobCardDepreciationPrint() {
     const totals = parts.reduce((a, p) => ({
         items: a.items + 1,
         qty:   a.qty   + Number(p.Qty || 0),
-        total: a.total + Number(p.TotalAmount || 0),
+        total: a.total + Number(p.TotalWithTax || 0),
         dep:   a.dep   + Number(p.DepAmount || 0),
     }), { items: 0, qty: 0, total: 0, dep: 0 });
 
@@ -149,17 +149,22 @@ export default function JobCardDepreciationPrint() {
                     </tr>
                 </thead>
                 <tbody>
-                    {parts.map((p, i) => (
+                    {parts.map((p, i) => {
+                        const qty = Number(p.Qty) || 0;
+                        const totalIncl = Number(p.TotalWithTax) || 0;
+                        const rateIncl  = qty > 0 ? totalIncl / qty : Number(p.Rate) || 0;
+                        return (
                         <tr key={i}>
                             <td className="mono wrap">{p.ItemNumber || ''}</td>
                             <td className="wrap">{p.ItemName || ''}</td>
                             <td className="r">{fmt(p.Qty)}</td>
-                            <td className="r">{fmt(p.Rate)}</td>
-                            <td className="r">{fmt(p.TotalAmount)}</td>
+                            <td className="r">{fmt(rateIncl)}</td>
+                            <td className="r">{fmt(totalIncl)}</td>
                             <td className="c">{fmtQ(p.DepreciationPct)}</td>
                             <td className="r">{fmt(p.DepAmount)}</td>
                         </tr>
-                    ))}
+                        );
+                    })}
                     {parts.length === 0 && (
                         <tr><td colSpan={7} className="c empty">No parts with depreciation data on this Job Card.</td></tr>
                     )}
