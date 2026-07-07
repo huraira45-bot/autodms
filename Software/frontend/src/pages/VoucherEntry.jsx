@@ -269,6 +269,33 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         setMsg(null);
     };
 
+    // ---------- Change Date (JV only) ----------
+    // Opening balances / prior-period adjustments / accruals are always JVs
+    // and legitimately need a non-today date. Backend endpoint enforces
+    // JV-only + non-reversing + finance_vouchers:edit permission.
+    const [dateEditOpen, setDateEditOpen] = useState(false);
+    const [dateEditVal,  setDateEditVal]  = useState('');
+
+    const openDateEdit = () => {
+        if (!active) return;
+        setDateEditVal(new Date(active.VoucherDate).toISOString().split('T')[0]);
+        setDateEditOpen(true);
+    };
+    const submitDateChange = async () => {
+        if (!active || !dateEditVal) return;
+        setBusy(true);
+        try {
+            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/date`, { VoucherDate: dateEditVal });
+            setDateEditOpen(false);
+            await loadVoucher(active.VoucherID);
+            setMsg({ kind: 'ok', text: 'Voucher date updated.' });
+        } catch (err) {
+            setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
+        } finally {
+            setBusy(false);
+        }
+    };
+
     // ---------- Delete Draft ----------
     const handleDeleteDraft = async () => {
         if (!active || active.Status !== 'Draft') return;
@@ -372,6 +399,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         const canFinalize  = status === 'Draft'  && hasModule('finalize');
         const canUnfReq    = status === 'Posted' && hasModule('finalize');
         const isReversed   = status === 'Reversed';
+        // Only JV vouchers get the Change Date affordance — CPV/CRV/BPV/BRV
+        // stay locked to today because they represent physical cash/bank
+        // movement.
+        const canChangeDate = canEdit && !isReversed && active.VoucherTypeCode === 'JV' && !active.ReversesVoucherID;
 
         // Line count / total for the smart-button row.
         const linesCount = (active.lines || []).length;
@@ -444,6 +475,26 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                             <button type="button" className="erp-btn" onClick={openUnfinalize} disabled={busy}>
                                 <Unlock size={14} /> Request Unfinalize
                             </button>
+                        )}
+                        {canChangeDate && (
+                            <button type="button" className="erp-btn" onClick={openDateEdit} disabled={busy}
+                                title="Journal Vouchers can be back-dated (openings, prior-period adjustments).">
+                                <Edit3 size={14} /> Change Date
+                            </button>
+                        )}
+                        {dateEditOpen && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 8px', border: '1px solid var(--erp-border)', borderRadius: 4, background: 'var(--erp-surface-alt)' }}>
+                                <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>New date:</span>
+                                <input type="date" value={dateEditVal}
+                                       onChange={e => setDateEditVal(e.target.value)}
+                                       style={{ padding: '2px 6px', fontSize: 12 }} />
+                                <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={submitDateChange} disabled={busy || !dateEditVal}>
+                                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
+                                </button>
+                                <button type="button" className="erp-btn erp-btn-sm" onClick={() => setDateEditOpen(false)} disabled={busy}>
+                                    Cancel
+                                </button>
+                            </div>
                         )}
                         {isReversed && (
                             <div className="erp-alert danger" style={{ margin: 0 }}>

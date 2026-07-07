@@ -33,6 +33,7 @@ router.get(   '/vouchers/drafts',   requirePerm('finance_vouchers', 'view'),   a
 router.get(   '/vouchers/search',   requirePerm('finance_vouchers', 'view'),   accountController.searchVouchers);
 router.get(   '/vouchers/:id',      requirePerm('finance_vouchers', 'view'),   accountController.getVoucher);
 router.put(   '/vouchers/:id',      requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucher);
+router.patch( '/vouchers/:id/date', requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucherDate);
 router.delete('/vouchers/:id',      requirePerm('finance_vouchers', 'delete'), accountController.deleteVoucher);
 
 module.exports = router;

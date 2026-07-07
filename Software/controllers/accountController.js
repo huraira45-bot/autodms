@@ -436,6 +436,48 @@ exports.searchVouchers = async (req, res) => {
 };
 
 // PUT /accounts/vouchers/:id — update a Draft voucher (header + lines). Rejects non-Draft.
+// PATCH /api/vouchers/:id/date — change ONLY the VoucherDate on a posted
+// JV. Opening balances / prior-period adjustments / accruals live in JVs
+// and legitimately need a non-today date; owner ask 2026-07-07. The
+// today-only policy still applies to CPV/CRV/BPV/BRV (physical cash/bank
+// movement) and to fresh voucher creation. Lines are NOT touched.
+exports.updateVoucherDate = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const { VoucherDate } = req.body;
+        if (!VoucherDate) return res.status(400).json({ error: 'VoucherDate is required.' });
+        const d = new Date(VoucherDate);
+        if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Voucher date is invalid.' });
+
+        const pool = await getPool();
+        const head = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT v.VoucherID, v.Status, v.ReversesVoucherID, t.Title AS VoucherType
+                    FROM   data_FinanceVoucherInfo v
+                    JOIN   GLVoucherType t ON v.VoucherTypeID = t.Voucherid
+                    WHERE  v.VoucherID = @id`);
+        if (!head.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
+        const row = head.recordset[0];
+        if (row.VoucherType !== 'JV') {
+            return res.status(400).json({ error: `Only Journal Vouchers (JV) can be back-dated. This is a ${row.VoucherType}.` });
+        }
+        if (row.ReversesVoucherID) {
+            return res.status(400).json({ error: 'Cannot change the date on a reversing voucher.' });
+        }
+        if (row.Status !== 'Posted' && row.Status !== 'Draft') {
+            return res.status(400).json({ error: `Voucher is in status "${row.Status}" and cannot be edited.` });
+        }
+
+        await pool.request()
+            .input('id', sql.Int, id)
+            .input('dt', sql.DateTime, d)
+            .query(`UPDATE data_FinanceVoucherInfo SET VoucherDate = @dt WHERE VoucherID = @id`);
+        res.json({ message: 'Voucher date updated', VoucherID: id });
+    } catch (err) {
+        console.error('updateVoucherDate:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
