@@ -610,16 +610,18 @@ export default function JobCardForm() {
 
   // Tax per §14.4 — calculated on NET amount (discount before tax):
   //   PST = (labour - labour_disc + sublet) × PST rate / 100
-  //   GST = sum of snapshotted per-line TaxAmount (already net of discount +
-  //         respects per-line IsGST toggle). Falls back to (parts − parts_disc)
-  //         × gstRate for legacy rows that predate the snapshot.
+  //   GST = sum of snapshotted per-line TaxAmount only. Honours the
+  //         per-line IsGST toggle: if the operator turned GST off at
+  //         parts issue, TaxAmount is 0 and this display shows 0 too.
+  //         No fallback — display must match what actually posts to the GL.
   const pstRate = parseFloat(taxRates.PST) || 0;
-  const gstRate = parseFloat(taxRates.GST) || 0;
   const totalPST = +(((totalLabour - totalLabourDisc) + totalSublet) * pstRate / 100).toFixed(2);
-  const snapshotGST = issuedParts.reduce((s, p) => s + (parseFloat(p.TaxAmount || 0)), 0);
-  const totalGST = snapshotGST > 0
-    ? +snapshotGST.toFixed(2)
-    : +(Math.max(0, totalParts - totalPartsDisc) * gstRate / 100).toFixed(2);
+  const totalGST = +issuedParts.reduce((s, p) => s + (parseFloat(p.TaxAmount || 0)), 0).toFixed(2);
+  // Rate shown next to "GST" in the totals grid. Prefer any non-zero
+  // per-line TaxRate that actually applied on this JC; if every part is
+  // non-taxable, show 0% so the label reflects reality (Rs 0.00 next to
+  // "GST 18%" was confusing operators).
+  const gstRate = Math.max(0, ...issuedParts.map(p => parseFloat(p.TaxRate) || 0));
   const totalTax = totalPST + totalGST;
   const totalPayable = +(grandTotal - totalDiscountUsed + totalTax).toFixed(2);
   const capOver = !!careOff && totalLabourDisc > maxDiscountAllowed + 0.005;
