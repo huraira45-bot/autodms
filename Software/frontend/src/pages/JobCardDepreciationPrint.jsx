@@ -61,11 +61,12 @@ export default function JobCardDepreciationPrint() {
         dep:   a.dep   + Number(p.DepAmount || 0),
     }), { items: 0, qty: 0, total: 0, dep: 0 });
 
-    // Vehicle description — vw_WorkshopJobCards exposes different fields
-    // depending on the setup; try the common ones and fall back to blank.
-    const vehicleName = jc.VehicleName
-        || [jc.BrandName, jc.VersionName || jc.ModelName].filter(Boolean).join(' ')
-        || jc.Vehicle
+    // Vehicle description — vw_WorkshopJobCards stores the model text in
+    // VersionCode (same field WorkOrderPrint uses on the Model row). Fall
+    // back to Brand / VehicleCode for older data-entry patterns.
+    const vehicleName = jc.VersionCode
+        || [jc.BrandCode, jc.VehicleCode].filter(Boolean).join(' ')
+        || jc.VehicleName
         || '';
 
     const rowStatus = jc.IsFinalized ? 'Complete' : (jc.Status || 'Open');
@@ -114,9 +115,9 @@ export default function JobCardDepreciationPrint() {
                     </tr>
                     <tr>
                         <td className="lbl">Party:</td>
-                        <td className="val">{insurance.header?.CompanyName || ''}</td>
-                        <td className="lbl">Company:</td>
                         <td className="val">{jc.PartyName || ''}</td>
+                        <td className="lbl">Company:</td>
+                        <td className="val">{insurance.header?.CompanyName || ''}</td>
                         <td className="lbl">Reg #:</td>
                         <td className="val">{jc.VehicleRegNo || ''}</td>
                         <td className="lbl">Chassis #:</td>
