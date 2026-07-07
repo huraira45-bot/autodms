@@ -18,6 +18,7 @@
  *  - Deleting a Paint Issue restores stock at the pinned IssueUnitCost.
  */
 const { sql, getPool } = require('../config/db');
+const { _resolveBaseQty: resolveBaseQty } = require('./paintLabController');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
@@ -111,6 +112,8 @@ exports.eligibleJobs = async (req, res) => {
 
 // Compensate — put a set of previously-issued lines back into stock at
 // their pinned IssueUnitCost. Used by edit + delete. Runs inside the tx.
+// IssueUnitCost is per BASE unit; Quantity is in the line's UoM. Convert
+// back to base qty before touching StockQty.
 async function restoreLines(tx, issueId, paintWHID, note, userInfo) {
     const oldLines = (await new sql.Request(tx).input('id', sql.Int, issueId)
         .query(`SELECT * FROM paint_IssueDetail WHERE PaintIssueID=@id`)).recordset;
@@ -120,9 +123,9 @@ async function restoreLines(tx, issueId, paintWHID, note, userInfo) {
             .query('SELECT StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
         const oldQty = Number(itRes.recordset[0].StockQty) || 0;
         const oldAvg = Number(itRes.recordset[0].AvgCost) || 0;
-        const inQty  = Number(l.Quantity);
-        const inVal  = round2(inQty * Number(l.IssueUnitCost));
-        const newQty = round4(oldQty + inQty);
+        const { baseQty: inBaseQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, l.Quantity);
+        const inVal  = round2(Number(l.LineTotal));
+        const newQty = round4(oldQty + inBaseQty);
         const newVal = round2(oldQty * oldAvg + inVal);
         const newAvg = newQty > 0 ? round4(newVal / newQty) : 0;
 
@@ -138,7 +141,7 @@ async function restoreLines(tx, issueId, paintWHID, note, userInfo) {
             .input('src', sql.NVarChar(20),  'ISSUE_ADJ')
             .input('sid', sql.Int,           issueId)
             .input('did', sql.Int,           l.PaintIssueDetailID)
-            .input('dq',  sql.Decimal(18,4), inQty)
+            .input('dq',  sql.Decimal(18,4), inBaseQty)
             .input('uc',  sql.Decimal(18,4), l.IssueUnitCost)
             .input('dv',  sql.Decimal(18,2), inVal)
             .input('rq',  sql.Decimal(18,4), newQty)
@@ -166,6 +169,7 @@ async function consumeLines(tx, issueId, paintWHID, lines, note, userInfo) {
         if (!l.PaintItemID) throw new Error('Every line needs PaintItemID');
         const qty = round4(l.Quantity);
         if (!(qty > 0)) throw new Error('Each line quantity must be > 0');
+        if (!l.PaintUOMID) throw new Error('Every line needs PaintUOMID');
 
         const itRes = await new sql.Request(tx).input('i', sql.Int, l.PaintItemID)
             .query('SELECT PaintCode, PaintName, StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
@@ -173,12 +177,16 @@ async function consumeLines(tx, issueId, paintWHID, lines, note, userInfo) {
         const it = itRes.recordset[0];
         const oldQty = Number(it.StockQty) || 0;
         const oldAvg = Number(it.AvgCost) || 0;
-        if (oldQty - qty < -0.0001) {
-            throw new Error(`Insufficient stock for ${it.PaintName} (${it.PaintCode}). On hand: ${oldQty}, requested: ${qty}.`);
+
+        // Convert issue-unit qty to base-unit qty via the item's factor.
+        // Stock and AvgCost live in base units.
+        const { baseQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, qty);
+        if (oldQty - baseQty < -0.0001) {
+            throw new Error(`Insufficient stock for ${it.PaintName} (${it.PaintCode}). On hand: ${oldQty} (base UoM), requested: ${baseQty} (base UoM after conversion).`);
         }
-        const unitCost = round4(oldAvg);
-        const lineVal  = round2(qty * unitCost);
-        const newQty   = round4(oldQty - qty);
+        const unitCost = round4(oldAvg);         // per BASE unit
+        const lineVal  = round2(baseQty * unitCost);
+        const newQty   = round4(oldQty - baseQty);
         const newVal   = round2(oldQty * oldAvg - lineVal);
         const newAvg   = newQty > 0 ? round4(Math.max(0, newVal) / newQty) : 0;
 
@@ -188,10 +196,12 @@ async function consumeLines(tx, issueId, paintWHID, lines, note, userInfo) {
             .input('a', sql.Decimal(18,4), newAvg)
             .query('UPDATE paint_Item SET StockQty=@q, AvgCost=@a, UpdatedAt=GETDATE() WHERE PaintItemID=@i');
 
+        // Store the ORIGINAL issue-unit qty on the detail row (for audit
+        // + print). IssueUnitCost is per BASE unit, LineTotal is money.
         const insRes = await new sql.Request(tx)
             .input('h',  sql.Int,           issueId)
             .input('it', sql.Int,           l.PaintItemID)
-            .input('u',  sql.Int,           l.PaintUOMID || null)
+            .input('u',  sql.Int,           l.PaintUOMID)
             .input('q',  sql.Decimal(18,4), qty)
             .input('uc', sql.Decimal(18,4), unitCost)
             .input('lt', sql.Decimal(18,2), lineVal)
@@ -206,7 +216,7 @@ async function consumeLines(tx, issueId, paintWHID, lines, note, userInfo) {
             .input('src', sql.NVarChar(20),  'ISSUE')
             .input('sid', sql.Int,           issueId)
             .input('did', sql.Int,           insRes.recordset[0].PaintIssueDetailID)
-            .input('dq',  sql.Decimal(18,4), -qty)
+            .input('dq',  sql.Decimal(18,4), -baseQty)
             .input('uc',  sql.Decimal(18,4), unitCost)
             .input('dv',  sql.Decimal(18,2), -lineVal)
             .input('rq',  sql.Decimal(18,4), newQty)

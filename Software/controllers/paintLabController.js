@@ -232,6 +232,124 @@ exports.itemUpdate = async (req, res) => {
 };
 
 // ────────────────────────────────────────────────────────────────
+// Paint Item — Alternate UoMs with factor to base (owner ask 2026-07-07)
+// The item's PaintUOMID is the *base* accounting unit; paint_ItemUOM
+// lists every UoM the operator can select on GRN / Issue lines together
+// with a factor:  base_qty = line_qty * FactorToBase.
+// ────────────────────────────────────────────────────────────────
+// Bulk read — every item + every allowed UoM, used by GRN/Issue line
+// pickers so each row can offer only the UoMs configured on its item.
+exports.itemUomAll = async (_req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request().query(`
+            SELECT iu.PaintItemID, iu.PaintUOMID, iu.FactorToBase, u.UOMName,
+                   CASE WHEN iu.PaintUOMID = i.PaintUOMID THEN 1 ELSE 0 END AS IsBase
+            FROM   paint_ItemUOM iu
+            JOIN   paint_UOM  u ON iu.PaintUOMID = u.PaintUOMID
+            JOIN   paint_Item i ON iu.PaintItemID = i.PaintItemID
+            WHERE  i.IsActive = 1
+            ORDER  BY iu.PaintItemID, IsBase DESC, u.UOMName
+        `);
+        res.json(r.recordset);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+exports.itemUomList = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('id', sql.Int, parseInt(req.params.id))
+            .query(`SELECT iu.PaintUOMID, iu.FactorToBase, u.UOMName,
+                           CASE WHEN iu.PaintUOMID = i.PaintUOMID THEN 1 ELSE 0 END AS IsBase
+                    FROM   paint_ItemUOM iu
+                    JOIN   paint_UOM u ON iu.PaintUOMID = u.PaintUOMID
+                    JOIN   paint_Item i ON iu.PaintItemID = i.PaintItemID
+                    WHERE  iu.PaintItemID = @id
+                    ORDER  BY IsBase DESC, u.UOMName`);
+        res.json(r.recordset);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+// PUT — replace the full alt-UoM list. Base UoM is always re-seeded with
+// factor 1 regardless of what the client sends, so an operator can never
+// lock themselves out of the item's own unit.
+exports.itemUomReplace = async (req, res) => {
+    const itemId = parseInt(req.params.id);
+    const incoming = Array.isArray(req.body?.uoms) ? req.body.uoms : [];
+    for (const [i, row] of incoming.entries()) {
+        if (!row || !row.PaintUOMID) return res.status(400).json({ error: `Row ${i + 1}: PaintUOMID is required.` });
+        const f = Number(row.FactorToBase);
+        if (!(f > 0)) return res.status(400).json({ error: `Row ${i + 1}: FactorToBase must be > 0.` });
+    }
+    try {
+        const pool = await getPool();
+        const baseRes = await pool.request().input('id', sql.Int, itemId)
+            .query('SELECT PaintUOMID FROM paint_Item WHERE PaintItemID = @id');
+        if (!baseRes.recordset.length) return res.status(404).json({ error: 'Paint item not found.' });
+        const baseUomId = baseRes.recordset[0].PaintUOMID;
+        if (!baseUomId) return res.status(400).json({ error: 'This paint item has no base UoM assigned. Set it on the item master first.' });
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            await new sql.Request(tx).input('id', sql.Int, itemId)
+                .query('DELETE FROM paint_ItemUOM WHERE PaintItemID = @id');
+            await new sql.Request(tx)
+                .input('i', sql.Int, itemId).input('u', sql.Int, baseUomId).input('f', sql.Decimal(18,6), 1)
+                .query('INSERT INTO paint_ItemUOM (PaintItemID, PaintUOMID, FactorToBase) VALUES (@i, @u, @f)');
+            const seen = new Set([baseUomId]);
+            for (const row of incoming) {
+                const uid = parseInt(row.PaintUOMID);
+                if (seen.has(uid)) continue;
+                seen.add(uid);
+                await new sql.Request(tx)
+                    .input('i', sql.Int, itemId)
+                    .input('u', sql.Int, uid)
+                    .input('f', sql.Decimal(18,6), Number(row.FactorToBase))
+                    .query('INSERT INTO paint_ItemUOM (PaintItemID, PaintUOMID, FactorToBase) VALUES (@i, @u, @f)');
+            }
+            await tx.commit();
+            res.json({ message: 'Alternate UoMs updated', count: seen.size });
+        } catch (e) {
+            await tx.rollback();
+            throw e;
+        }
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+};
+
+// Shared helper — GRN + Issue call this to convert a line's quantity from
+// its chosen UoM into the item's base UoM. Errors clearly if the operator
+// picked a UoM that isn't configured on that item.
+async function resolveBaseQty(tx, paintItemID, paintUomID, qty) {
+    const r = await new sql.Request(tx)
+        .input('i', sql.Int, paintItemID)
+        .input('u', sql.Int, paintUomID)
+        .query('SELECT FactorToBase FROM paint_ItemUOM WHERE PaintItemID=@i AND PaintUOMID=@u');
+    if (!r.recordset.length) {
+        const n = await new sql.Request(tx)
+            .input('i', sql.Int, paintItemID).input('u', sql.Int, paintUomID)
+            .query(`SELECT (SELECT PaintCode FROM paint_Item WHERE PaintItemID=@i) AS PaintCode,
+                           (SELECT PaintName FROM paint_Item WHERE PaintItemID=@i) AS PaintName,
+                           (SELECT UOMName  FROM paint_UOM   WHERE PaintUOMID=@u)  AS UOMName`);
+        const row = n.recordset[0] || {};
+        throw new Error(
+            `Paint item "${row.PaintCode || paintItemID} ${row.PaintName || ''}" ` +
+            `is not configured to use UoM "${row.UOMName || paintUomID}". ` +
+            `Add it under Alternate Units on the item master (with a conversion factor to the base UoM).`
+        );
+    }
+    const factor = Number(r.recordset[0].FactorToBase);
+    return {
+        factor,
+        baseQty: Math.round((Number(qty) || 0) * factor * 10000) / 10000,
+    };
+}
+exports._resolveBaseQty = resolveBaseQty;
+
+// ────────────────────────────────────────────────────────────────
 // Paint Settings — allowed Job Card business types for Paint Issue
 // ────────────────────────────────────────────────────────────────
 exports.allowedBusinessTypesList = async (_req, res) => {

@@ -43,6 +43,7 @@ export default function PaintGRN() {
 
     const [items, setItems]           = useState([]);
     const [uoms, setUoms]             = useState([]);
+    const [itemUoms, setItemUoms]     = useState([]);   // per-item alt-UoM rows
     const [parties, setParties]       = useState([]);
     const [warehouses, setWarehouses] = useState([]);
     const [gstRate, setGstRate]       = useState(0);
@@ -63,17 +64,19 @@ export default function PaintGRN() {
     useEffect(() => {
         (async () => {
             try {
-                const [i, u, p, w, tr] = await Promise.all([
+                const [i, u, p, w, tr, iu] = await Promise.all([
                     axios.get('/api/paint/items'),
                     axios.get('/api/paint/uom'),
                     axios.get('/api/parties', { params: { business: 'PAINT_LAB' } }),
                     axios.get('/api/paint/warehouses'),
                     axios.get('/api/tax-rates').catch(() => ({ data: { current: [] } })),
+                    axios.get('/api/paint/item-uoms').catch(() => ({ data: [] })),
                 ]);
                 setItems(i.data || []);
                 setUoms(u.data || []);
                 setParties(p.data || []);
                 setWarehouses(w.data || []);
+                setItemUoms(iu.data || []);
                 const gst = (tr.data?.current || []).find(t => (t.TaxType || '').toUpperCase() === 'GST');
                 setGstRate(gst ? Number(gst.Rate) : 0);
             } catch (err) {
@@ -264,6 +267,18 @@ export default function PaintGRN() {
         id: w.PaintWHID, label: w.WHDesc, sub: w.WHCode,
     })), [warehouses]);
     const uomOpts = useMemo(() => uoms.map(u => ({ id: u.PaintUOMID, label: u.UOMName })), [uoms]);
+    // Per-item allowed UoMs — falls back to the full list for legacy items
+    // that don't yet have paint_ItemUOM rows (migration 069 grandfathers
+    // existing items, but new fresh installs may not).
+    const uomOptsForItem = React.useCallback((paintItemID) => {
+        if (!paintItemID) return uomOpts;
+        const allowed = itemUoms.filter(iu => Number(iu.PaintItemID) === Number(paintItemID));
+        if (!allowed.length) return uomOpts;
+        return allowed.map(iu => ({
+            id: iu.PaintUOMID,
+            label: iu.IsBase ? `${iu.UOMName} (base)` : iu.UOMName,
+        }));
+    }, [itemUoms, uomOpts]);
 
     return (
         <div className="paint-page">
@@ -450,7 +465,7 @@ export default function PaintGRN() {
                                             <td>
                                                 <SearchableSelect value={l.PaintUOMID || ''}
                                                     onChange={v => patchLine(idx, { PaintUOMID: v })}
-                                                    options={uomOpts} placeholder="UOM" title="Pick UOM" />
+                                                    options={uomOptsForItem(l.PaintItemID)} placeholder="UOM" title="Pick UOM" />
                                             </td>
                                             <td className="num">
                                                 <input type="number" step="0.0001" value={l.Quantity} min={0}

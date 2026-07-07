@@ -42,6 +42,10 @@ router.delete('/warehouses/:id',   requirePerm('paint_lab_settings', 'delete'), 
 router.get( '/items',      requireAnyAccess(...ANY_PAINT_VIEW),           c.itemList);
 router.post('/items',      requirePerm('paint_lab_items', 'insert'),      c.itemCreate);
 router.put( '/items/:id',  requirePerm('paint_lab_items', 'edit'),        c.itemUpdate);
+// Alternate units per item — used by GRN/Issue UoM pickers + item form.
+router.get( '/item-uoms',      requireAnyAccess(...ANY_PAINT_VIEW),       c.itemUomAll);
+router.get( '/items/:id/uoms', requireAnyAccess(...ANY_PAINT_VIEW),       c.itemUomList);
+router.put( '/items/:id/uoms', requirePerm('paint_lab_items', 'edit'),    c.itemUomReplace);
 
 // ── Settings: allowed JC business types + system-account status ──
 router.get( '/settings/business-types',      requireAnyAccess(...ANY_PAINT_VIEW),          c.allowedBusinessTypesList);

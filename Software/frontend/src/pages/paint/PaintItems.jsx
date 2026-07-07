@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Plus, Save, X, Search, Loader2 } from 'lucide-react';
+import { Plus, Save, X, Search, Loader2, Trash2 } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import SearchableSelect from '../../components/SearchableSelect';
 
@@ -28,6 +28,9 @@ export default function PaintItems() {
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [busy, setBusy] = useState(false);
+    // Alternate UoMs for the item currently being edited.
+    // Rows shape: { PaintUOMID, FactorToBase, IsBase }
+    const [altUoms, setAltUoms] = useState([]);
 
     const fetchAll = async () => {
         try {
@@ -54,8 +57,8 @@ export default function PaintItems() {
         );
     }, [items, search]);
 
-    const openCreate = () => { setEditingId(null); setForm(emptyForm); setOpenForm(true); };
-    const openEdit   = (row) => {
+    const openCreate = () => { setEditingId(null); setForm(emptyForm); setAltUoms([]); setOpenForm(true); };
+    const openEdit   = async (row) => {
         setEditingId(row.PaintItemID);
         setForm({
             PaintCode:       row.PaintCode || '',
@@ -68,19 +71,42 @@ export default function PaintItems() {
             IsActive:        row.IsActive !== 0 && row.IsActive !== false,
         });
         setOpenForm(true);
+        // Load the item's alt-UoM list. Errors are non-fatal — the grid
+        // just starts empty and the operator can still save the master.
+        try {
+            const r = await axios.get(`/api/paint/items/${row.PaintItemID}/uoms`);
+            setAltUoms(r.data || []);
+        } catch (e) { setAltUoms([]); }
     };
-    const closeForm = () => { setOpenForm(false); setEditingId(null); setForm(emptyForm); };
+    const closeForm = () => { setOpenForm(false); setEditingId(null); setForm(emptyForm); setAltUoms([]); };
+
+    const addAltRow = () => setAltUoms(rows => [...rows, { PaintUOMID: '', FactorToBase: '' }]);
+    const updateAltRow = (idx, patch) =>
+        setAltUoms(rows => rows.map((r, i) => i === idx ? { ...r, ...patch } : r));
+    const removeAltRow = (idx) =>
+        setAltUoms(rows => rows.filter((r, i) => i !== idx));
 
     const submit = async (e) => {
         e.preventDefault();
         setBusy(true);
         try {
+            let itemId = editingId;
             if (editingId) {
                 await axios.put(`/api/paint/items/${editingId}`, form);
                 notify({ type: 'success', title: 'Paint item updated', message: form.PaintName });
             } else {
-                await axios.post('/api/paint/items', form);
+                const r = await axios.post('/api/paint/items', form);
+                itemId = r.data?.PaintItemID || null;
                 notify({ type: 'success', title: 'Paint item added', message: form.PaintName });
+            }
+            // Save alt UoMs on the same click. The backend re-seeds the
+            // base row with factor 1 automatically, so we only need to
+            // send non-base rows.
+            if (itemId && altUoms.length) {
+                const payload = altUoms
+                    .filter(r => r.PaintUOMID && !r.IsBase && Number(r.FactorToBase) > 0)
+                    .map(r => ({ PaintUOMID: Number(r.PaintUOMID), FactorToBase: Number(r.FactorToBase) }));
+                await axios.put(`/api/paint/items/${itemId}/uoms`, { uoms: payload });
             }
             closeForm();
             fetchAll();
@@ -212,6 +238,66 @@ export default function PaintItems() {
                                             style={{ height: 'auto', width: 'auto', minHeight: 'auto' }} />
                                         Active
                                     </label>
+                                )}
+                                {editingId && (
+                                    <div className="span-2" style={{ borderTop: '1px solid var(--erp-border)', marginTop: 6, paddingTop: 8 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                            <label style={{ padding: 0, margin: 0, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: 11, color: 'var(--erp-text-muted)' }}>Alternate Units</label>
+                                            <button type="button" className="btn btn-sm" onClick={addAltRow}><Plus size={11} /> Add</button>
+                                        </div>
+                                        <div style={{ fontSize: 11, color: 'var(--erp-text-muted)', marginBottom: 6 }}>
+                                            Base UoM = "{uoms.find(u => Number(u.PaintUOMID) === Number(form.PaintUOMID))?.UOMName || '—'}". Stock &amp; average cost live in the base unit. Each row here lets you receive or issue in a different UoM; <b>Factor</b> = how many base units equal <b>1</b> alt unit (e.g. 1 Gallon = 3.785 Litre → Factor 3.785 when base is Litre).
+                                        </div>
+                                        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                                            <thead>
+                                                <tr style={{ background: 'var(--erp-surface-alt)' }}>
+                                                    <th style={{ padding: '4px 6px', textAlign: 'left' }}>UoM</th>
+                                                    <th style={{ padding: '4px 6px', textAlign: 'right' }}>Factor to base</th>
+                                                    <th style={{ padding: '4px 6px', width: 30 }}></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {altUoms.map((r, idx) => (
+                                                    <tr key={idx}>
+                                                        <td style={{ padding: '3px 6px', border: '1px solid var(--erp-border)' }}>
+                                                            {r.IsBase ? (
+                                                                <span style={{ color: 'var(--erp-text-muted)' }}>{r.UOMName} <small>(base)</small></span>
+                                                            ) : (
+                                                                <select className="field" value={r.PaintUOMID || ''}
+                                                                    onChange={e => updateAltRow(idx, { PaintUOMID: e.target.value })}>
+                                                                    <option value="">Select UoM…</option>
+                                                                    {uoms
+                                                                        .filter(u => Number(u.PaintUOMID) !== Number(form.PaintUOMID))
+                                                                        .map(u => <option key={u.PaintUOMID} value={u.PaintUOMID}>{u.UOMName}</option>)}
+                                                                </select>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '3px 6px', border: '1px solid var(--erp-border)', textAlign: 'right' }}>
+                                                            {r.IsBase ? (
+                                                                <span style={{ color: 'var(--erp-text-muted)' }}>1.000000</span>
+                                                            ) : (
+                                                                <input className="field" type="number" step="0.000001" value={r.FactorToBase ?? ''}
+                                                                    onChange={e => updateAltRow(idx, { FactorToBase: e.target.value })}
+                                                                    style={{ textAlign: 'right' }} />
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '3px 6px', border: '1px solid var(--erp-border)' }}>
+                                                            {!r.IsBase && (
+                                                                <button type="button" className="btn btn-sm" onClick={() => removeAltRow(idx)} title="Remove">
+                                                                    <Trash2 size={11} />
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {altUoms.length === 0 && (
+                                                    <tr><td colSpan={3} style={{ padding: 8, textAlign: 'center', color: 'var(--erp-text-muted)', fontStyle: 'italic', border: '1px solid var(--erp-border)' }}>
+                                                        No alternate UoMs. Click Add to receive/issue in units other than the base.
+                                                    </td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 )}
                                 <div className="span-2" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
                                     <button type="button" className="btn" onClick={closeForm}>Cancel</button>

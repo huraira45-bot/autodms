@@ -16,6 +16,7 @@
  *    source.ReturnedQty. Admin-only via routes.
  */
 const { sql, getPool } = require('../config/db');
+const { _resolveBaseQty: resolveBaseQty } = require('./paintLabController');
 const { postPaintGRTNVoucher } = require('../services/paintGRTNPostingService');
 const { postReversalVoucher }  = require('../services/voucherReversalService');
 
@@ -339,11 +340,12 @@ exports.finalize = async (req, res) => {
             }
 
             // Reduce stock at OriginalUnitCost so the avg-cost math nets out.
+            // Stock is tracked in base units; convert line qty via factor.
             const itemRes = await new sql.Request(tx).input('i', sql.Int, l.PaintItemID)
                 .query('SELECT StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
             const oldQty = Number(itemRes.recordset[0].StockQty) || 0;
             const oldAvg = Number(itemRes.recordset[0].AvgCost) || 0;
-            const outQty = Number(l.Quantity);
+            const { baseQty: outQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, l.Quantity);
             const outVal = round2(outQty * Number(l.OriginalUnitCost));
             const newQty = round4(oldQty - outQty);
             if (newQty < 0) throw new Error(`Cannot return — stock would go negative on paint item ${l.PaintItemID}. Current on-hand: ${oldQty}.`);
@@ -426,7 +428,9 @@ exports.unfinalize = async (req, res) => {
                 .query('SELECT StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
             const oldQty = Number(itemRes.recordset[0].StockQty) || 0;
             const oldAvg = Number(itemRes.recordset[0].AvgCost) || 0;
-            const inQty  = Number(l.Quantity);
+            // Convert to base units so the +qty exactly matches what was
+            // -qty'd on finalize (both use resolveBaseQty against paint_ItemUOM).
+            const { baseQty: inQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, l.Quantity);
             const inVal  = round2(inQty * Number(l.OriginalUnitCost));
             const newQty = round4(oldQty + inQty);
             const newVal = round2(oldQty * oldAvg + inVal);
