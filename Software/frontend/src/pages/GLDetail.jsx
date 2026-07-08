@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { ListChecks, Loader2, RefreshCw, Search, ArrowLeft, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
 import { ErpControlPanel } from '../components/erp';
+
+// Same map VoucherBrowser uses to open a voucher in view mode. Any type not
+// in this map falls back to /vouchers/jv?id=X — VoucherEntry loads by id
+// regardless of the URL segment, so posting types (SI, SS, SSR, PV, PRV)
+// still open cleanly.
+const TYPE_TO_ROUTE = {
+    CPV: '/vouchers/cpv', CRV: '/vouchers/crv', BPV: '/vouchers/bpv',
+    BRV: '/vouchers/brv', JV:  '/vouchers/jv',
+};
 
 const API_BASE = '/api';
 
@@ -97,6 +106,12 @@ function AccountPicker({ onSelect }) {
 export default function GLDetail() {
     const [params, setParams] = useSearchParams();
     const glcaid = params.get('glcaid');
+    const navigate = useNavigate();
+    const openVoucher = (l) => {
+        if (!l?.VoucherID) return;
+        const route = TYPE_TO_ROUTE[l.VoucherType] || '/vouchers/jv';
+        navigate(`${route}?id=${l.VoucherID}`);
+    };
     const [from, setFrom] = useState(params.get('from') || new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10));
     const [to, setTo]     = useState(params.get('to')   || new Date().toISOString().slice(0, 10));
 
@@ -243,9 +258,12 @@ export default function GLDetail() {
                                             const sign = data.account.Nature === 'Debit' ? 1 : -1;
                                             const dispRun = (l.RunningNetDr * sign).toFixed(2);
                                             return (
-                                                <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                <tr key={i}
+                                                    style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
+                                                    onClick={() => openVoucher(l)}
+                                                    title="Open this voucher">
                                                     <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{new Date(l.VoucherDate).toLocaleDateString()}</td>
-                                                    <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{l.VoucherNo}</td>
+                                                    <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#1e40af', textDecoration: 'underline' }}>{l.VoucherNo}</td>
                                                     <td style={{ padding: '8px 12px' }}>{l.VoucherType}</td>
                                                     <td style={{ padding: '8px 12px', color: '#475569' }}>{l.Narration}</td>
                                                     <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#64748b' }}>
