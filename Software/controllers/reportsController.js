@@ -536,6 +536,35 @@ async function getClassBalances(pool, asOf, classes) {
 }
 
 /**
+ * Groups a flat list of leaf rows (each carries GLCode + PeriodAmount) under
+ * their Level-3 COA parent (first 6 chars of GLCode). Titles come from the
+ * pre-loaded parentTitleByCode map so departmental groupings match the COA.
+ *
+ * Each group carries:  { code, title, total, leaves: [...] }
+ */
+function buildGroups(leaves, parentTitleByCode) {
+    const byCode = new Map();
+    for (const l of leaves) {
+        const parentCode = String(l.GLCode || '').slice(0, 6);
+        if (!parentCode) continue;
+        if (!byCode.has(parentCode)) {
+            byCode.set(parentCode, {
+                code: parentCode,
+                title: parentTitleByCode.get(parentCode) || parentCode,
+                total: 0,
+                leaves: [],
+            });
+        }
+        const g = byCode.get(parentCode);
+        g.leaves.push(l);
+        g.total += Number(l.PeriodAmount) || 0;
+    }
+    return Array.from(byCode.values())
+        .map(g => ({ ...g, total: +g.total.toFixed(2) }))
+        .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/**
  * GET /reports/pnl?from=&to=
  * Profit & Loss for a period — Revenue (class 4) − Expenses (class 5) = Net Profit.
  */
@@ -576,10 +605,27 @@ exports.getPnL = async (req, res) => {
         const expenses = buildSection('5');
         const netProfit = +(revenue.total - expenses.total).toFixed(2);
 
+        // Grouped view — owner ask 2026-07-08. Roll leaves up to their
+        // Level-3 COA parent (the "Group" prefix, e.g. 401002 WORKSHOP
+        // SERVICES INCOME) so the UI can render a two-tier tree:
+        //   Group → leaves.
+        // Titles come from GLChartOFAccount where isParent=1 so departmental
+        // groupings match what the accountant sees in the COA screen.
+        const parents = await pool.request().query(`
+            SELECT GLCode, GLTitle
+            FROM GLChartOFAccount
+            WHERE isParent = 1 AND LEN(GLCode) = 6
+              AND (LEFT(GLCode,1) = '4' OR LEFT(GLCode,1) = '5')`);
+        const parentTitleByCode = new Map(parents.recordset.map(p => [p.GLCode, p.GLTitle]));
+        const groupRevenue  = buildGroups(revenue.rows, parentTitleByCode);
+        const groupExpenses = buildGroups(expenses.rows, parentTitleByCode);
+
         res.json({
             from: fromRaw.toISOString().slice(0, 10),
             to:   toRaw.toISOString().slice(0, 10),
-            revenue, expenses, netProfit
+            revenue: { ...revenue, groups: groupRevenue },
+            expenses: { ...expenses, groups: groupExpenses },
+            netProfit
         });
     } catch (err) {
         console.error('P&L error:', err);
@@ -609,6 +655,71 @@ exports.getBalanceSheet = async (req, res) => {
         const liabilitiesAndEquity = +(liabilities.total + equity.total + retained).toFixed(2);
         const diff = +(assets.total - liabilitiesAndEquity).toFixed(2);
 
+        // Grouped view — owner ask 2026-07-08. Two-tier tree:
+        //   Class (1/2/3) → Group (Level-3, e.g. 101 NON-CURRENT ASSETS) → Leaves.
+        // Retained earnings is stitched under Class 3 as a synthetic group.
+        const parents = await pool.request().query(`
+            SELECT GLCode, GLTitle
+            FROM GLChartOFAccount
+            WHERE isParent = 1 AND LEN(GLCode) IN (1, 3)
+              AND LEFT(GLCode,1) IN ('1','2','3')`);
+        const parentTitleByCode = new Map(parents.recordset.map(p => [p.GLCode, p.GLTitle]));
+        const buildBSGroups = (rows, classCode) => {
+            const byCode = new Map();
+            for (const r of rows) {
+                const parentCode = String(r.GLCode || '').slice(0, 3);
+                if (!parentCode.startsWith(classCode)) continue;
+                if (!byCode.has(parentCode)) {
+                    byCode.set(parentCode, {
+                        code: parentCode,
+                        title: parentTitleByCode.get(parentCode) || parentCode,
+                        total: 0,
+                        leaves: [],
+                    });
+                }
+                const g = byCode.get(parentCode);
+                const bal = Number(r.Balance) || 0;
+                g.leaves.push({ ...r, PeriodAmount: bal });
+                g.total += bal;
+            }
+            return Array.from(byCode.values())
+                .map(g => ({ ...g, total: +g.total.toFixed(2) }))
+                .sort((a, b) => a.code.localeCompare(b.code));
+        };
+        const classes = [
+            {
+                classRoot: '1',
+                classTitle: parentTitleByCode.get('1') || 'ASSETS',
+                total: +assets.total.toFixed(2),
+                groups: buildBSGroups(assets.rows, '1'),
+            },
+            {
+                classRoot: '2',
+                classTitle: parentTitleByCode.get('2') || 'LIABILITIES',
+                total: +liabilities.total.toFixed(2),
+                groups: buildBSGroups(liabilities.rows, '2'),
+            },
+            {
+                classRoot: '3',
+                classTitle: parentTitleByCode.get('3') || 'EQUITY',
+                total: +(equity.total + retained).toFixed(2),
+                groups: [
+                    ...buildBSGroups(equity.rows, '3'),
+                    // Retained earnings synthetic group — always at the end.
+                    {
+                        code: 'RE',
+                        title: 'Retained Earnings (period)',
+                        total: retained,
+                        leaves: [{
+                            GLCAID: 'retained', GLCode: '—',
+                            GLTitle: 'Retained Earnings (period)',
+                            PeriodAmount: retained,
+                        }],
+                    },
+                ],
+            },
+        ];
+
         res.json({
             asOf: asOfRaw.toISOString().slice(0, 10),
             assets:      { rows: assets.rows,      total: +assets.total.toFixed(2) },
@@ -616,7 +727,8 @@ exports.getBalanceSheet = async (req, res) => {
             equity:      { rows: equity.rows,      total: +equity.total.toFixed(2) },
             retainedEarnings: retained,
             liabilitiesAndEquity,
-            diff
+            diff,
+            classes
         });
     } catch (err) {
         console.error('Balance Sheet error:', err);

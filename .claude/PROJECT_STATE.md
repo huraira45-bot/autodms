@@ -245,6 +245,7 @@ Deferred design sessions: Car Sales, Payroll / HR, Incentive Distribution (each 
 | 2026-05 | Floating-point tolerance `+ 0.005` in cap check | Prevents false "over cap" rejections from rounding (e.g. 10.001 vs 10.000) |
 | 2026-05 | Pure `careOffUtils.js` separate from controller | Allows Jest to test cap logic without any DB mocking |
 | 2026-05 | Swap block: reject care-off change if current discounts > new cap | Prevents silent data corruption when swapping to a lower-cap care-off |
+| 2026-07-08 | P&L + Balance Sheet render grouped/expandable (backward-compat payload adds `groups` / `classes`) | Owner asked for drill-down: Group → Account → GL Detail, without the ~9h full dept-P&L (which needs `DepartmentID` on `data_FinanceVoucherDetail`). Achievable today because revenue GLs already split by JC-type (401002xxx per department). |
 
 ---
 

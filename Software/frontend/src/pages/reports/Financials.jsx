@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, Scale, BookOpen } from 'lucide-react';
+import { TrendingUp, Scale, BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfControl, SingleDateControl } from './ReportShell';
 
 // Row drill-down helper — opens GL Detail for the clicked account, passing
@@ -8,7 +8,6 @@ import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfC
 function useDrillToGL() {
     const navigate = useNavigate();
     return (params) => (glcaid) => {
-        // Skip synthetic rows (e.g. Retained Earnings placeholder on BS).
         if (!glcaid || typeof glcaid !== 'number') return;
         const q = new URLSearchParams({ glcaid: String(glcaid) });
         if (params?.from) q.set('from', params.from);
@@ -18,15 +17,13 @@ function useDrillToGL() {
     };
 }
 
-const sectionStyle = { background: '#eff6ff' };
-
 // ---- Profit & Loss ----
 export function PnL() {
     const drillTo = useDrillToGL();
     return (
         <ReportShell
             title="Profit & Loss"
-            subtitle="Revenue − Expenses for the chosen period."
+            subtitle="Revenue − Expenses for the chosen period. Click a group to see accounts under it (e.g. per-department sales)."
             icon={TrendingUp}
             endpoint="pnl"
             defaultParams={{ from: yearStartISO(), to: todayISO() }}
@@ -50,45 +47,86 @@ export function PnL() {
                         </div>
                     </div>
 
-                    <Section title="REVENUE"  rows={data.revenue.rows}  total={data.revenue.total}  drillTo={drillTo(ctx?.params)} />
-                    <Section title="EXPENSES" rows={data.expenses.rows} total={data.expenses.total} drillTo={drillTo(ctx?.params)} />
+                    <PnLSection title="REVENUE"  groups={data.revenue?.groups || []}  total={data.revenue?.total || 0}  drillTo={drillTo(ctx?.params)} />
+                    <PnLSection title="EXPENSES" groups={data.expenses?.groups || []} total={data.expenses?.total || 0} drillTo={drillTo(ctx?.params)} />
                 </>
             )}
         </ReportShell>
     );
 }
 
-function Section({ title, rows, total, drillTo }) {
+function PnLSection({ title, groups, total, drillTo }) {
+    const [expanded, setExpanded] = useState(new Set());
+    const toggle = (code) => {
+        setExpanded(prev => {
+            const next = new Set(prev);
+            if (next.has(code)) next.delete(code); else next.add(code);
+            return next;
+        });
+    };
     return (
         <div className="card">
-            <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 12 }}>{title}</div>
-            {rows.length === 0 ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ fontWeight: 700, color: '#1e40af' }}>{title}</div>
+                <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                    Total <strong style={{ color: '#0f172a' }}>PKR {fmt(total)}</strong>
+                </div>
+            </div>
+            {groups.length === 0 ? (
                 <div style={{ padding: 16, color: '#64748b', fontStyle: 'italic' }}>No activity in this section.</div>
             ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                     <thead>
                         <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                            <TH>Code</TH><TH>Account</TH><TH align="right">Amount</TH>
+                            <TH>Code</TH>
+                            <TH>Group / Account</TH>
+                            <TH align="right">Debit</TH>
+                            <TH align="right">Credit</TH>
+                            <TH align="right">Net</TH>
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map(r => {
-                            const canDrill = drillTo && typeof r.GLCAID === 'number';
+                        {groups.map(g => {
+                            const open = expanded.has(g.code);
+                            const gDr = g.leaves.reduce((s, l) => s + (Number(l.TotalDr) || 0), 0);
+                            const gCr = g.leaves.reduce((s, l) => s + (Number(l.TotalCr) || 0), 0);
                             return (
-                                <tr key={r.GLCAID}
-                                    style={{ borderBottom: '1px solid #f1f5f9', cursor: canDrill ? 'pointer' : 'default' }}
-                                    onClick={canDrill ? () => drillTo(r.GLCAID) : undefined}
-                                    title={canDrill ? 'Open GL Detail for this account' : undefined}>
-                                    <TD mono color="#64748b">{r.GLCode}</TD>
-                                    <TD>{r.GLTitle}</TD>
-                                    <TD align="right" bold>{fmt(r.PeriodAmount)}</TD>
-                                </tr>
+                                <React.Fragment key={g.code}>
+                                    <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#f8fafc', cursor: 'pointer' }}
+                                        onClick={() => toggle(g.code)}
+                                        title={open ? 'Collapse' : 'Expand'}>
+                                        <TD mono color="#475569">
+                                            {open ? <ChevronDown size={12} style={{ display: 'inline', marginRight: 4 }} />
+                                                  : <ChevronRight size={12} style={{ display: 'inline', marginRight: 4 }} />}
+                                            {g.code}
+                                        </TD>
+                                        <TD bold color="#0f172a">{g.title}</TD>
+                                        <TD align="right" mono>{gDr > 0.005 ? fmt(gDr) : '—'}</TD>
+                                        <TD align="right" mono>{gCr > 0.005 ? fmt(gCr) : '—'}</TD>
+                                        <TD align="right" bold>{fmt(g.total)}</TD>
+                                    </tr>
+                                    {open && g.leaves.map(l => {
+                                        const canDrill = drillTo && typeof l.GLCAID === 'number';
+                                        return (
+                                            <tr key={l.GLCAID}
+                                                style={{ borderBottom: '1px solid #f1f5f9', cursor: canDrill ? 'pointer' : 'default', background: 'white' }}
+                                                onClick={canDrill ? () => drillTo(l.GLCAID) : undefined}
+                                                title={canDrill ? 'Open GL Detail for this account' : undefined}>
+                                                <TD mono color="#64748b">&nbsp;&nbsp;&nbsp;&nbsp;{l.GLCode}</TD>
+                                                <TD color="#334155">{l.GLTitle}</TD>
+                                                <TD align="right" mono color="#0284c7">{Number(l.TotalDr) > 0.005 ? fmt(l.TotalDr) : '—'}</TD>
+                                                <TD align="right" mono color="#0284c7">{Number(l.TotalCr) > 0.005 ? fmt(l.TotalCr) : '—'}</TD>
+                                                <TD align="right">{fmt(l.PeriodAmount)}</TD>
+                                            </tr>
+                                        );
+                                    })}
+                                </React.Fragment>
                             );
                         })}
                     </tbody>
                     <tfoot>
                         <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
-                            <td colSpan={2} style={{ padding: 12, fontWeight: 700 }}>Total {title}</td>
+                            <td colSpan={4} style={{ padding: 12, fontWeight: 700 }}>Total {title}</td>
                             <TD align="right" bold>{fmt(total)}</TD>
                         </tr>
                     </tfoot>
@@ -104,7 +142,7 @@ export function BalanceSheet() {
     return (
         <ReportShell
             title="Balance Sheet"
-            subtitle="Assets vs. Liabilities + Equity as of the chosen date."
+            subtitle="Assets vs. Liabilities + Equity as of the chosen date. Click a class to see its groups; click a group to see accounts."
             icon={Scale}
             endpoint="balance-sheet"
             defaultParams={{ asOf: todayISO() }}
@@ -129,15 +167,88 @@ export function BalanceSheet() {
                         </div>
                     </div>
 
-                    <Section title="ASSETS"      rows={data.assets.rows.map(r => ({ ...r, PeriodAmount: r.Balance }))} total={data.assets.total} drillTo={drillTo(ctx?.params)} />
-                    <Section title="LIABILITIES" rows={data.liabilities.rows.map(r => ({ ...r, PeriodAmount: r.Balance }))} total={data.liabilities.total} drillTo={drillTo(ctx?.params)} />
-                    <Section title="EQUITY" rows={[
-                        ...data.equity.rows.map(r => ({ ...r, PeriodAmount: r.Balance })),
-                        { GLCAID: 'retained', GLCode: '—', GLTitle: 'Retained Earnings (period)', PeriodAmount: data.retainedEarnings }
-                    ]} total={data.equity.total + data.retainedEarnings} drillTo={drillTo(ctx?.params)} />
+                    {(data.classes || []).map(cls => (
+                        <BSClassPanel key={cls.classRoot} cls={cls} drillTo={drillTo(ctx?.params)} />
+                    ))}
                 </>
             )}
         </ReportShell>
+    );
+}
+
+function BSClassPanel({ cls, drillTo }) {
+    const [openClass, setOpenClass] = useState(true);
+    const [expandedGroups, setExpandedGroups] = useState(new Set());
+    const toggleGroup = (code) => {
+        setExpandedGroups(prev => {
+            const next = new Set(prev);
+            if (next.has(code)) next.delete(code); else next.add(code);
+            return next;
+        });
+    };
+    return (
+        <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, cursor: 'pointer' }}
+                 onClick={() => setOpenClass(v => !v)}
+                 title={openClass ? 'Collapse' : 'Expand'}>
+                <div style={{ fontWeight: 700, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {openClass ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    Class {cls.classRoot} — {cls.classTitle}
+                </div>
+                <div style={{ fontSize: '0.9rem', color: '#0f172a' }}>
+                    <strong>PKR {fmt(cls.total)}</strong>
+                </div>
+            </div>
+            {openClass && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                    <thead>
+                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                            <TH>Code</TH>
+                            <TH>Group / Account</TH>
+                            <TH align="right">Balance</TH>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {(cls.groups || []).map(g => {
+                            const open = expandedGroups.has(g.code);
+                            return (
+                                <React.Fragment key={g.code}>
+                                    <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#f8fafc', cursor: 'pointer' }}
+                                        onClick={() => toggleGroup(g.code)}>
+                                        <TD mono color="#475569">
+                                            {open ? <ChevronDown size={12} style={{ display: 'inline', marginRight: 4 }} />
+                                                  : <ChevronRight size={12} style={{ display: 'inline', marginRight: 4 }} />}
+                                            {g.code}
+                                        </TD>
+                                        <TD bold color="#0f172a">{g.title}</TD>
+                                        <TD align="right" bold>{fmt(g.total)}</TD>
+                                    </tr>
+                                    {open && g.leaves.map(l => {
+                                        const canDrill = drillTo && typeof l.GLCAID === 'number';
+                                        return (
+                                            <tr key={l.GLCAID}
+                                                style={{ borderBottom: '1px solid #f1f5f9', cursor: canDrill ? 'pointer' : 'default' }}
+                                                onClick={canDrill ? () => drillTo(l.GLCAID) : undefined}
+                                                title={canDrill ? 'Open GL Detail for this account' : undefined}>
+                                                <TD mono color="#64748b">&nbsp;&nbsp;&nbsp;&nbsp;{l.GLCode}</TD>
+                                                <TD color="#334155">{l.GLTitle}</TD>
+                                                <TD align="right">{fmt(l.PeriodAmount)}</TD>
+                                            </tr>
+                                        );
+                                    })}
+                                </React.Fragment>
+                            );
+                        })}
+                    </tbody>
+                    <tfoot>
+                        <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
+                            <td colSpan={2} style={{ padding: 12, fontWeight: 700 }}>Total Class {cls.classRoot}</td>
+                            <TD align="right" bold>{fmt(cls.total)}</TD>
+                        </tr>
+                    </tfoot>
+                </table>
+            )}
+        </div>
     );
 }
 
@@ -190,7 +301,7 @@ export function DayBook() {
                                         <tr key={v.VoucherID} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                             <TD mono color="#475569">{v.VoucherNo}</TD>
                                             <TD>{v.VoucherType}</TD>
-                                            <TD color="#475569">{v.Remarks}</TD>
+                                            <TD>{v.Remarks || '—'}</TD>
                                             <TD>{v.SourceDocType ? `${v.SourceDocType} #${v.SourceDocID}` : '—'}</TD>
                                             <TD>{v.CreatedByName || '—'}</TD>
                                             <TD align="right">{v.LineCount}</TD>
