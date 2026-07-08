@@ -31,7 +31,10 @@ router.delete('/order-types/:id',           requirePerm('workshop_settings', 'de
 // ── Job Cards (workshop_jobs) ──────────────────────────────────────────────
 router.get(   '/job-cards',                 requirePerm('workshop_jobs', 'view'),        wc.getJobCards);
 router.get(   '/vehicle-history',           requirePerm('workshop_jobs', 'view'),        wc.getVehicleHistory);
-router.get(   '/job-cards/resolve-ro',      requirePerm('workshop_jobs', 'view'),        wc.resolveByRO);
+// Cashier flows (Receive Payment / Depreciation payments) also need to
+// look up a JC by its RO number and read its insurance balance without
+// having full workshop_jobs view rights. Both are read-only.
+router.get(   '/job-cards/resolve-ro',      requireAnyAccess('workshop_jobs:view', 'payments'), wc.resolveByRO);
 router.get(   '/job-cards/:id/print-data',  requirePerm('workshop_jobs', 'view'),        wc.getJobCardPrintData);
 router.get(   '/job-cards/:id/invoice-data', requirePerm('workshop_jobs', 'view'),       wc.getJobCardInvoiceData);
 router.get(   '/job-cards/:id',             requirePerm('workshop_jobs', 'view'),        wc.getJobCardById);
@@ -41,9 +44,13 @@ router.get(   '/job-cards/:id/navigation',  requirePerm('workshop_jobs', 'view')
 router.post(  '/job-cards/:id/damage-marks',requirePerm('workshop_jobs', 'edit'),        wc.saveDamageMarks);
 
 // Insurance handling on JC — treated as JC edits
-router.get(   '/job-cards/:id/insurance',   requirePerm('workshop_jobs', 'view'),        wc.getJobCardInsurance);
+router.get(   '/job-cards/:id/insurance',   requireAnyAccess('workshop_jobs:view', 'payments'), wc.getJobCardInsurance);
 router.post(  '/job-cards/:id/insurance',   requirePerm('workshop_jobs', 'edit'),        wc.saveJobCardInsurance);
-router.post(  '/job-cards/:id/depreciation-payments', requirePerm('workshop_jobs', 'edit'), wc.recordDepreciationPayment);
+// Depreciation receipt is a payment operation, not a JC edit. Cashiers
+// have `payments` (workflow) but usually NOT workshop_jobs:edit. Accept
+// either so a cashier can record the depreciation cash while an advisor
+// / manager with JC-edit rights can also still trigger it.
+router.post(  '/job-cards/:id/depreciation-payments', requireAnyAccess('payments', 'workshop_jobs:edit'), wc.recordDepreciationPayment);
 
 // Birthdays — read-only, useful for CRO + Workshop staff dashboards
 router.get(   '/birthdays',                 requireAnyAccess('workshop_jobs:view', 'cro_workspace', 'workshop_customers:view'), wc.getBirthdays);
