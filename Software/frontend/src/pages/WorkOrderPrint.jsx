@@ -39,8 +39,16 @@ export default function WorkOrderPrint() {
     const partsGross  = (jc.PartsItems || []).reduce((s, p) => s + (Number(p.StockRate || p.ItemRate) || 0) * (Number(p.IssueQuantity || p.Quantity) || 1), 0);
     const partsDisc   = (jc.PartsItems || []).reduce((s, p) => s + (Number(p.DiscAmt) || 0), 0);
     const partsNet    = partsGross - partsDisc;
-    const sublet      = (jc.SubletItems || []).reduce((s, x) => s + (Number(x.Amount) || 0), 0);
-    const pst         = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.TaxAmount) || 0), 0);
+    // Sublet field is PayableAmount on Addata_JobCardInfoSubletJobDetail;
+    // .Amount doesn't exist so this was silently returning 0 on every JC
+    // with sublet work — root cause of GR-3054's Rs 1,160.40 mismatch
+    // (owner report 2026-07-08).
+    const sublet      = (jc.SubletItems || []).reduce((s, x) => s + (Number(x.PayableAmount) || 0), 0);
+    // PST is on labour + sublet (both are PST-taxable). Sublet.TaxAmount
+    // is snapshotted at save; sum it in so the printed 16% PST total
+    // matches the finalize/ledger figure.
+    const pst         = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.TaxAmount) || 0), 0)
+                      + (jc.SubletItems || []).reduce((s, x) => s + (Number(x.TaxAmount) || 0), 0);
     const gst         = (jc.PartsItems  || []).reduce((s, p) => s + (Number(p.TaxAmount) || 0), 0);
     const total       = labourNet + partsNet + sublet + pst + gst;
 
