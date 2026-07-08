@@ -898,8 +898,10 @@ export default function ReceivePayment() {
                 <SearchableSelect
                   value={row.GLCAID}
                   onChange={val => setCustomAdj(rows => rows.map((r, i) => i === idx ? { ...r, GLCAID: val } : r))}
-                  options={coa.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode }))}
-                  placeholder="Pick GL account (search code or title)…"
+                  options={coa
+                    .filter(a => (a.GLCode || '').startsWith('502'))
+                    .map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode }))}
+                  placeholder="Pick expense account (502…)…"
                 />
                 <input type="number" step="0.01" min="0"
                   value={row.Amount}
