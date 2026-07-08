@@ -53,7 +53,13 @@ async function jobCardRefs(pool, jcId) {
     const blockers = [];
     const sourceVid = await findSourceVoucherId(pool, 'JOBCARD', jcId);
 
-    // Posted payment / allocation vouchers tagged to this JC, excluding the SI voucher itself.
+    // Posted payment / allocation vouchers tagged to this JC, excluding:
+    //   - The current SI voucher itself (svid)
+    //   - Reversal vouchers (ReversesVoucherID not null). A reversal is
+    //     the "undo" of a prior finalize and is history — it doesn't
+    //     represent an active downstream doc. Owner report 2026-07-08:
+    //     an old SI-REV from a previous unfinalize was blocking the
+    //     current unfinalize.
     const r = await pool.request()
         .input('jc', sql.Int, jcId)
         .input('svid', sql.Int, sourceVid || -1)
@@ -65,6 +71,7 @@ async function jobCardRefs(pool, jcId) {
             WHERE d.JobCardID = @jc
               AND v.Status = 'Posted'
               AND v.VoucherID <> @svid
+              AND v.ReversesVoucherID IS NULL
         `);
     for (const v of r.recordset) {
         blockers.push({
