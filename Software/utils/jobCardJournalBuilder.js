@@ -163,9 +163,10 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
         ? round2(Math.min(depreciationTotal, customerPays))
         : 0;
 
-    // Under-insurance split — flat percentage of (invoice − depreciation)
-    // that becomes an additional customer share. Capped so it can never
-    // exceed the base. No JC-type restriction (owner ask 2026-07-08).
+    // Under-insurance split — owner confirmed 2026-07-08: sublet is
+    // included in the base. So uiBase = customerPays − depAmount, same
+    // as the JC Insurance tab's Under-Insurance preview computes. Capped
+    // so under-ins can never exceed the base.
     const uiPct = Math.max(0, Number(underInsurancePct) || 0);
     const uiBase = Math.max(0, round2(customerPays - depAmount));
     const underInsAmount = uiPct > 0
