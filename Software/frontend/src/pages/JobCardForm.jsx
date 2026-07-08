@@ -84,8 +84,10 @@ export default function JobCardForm() {
 
   // Insurance tab — claim header + per-part depreciation rows + payments
   const [insHeader, setInsHeader] = useState({
-    CompanyName: '', SurveyorName: '', SurveyorMobile: '', SurveyorMobile2: '', InsClaimNo: ''
+    CompanyName: '', SurveyorName: '', SurveyorMobile: '', SurveyorMobile2: '', InsClaimNo: '',
+    UnderInsurancePct: 0,
   });
+  const [insTotals, setInsTotals] = useState({ underInsuranceBase: 0, underInsuranceAmount: 0, customerShareTotal: 0 });
   const [insParts, setInsParts] = useState([]);      // includes TaxRate / TaxAmount / TotalWithTax
   const [insPayments, setInsPayments] = useState([]);
   const [insSaving, setInsSaving] = useState(false);
@@ -266,6 +268,7 @@ export default function JobCardForm() {
             if (insRes.data?.header) setInsHeader(insRes.data.header);
             if (Array.isArray(insRes.data?.parts)) setInsParts(insRes.data.parts);
             if (Array.isArray(insRes.data?.payments)) setInsPayments(insRes.data.payments);
+            if (insRes.data?.totals) setInsTotals(insRes.data.totals);
           }).catch(() => {});
           if (jc.VOCRemarks) { try { setVocChecks(JSON.parse(jc.VOCRemarks)); } catch (e) {} }
           setIsFinalized(!!jc.IsFinalized);
@@ -1644,6 +1647,50 @@ export default function JobCardForm() {
                           {totalDepAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                       </div>
+                      {/* Under-insurance (owner ask 2026-07-08).
+                          Percentage of (invoice - depreciation) that shifts
+                          from insurer to the customer. Same payment path as
+                          depreciation (Receive Payment > Depreciation mode). */}
+                      <div style={S.field}>
+                        <label style={S.label}>Under-Insurance %</label>
+                        <input style={S.input} type="number" step="0.01" min="0" max="100"
+                               value={insHeader.UnderInsurancePct ?? 0}
+                               onChange={e => {
+                                 const v = e.target.value;
+                                 setInsHeader(h => ({ ...h, UnderInsurancePct: v === '' ? '' : Number(v) }));
+                                 // Live preview: recompute customer share
+                                 // using the totals returned at load time.
+                                 const pct = Number(v) || 0;
+                                 const base = Number(insTotals.underInsuranceBase) || 0;
+                                 const amt = +(base * pct / 100).toFixed(2);
+                                 setInsTotals(t => ({
+                                   ...t,
+                                   underInsuranceAmount: amt,
+                                   customerShareTotal: +(totalDepAmount + amt).toFixed(2),
+                                 }));
+                               }}
+                               disabled={disabled}
+                               placeholder="e.g. 20 for 20% under-insured" />
+                        <div style={{ fontSize: 11, color: 'var(--erp-text-muted)', marginTop: 2 }}>
+                          Applied to (invoice − depreciation) = <b>PKR {Number(insTotals.underInsuranceBase || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+                        </div>
+                      </div>
+                      {Number(insTotals.underInsuranceAmount) > 0 && (
+                        <div style={S.field}>
+                          <label style={{ ...S.label, fontWeight: 700, color: '#7c2d12' }}>Under-Insurance Amount</label>
+                          <div style={{ ...S.billVal, fontWeight: 700, color: '#7c2d12', background: '#ffedd5', textAlign: 'right', padding: '4px 8px' }}>
+                            {Number(insTotals.underInsuranceAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      )}
+                      {(Number(insTotals.underInsuranceAmount) > 0 || totalDepAmount > 0) && (
+                        <div style={S.field}>
+                          <label style={{ ...S.label, fontWeight: 700, color: '#7c2d12' }}>Customer Share Total (dep + under-ins)</label>
+                          <div style={{ ...S.billVal, fontWeight: 700, color: '#7c2d12', background: '#ffedd5', textAlign: 'right', padding: '4px 8px' }}>
+                            {(Number(insTotals.customerShareTotal) || (totalDepAmount + Number(insTotals.underInsuranceAmount || 0))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      )}
                       <button type="button" onClick={saveInsurance}
                         disabled={disabled || insSaving || !isEdit}
                         style={{ ...S.toolBtn, marginTop: 6, justifyContent: 'center', background: insSaving ? '#cbd5e1' : '#15803d', color: 'white', borderColor: '#15803d' }}>

@@ -1646,9 +1646,10 @@ exports.getJobCardInsurance = async (req, res) => {
         const id = parseInt(req.params.id);
         const pool = await getPool();
         const hdr = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo
+            .query(`SELECT CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo,
+                           ISNULL(UnderInsurancePct, 0) AS UnderInsurancePct
                     FROM dms_JobCardInsurance WHERE JobCardId=@id`);
-        const header = hdr.recordset[0] || { CompanyName:'', SurveyorName:'', SurveyorMobile:'', SurveyorMobile2:'', InsClaimNo:'' };
+        const header = hdr.recordset[0] || { CompanyName:'', SurveyorName:'', SurveyorMobile:'', SurveyorMobile2:'', InsClaimNo:'', UnderInsurancePct: 0 };
 
         // Parts issued to the JC
         const partsRs = await pool.request().input('id', sql.Int, id).query(`
@@ -1713,14 +1714,57 @@ exports.getJobCardInsurance = async (req, res) => {
             .filter(p => (p.VoucherStatus || 'Posted') !== 'Reversed')
             .reduce((s, p) => s + Number(p.PaidAmount || 0), 0);
 
+        // ── Under-insurance (owner ask 2026-07-08) ──
+        // Percentage of the entire invoice (parts + service + sublet + all
+        // taxes) minus depreciation. Same customer pool as dep — paid via
+        // the same Depreciation Receive Payment flow.
+        //
+        // We reconstitute the invoice total from the JC detail tables so we
+        // don't have to depend on the SI voucher header (this endpoint runs
+        // pre-finalize too, when the accountant is still setting the pct).
+        const labourTot = await pool.request().input('id', sql.Int, id).query(
+            `SELECT ISNULL(SUM((Price - ISNULL(DiscAmt,0)) + ISNULL(TaxAmount,0)), 0) AS T
+             FROM Addata_JobCardInfoDetail WHERE JobCardId=@id`);
+        const subletTot = await pool.request().input('id', sql.Int, id).query(
+            `SELECT ISNULL(SUM(ISNULL(PayableAmount,0) + ISNULL(TaxAmount,0)), 0) AS T
+             FROM Addata_JobCardInfoSubletJobDetail WHERE JobCardId=@id`);
+        const partsTot = await pool.request().input('id', sql.Int, id).query(
+            `SELECT ISNULL(SUM(d.IssueQuantity * d.ItemRate
+                              - ISNULL(d.DiscAmt,0)
+                              + ISNULL(d.TaxAmount,0)), 0) AS T
+             FROM data_StockIssuetoJobCardDetail d
+             INNER JOIN data_StockIssuetoJobCard h ON h.StockIssueID = d.StockIssueID
+             WHERE h.JobCardId=@id`);
+        const invoiceTotal = Number(labourTot.recordset[0].T)
+                           + Number(subletTot.recordset[0].T)
+                           + Number(partsTot.recordset[0].T);
+
+        const underInsurancePct = Number(header.UnderInsurancePct) || 0;
+        const underInsuranceBase = Math.max(0, invoiceTotal - depreciationTotal);
+        const underInsuranceAmount = +(underInsuranceBase * underInsurancePct / 100).toFixed(2);
+
+        // Customer's total share (paid via Depreciation Receive Payment) =
+        // depreciation + under-insurance.
+        const customerShareTotal = +(depreciationTotal + underInsuranceAmount).toFixed(2);
+
         res.json({
             header,
             parts: parts.recordset,
             payments: pays.recordset,
             totals: {
-                depreciationTotal: +depreciationTotal.toFixed(2),
-                depreciationPaid:  +depreciationPaid.toFixed(2),
-                depreciationBalance: +(depreciationTotal - depreciationPaid).toFixed(2)
+                depreciationTotal:    +depreciationTotal.toFixed(2),
+                depreciationPaid:     +depreciationPaid.toFixed(2),
+                // depreciationBalance still called that for backward
+                // compatibility with existing UI, but it's now
+                // (dep + under-ins) − paid. Frontend / Receive Payment
+                // treats it as the total customer share balance.
+                depreciationBalance:  +(customerShareTotal - depreciationPaid).toFixed(2),
+                // Extra fields so the Insurance tab can show a breakdown.
+                invoiceTotal:         +invoiceTotal.toFixed(2),
+                underInsurancePct:    +underInsurancePct.toFixed(2),
+                underInsuranceBase:   +underInsuranceBase.toFixed(2),
+                underInsuranceAmount: underInsuranceAmount,
+                customerShareTotal:   customerShareTotal,
             }
         });
     } catch (err) {
@@ -1761,16 +1805,18 @@ exports.saveJobCardInsurance = async (req, res) => {
             .input('sm',  sql.NVarChar(30),  header.SurveyorMobile  || null)
             .input('sm2', sql.NVarChar(30),  header.SurveyorMobile2 || null)
             .input('cn',  sql.NVarChar(80),  header.InsClaimNo      || null)
+            .input('uip', sql.Decimal(5,2),  Number.isFinite(Number(header.UnderInsurancePct)) ? Number(header.UnderInsurancePct) : 0)
             .query(`
                 IF EXISTS (SELECT 1 FROM dms_JobCardInsurance WHERE JobCardId=@id)
                     UPDATE dms_JobCardInsurance
                        SET CompanyName=@co, SurveyorName=@sn, SurveyorMobile=@sm,
-                           SurveyorMobile2=@sm2, InsClaimNo=@cn, UpdatedAt=GETDATE()
+                           SurveyorMobile2=@sm2, InsClaimNo=@cn, UnderInsurancePct=@uip,
+                           UpdatedAt=GETDATE()
                      WHERE JobCardId=@id;
                 ELSE
                     INSERT INTO dms_JobCardInsurance
-                        (JobCardId, CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo)
-                    VALUES (@id, @co, @sn, @sm, @sm2, @cn);
+                        (JobCardId, CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo, UnderInsurancePct)
+                    VALUES (@id, @co, @sn, @sm, @sm2, @cn, @uip);
             `);
 
         // Replace depreciation rows

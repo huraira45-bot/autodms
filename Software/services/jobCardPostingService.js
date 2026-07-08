@@ -168,12 +168,23 @@ async function loadJobCardData(jobCardId, transaction) {
                 FROM dms_JobCardPartsDepreciation WHERE JobCardId=@id`);
     const depreciationTotal = Number(depRs.recordset[0].Total) || 0;
 
+    // Under-insurance percentage — flat % applied to (invoice − depreciation).
+    // Same customer pool as depreciation. Owner ask 2026-07-08.
+    const uipRs = await new sql.Request(transaction)
+        .input('id', sql.Int, jobCardId)
+        .query(`SELECT ISNULL(UnderInsurancePct, 0) AS Pct
+                FROM dms_JobCardInsurance WHERE JobCardId=@id`);
+    const underInsurancePct = uipRs.recordset.length
+        ? Number(uipRs.recordset[0].Pct) || 0
+        : 0;
+
     return {
         jobCard,
         labourLines: labour.recordset,
         subletLines: sublet.recordset,
         partsLines: parts.recordset,
         depreciationTotal,
+        underInsurancePct,
     };
 }
 
@@ -197,7 +208,7 @@ async function resolvePaymentBank(jobCard, transaction) {
  */
 async function postJobCardVoucher(jobCardId, userInfo, transaction) {
     // 1. Load all job-card data + any active campaign application
-    const { jobCard, labourLines, subletLines, partsLines, depreciationTotal } = await loadJobCardData(jobCardId, transaction);
+    const { jobCard, labourLines, subletLines, partsLines, depreciationTotal, underInsurancePct } = await loadJobCardData(jobCardId, transaction);
     const campaign = await loadCampaignApplication(jobCardId, transaction);
 
     // 2. Resolve system accounts + per-party GLs. Customer A/R uses the JC
@@ -223,6 +234,7 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
         labourLines, subletLines, partsLines,
         accounts, campaign, partyGL, subletVendorGLs,
         depreciationTotal,
+        underInsurancePct,
     });
 
     // Empty Job Cards (no labour / sublet / parts) — owner decision: allow them

@@ -35,7 +35,7 @@ const PAYMENT_MODES = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsLines = [], accounts, paymentBank = null, campaign = null, partyGL = null, subletVendorGLs = new Map(), depreciationTotal = 0 }) {
+function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsLines = [], accounts, paymentBank = null, campaign = null, partyGL = null, subletVendorGLs = new Map(), depreciationTotal = 0, underInsurancePct = 0 }) {
     if (!accounts) throw new Error('accounts map required');
 
     // ---- Compute totals from each line group ----
@@ -154,9 +154,24 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
     //   - Insurer (PartyGLID, party-tagged) for (customerPays - dep)
     //   - General Customer (JC-tagged only)  for (dep)
     // For walk-ins or no-dep cases, the single-leg path is unchanged.
-    const depSplit = (partyTagForInvoiceLeg != null) && depreciationTotal > 0
+    // Depreciation split (per-part).
+    const depAmount = (partyTagForInvoiceLeg != null) && depreciationTotal > 0
         ? round2(Math.min(depreciationTotal, customerPays))
         : 0;
+
+    // Under-insurance split — owner ask 2026-07-08. A flat percentage of
+    // (invoice − depreciation) that shifts from insurer to customer. Only
+    // applies on insurance JCs (partyTagForInvoiceLeg is the insurer);
+    // capped so we can never leave the insurer negative.
+    const uiPct = Math.max(0, Number(underInsurancePct) || 0);
+    const uiBase = Math.max(0, round2(customerPays - depAmount));
+    const underInsAmount = (partyTagForInvoiceLeg != null) && uiPct > 0
+        ? round2(Math.min(uiBase * (uiPct / 100), uiBase))
+        : 0;
+
+    // Combined customer share (depreciation + under-insurance) → General
+    // Customer A/C. Insurer share = whatever's left after both.
+    const depSplit = round2(depAmount + underInsAmount);
     const insurerShare = round2(customerPays - depSplit);
 
     if (insurerShare > 0) {
@@ -176,17 +191,24 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
     }
 
     if (depSplit > 0) {
+        // Narration reflects whether under-insurance contributed too, so
+        // reports and party ledger reads are unambiguous.
+        const narr = underInsAmount > 0 && depAmount > 0
+            ? `Customer share (dep ${depAmount.toFixed(2)} + under-ins ${underInsAmount.toFixed(2)}) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`
+            : underInsAmount > 0
+                ? `Customer under-insurance share (${uiPct}% of ${uiBase.toFixed(2)}) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`
+                : `Customer depreciation share — JC-${jobCard.JobCardNo || jobCard.JobCardId}`;
         lines.push({
             GLCAID: accounts.GENERAL_CUSTOMER.GLCAID,
             Debit: depSplit, Credit: 0,
-            Narration: `Customer depreciation share — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
+            Narration: narr,
             PartyID: null, JobCardID: jcTag,
         });
         subsidiaryWrites.push({
             GLCAID: accounts.GENERAL_CUSTOMER.GLCAID,
             Debit: depSplit, Credit: 0,
             PartyID: null, JobCardID: jcTag,
-            Narration: `Customer depreciation share — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
+            Narration: narr,
         });
     }
 
