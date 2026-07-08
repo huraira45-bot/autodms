@@ -251,10 +251,20 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const [editingId, setEditingId] = useState(null);
 
     const startEditDraft = () => {
-        if (!active || active.Status !== 'Draft') return;
+        if (!active) return;
+        // Draft vouchers of any type are editable. Posted JVs are also
+        // editable (opening balances / prior-period reclassifications /
+        // corrections) — backend enforces the same rule. Reversed or
+        // reversing vouchers are always locked.
+        const isJV = active.VoucherTypeCode === 'JV';
+        const allowed = active.Status === 'Draft'
+            || (isJV && active.Status === 'Posted' && !active.ReversesVoucherID);
+        if (!allowed) return;
         setHeader({
-            // Policy: even when editing an existing Draft, post date is forced to today.
-            VoucherDate: todayStr,
+            // JV keeps its existing date; other types are forced to today.
+            VoucherDate: isJV
+                ? new Date(active.VoucherDate).toISOString().split('T')[0]
+                : todayStr,
             VoucherTypeID: active.VoucherTypeID,
             Remarks: active.Remarks || ''
         });
@@ -402,7 +412,13 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         // Only JV vouchers get the Change Date affordance — CPV/CRV/BPV/BRV
         // stay locked to today because they represent physical cash/bank
         // movement.
-        const canChangeDate = canEdit && !isReversed && active.VoucherTypeCode === 'JV' && !active.ReversesVoucherID;
+        const isJV         = active.VoucherTypeCode === 'JV';
+        const canChangeDate = canEdit && !isReversed && isJV && !active.ReversesVoucherID;
+        // Full-value edit: Draft (any type) OR Posted JVs. Backend enforces
+        // the same policy on the PUT endpoint. Reversed / reversing
+        // vouchers are always locked.
+        const canEditValues = canEdit && !isReversed && !active.ReversesVoucherID &&
+            (status === 'Draft' || (isJV && status === 'Posted'));
 
         // Line count / total for the smart-button row.
         const linesCount = (active.lines || []).length;
@@ -451,19 +467,18 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     </div>
 
                     <div style={{ padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--erp-border)' }}>
-                        {status === 'Draft' && (
-                            <>
-                                {canEdit && (
-                                    <button type="button" className="erp-btn erp-btn-primary" onClick={startEditDraft} disabled={busy}>
-                                        <Edit3 size={14} /> Edit Draft
-                                    </button>
-                                )}
-                                {canDelete && (
-                                    <button type="button" className="erp-btn erp-btn-danger" onClick={handleDeleteDraft} disabled={busy}>
-                                        <Trash2 size={14} /> Delete
-                                    </button>
-                                )}
-                            </>
+                        {canEditValues && (
+                            <button type="button" className="erp-btn erp-btn-primary" onClick={startEditDraft} disabled={busy}
+                                title={status === 'Draft'
+                                    ? 'Edit this Draft voucher before posting.'
+                                    : 'Edit values on a posted JV (opening balances / prior-period adjustments).'}>
+                                <Edit3 size={14} /> {status === 'Draft' ? 'Edit Draft' : 'Edit Values'}
+                            </button>
+                        )}
+                        {status === 'Draft' && canDelete && (
+                            <button type="button" className="erp-btn erp-btn-danger" onClick={handleDeleteDraft} disabled={busy}>
+                                <Trash2 size={14} /> Delete
+                            </button>
                         )}
                         {canFinalize && (
                             <button type="button" className="erp-btn erp-btn-primary" onClick={handleFinalize} disabled={busy}>

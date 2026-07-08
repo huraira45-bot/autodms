@@ -482,8 +482,6 @@ exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { VoucherDate, VoucherTypeID, Remarks, Items } = req.body;
-        const dateErr = checkVoucherDateIsToday(VoucherDate);
-        if (dateErr) return res.status(400).json({ error: dateErr });
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
         const badIdx = Items.findIndex(it => !it.GLCAID);
@@ -496,12 +494,32 @@ exports.updateVoucher = async (req, res) => {
             return res.status(400).json({ error: 'Debits and credits must balance.' });
 
         const pool = await getPool();
-        // Reject if not a Draft
+        // Load current voucher header + type so we can decide what edits
+        // are allowed. JVs (opening balances, prior-period adjustments,
+        // reclassifications) can be edited in Draft OR Posted state and
+        // may carry any date. Other types (CPV/CRV/BPV/BRV) stay
+        // Draft-only + today-only per the daily-cash-movement policy.
         const check = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT Status FROM data_FinanceVoucherInfo WHERE VoucherID=@id`);
+            .query(`SELECT v.Status, v.ReversesVoucherID, t.Title AS VoucherType
+                    FROM   data_FinanceVoucherInfo v
+                    JOIN   GLVoucherType t ON v.VoucherTypeID = t.Voucherid
+                    WHERE  v.VoucherID = @id`);
         if (!check.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
-        if (check.recordset[0].Status !== 'Draft')
-            return res.status(409).json({ error: `Only Draft vouchers can be edited. Current status: ${check.recordset[0].Status}.` });
+        const row = check.recordset[0];
+        const isJV = row.VoucherType === 'JV';
+        if (row.ReversesVoucherID) {
+            return res.status(400).json({ error: 'Cannot edit a reversing voucher — reverse the reversal instead.' });
+        }
+        if (row.Status === 'Reversed') {
+            return res.status(409).json({ error: 'Voucher is already Reversed and cannot be edited.' });
+        }
+        if (!isJV && row.Status !== 'Draft') {
+            return res.status(409).json({ error: `Only Draft vouchers can be edited for this type. Current status: ${row.Status}. JV vouchers can be edited in Posted state; other types must be reversed and re-entered.` });
+        }
+        if (!isJV) {
+            const dateErr = checkVoucherDateIsToday(VoucherDate);
+            if (dateErr) return res.status(400).json({ error: dateErr });
+        }
 
         const transaction = new sql.Transaction(pool);
         await transaction.begin();

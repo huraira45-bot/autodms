@@ -804,7 +804,17 @@ export default function JobCardForm() {
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>Date In</label>
-                  <input style={S.input} type="datetime-local" value={form.ReceiptDate} onChange={e => f('ReceiptDate', e.target.value)} />
+                  {/* Owner ask 2026-07-08: Date In must be the actual moment
+                      the JC is being opened / already open — no back- or
+                      forward-dating. Read-only input; on new JCs the state
+                      already carries new Date() at form open, on existing
+                      JCs the DB value shows through and stays locked. */}
+                  <input style={{ ...S.input, background: '#e8edf2', cursor: 'not-allowed' }}
+                         type="datetime-local"
+                         value={form.ReceiptDate}
+                         readOnly
+                         disabled
+                         title="Date In is fixed to when the Job Card was opened; not editable." />
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>RO Status</label>
