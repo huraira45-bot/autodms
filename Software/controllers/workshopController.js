@@ -1719,9 +1719,9 @@ exports.getJobCardInsurance = async (req, res) => {
         // taxes) minus depreciation. Same customer pool as dep — paid via
         // the same Depreciation Receive Payment flow.
         //
-        // We reconstitute the invoice total from the JC detail tables so we
-        // don't have to depend on the SI voucher header (this endpoint runs
-        // pre-finalize too, when the accountant is still setting the pct).
+        // Owner spec 2026-07-08: base = whole invoice (part + service +
+        // sublet + all taxes) − depreciation. Same three components that
+        // getJobCardBalance computes when there's no SI voucher yet.
         const labourTot = await pool.request().input('id', sql.Int, id).query(
             `SELECT ISNULL(SUM((Price - ISNULL(DiscAmt,0)) + ISNULL(TaxAmount,0)), 0) AS T
              FROM Addata_JobCardInfoDetail WHERE JobCardId=@id`);
@@ -1729,12 +1729,11 @@ exports.getJobCardInsurance = async (req, res) => {
             `SELECT ISNULL(SUM(ISNULL(PayableAmount,0) + ISNULL(TaxAmount,0)), 0) AS T
              FROM Addata_JobCardInfoSubletJobDetail WHERE JobCardId=@id`);
         const partsTot = await pool.request().input('id', sql.Int, id).query(
-            `SELECT ISNULL(SUM(d.IssueQuantity * d.ItemRate
-                              - ISNULL(d.DiscAmt,0)
-                              + ISNULL(d.TaxAmount,0)), 0) AS T
-             FROM data_StockIssuetoJobCardDetail d
-             INNER JOIN data_StockIssuetoJobCard h ON h.StockIssueID = d.StockIssueID
-             WHERE h.JobCardId=@id`);
+            `SELECT ISNULL(SUM(IssueQuantity * ItemRate
+                              - ISNULL(DiscAmt,0)
+                              + ISNULL(TaxAmount,0)), 0) AS T
+             FROM data_StockIssuetoJobCardDetail
+             WHERE JobCardId=@id`);
         const invoiceTotal = Number(labourTot.recordset[0].T)
                            + Number(subletTot.recordset[0].T)
                            + Number(partsTot.recordset[0].T);
