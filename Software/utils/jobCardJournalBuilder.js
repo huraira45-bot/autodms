@@ -154,18 +154,21 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
     //   - Insurer (PartyGLID, party-tagged) for (customerPays - dep)
     //   - General Customer (JC-tagged only)  for (dep)
     // For walk-ins or no-dep cases, the single-leg path is unchanged.
-    // Depreciation split (per-part).
-    const depAmount = (partyTagForInvoiceLeg != null) && depreciationTotal > 0
+    // Depreciation split (per-part). Owner ask 2026-07-08: applies on any
+    // JC that has a depreciation total > 0 — including walk-ins. On a
+    // walk-in the customer subsidiary is General Customer, so the split
+    // is between two lines that both hit that account (redundant but
+    // audit-friendly: dep portion carries its own narration).
+    const depAmount = depreciationTotal > 0
         ? round2(Math.min(depreciationTotal, customerPays))
         : 0;
 
-    // Under-insurance split — owner ask 2026-07-08. A flat percentage of
-    // (invoice − depreciation) that shifts from insurer to customer. Only
-    // applies on insurance JCs (partyTagForInvoiceLeg is the insurer);
-    // capped so we can never leave the insurer negative.
+    // Under-insurance split — flat percentage of (invoice − depreciation)
+    // that becomes an additional customer share. Capped so it can never
+    // exceed the base. No JC-type restriction (owner ask 2026-07-08).
     const uiPct = Math.max(0, Number(underInsurancePct) || 0);
     const uiBase = Math.max(0, round2(customerPays - depAmount));
-    const underInsAmount = (partyTagForInvoiceLeg != null) && uiPct > 0
+    const underInsAmount = uiPct > 0
         ? round2(Math.min(uiBase * (uiPct / 100), uiBase))
         : 0;
 
