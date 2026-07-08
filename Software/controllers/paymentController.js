@@ -557,11 +557,17 @@ async function postPayment(req, res, direction) {
         });
 
         // Pick voucher type by direction + dominant mode
-        // CRV / BRV for receive; CPV / BPV for make. Pick BRV/BPV if any mode is Bank Transfer; else use CRV/CPV.
+        //   - Any bank/POS/cheque line → BRV / BPV
+        //   - Any cash line            → CRV / CPV
+        //   - No cash at all (pure write-off / WHT settlement) → JV
+        //     because there's no physical cash/bank movement, only a
+        //     reclassification of the AR into an expense / withholding.
         const hasBank = paymentLines.some(p => p.Mode === 'Bank Transfer' || p.Mode === 'POS' || p.Mode === 'Cheque');
+        const hasAnyCash = paymentLines.length > 0;
         let voucherTypeTitle;
-        if (direction === 'receive') voucherTypeTitle = hasBank ? 'BRV' : 'CRV';
-        else                          voucherTypeTitle = hasBank ? 'BPV' : 'CPV';
+        if (!hasAnyCash)                    voucherTypeTitle = 'JV';
+        else if (direction === 'receive')   voucherTypeTitle = hasBank ? 'BRV' : 'CRV';
+        else                                voucherTypeTitle = hasBank ? 'BPV' : 'CPV';
 
         const vtRes = await pool.request()
             .input('t', sql.NVarChar(20), voucherTypeTitle)
