@@ -1,11 +1,28 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TrendingUp, Scale, BookOpen } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfControl, SingleDateControl } from './ReportShell';
+
+// Row drill-down helper — opens GL Detail for the clicked account, passing
+// through the current date range so the linked page auto-loads matching data.
+function useDrillToGL() {
+    const navigate = useNavigate();
+    return (params) => (glcaid) => {
+        // Skip synthetic rows (e.g. Retained Earnings placeholder on BS).
+        if (!glcaid || typeof glcaid !== 'number') return;
+        const q = new URLSearchParams({ glcaid: String(glcaid) });
+        if (params?.from) q.set('from', params.from);
+        if (params?.to)   q.set('to',   params.to);
+        if (params?.asOf) q.set('to',   params.asOf);
+        navigate(`/reports/gl-detail?${q.toString()}`);
+    };
+}
 
 const sectionStyle = { background: '#eff6ff' };
 
 // ---- Profit & Loss ----
 export function PnL() {
+    const drillTo = useDrillToGL();
     return (
         <ReportShell
             title="Profit & Loss"
@@ -15,7 +32,7 @@ export function PnL() {
             defaultParams={{ from: yearStartISO(), to: todayISO() }}
             controls={PeriodControls}
         >
-            {(data) => (
+            {(data, ctx) => (
                 <>
                     <div className="card" style={{
                         background: data.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
@@ -33,15 +50,15 @@ export function PnL() {
                         </div>
                     </div>
 
-                    <Section title="REVENUE" rows={data.revenue.rows} total={data.revenue.total} />
-                    <Section title="EXPENSES" rows={data.expenses.rows} total={data.expenses.total} />
+                    <Section title="REVENUE"  rows={data.revenue.rows}  total={data.revenue.total}  drillTo={drillTo(ctx?.params)} />
+                    <Section title="EXPENSES" rows={data.expenses.rows} total={data.expenses.total} drillTo={drillTo(ctx?.params)} />
                 </>
             )}
         </ReportShell>
     );
 }
 
-function Section({ title, rows, total }) {
+function Section({ title, rows, total, drillTo }) {
     return (
         <div className="card">
             <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 12 }}>{title}</div>
@@ -55,13 +72,19 @@ function Section({ title, rows, total }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map(r => (
-                            <tr key={r.GLCAID} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <TD mono color="#64748b">{r.GLCode}</TD>
-                                <TD>{r.GLTitle}</TD>
-                                <TD align="right" bold>{fmt(r.PeriodAmount)}</TD>
-                            </tr>
-                        ))}
+                        {rows.map(r => {
+                            const canDrill = drillTo && typeof r.GLCAID === 'number';
+                            return (
+                                <tr key={r.GLCAID}
+                                    style={{ borderBottom: '1px solid #f1f5f9', cursor: canDrill ? 'pointer' : 'default' }}
+                                    onClick={canDrill ? () => drillTo(r.GLCAID) : undefined}
+                                    title={canDrill ? 'Open GL Detail for this account' : undefined}>
+                                    <TD mono color="#64748b">{r.GLCode}</TD>
+                                    <TD>{r.GLTitle}</TD>
+                                    <TD align="right" bold>{fmt(r.PeriodAmount)}</TD>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                     <tfoot>
                         <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
@@ -77,6 +100,7 @@ function Section({ title, rows, total }) {
 
 // ---- Balance Sheet ----
 export function BalanceSheet() {
+    const drillTo = useDrillToGL();
     return (
         <ReportShell
             title="Balance Sheet"
@@ -86,7 +110,7 @@ export function BalanceSheet() {
             defaultParams={{ asOf: todayISO() }}
             controls={AsOfControl}
         >
-            {(data) => (
+            {(data, ctx) => (
                 <>
                     <div className="card" style={{
                         background: Math.abs(data.diff) < 0.01 ? '#f0fdf4' : '#fef2f2',
@@ -105,12 +129,12 @@ export function BalanceSheet() {
                         </div>
                     </div>
 
-                    <Section title="ASSETS" rows={data.assets.rows.map(r => ({ ...r, PeriodAmount: r.Balance }))} total={data.assets.total} />
-                    <Section title="LIABILITIES" rows={data.liabilities.rows.map(r => ({ ...r, PeriodAmount: r.Balance }))} total={data.liabilities.total} />
+                    <Section title="ASSETS"      rows={data.assets.rows.map(r => ({ ...r, PeriodAmount: r.Balance }))} total={data.assets.total} drillTo={drillTo(ctx?.params)} />
+                    <Section title="LIABILITIES" rows={data.liabilities.rows.map(r => ({ ...r, PeriodAmount: r.Balance }))} total={data.liabilities.total} drillTo={drillTo(ctx?.params)} />
                     <Section title="EQUITY" rows={[
                         ...data.equity.rows.map(r => ({ ...r, PeriodAmount: r.Balance })),
                         { GLCAID: 'retained', GLCode: '—', GLTitle: 'Retained Earnings (period)', PeriodAmount: data.retainedEarnings }
-                    ]} total={data.equity.total + data.retainedEarnings} />
+                    ]} total={data.equity.total + data.retainedEarnings} drillTo={drillTo(ctx?.params)} />
                 </>
             )}
         </ReportShell>

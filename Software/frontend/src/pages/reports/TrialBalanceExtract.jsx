@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import { FileBarChart } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, DateInput } from './ReportShell';
 
@@ -62,6 +63,18 @@ export default function TrialBalanceExtract() {
             .catch(() => {});
     }, []);
 
+    // Row drill-down → open GL Detail for the clicked account. Curry to
+    // pass the current period so the linked page auto-loads the same
+    // From/To range.
+    const navigate = useNavigate();
+    const drillTo = (params) => (glcaid) => {
+        if (!glcaid) return;
+        const q = new URLSearchParams({ glcaid: String(glcaid) });
+        if (params?.from) q.set('from', params.from);
+        if (params?.to)   q.set('to',   params.to);
+        navigate(`/reports/gl-detail?${q.toString()}`);
+    };
+
     const printFilterSummary = (params) => {
         const parts = [];
         if (params.from && params.to) parts.push(`Period: ${params.from} → ${params.to}`);
@@ -101,7 +114,7 @@ export default function TrialBalanceExtract() {
                 </>
             )}
         >
-            {(data) => (
+            {(data, ctx) => (
                 <>
                     <div className="card" style={{ padding: 12, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
                         <Stat label="Accounts"    value={fmtInt(data.rows.length)} />
@@ -136,7 +149,7 @@ export default function TrialBalanceExtract() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {renderRows(data.rows, showZeroPeriod)}
+                                {renderRows(data.rows, showZeroPeriod, drillTo(ctx?.params))}
                             </tbody>
                             <tfoot>
                                 <tr style={{ borderTop: '2px solid #0f172a', background: '#f8fafc', fontWeight: 800 }}>
@@ -158,7 +171,7 @@ export default function TrialBalanceExtract() {
 }
 
 // Group rows by class root, render each block with a header row.
-function renderRows(rows, showZeroPeriod) {
+function renderRows(rows, showZeroPeriod, drillTo) {
     const filtered = showZeroPeriod
         ? rows
         : rows.filter(r => r.PeriodDr > 0.005 || r.PeriodCr > 0.005);
@@ -186,7 +199,9 @@ function renderRows(rows, showZeroPeriod) {
         );
         for (const r of grouped[k]) {
             out.push(
-                <tr key={r.GLCAID} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <tr key={r.GLCAID} style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
+                    onClick={() => drillTo && drillTo(r.GLCAID)}
+                    title="Open GL Detail for this account">
                     <TD mono color="#475569">{r.GLCode}</TD>
                     <TD>{r.GLTitle}</TD>
                     <TD align="right" mono>{r.OpeningDr > 0.005 ? fmt(r.OpeningDr) : '—'}</TD>
