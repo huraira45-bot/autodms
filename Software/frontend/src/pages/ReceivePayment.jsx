@@ -44,6 +44,11 @@ export default function ReceivePayment() {
   // Resolved server-side to GL leaves: WHTL=102005005, WHTP=102005006, STWH=102005007,
   // Salvage=502002038, Short=502002039.
   const [adjustments, setAdjustments] = useState({ WHTL: '', WHTP: '', STWH: '', Salvage: '', Short: '' });
+  // Custom write-offs (owner ask 2026-07-08): any GL leaf + amount +
+  // narration, only on Receive Payment for a named customer. Reduces the
+  // invoice outstanding by the total.
+  const [customAdj, setCustomAdj] = useState([]);   // [{ GLCAID, GLLabel, Amount, Narration }]
+  const [coa, setCoa] = useState([]);               // full COA leaves for the picker
   const [narration, setNarration] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -58,6 +63,10 @@ export default function ReceivePayment() {
   useEffect(() => {
     axios.get('/api/parties').then(r => setParties(r.data)).catch(() => {});
     axios.get('/api/accounts/banks').then(r => setBanks(r.data)).catch(() => {});
+    axios.get('/api/accounts/coa').then(r => {
+      const leaves = (r.data || []).filter(a => !a.isParent && !a.IsParent);
+      setCoa(leaves);
+    }).catch(() => {});
     axios.get('/api/workshop/job-types').then(r => {
       setJobTypes(r.data);
       if (r.data.length > 0) {
@@ -202,9 +211,13 @@ export default function ReceivePayment() {
     () => paymentLines.reduce((s, p) => s + (parseFloat(p.Amount) || 0), 0),
     [paymentLines]
   );
+  const customAdjTotal = useMemo(
+    () => customAdj.reduce((s, r) => s + (parseFloat(r.Amount) || 0), 0),
+    [customAdj]
+  );
   const adjustmentTotal = useMemo(
-    () => Object.values(adjustments).reduce((s, v) => s + (parseFloat(v) || 0), 0),
-    [adjustments]
+    () => Object.values(adjustments).reduce((s, v) => s + (parseFloat(v) || 0), 0) + customAdjTotal,
+    [adjustments, customAdjTotal]
   );
   // What "settles" the invoice = cash received + adjustments withheld by customer
   const totalPayment = cashPayment + adjustmentTotal;
@@ -332,6 +345,16 @@ export default function ReceivePayment() {
             .map(([k, v]) => [k, parseFloat(v) || 0])
             .filter(([, v]) => v > 0))
         : {};
+      if (mode === 'named') {
+        const customPayload = customAdj
+          .filter(r => r.GLCAID && parseFloat(r.Amount) > 0)
+          .map(r => ({
+            GLCAID: parseInt(r.GLCAID),
+            Amount: +parseFloat(r.Amount).toFixed(2),
+            Narration: (r.Narration || '').trim() || null,
+          }));
+        if (customPayload.length) adjPayload.custom = customPayload;
+      }
 
       const r = await axios.post('/api/payments/receive', {
         partyId: mode === 'named' ? selectedParty.PartyID : null,
@@ -354,6 +377,7 @@ export default function ReceivePayment() {
       // Reset and refresh
       setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
       setAdjustments({ WHTL: '', WHTP: '', STWH: '', Salvage: '', Short: '' });
+      setCustomAdj([]);
       setAllocations({});
       setNarration('');
       if (mode === 'named' && selectedParty) pickParty(selectedParty);
@@ -848,6 +872,56 @@ export default function ReceivePayment() {
                 />
               </div>
             ))}
+          </div>
+
+          {/* Custom write-offs — any GL leaf. Owner ask 2026-07-08.
+              Use to charge part of an invoice to an expense / discount /
+              bad-debt account when the customer isn't going to pay the full
+              amount. Multiple rows allowed. Each row posts Dr GL / Cr
+              customer AR when the voucher is finalized. */}
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed #fde68a' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <strong style={{ color: '#78350f', fontSize: 12.5 }}>Custom write-off / expense adjustments</strong>
+              <button type="button"
+                onClick={() => setCustomAdj(rows => [...rows, { GLCAID: '', GLLabel: '', Amount: '', Narration: '' }])}
+                style={{ background: '#f59e0b', color: 'white', border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11.5, cursor: 'pointer' }}>
+                + Add row
+              </button>
+            </div>
+            {customAdj.length === 0 && (
+              <div style={{ fontSize: 11, color: '#78350f', fontStyle: 'italic', padding: '4px 2px' }}>
+                No custom adjustments. Click "Add row" to charge part of the invoice to any GL leaf (expense, discount, bad debt, …).
+              </div>
+            )}
+            {customAdj.map((row, idx) => (
+              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 1.2fr 32px', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                <SearchableSelect
+                  value={row.GLCAID}
+                  onChange={val => setCustomAdj(rows => rows.map((r, i) => i === idx ? { ...r, GLCAID: val } : r))}
+                  options={coa.map(a => ({ id: a.GLCAID, label: a.GLTitle, sub: a.GLCode }))}
+                  placeholder="Pick GL account (search code or title)…"
+                />
+                <input type="number" step="0.01" min="0"
+                  value={row.Amount}
+                  onChange={e => setCustomAdj(rows => rows.map((r, i) => i === idx ? { ...r, Amount: e.target.value } : r))}
+                  placeholder="0.00"
+                  style={{ ...inp, borderColor: '#fde68a', background: 'white', textAlign: 'right' }} />
+                <input type="text"
+                  value={row.Narration}
+                  onChange={e => setCustomAdj(rows => rows.map((r, i) => i === idx ? { ...r, Narration: e.target.value } : r))}
+                  placeholder="Narration (optional)"
+                  style={{ ...inp, borderColor: '#fde68a', background: 'white' }} />
+                <button type="button"
+                  onClick={() => setCustomAdj(rows => rows.filter((_, i) => i !== idx))}
+                  style={{ background: 'transparent', color: '#b45309', border: '1px solid #fcd34d', borderRadius: 4, cursor: 'pointer', height: 30 }}
+                  title="Remove">×</button>
+              </div>
+            ))}
+            {customAdjTotal > 0 && (
+              <div style={{ fontSize: 11.5, color: '#78350f', textAlign: 'right', marginTop: 4 }}>
+                Custom subtotal: <strong>PKR {customAdjTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              </div>
+            )}
           </div>
         </div>
       )}

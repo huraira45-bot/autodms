@@ -509,6 +509,37 @@ async function postPayment(req, res, direction) {
                 Narration: `${def.Label} — withheld by customer on settlement`,
             });
         }
+        // Custom adjustments — owner ask 2026-07-08. Operator can pick any
+        // non-parent GL leaf (expense, discount, bad-debt, etc.) and post an
+        // amount that settles part of the invoice without cash. Only allowed
+        // on Receive Payment for named customers.
+        const custom = Array.isArray(adj.custom) ? adj.custom : [];
+        for (const [i, row] of custom.entries()) {
+            const amount = Number(row?.Amount) || 0;
+            const glcaid = parseInt(row?.GLCAID);
+            if (amount <= 0) continue;
+            if (direction !== 'receive') {
+                return res.status(400).json({ error: 'Custom adjustments are only supported on Receive Payment.' });
+            }
+            if (!party?.PartyID) {
+                return res.status(400).json({ error: 'Custom adjustments require a named party.' });
+            }
+            if (!Number.isFinite(glcaid) || glcaid <= 0) {
+                return res.status(400).json({ error: `Custom adjustment #${i + 1}: pick a GL account.` });
+            }
+            const acc = await pool.request().input('id', sql.Int, glcaid)
+                .query(`SELECT GLCAID, GLCode, GLTitle, isParent
+                        FROM GLChartOFAccount WHERE GLCAID=@id`);
+            if (!acc.recordset.length) return res.status(400).json({ error: `Custom adjustment #${i + 1}: GL account not found.` });
+            if (acc.recordset[0].isParent) return res.status(400).json({ error: `Custom adjustment #${i + 1}: account "${acc.recordset[0].GLCode} ${acc.recordset[0].GLTitle}" is a parent — pick a leaf.` });
+            adjustmentLines.push({
+                Type: 'Custom',
+                GLCAID: glcaid,
+                Amount: amount,
+                Narration: (row.Narration && String(row.Narration).trim())
+                    || `Write-off to ${acc.recordset[0].GLCode} ${acc.recordset[0].GLTitle}`,
+            });
+        }
 
         const built = buildPaymentJournalLines({
             direction, party,
