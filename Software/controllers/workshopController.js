@@ -1926,25 +1926,39 @@ exports.recordDepreciationPayment = async (req, res) => {
             });
         }
 
-        // Cap at outstanding balance to prevent overpayment. Excludes
-        // payments whose linked voucher was later reversed — otherwise a
-        // reversed receipt would still count against the cap and block
-        // re-recording the payment.
+        // Cap at outstanding balance to prevent overpayment. Balance =
+        // depreciation + under-insurance − paid. Excludes payments whose
+        // linked voucher was later reversed — otherwise a reversed receipt
+        // would still count against the cap and block re-recording.
         const totals = await pool.request().input('id', sql.Int, id).query(`
             SELECT
               (SELECT ISNULL(SUM(DepAmount), 0)
                  FROM dms_JobCardPartsDepreciation
-                 WHERE JobCardId=@id) AS Total,
+                 WHERE JobCardId=@id) AS DepTotal,
+              (SELECT ISNULL(UnderInsurancePct, 0)
+                 FROM dms_JobCardInsurance
+                 WHERE JobCardId=@id) AS UIPct,
+              (SELECT ISNULL(SUM((Price - ISNULL(DiscAmt,0)) + ISNULL(TaxAmount,0)), 0)
+                 FROM Addata_JobCardInfoDetail WHERE JobCardId=@id) AS LabourTot,
+              (SELECT ISNULL(SUM(ISNULL(PayableAmount,0) + ISNULL(TaxAmount,0)), 0)
+                 FROM Addata_JobCardInfoSubletJobDetail WHERE JobCardId=@id) AS SubletTot,
+              (SELECT ISNULL(SUM(IssueQuantity * ItemRate - ISNULL(DiscAmt,0) + ISNULL(TaxAmount,0)), 0)
+                 FROM data_StockIssuetoJobCardDetail WHERE JobCardId=@id) AS PartsTot,
               (SELECT ISNULL(SUM(p.PaidAmount), 0)
                  FROM dms_JobCardDepreciationPayments p
                  LEFT JOIN data_FinanceVoucherInfo v ON p.VoucherID = v.VoucherID
                  WHERE p.JobCardId=@id
                    AND ISNULL(v.Status, 'Posted') <> 'Reversed') AS Paid`);
-        const total = Number(totals.recordset[0].Total) || 0;
-        const paid  = Number(totals.recordset[0].Paid)  || 0;
-        const balance = +(total - paid).toFixed(2);
+        const row = totals.recordset[0];
+        const depTotal    = Number(row.DepTotal) || 0;
+        const invoiceTot  = Number(row.LabourTot) + Number(row.SubletTot) + Number(row.PartsTot);
+        const uiBase      = Math.max(0, invoiceTot - depTotal);
+        const uiAmount    = +((uiBase * (Number(row.UIPct) || 0)) / 100).toFixed(2);
+        const total       = +(depTotal + uiAmount).toFixed(2);
+        const paid        = Number(row.Paid) || 0;
+        const balance     = +(total - paid).toFixed(2);
         if (amount > balance + 0.005) {
-            return res.status(400).json({ error: `Amount (${amount.toFixed(2)}) exceeds outstanding depreciation balance (${balance.toFixed(2)})` });
+            return res.status(400).json({ error: `Amount (${amount.toFixed(2)}) exceeds outstanding customer share (dep + under-ins) balance (${balance.toFixed(2)})` });
         }
 
         // Resolve GL accounts for the voucher:
