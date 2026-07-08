@@ -429,11 +429,18 @@ async function postPayment(req, res, direction) {
             return res.status(400).json({ error: 'allocations must be an array (use [] for full advance).' });
         }
         // Adjustments are an object keyed by type: { Salvage, WHTL, WHTP, STWH, Short }
+        // plus an optional `custom` array of { GLCAID, Amount, Narration }.
         const adj = adjustments && typeof adjustments === 'object' ? adjustments : {};
-        const adjTotal = Object.values(adj).reduce((s, v) => s + (Number(v) || 0), 0);
+        const adjTotalFixed = Object.entries(adj)
+            .filter(([k]) => k !== 'custom')
+            .reduce((s, [, v]) => s + (Number(v) || 0), 0);
+        const adjTotalCustom = Array.isArray(adj.custom)
+            ? adj.custom.reduce((s, r) => s + (Number(r?.Amount) || 0), 0)
+            : 0;
+        const adjTotal = adjTotalFixed + adjTotalCustom;
         // Either cash OR adjustments must be present
         if (paymentLines.length === 0 && adjTotal <= 0) {
-            return res.status(400).json({ error: 'At least one payment line or tax adjustment is required.' });
+            return res.status(400).json({ error: 'At least one payment line or adjustment (WHT / write-off) is required.' });
         }
 
         const party = partyId ? { PartyID: parseInt(partyId) } : null;
