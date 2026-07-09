@@ -245,11 +245,11 @@ export default function SubletRepair() {
             {/* Amounts */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 420 }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 18px' }}>
-                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Invoice Amount</div>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Vendor Payable Bill</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: '#1e293b' }}>PKR {parseFloat(current.InvoiceAmount || 0).toLocaleString()}</div>
               </div>
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '14px 18px' }}>
-                <div style={{ fontSize: 11, color: '#166534', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Payable Amount</div>
+                <div style={{ fontSize: 11, color: '#166534', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Customer Payable Bill</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: '#166534' }}>PKR {parseFloat(current.PayableAmount || 0).toLocaleString()}</div>
               </div>
             </div>
@@ -300,8 +300,8 @@ export default function SubletRepair() {
               </div>
 
               <div className="grid-2">
-                <div className="form-group"><label>Invoice Amount (PKR)</label><input type="number" value={form.InvoiceAmount} onChange={e => setForm({ ...form, InvoiceAmount: e.target.value })} /></div>
-                <div className="form-group"><label>Payable Amount (PKR)</label><input type="number" value={form.PayableAmount} onChange={e => setForm({ ...form, PayableAmount: e.target.value })} /></div>
+                <div className="form-group"><label>Vendor Payable Bill (PKR)</label><input type="number" value={form.InvoiceAmount} onChange={e => setForm({ ...form, InvoiceAmount: e.target.value })} /></div>
+                <div className="form-group"><label>Customer Payable Bill (PKR)</label><input type="number" value={form.PayableAmount} onChange={e => setForm({ ...form, PayableAmount: e.target.value })} /></div>
               </div>
 
               <div className="grid-2">
