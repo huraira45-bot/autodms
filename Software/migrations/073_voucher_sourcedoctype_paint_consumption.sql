@@ -1,18 +1,20 @@
 -- =====================================================================
 -- 073_voucher_sourcedoctype_paint_consumption.sql
 --
--- Extend CK_VoucherInfo_SourceDocType to allow 'JC_PAINT_CONS'.
+-- Extend CK_VoucherInfo_SourceDocType to allow the three paint-module
+-- source doc types the code has always emitted but the constraint on
+-- live never covered:
+--   * PAINT_GRN     — paintGRNPostingService (finalize Paint GRN)
+--   * PAINT_GRTN    — paintGRTNPostingService (finalize Paint GRTN)
+--   * JC_PAINT_CONS — paintIssueConsumptionService (posted at JC finalize
+--                    for each B&P JC that consumed paint).
 --
--- paintIssueConsumptionService.js posts a separate voucher on JC
--- finalize for each B&P JC that consumed paint (uses the JC's
--- source-doc slot with a unique type so reports can distinguish
--- paint-consumption postings from the main SI). The constraint on
--- data_FinanceVoucherInfo.SourceDocType was never updated to include
--- that value, so finalizing any B&P JC with paint fails with
--- CK_VoucherInfo_SourceDocType (owner report on B&P-0011, 2026-07-09).
+-- Owner reports 2026-07-09:
+--   * B&P-0011 finalize fails on CK_VoucherInfo_SourceDocType (JC_PAINT_CONS)
+--   * Paint Lab opening-stock GRN finalize fails on same constraint (PAINT_GRN)
 --
--- Idempotent: skips the rebuild if the current constraint definition
--- already contains JC_PAINT_CONS.
+-- Idempotent: rebuilds only if the current definition is missing any of
+-- the three. Safe to re-run.
 -- =====================================================================
 SET NOCOUNT ON;
 
@@ -20,10 +22,12 @@ IF EXISTS (
     SELECT 1
     FROM   sys.check_constraints
     WHERE  name = 'CK_VoucherInfo_SourceDocType'
-      AND  definition NOT LIKE '%JC_PAINT_CONS%'
+      AND  (definition NOT LIKE '%JC_PAINT_CONS%'
+         OR definition NOT LIKE '%PAINT_GRN%'
+         OR definition NOT LIKE '%PAINT_GRTN%')
 )
 BEGIN
-    PRINT 'Rebuilding CK_VoucherInfo_SourceDocType with JC_PAINT_CONS added...';
+    PRINT 'Rebuilding CK_VoucherInfo_SourceDocType with paint values added...';
     ALTER TABLE dbo.data_FinanceVoucherInfo DROP CONSTRAINT CK_VoucherInfo_SourceDocType;
     ALTER TABLE dbo.data_FinanceVoucherInfo ADD CONSTRAINT CK_VoucherInfo_SourceDocType
         CHECK (SourceDocType IS NULL OR SourceDocType IN (
@@ -31,7 +35,8 @@ BEGIN
             'SALES_INCENTIVE_DISB', 'SALES_INCENTIVE_ACCRUAL',
             'SALES_DELIVERY', 'MASTER_INVOICE', 'SALES_PAYMENT',
             'SSR', 'STORE_SALE', 'GRTN', 'GRN', 'JOBCARD',
-            'JC_PAINT_CONS', 'VOUCHER'
+            'PAINT_GRN', 'PAINT_GRTN', 'JC_PAINT_CONS',
+            'VOUCHER'
         ));
     PRINT '073_voucher_sourcedoctype_paint_consumption applied.';
 END
