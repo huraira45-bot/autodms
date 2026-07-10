@@ -72,6 +72,12 @@ async function loadStoreSale(tx, saleId) {
 // Walk-out balance for a JOB CARD: Σ Dr − Σ Cr on Gen-Cust tagged with the JC,
 // where the leg has NO PartyID. PartyID-tagged legs sit on the credit-party's
 // own GL and are settled later via party statement.
+//
+// Reversal-safe: Status='Posted' already excludes 'Reversed' originals; the
+// extra ReversesVoucherID IS NULL filter also excludes the Posted reversal
+// legs so a reversal pair nets to zero instead of double-counting on Dr side.
+// Owner case 2026-07-10 (JC GR-3110): a mistaken BRV was reversed, plus an
+// unfinalize/re-finalize cascade, left 3 stranded Posted-reversal Dr legs.
 async function loadJobCardWalkOutBalance(tx, genCustGL, jcId) {
     const sumQ = await new sql.Request(tx)
         .input('gl', sql.Int, genCustGL)
@@ -82,6 +88,7 @@ async function loadJobCardWalkOutBalance(tx, genCustGL, jcId) {
                 FROM data_FinanceVoucherDetail d
                 INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
                 WHERE v.Status='Posted'
+                  AND v.ReversesVoucherID IS NULL
                   AND d.GLCAID=@gl
                   AND d.PartyID IS NULL
                   AND d.JobCardID=@jc`);
@@ -102,6 +109,7 @@ async function loadJobCardPaymentModes(tx, genCustGL, jcId) {
                 INNER JOIN GLChartOFAccount g ON g.GLCAID = drLeg.GLCAID
                 LEFT JOIN dms_SystemAccounts sa ON sa.GLCAID = drLeg.GLCAID
                 WHERE v.Status='Posted'
+                  AND v.ReversesVoucherID IS NULL
                   AND crLeg.GLCAID=@gl AND crLeg.PartyID IS NULL AND crLeg.Credit > 0
                   AND crLeg.JobCardID=@jc`);
     return q.recordset;
@@ -152,6 +160,7 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
                 FROM data_FinanceVoucherDetail d
                 INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
                 WHERE v.Status='Posted'
+                  AND v.ReversesVoucherID IS NULL
                   AND d.GLCAID=@gl AND d.PartyID IS NULL AND d.JobCardID=jc.JobCardId
             ) bal
             WHERE jc.JobCardId <> @jcId
