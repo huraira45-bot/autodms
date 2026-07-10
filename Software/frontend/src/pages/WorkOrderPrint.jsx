@@ -112,7 +112,7 @@ export default function WorkOrderPrint() {
                     </tr>
                     <tr>
                         <td className="lbl">CNIC #</td><td colSpan={3} className="val">{jc.CustomerCNIC || '- -'}</td>
-                        <td className="lbl">DOB</td><td colSpan={4} className="val">&nbsp;</td>
+                        <td className="lbl">DOB</td><td colSpan={4} className="val">{d(jc.CustomerDOB) || '- -'}</td>
                     </tr>
                 </tbody>
             </table>
