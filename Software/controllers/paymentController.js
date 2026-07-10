@@ -216,14 +216,21 @@ exports.getJobCardBalance = async (req, res) => {
             allocated = parseFloat(allocRes.recordset[0].Allocated) || 0;
         }
 
+        // Advance balance = SUM(Credit) - SUM(Debit) across every ledger row
+        // tagged with this JC on the Customer-Advance account. Nets reversal
+        // pairs (Reversed Cr + Posted Dr reversal) to zero without needing a
+        // header join, and also correctly reduces the advance when it's later
+        // drawn down against an invoice. Owner case 2026-07-10 (JC GR-3110):
+        // six BRV drafts + their reversals sat in the ledger and the old
+        // Credit-only CASE inflated the display by 44,338.
         const advanceGL = await resolveRole('CUSTOMER_ADVANCE_RECEIVED');
         const advRes = await pool.request()
             .input('jcid', sql.Int, jobCardId)
             .input('gl', sql.Int, advanceGL)
-            .query(`SELECT ISNULL(SUM(CASE WHEN Credit > 0 THEN Credit - Debit ELSE 0 END), 0) AS AdvanceCredit
+            .query(`SELECT ISNULL(SUM(Credit) - SUM(Debit), 0) AS AdvanceCredit
                     FROM dms_PartyLedger
                     WHERE JobCardID=@jcid AND GLCAID=@gl`);
-        const advance = parseFloat(advRes.recordset[0].AdvanceCredit) || 0;
+        const advance = Math.max(0, parseFloat(advRes.recordset[0].AdvanceCredit) || 0);
 
         // Paid = (paid-at-finalize) + (separate payment vouchers allocated to SI) + (walk-in advances tagged to JC)
         // Cap the "paid" figure at invoiceTotal for display so an accidental double-
