@@ -133,7 +133,9 @@ BEGIN TRY
 
     -- Post JV: Dr Paint Stock / Cr Capital, formatted per §14.22 opening-balance
     -- convention (JV-OB-YYYY-MM-NNNN) drawing from seq_Voucher_JV.
-    DECLARE @jvTypeID INT = (SELECT Voucherid FROM GLVoucherType WHERE Title = 'JV');
+    -- Live has duplicate 'JV' rows on GLVoucherType (observed 2026-07-10);
+    -- pick the lowest ID deterministically instead of assuming uniqueness.
+    DECLARE @jvTypeID INT = (SELECT TOP 1 Voucherid FROM GLVoucherType WHERE Title = 'JV' ORDER BY Voucherid);
     IF @jvTypeID IS NULL THROW 51006, 'JV voucher type missing', 1;
 
     DECLARE @seqN INT = NEXT VALUE FOR dbo.seq_Voucher_JV;
