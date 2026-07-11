@@ -30,7 +30,12 @@ exports.getActiveCareOffs = async (req, res) => {
 
 exports.saveCareOff = async (req, res) => {
     try {
-        const { CareOffID, EmployeeID, MaxDiscountPct, IsActive } = req.body;
+        // PUT /:id puts the row ID in the URL, not the body — fall back to it so
+        // an edit isn't misread as a create and doesn't trip the duplicate check.
+        // Owner report 2026-07-10: reactivating and percentage edits both failed
+        // with "This employee is already configured as a Care-Off."
+        const CareOffID = req.params.id ? parseInt(req.params.id) : req.body.CareOffID;
+        const { EmployeeID, MaxDiscountPct, IsActive } = req.body;
         if (!EmployeeID) return res.status(400).json({ error: 'Employee is required.' });
         const pct = Number(MaxDiscountPct);
         if (isNaN(pct) || pct < 0 || pct > 100)
