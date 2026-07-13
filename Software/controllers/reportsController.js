@@ -1387,11 +1387,19 @@ exports.getWalkInOutstanding = async (req, res) => {
         const asOf = endOfDay(asOfRaw);
 
         const pool = await getPool();
-        const gcGL = await resolveRole('GENERAL_CUSTOMER');
+        const gcGL  = await resolveRole('GENERAL_CUSTOMER');
+        const advGL = await resolveRole('CUSTOMER_ADVANCE_RECEIVED');
 
+        // Owner report 2026-07-10: walk-in receipts posted as advances (Cr
+        // CUSTOMER_ADVANCE_RECEIVED tagged with JobCardID) leave the JC on the
+        // pending list even though bank/cash received the money — because the
+        // Cr never lands on Gen-Cust with AllocatedToVoucherID. Widen the paid
+        // figure to include those advance Crs (net of any Drs on the same
+        // account for the JC — reversals cancel, draw-downs reduce).
         const r = await pool.request()
-            .input('gl',   sql.Int,      gcGL)
-            .input('asOf', sql.DateTime, asOf)
+            .input('gl',    sql.Int,      gcGL)
+            .input('advGL', sql.Int,      advGL)
+            .input('asOf',  sql.DateTime, asOf)
             .query(`
                 WITH InvoiceLines AS (
                     SELECT d.VoucherID, d.JobCardID, SUM(d.Debit) AS Invoiced, MIN(v.VoucherDate) AS InvDate
@@ -1410,19 +1418,37 @@ exports.getWalkInOutstanding = async (req, res) => {
                       AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
                       AND v.VoucherDate <= @asOf
                     GROUP BY d.AllocatedToVoucherID
+                ),
+                Advances AS (
+                    SELECT d.JobCardID, SUM(d.Credit) - SUM(d.Debit) AS AdvNet
+                    FROM data_FinanceVoucherDetail d
+                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                    WHERE d.GLCAID = @advGL
+                      AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND v.VoucherDate <= @asOf
+                      AND d.JobCardID IS NOT NULL
+                    GROUP BY d.JobCardID
                 )
                 SELECT i.VoucherID, vi.VoucherNo,
                        jc.JobCardId, jc.JobCardNo, jc.JobCardDate,
                        jc.[Status] AS PaymentType, jc.PaymentBankID,
                        i.Invoiced,
-                       ISNULL(s.Paid, 0) AS Paid,
-                       i.Invoiced - ISNULL(s.Paid, 0) AS Outstanding,
+                       ISNULL(s.Paid, 0)                            AS AllocatedPaid,
+                       CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END AS Advance,
+                       ISNULL(s.Paid, 0)
+                         + CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END AS Paid,
+                       i.Invoiced
+                         - ISNULL(s.Paid, 0)
+                         - CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END AS Outstanding,
                        DATEDIFF(day, jc.JobCardDate, @asOf) AS AgeDays
                 FROM InvoiceLines i
-                LEFT JOIN Settled s ON s.AllocatedToVoucherID = i.VoucherID
+                LEFT JOIN Settled  s ON s.AllocatedToVoucherID = i.VoucherID
+                LEFT JOIN Advances a ON a.JobCardID           = i.JobCardID
                 INNER JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = i.VoucherID
                 INNER JOIN Addata_JobCardInfo jc ON jc.JobCardId = i.JobCardID
-                WHERE i.Invoiced - ISNULL(s.Paid, 0) > 0.005
+                WHERE i.Invoiced
+                      - ISNULL(s.Paid, 0)
+                      - CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END > 0.005
                 ORDER BY jc.JobCardDate ASC
             `);
 
