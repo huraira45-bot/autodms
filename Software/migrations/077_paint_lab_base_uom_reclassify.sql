@@ -89,9 +89,14 @@ BEGIN TRY
                 RunningAvgCost = CAST(RunningAvgCost / @quaterScale AS DECIMAL(18,4))
             WHERE PaintItemID = @pid;
 
+            -- Pin computed values to DECIMAL(18,4) before string-cast so
+            -- SQL Server's implicit high-precision multiply/divide result
+            -- (up to DECIMAL(38,23)) doesn't overflow NVARCHAR at PRINT time.
             PRINT '  Paint ' + CAST(@pid AS NVARCHAR(10)) + ': Quater -> Gram (qty ' +
-                  CAST(@curQty AS NVARCHAR(20)) + ' -> ' + CAST(@curQty * @quaterScale AS NVARCHAR(20)) +
-                  ', cost ' + CAST(@curCost AS NVARCHAR(20)) + ' -> ' + CAST(@curCost / @quaterScale AS NVARCHAR(20)) + ')';
+                  CAST(@curQty AS NVARCHAR(30)) + ' -> ' +
+                  CAST(CAST(@curQty * @quaterScale AS DECIMAL(18,4)) AS NVARCHAR(30)) +
+                  ', cost ' + CAST(@curCost AS NVARCHAR(30)) + ' -> ' +
+                  CAST(CAST(@curCost / @quaterScale AS DECIMAL(18,6)) AS NVARCHAR(30)) + ')';
         END
         ELSE
             PRINT '  Paint ' + CAST(@pid AS NVARCHAR(10)) + ': skip (base is not Quater)';
