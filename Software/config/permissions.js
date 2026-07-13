@@ -161,6 +161,7 @@ const SECTIONS = [
             { key: 'report:reorder_alert',         label: 'Reorder Alert',         kind: 'report' },
             { key: 'report:parts_sales_register',  label: 'Parts Sales Register',  kind: 'report' },
             { key: 'report:purchase_summary',      label: 'Purchase Summary',      kind: 'report' },
+            { key: 'report:parts_issued_to_jc',    label: 'Parts Issued to JC',    kind: 'report' },
         ],
     },
     {
