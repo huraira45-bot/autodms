@@ -34,6 +34,33 @@ export function JobCardRegister() {
         else                                     parts.push('Status: Finalized only');
         return parts.join('  •  ');
     };
+    const excelExport = (data, params) => ({
+        filename: `job-card-register-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: [
+            'Card #', 'Finalized Date', 'Finalized By', 'Customer', 'Customer Code',
+            'Vehicle Reg', 'Chassis', 'Advisor', 'Job Type', 'Payment Type',
+            'Status', 'Labour', 'Sublet', 'PST', 'Parts', 'GST', 'Total',
+        ],
+        rows: (data.rows || []).map(r => [
+            r.JobCardNo,
+            r.FinalizedAt || r.JobCardDate || '',
+            r.FinalizedByName || '',
+            r.CustomerName || '',
+            r.CustomerCode || '',
+            r.VehicleRegNo || '',
+            r.ChasisNo || '',
+            r.ServiceAdvisor || '',
+            r.JobTypeName || r.JobTypeCode || '',
+            r.PaymentType || '',
+            r.IsFinalized ? 'Finalized' : (r.Status || 'Draft'),
+            Number(r.LabourAmount || 0),
+            Number(r.SubletAmount || 0),
+            Number(r.PSTAmount    || 0),
+            Number(r.PartsAmount  || 0),
+            Number(r.GSTAmount    || 0),
+            Number(r.TotalAmount  || 0),
+        ]),
+    });
     return (
         <ReportShell
             title="Job Card Register"
@@ -42,6 +69,7 @@ export function JobCardRegister() {
             endpoint="service/job-card-register"
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized' }}
             printFilterSummary={printFilterSummary}
+            excelExport={excelExport}
             landscape
             controls={({ params, updateParam }) => (
                 <>

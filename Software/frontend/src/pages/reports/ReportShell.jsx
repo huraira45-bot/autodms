@@ -1,7 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Loader2, RefreshCw, Printer } from 'lucide-react';
+import { Loader2, RefreshCw, Printer, FileSpreadsheet } from 'lucide-react';
 import ReportPrintHeader from '../../components/ReportPrintHeader';
+
+// CSV downloader used by ReportShell's Excel button. Emits UTF-8 with BOM so
+// Excel handles non-ASCII characters (e.g. Urdu customer names) correctly.
+function downloadCsv(filename, headers, rows) {
+    const escape = (v) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.map(escape).join(',')];
+    for (const row of rows) lines.push(row.map(escape).join(','));
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
 
 export const API_BASE = '/api';
 
@@ -27,6 +48,15 @@ export default function ReportShell({
     // `superWide` marks reports with 12+ columns where 8pt isn't small enough
     // to fit landscape. Applies a 7.5pt/2pt-padding CSS variant.
     superWide = false,
+    // Optional Excel/CSV export. Pass a function (data, params) => {
+    //   filename: 'job-card-register-2026-07.csv',
+    //   headers: ['Card #', 'Date', ...],
+    //   rows:    [['GR-3110', '2026-07-10', ...], ...]
+    // }
+    // When provided, ReportShell renders an "Export Excel" button. Owner ask
+    // 2026-07-14. CSV works because Excel opens .csv as a spreadsheet — no
+    // xlsx library dependency needed.
+    excelExport,
 }) {
     const [params, setParams] = useState(defaultParams);
     const [data, setData]     = useState(null);
@@ -85,6 +115,19 @@ export default function ReportShell({
                         {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                         Refresh
                     </button>
+                    {excelExport && (
+                        <button type="button" className="erp-btn erp-btn-sm"
+                            onClick={() => {
+                                const spec = excelExport(data, params);
+                                if (!spec || !spec.headers) return;
+                                downloadCsv(spec.filename || `${endpoint.replace(/\//g,'-')}.csv`,
+                                            spec.headers, spec.rows || []);
+                            }}
+                            disabled={loading || !data}
+                            title="Download as .csv (opens in Excel)">
+                            <FileSpreadsheet size={14} /> Excel
+                        </button>
+                    )}
                     <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
                         disabled={loading || !data}>
                         <Printer size={14} /> Print
