@@ -76,33 +76,68 @@ exports.getPending = async (req, res) => {
 
 // POST /api/pos-settlement
 // body: {
-//   bankGLCAID,                                    -- target bank account (must be in dms_BankAccounts)
+//   banks: [                                       -- one row per receiving bank (owner ask 2026-07-14: split possible)
+//     { bankGLCAID, netDepositAmount, commissionAmount }, ...
+//   ],
 //   voucherIDs: [vid, vid, ...],                   -- which pending POS receipts to settle
-//   commissionAmount,                              -- explicit commission (PKR) — user can override the bank's default
-//   netDepositAmount,                              -- explicit net deposit (PKR) — user can override (e.g. bank deposited less)
 //   narration,
 // }
+//
+// Backward compat: if body carries { bankGLCAID, netDepositAmount, commissionAmount }
+// at the top level (legacy single-bank shape) it is normalised into
+// banks: [{ ... }].
 exports.postSettlement = async (req, res) => {
     try {
         const { bankGLCAID, voucherIDs, commissionAmount, netDepositAmount, narration } = req.body;
-        if (!bankGLCAID) return res.status(400).json({ error: 'Bank account is required.' });
+        let banks = Array.isArray(req.body.banks) ? req.body.banks.slice() : null;
+
+        if (!banks && bankGLCAID) {
+            // Legacy single-bank shape.
+            banks = [{ bankGLCAID, netDepositAmount, commissionAmount }];
+        }
+
+        if (!banks || banks.length === 0) {
+            return res.status(400).json({ error: 'At least one bank row is required.' });
+        }
         if (!Array.isArray(voucherIDs) || voucherIDs.length === 0) {
             return res.status(400).json({ error: 'Pick at least one POS receipt to settle.' });
         }
 
         const pool = await getPool();
 
-        // Validate bank is marked + has charges account
-        const bankRes = await pool.request()
-            .input('id', sql.Int, parseInt(bankGLCAID))
-            .query(`SELECT b.GLCAID, b.POSCommissionPct, b.BankChargesGLCAID, c.GLTitle
-                    FROM dms_BankAccounts b
-                    INNER JOIN GLChartOFAccount c ON c.GLCAID = b.GLCAID
-                    WHERE b.GLCAID=@id AND b.IsActive=1`);
-        if (!bankRes.recordset.length) return res.status(400).json({ error: 'Bank account not active or not marked as bank.' });
-        const bank = bankRes.recordset[0];
-        if (!bank.BankChargesGLCAID) {
-            return res.status(400).json({ error: 'Bank Charges account is not configured for this bank. Set it in the bank COA configuration.' });
+        // Validate every bank + resolve its charges account.
+        const resolvedBanks = [];
+        for (const [i, row] of banks.entries()) {
+            if (!row || !row.bankGLCAID) {
+                return res.status(400).json({ error: `Bank #${i+1}: bank account is required.` });
+            }
+            const bankRes = await pool.request()
+                .input('id', sql.Int, parseInt(row.bankGLCAID))
+                .query(`SELECT b.GLCAID, b.POSCommissionPct, b.BankChargesGLCAID, c.GLTitle
+                        FROM dms_BankAccounts b
+                        INNER JOIN GLChartOFAccount c ON c.GLCAID = b.GLCAID
+                        WHERE b.GLCAID=@id AND b.IsActive=1`);
+            if (!bankRes.recordset.length) {
+                return res.status(400).json({ error: `Bank #${i+1}: not active or not marked as a bank.` });
+            }
+            const b = bankRes.recordset[0];
+            if (!b.BankChargesGLCAID) {
+                return res.status(400).json({ error: `Bank #${i+1} (${b.GLTitle}): Bank Charges account not configured. Set it in the bank's COA config.` });
+            }
+            // Duplicate bank rows not allowed — merge them upstream if the operator meant one row.
+            if (resolvedBanks.some(rb => rb.GLCAID === b.GLCAID)) {
+                return res.status(400).json({ error: `Bank ${b.GLTitle} appears more than once — merge the amounts into one row.` });
+            }
+            resolvedBanks.push({
+                GLCAID: b.GLCAID,
+                POSCommissionPct: parseFloat(b.POSCommissionPct) || 0,
+                BankChargesGLCAID: b.BankChargesGLCAID,
+                GLTitle: b.GLTitle,
+                netDeposit: (row.netDepositAmount !== undefined && row.netDepositAmount !== null && row.netDepositAmount !== '')
+                    ? +parseFloat(row.netDepositAmount).toFixed(2) : null,
+                commission: (row.commissionAmount !== undefined && row.commissionAmount !== null && row.commissionAmount !== '')
+                    ? +parseFloat(row.commissionAmount).toFixed(2) : null,
+            });
         }
 
         // Resolve POS Clearing GL
@@ -140,17 +175,29 @@ exports.postSettlement = async (req, res) => {
         const grossTotal = +pendingRes.recordset.reduce((a, r) => a + parseFloat(r.PendingAmount || 0), 0).toFixed(2);
         if (grossTotal <= 0) return res.status(400).json({ error: 'Selected receipts have no pending balance.' });
 
-        // Commission resolution: explicit overrides, else apply bank's POSCommissionPct
-        const defaultCommission = +(grossTotal * (parseFloat(bank.POSCommissionPct) || 0) / 100).toFixed(2);
-        const commission = (commissionAmount !== undefined && commissionAmount !== null && commissionAmount !== '')
-            ? +parseFloat(commissionAmount).toFixed(2)
-            : defaultCommission;
-        const netDeposit = (netDepositAmount !== undefined && netDepositAmount !== null && netDepositAmount !== '')
-            ? +parseFloat(netDepositAmount).toFixed(2)
-            : +(grossTotal - commission).toFixed(2);
+        // Single-bank commission default only fires when there's exactly one bank
+        // AND the operator omitted an explicit commission. Multi-bank flow must
+        // send explicit netDeposit + commission per row (there's no natural way
+        // to auto-split a percentage across banks).
+        if (resolvedBanks.length === 1) {
+            const b = resolvedBanks[0];
+            if (b.commission === null) b.commission = +(grossTotal * b.POSCommissionPct / 100).toFixed(2);
+            if (b.netDeposit === null) b.netDeposit = +(grossTotal - b.commission).toFixed(2);
+        } else {
+            // Multi-bank: every row must carry both amounts explicitly.
+            for (const [i, b] of resolvedBanks.entries()) {
+                if (b.netDeposit === null || b.commission === null) {
+                    return res.status(400).json({ error: `Bank #${i+1} (${b.GLTitle}): net deposit AND commission are required in multi-bank settlement.` });
+                }
+            }
+        }
 
-        if (Math.abs((netDeposit + commission) - grossTotal) > 0.01) {
-            return res.status(400).json({ error: `Bank deposit (${netDeposit}) + commission (${commission}) must equal gross POS total (${grossTotal}).` });
+        const totalNet = +resolvedBanks.reduce((s, b) => s + b.netDeposit, 0).toFixed(2);
+        const totalCommission = +resolvedBanks.reduce((s, b) => s + b.commission, 0).toFixed(2);
+        if (Math.abs((totalNet + totalCommission) - grossTotal) > 0.01) {
+            return res.status(400).json({
+                error: `Total across banks (net ${totalNet} + commission ${totalCommission} = ${(totalNet+totalCommission).toFixed(2)}) must equal gross POS total (${grossTotal.toFixed(2)}).`
+            });
         }
 
         // Pick BRV voucher type
@@ -164,7 +211,10 @@ exports.postSettlement = async (req, res) => {
         try {
             const voucherNo = await nextVoucherNo(transaction, 'BRV');
 
-            const narrationStr = narration || `POS settlement to ${bank.GLTitle} (${pendingRes.recordset.length} receipt${pendingRes.recordset.length === 1 ? '' : 's'})`;
+            const bankLabel = resolvedBanks.length === 1
+                ? resolvedBanks[0].GLTitle
+                : resolvedBanks.map(b => b.GLTitle).join(' + ');
+            const narrationStr = narration || `POS settlement to ${bankLabel} (${pendingRes.recordset.length} receipt${pendingRes.recordset.length === 1 ? '' : 's'})`;
 
             const hdrRes = await new sql.Request(transaction)
                 .input('vd',      sql.DateTime,     new Date())
@@ -183,24 +233,26 @@ exports.postSettlement = async (req, res) => {
                                 'Draft', 0, @src, @cby, @cbyN)`);
             const voucherId = hdrRes.recordset[0].VoucherID;
 
-            // Dr Bank
-            await new sql.Request(transaction)
-                .input('vid', sql.Int, voucherId)
-                .input('gl',  sql.Int, bank.GLCAID)
-                .input('nar', sql.NVarChar(sql.MAX), `POS settlement deposit — ${voucherNo}`)
-                .input('dr',  sql.Decimal(18,2), netDeposit)
-                .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
-                        VALUES (@vid, @gl, @nar, @dr, 0)`);
-
-            // Dr Bank Charges (commission) — only if > 0
-            if (commission > 0) {
-                await new sql.Request(transaction)
-                    .input('vid', sql.Int, voucherId)
-                    .input('gl',  sql.Int, bank.BankChargesGLCAID)
-                    .input('nar', sql.NVarChar(sql.MAX), `POS commission — ${voucherNo}`)
-                    .input('dr',  sql.Decimal(18,2), commission)
-                    .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
-                            VALUES (@vid, @gl, @nar, @dr, 0)`);
+            // Dr Bank + Dr Bank Charges — one pair per bank row.
+            for (const b of resolvedBanks) {
+                if (b.netDeposit > 0) {
+                    await new sql.Request(transaction)
+                        .input('vid', sql.Int, voucherId)
+                        .input('gl',  sql.Int, b.GLCAID)
+                        .input('nar', sql.NVarChar(sql.MAX), `POS settlement deposit to ${b.GLTitle} — ${voucherNo}`)
+                        .input('dr',  sql.Decimal(18,2), b.netDeposit)
+                        .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                                VALUES (@vid, @gl, @nar, @dr, 0)`);
+                }
+                if (b.commission > 0) {
+                    await new sql.Request(transaction)
+                        .input('vid', sql.Int, voucherId)
+                        .input('gl',  sql.Int, b.BankChargesGLCAID)
+                        .input('nar', sql.NVarChar(sql.MAX), `POS commission (${b.GLTitle}) — ${voucherNo}`)
+                        .input('dr',  sql.Decimal(18,2), b.commission)
+                        .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                                VALUES (@vid, @gl, @nar, @dr, 0)`);
+                }
             }
 
             // Cr POS Clearing per source receipt voucher, tagged with AllocatedToVoucherID
@@ -227,7 +279,13 @@ exports.postSettlement = async (req, res) => {
             res.status(201).json({
                 message: 'POS settlement posted.',
                 voucherId, voucherNo,
-                grossTotal, commission, netDeposit,
+                grossTotal,
+                commission: totalCommission,
+                netDeposit: totalNet,
+                banks: resolvedBanks.map(b => ({
+                    GLCAID: b.GLCAID, name: b.GLTitle,
+                    netDeposit: b.netDeposit, commission: b.commission,
+                })),
                 settledCount: pendingRes.recordset.length,
             });
         } catch (err) {

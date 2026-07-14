@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { CreditCard, Loader2, Check, AlertTriangle, RefreshCw } from 'lucide-react';
+import { CreditCard, Loader2, Check, AlertTriangle, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import RecentActivityPanel from '../components/RecentActivityPanel';
 
 // POS Settlement screen per §14.13.
@@ -10,12 +10,11 @@ import RecentActivityPanel from '../components/RecentActivityPanel';
 export default function POSSettlement() {
   const [pending, setPending] = useState([]);
   const [banks, setBanks] = useState([]);
-  const [bankRates, setBankRates] = useState({}); // GLCAID → { POSCommissionPct, BankChargesGLCAID }
   const [loading, setLoading] = useState(true);
-  const [bankId, setBankId] = useState('');
+  // Multi-bank rows (owner ask 2026-07-14). Start with one empty row.
+  // Each row: { bankId, commission, netDeposit } — strings so blank inputs stay blank.
+  const [bankRows, setBankRows] = useState([{ bankId: '', commission: '', netDeposit: '' }]);
   const [selectedIds, setSelectedIds] = useState({});      // { [voucherId]: bool }
-  const [commissionOverride, setCommissionOverride] = useState('');
-  const [netDepositOverride, setNetDepositOverride] = useState('');
   const [narration, setNarration] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -48,11 +47,6 @@ export default function POSSettlement() {
     try {
       const r = await axios.get('/api/accounts/banks');
       setBanks(r.data || []);
-      // For the rate, we need per-bank settings. We'll call a small dedicated endpoint OR
-      // include those fields in /banks response. For now, fetch via another route.
-      const rates = {};
-      // Fallback: ask via parties? No, we need the dms_BankAccounts row. We'll request it on selection.
-      setBankRates(rates);
     } catch (e) {
       flash('Failed to load bank accounts.', true);
     }
@@ -78,32 +72,62 @@ export default function POSSettlement() {
       .toFixed(2);
   }, [pending, selectedIds]);
 
-  const selectedBank = banks.find(b => String(b.GLCAID) === String(bankId)) || null;
-  // We don't have POSCommissionPct directly here. We'll use 0 as default and let the user enter the commission manually.
-  // (Backend computes default if commissionAmount is left blank.)
-  const defaultCommission = 0; // Backend resolves real default
-  const commission = commissionOverride !== '' ? +parseFloat(commissionOverride || 0) : defaultCommission;
-  const netDeposit = netDepositOverride !== '' ? +parseFloat(netDepositOverride || 0) : +(grossTotal - commission).toFixed(2);
-  const isBalanced = Math.abs((netDeposit + commission) - grossTotal) <= 0.01;
+  const totalCommission = useMemo(
+    () => +bankRows.reduce((s, r) => s + (parseFloat(r.commission) || 0), 0).toFixed(2),
+    [bankRows]
+  );
+  const totalNetDeposit = useMemo(
+    () => +bankRows.reduce((s, r) => s + (parseFloat(r.netDeposit) || 0), 0).toFixed(2),
+    [bankRows]
+  );
+  const isBalanced = Math.abs((totalNetDeposit + totalCommission) - grossTotal) <= 0.01;
+  const isMulti = bankRows.length > 1;
+
+  // Row helpers.
+  const updateRow = (idx, patch) => setBankRows(rows => rows.map((r, i) => i === idx ? { ...r, ...patch } : r));
+  const addRow = () => setBankRows(rows => [...rows, { bankId: '', commission: '', netDeposit: '' }]);
+  const removeRow = (idx) => setBankRows(rows => rows.length > 1 ? rows.filter((_, i) => i !== idx) : rows);
+  // Auto-fill net deposit on the single-bank path when the operator picks a bank
+  // and enters commission (or leaves it blank) — matches the old UX.
+  const autofillSingleBank = () => {
+    if (bankRows.length !== 1) return;
+    const r = bankRows[0];
+    if (r.netDeposit === '') {
+      const c = parseFloat(r.commission) || 0;
+      updateRow(0, { netDeposit: (grossTotal - c).toFixed(2) });
+    }
+  };
 
   const handleSubmit = async () => {
-    if (!bankId) { flash('Pick a bank.', true); return; }
     const ids = Object.entries(selectedIds).filter(([, v]) => v).map(([k]) => parseInt(k));
     if (ids.length === 0) { flash('Select at least one POS receipt.', true); return; }
-    if (!isBalanced) { flash('Net deposit + commission must equal gross POS total.', true); return; }
+    for (const [i, r] of bankRows.entries()) {
+      if (!r.bankId) { flash(`Bank #${i+1}: pick a bank.`, true); return; }
+      if (isMulti) {
+        if (r.netDeposit === '' || r.commission === '') {
+          flash(`Bank #${i+1}: multi-bank split needs both net deposit and commission on every row (commission can be 0).`, true);
+          return;
+        }
+      }
+    }
+    if (isMulti && !isBalanced) {
+      flash(`Total across banks (${(totalNetDeposit + totalCommission).toFixed(2)}) must equal gross POS total (${grossTotal.toFixed(2)}).`, true);
+      return;
+    }
 
     setSaving(true);
     try {
       const r = await axios.post('/api/pos-settlement', {
-        bankGLCAID: parseInt(bankId),
+        banks: bankRows.map(row => ({
+          bankGLCAID: parseInt(row.bankId),
+          netDepositAmount: row.netDeposit !== '' ? parseFloat(row.netDeposit) : undefined,
+          commissionAmount: row.commission !== '' ? parseFloat(row.commission) : undefined,
+        })),
         voucherIDs: ids,
-        commissionAmount: commissionOverride !== '' ? parseFloat(commissionOverride) : undefined,
-        netDepositAmount: netDepositOverride !== '' ? parseFloat(netDepositOverride) : undefined,
         narration: narration || null,
       });
       flash(`Settlement posted as ${r.data.voucherNo}. Gross ${r.data.grossTotal}, commission ${r.data.commission}, deposit ${r.data.netDeposit}.`);
-      setCommissionOverride('');
-      setNetDepositOverride('');
+      setBankRows([{ bankId: '', commission: '', netDeposit: '' }]);
       setNarration('');
       fetchPending();
     } catch (e) {
@@ -126,22 +150,63 @@ export default function POSSettlement() {
       {msg && <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{msg}</div>}
       {err && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 14px', borderRadius: 8, marginBottom: 14 }}>{err}</div>}
 
-      {/* Bank picker */}
+      {/* Bank rows — one per receiving bank */}
       <div style={card}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'end' }}>
-          <div>
-            <label style={lblStyle}>Bank Account *</label>
-            <select value={bankId} onChange={e => setBankId(e.target.value)} style={inp}>
-              <option value="">Pick the bank that received the deposit...</option>
-              {banks.map(b => <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>)}
-            </select>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-              The bank's configured Bank Charges account will receive the commission. Per-bank commission % is applied automatically; you can override the amounts below.
-            </div>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <strong>Receiving Bank{isMulti ? 's' : ''}</strong>
           <button onClick={fetchPending} disabled={loading} style={btn('ghost')}>
             <RefreshCw size={14} /> Refresh
           </button>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          {bankRows.map((row, idx) => {
+            const usedBankIds = new Set(bankRows.filter((_, i) => i !== idx).map(r => r.bankId).filter(Boolean));
+            return (
+              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px auto', gap: 8, alignItems: 'end' }}>
+                <div>
+                  <label style={lblStyle}>Bank {isMulti ? `#${idx+1}` : ''} *</label>
+                  <select value={row.bankId} onChange={e => updateRow(idx, { bankId: e.target.value })} style={inp}>
+                    <option value="">Pick a bank…</option>
+                    {banks.filter(b => !usedBankIds.has(String(b.GLCAID))).map(b => (
+                      <option key={b.GLCAID} value={b.GLCAID}>{b.GLCode} — {b.GLTitle}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={lblStyle}>Commission</label>
+                  <input type="number" step="0.01" min="0" value={row.commission}
+                    onChange={e => updateRow(idx, { commission: e.target.value })}
+                    onBlur={autofillSingleBank}
+                    placeholder={isMulti ? '0.00' : '(auto)'} style={inp} />
+                </div>
+                <div>
+                  <label style={lblStyle}>Net Deposit</label>
+                  <input type="number" step="0.01" min="0" value={row.netDeposit}
+                    onChange={e => updateRow(idx, { netDeposit: e.target.value })}
+                    placeholder={isMulti ? '0.00' : `(${(grossTotal - (parseFloat(row.commission) || 0)).toFixed(2)})`}
+                    style={inp} />
+                </div>
+                <button onClick={() => removeRow(idx)}
+                  disabled={bankRows.length === 1}
+                  title={bankRows.length === 1 ? 'At least one bank row is required' : 'Remove this bank'}
+                  style={{ ...btn(bankRows.length === 1 ? 'disabled' : 'ghost'), padding: '8px 10px' }}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button onClick={addRow} style={btn('ghost')}
+            disabled={bankRows.length >= banks.length}
+            title={bankRows.length >= banks.length ? 'No more banks to add' : 'Split settlement across another bank'}>
+            <Plus size={14} /> Add Bank
+          </button>
+          <div style={{ fontSize: 11, color: '#94a3b8', maxWidth: 420, textAlign: 'right' }}>
+            {isMulti
+              ? 'Multi-bank split: enter net deposit + commission per bank. Sum must equal gross POS total.'
+              : 'Single bank: leave amounts blank to use the bank\'s default commission %. Bank Charges GL is auto-selected per bank.'}
+          </div>
         </div>
       </div>
 
@@ -204,32 +269,24 @@ export default function POSSettlement() {
         <strong>Settlement Preview</strong>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginTop: 12 }}>
           <Stat label="Gross POS total" value={grossTotal} colour="#1e293b" />
-          <Stat label="Commission (bank charge)" value={commission} colour="#dc2626" />
-          <Stat label="Net deposit to bank" value={netDeposit} colour="#16a34a" warn={!isBalanced} />
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
-          <div>
-            <label style={lblStyle}>Override commission (optional)</label>
-            <input type="number" step="0.01" min="0" value={commissionOverride} onChange={e => setCommissionOverride(e.target.value)} placeholder={`(leave blank to use bank's default %)`} style={inp} />
-          </div>
-          <div>
-            <label style={lblStyle}>Override net deposit (optional)</label>
-            <input type="number" step="0.01" min="0" value={netDepositOverride} onChange={e => setNetDepositOverride(e.target.value)} placeholder={`(${(grossTotal - commission).toFixed(2)})`} style={inp} />
-          </div>
+          <Stat label={isMulti ? 'Total commission (all banks)' : 'Commission (bank charge)'} value={totalCommission} colour="#dc2626" />
+          <Stat label={isMulti ? 'Total net deposit (all banks)' : 'Net deposit to bank'} value={totalNetDeposit} colour="#16a34a" warn={isMulti && !isBalanced} />
         </div>
         <div style={{ marginTop: 12 }}>
           <label style={lblStyle}>Narration / Memo</label>
-          <input type="text" value={narration} onChange={e => setNarration(e.target.value)} placeholder="e.g. HBL POS settlement 12-May-26" style={inp} />
+          <input type="text" value={narration} onChange={e => setNarration(e.target.value)} placeholder="e.g. HBL + Meezan POS settlement 14-Jul-26" style={inp} />
         </div>
-        {!isBalanced && (
+        {isMulti && !isBalanced && (
           <div style={{ marginTop: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
-            <AlertTriangle size={14} /> Commission + net deposit must equal gross POS total ({grossTotal.toFixed(2)}).
+            <AlertTriangle size={14} /> Net deposit + commission across all banks ({(totalNetDeposit + totalCommission).toFixed(2)}) must equal gross POS total ({grossTotal.toFixed(2)}).
           </div>
         )}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-        <button onClick={handleSubmit} disabled={saving || !bankId || grossTotal <= 0 || !isBalanced} style={btn(saving || !bankId || grossTotal <= 0 || !isBalanced ? 'disabled' : 'primary')}>
+        <button onClick={handleSubmit}
+          disabled={saving || grossTotal <= 0 || bankRows.some(r => !r.bankId) || (isMulti && !isBalanced)}
+          style={btn(saving || grossTotal <= 0 || bankRows.some(r => !r.bankId) || (isMulti && !isBalanced) ? 'disabled' : 'primary')}>
           {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Post Settlement
         </button>
       </div>
@@ -240,9 +297,9 @@ export default function POSSettlement() {
         <RecentActivityPanel
           title="Recent Settlements"
           endpoint="/pos-settlement/recent"
-          params={{ bankGLCAID: bankId || undefined, limit: 12 }}
-          emptyMessage={!bankId ? 'Pick a bank to see recent settlements (or any bank).' : 'No recent settlements for this bank.'}
-          showBankColumn={!bankId}
+          params={{ bankGLCAID: (!isMulti && bankRows[0]?.bankId) || undefined, limit: 12 }}
+          emptyMessage={(!isMulti && bankRows[0]?.bankId) ? 'No recent settlements for this bank.' : 'Pick a single bank to filter by bank, or leave multi to see all.'}
+          showBankColumn={isMulti || !bankRows[0]?.bankId}
           amountField="TotalAmount"
         />
       </div>
