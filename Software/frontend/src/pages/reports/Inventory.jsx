@@ -5,37 +5,11 @@
  *     by warehouse / category / search, sorted by value desc.
  */
 import React, { useEffect, useState } from 'react';
-import { Package, AlertTriangle, Download } from 'lucide-react';
+import { Package, AlertTriangle } from 'lucide-react';
 import axios from 'axios';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, DateInput } from './ReportShell';
 
 const API_BASE = '/api';
-
-function csvEscape(v) {
-    if (v == null) return '';
-    const s = String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCSV(rows, totals, asOf) {
-    const header = ['#', 'Item Code', 'Part #', 'Item Name', 'Category', 'Location', 'Warehouse', 'UOM',
-                    'On Hand', 'Unit Price (PKR)', 'Total Amount (PKR)', 'Reorder Level'];
-    const body = rows.map((r, i) => [
-        i + 1,
-        r.ItemCode, r.PartNumber, r.ItemName, r.Category, r.BinLocation, r.Warehouse,
-        r.UOM,
-        r.OnHand, r.Rate, r.Value, r.ReOrderLevel
-    ].map(csvEscape).join(','));
-    const footer = `,,,,,,,Totals,${totals.totalQty},,${totals.totalValue},`;
-    const csv = [header.join(','), ...body, footer].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `inventory-on-hand-${asOf}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
 
 export function InventoryValuation() {
     const [warehouses, setWarehouses] = useState([]);
@@ -49,12 +23,41 @@ export function InventoryValuation() {
         ]);
     }, []);
 
+    const excelExport = (data, params) => ({
+        filename: `inventory-on-hand-${params.asOf || 'as-of'}.csv`,
+        headers: [
+            '#', 'Item Code', 'Part #', 'Item Name', 'Category', 'Location',
+            'Warehouse', 'UOM', 'On Hand', 'Unit Price (PKR)',
+            'Total Amount (PKR)', 'Reorder Level',
+        ],
+        rows: (data.rows || []).map((r, i) => [
+            i + 1,
+            r.ItemCode || '',
+            r.PartNumber || '',
+            r.ItemName || '',
+            r.Category || '',
+            r.BinLocation || '',
+            r.Warehouse || '',
+            r.UOM || '',
+            Number(r.OnHand || 0),
+            Number(r.Rate || 0),
+            Number(r.Value || 0),
+            Number(r.ReOrderLevel || 0),
+        ]).concat([
+            // Grand totals footer row
+            ['', '', '', '', '', '', '', 'TOTAL',
+             Number(data.totals?.totalQty || 0), '',
+             Number(data.totals?.totalValue || 0), ''],
+        ]),
+    });
+
     return (
         <ReportShell
             title="Inventory On Hand"
             subtitle="Current stock by item — quantity × weighted-average rate."
             icon={Package}
             endpoint="inventory-valuation"
+            excelExport={excelExport}
             defaultParams={{ asOf: todayISO(), search: '', whId: '', catId: '', includeZero: '0' }}
             controls={({ params, updateParam }) => (
                 <>
@@ -103,15 +106,8 @@ export function InventoryValuation() {
                     )}
 
                     <div className="card" style={{ overflowX: 'auto' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
-                                Showing {data.rows.length} of {fmtInt(data.totals.items)} items
-                            </div>
-                            <button className="btn-sm" disabled={data.rows.length === 0}
-                                onClick={() => downloadCSV(data.rows, data.totals, data.asOf)}
-                                style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <Download size={14} /> Export CSV
-                            </button>
+                        <div style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: 8 }}>
+                            Showing {data.rows.length} of {fmtInt(data.totals.items)} items
                         </div>
 
                         {data.rows.length === 0 ? (
