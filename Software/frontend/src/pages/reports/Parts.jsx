@@ -1,5 +1,6 @@
-import React from 'react';
-import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput, Wrench } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput, Wrench, BookOpen, Search } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls, DateInput } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -359,6 +360,219 @@ export function PartsIssuedToJc() {
                     </div>
                 </>
             )}
+        </ReportShell>
+    );
+}
+
+// =====================================================================
+// Item Ledger — chronological stock ledger for one item (owner ask 2026-07-17)
+// =====================================================================
+function ItemPicker({ params, updateParam }) {
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState([]);
+    const [selectedName, setSelectedName] = useState('');
+    const [open, setOpen] = useState(false);
+
+    useEffect(() => {
+        if (!params.itemId || selectedName) return;
+        axios.get('/api/reports/parts/item-search', { params: { q: '' } })
+            .then(r => {
+                const p = (r.data || []).find(x => String(x.ItemId) === String(params.itemId));
+                if (p) setSelectedName(`${p.PartNumber || p.ItemNumber} — ${p.ItemName}`);
+            })
+            .catch(() => {});
+    }, [params.itemId, selectedName]);
+
+    const doSearch = useCallback(async (v) => {
+        setQuery(v);
+        try {
+            const r = await axios.get('/api/reports/parts/item-search', { params: { q: v } });
+            setResults(r.data || []);
+        } catch { setResults([]); }
+    }, []);
+
+    return (
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+            <Search size={14} color="#64748b" />
+            <input
+                type="search"
+                placeholder={selectedName || 'Search item name / code / part number…'}
+                value={query}
+                onFocus={() => { setOpen(true); if (!results.length) doSearch(''); }}
+                onBlur={() => setTimeout(() => setOpen(false), 200)}
+                onChange={e => doSearch(e.target.value)}
+                style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 320 }}
+            />
+            {params.itemId && (
+                <button type="button"
+                    onClick={() => { updateParam('itemId', ''); setSelectedName(''); setQuery(''); }}
+                    title="Clear"
+                    style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 0, fontSize: '0.8rem' }}>
+                    Clear
+                </button>
+            )}
+            {open && results.length > 0 && (
+                <div style={{
+                    position: 'absolute', top: '100%', left: 20, right: 0,
+                    background: '#fff', border: '1px solid #cbd5e1', borderRadius: 6,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)', zIndex: 20,
+                    maxHeight: 300, overflowY: 'auto', marginTop: 4, minWidth: 360,
+                }}>
+                    {results.map(p => (
+                        <div key={p.ItemId}
+                            onMouseDown={() => {
+                                updateParam('itemId', String(p.ItemId));
+                                setSelectedName(`${p.PartNumber || p.ItemNumber} — ${p.ItemName}`);
+                                setQuery('');
+                                setOpen(false);
+                            }}
+                            style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '0.85rem' }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#f0f9ff'}
+                            onMouseLeave={e => e.currentTarget.style.background = ''}>
+                            <div style={{ fontWeight: 600 }}>{p.ItemName}</div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                Code {p.ItemNumber}{p.PartNumber && ` · Part# ${p.PartNumber}`}
+                                {p.Warehouse && ` · ${p.Warehouse}`}
+                                {p.CategoryName && ` · ${p.CategoryName}`}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+export function ItemLedger() {
+    const excelExport = (data, params) => ({
+        filename: `item-ledger-${(data.item?.PartNumber || data.item?.ItemNumber || 'item')}-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['Date', 'Type', 'Ref #', 'Party', 'Qty In', 'Qty Out', 'Rate', 'Value', 'Balance', 'Remarks'],
+        rows: [
+            ['', 'Opening', '', '', 0, 0, 0, 0, Number(data.totals.openingQty || 0), ''],
+            ...(data.rows || []).map(r => [
+                r.Date, r.MoveType, r.SourceRef, r.SourceParty || '',
+                Number(r.QtyIn), Number(r.QtyOut), Number(r.Rate), Number(r.LineValue),
+                Number(r.Balance), r.Remarks || '',
+            ]),
+            ['', 'Closing', '', '', 0, 0, 0, 0, Number(data.totals.closingQty || 0), ''],
+        ],
+    });
+    return (
+        <ReportShell
+            title="Item Ledger"
+            subtitle="Chronological stock movements for one item — opening + every in / out + running balance + closing."
+            icon={BookOpen}
+            endpoint="parts/item-ledger"
+            defaultParams={{ itemId: '', from: firstOfMonthISO(), to: todayISO() }}
+            excelExport={excelExport}
+            landscape
+            controls={({ params, updateParam }) => (
+                <>
+                    <ItemPicker params={params} updateParam={updateParam} />
+                    <PeriodControls params={params} updateParam={updateParam} />
+                </>
+            )}
+        >
+            {(data) => {
+                if (!data.item) {
+                    return <div className="card" style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Pick an item to see its stock ledger.</div>;
+                }
+                return (
+                    <>
+                        <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>
+                                    {data.from} → {data.to}
+                                </div>
+                                <div style={{ fontWeight: 700, fontSize: '1.15rem' }}>{data.item.ItemName}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                    Code {data.item.ItemNumber}
+                                    {data.item.PartNumber && ` · Part# ${data.item.PartNumber}`}
+                                    {data.item.UOMName && ` · ${data.item.UOMName}`}
+                                    {data.item.Warehouse && ` · ${data.item.Warehouse}`}
+                                    {data.item.CategoryName && ` · ${data.item.CategoryName}`}
+                                    · Weighted rate PKR {fmt(data.item.WeightedRate)}
+                                </div>
+                            </div>
+                            <SummaryBar items={[
+                                { label: 'Opening Qty',   value: fmt(data.totals.openingQty) },
+                                { label: 'In',            value: fmt(data.totals.qtyIn) },
+                                { label: 'Out',           value: fmt(data.totals.qtyOut) },
+                                { label: 'Closing Qty',   value: fmt(data.totals.closingQty) },
+                                { label: 'Closing Value', value: 'PKR ' + fmt(data.totals.closingValue), strong: true },
+                            ]} />
+                        </div>
+                        <div className="card" style={{ overflowX: 'auto' }}>
+                            <table style={tableStyle}>
+                                <thead>
+                                    <tr style={trHeader}>
+                                        <TH>Date</TH>
+                                        <TH>Type</TH>
+                                        <TH>Ref #</TH>
+                                        <TH>Party</TH>
+                                        <TH align="right">Qty In</TH>
+                                        <TH align="right">Qty Out</TH>
+                                        <TH align="right">Rate</TH>
+                                        <TH align="right">Value</TH>
+                                        <TH align="right">Balance</TH>
+                                        <TH>Remarks</TH>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr style={{ background: '#f0f9ff', borderBottom: '1px solid #cbd5e1' }}>
+                                        <TD colSpan={4} style={{ fontStyle: 'italic', fontWeight: 600 }}>Opening balance</TD>
+                                        <TD align="right" color="#94a3b8">—</TD>
+                                        <TD align="right" color="#94a3b8">—</TD>
+                                        <TD align="right" color="#94a3b8">—</TD>
+                                        <TD align="right" color="#94a3b8">—</TD>
+                                        <TD align="right" mono bold>{fmt(data.totals.openingQty)}</TD>
+                                        <TD></TD>
+                                    </tr>
+                                    {data.rows.length === 0 && (
+                                        <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>
+                                            No movements in this period.
+                                        </td></tr>
+                                    )}
+                                    {data.rows.map((r, i) => (
+                                        <tr key={i} style={trBody}>
+                                            <TD>{r.Date}</TD>
+                                            <TD mono color={r.QtyIn > 0 ? '#15803d' : '#b91c1c'}>{r.MoveType}</TD>
+                                            <TD mono>{r.SourceRef}</TD>
+                                            <TD color="#64748b">{r.SourceParty}</TD>
+                                            <TD align="right" mono color={r.QtyIn > 0 ? '#15803d' : undefined}>
+                                                {r.QtyIn > 0 ? fmt(r.QtyIn) : '—'}
+                                            </TD>
+                                            <TD align="right" mono color={r.QtyOut > 0 ? '#b91c1c' : undefined}>
+                                                {r.QtyOut > 0 ? fmt(r.QtyOut) : '—'}
+                                            </TD>
+                                            <TD align="right" mono>{fmt(r.Rate)}</TD>
+                                            <TD align="right" mono>{fmt(r.LineValue)}</TD>
+                                            <TD align="right" mono bold color={r.Balance < 0 ? '#b91c1c' : undefined}>
+                                                {fmt(r.Balance)}
+                                            </TD>
+                                            <TD color="#64748b" style={{ maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                                title={r.Remarks}>
+                                                {r.Remarks}
+                                            </TD>
+                                        </tr>
+                                    ))}
+                                    <tr style={{ background: '#eef2ff', borderTop: '2px solid #cbd5e1' }}>
+                                        <TD colSpan={4} style={{ fontStyle: 'italic', fontWeight: 700 }}>Closing balance</TD>
+                                        <TD align="right" mono bold color="#15803d">{fmt(data.totals.qtyIn)}</TD>
+                                        <TD align="right" mono bold color="#b91c1c">{fmt(data.totals.qtyOut)}</TD>
+                                        <TD align="right" color="#94a3b8">—</TD>
+                                        <TD align="right" color="#94a3b8">—</TD>
+                                        <TD align="right" mono bold color={data.totals.closingQty < 0 ? '#b91c1c' : undefined}>
+                                            {fmt(data.totals.closingQty)}
+                                        </TD>
+                                        <TD></TD>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                );
+            }}
         </ReportShell>
     );
 }

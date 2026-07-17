@@ -155,7 +155,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 // Module-scoped reports
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
-import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc } from './pages/reports/Parts';
+import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
@@ -372,6 +372,11 @@ function LegacySidebar() {
                 {canReport('parts_issued_to_jc') && (
                     <NavLink to="/reports/parts/issued-to-jc" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Parts Issued to Job Cards
+                    </NavLink>
+                )}
+                {canReport('item_ledger') && (
+                    <NavLink to="/reports/parts/item-ledger" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Item Ledger
                     </NavLink>
                 )}
                 {hasModule('procurement_grn') && (
@@ -943,6 +948,7 @@ function AppShell() {
                     <Route path="/reports/parts/sales-register"   element={<ProtectedRoute><PartsSalesRegister /></ProtectedRoute>} />
                     <Route path="/reports/parts/purchase-summary" element={<ProtectedRoute><PartsPurchaseSummary /></ProtectedRoute>} />
                     <Route path="/reports/parts/issued-to-jc"     element={<ProtectedRoute><PartsIssuedToJc /></ProtectedRoute>} />
+                    <Route path="/reports/parts/item-ledger"      element={<ProtectedRoute><ItemLedger /></ProtectedRoute>} />
 
                     {/* Sales (vehicle) reports */}
                     <Route path="/reports/sales/booking-register"        element={<ProtectedRoute><BookingRegister /></ProtectedRoute>} />

@@ -182,6 +182,7 @@ export const NAV_ITEMS = [
     { id: 'r-p-sales',   moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Parts Sales Register',path: '/reports/parts/sales-register',icon: ListChecks,   permission: 'report:parts_sales_register' },
     { id: 'r-p-purch',   moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Purchase Summary',    path: '/reports/parts/purchase-summary',icon: ListChecks,  permission: 'report:purchase_summary' },
     { id: 'r-p-issued',  moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Parts Issued to JC',  path: '/reports/parts/issued-to-jc',  icon: ListChecks,   permission: 'report:parts_issued_to_jc' },
+    { id: 'r-p-led',     moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Item Ledger',         path: '/reports/parts/item-ledger',   icon: ListChecks,   permission: 'report:item_ledger' },
     { id: 'r-s-book',    moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Booking Register',    path: '/reports/sales/booking-register',    icon: ListChecks, permission: 'report:booking_register' },
     { id: 'r-s-inv',     moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Vehicle Inventory',   path: '/reports/sales/vehicle-inventory',   icon: ListChecks, permission: 'report:vehicle_inventory' },
     { id: 'r-s-exec',    moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Executive Performance',path: '/reports/sales/executive-performance',icon: ListChecks,permission: 'report:executive_performance' },

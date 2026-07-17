@@ -382,3 +382,189 @@ exports.partsIssuedToJc = async (req, res) => {
         res.json({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), rows, totals });
     } catch (err) { console.error('partsIssuedToJc:', err); res.status(500).json({ error: err.message }); }
 };
+
+/**
+ * GET /reports/parts/item-search?q=
+ *
+ * Typeahead helper for the Item Ledger. Returns up to 50 items whose
+ * name / item number / part number matches the query. Owner ask 2026-07-17.
+ */
+exports.itemSearch = async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim();
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('q', sql.NVarChar(200), `%${q}%`)
+            .query(`
+                SELECT TOP 50
+                    i.ItemId,
+                    CAST(i.ItemNumber AS NVARCHAR(50)) AS ItemNumber,
+                    i.ManualNumber   AS PartNumber,
+                    i.ItenName       AS ItemName,
+                    i.WeightedRate,
+                    c.CategoryName,
+                    w.WHDesc         AS Warehouse
+                FROM InventItems i
+                LEFT JOIN InventCategory  c ON c.CategoryID = i.CategoryID
+                LEFT JOIN InventWareHouse w ON w.WHID       = i.WHID
+                WHERE i.ItemStatus = 1
+                  AND (@q = '%%'
+                       OR i.ItenName    LIKE @q
+                       OR i.ManualNumber LIKE @q
+                       OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @q)
+                ORDER BY i.ItenName
+            `);
+        res.json(r.recordset);
+    } catch (err) {
+        console.error('itemSearch:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /reports/parts/item-ledger?itemId=X&from=&to=
+ *
+ * Chronological ledger of every stock movement for one item in a period —
+ * with opening balance, running quantity + running value, and closing.
+ * Rows come from data_StockArrivalDetail (GRNs / opening stock) and
+ * data_StockInOutDetail (positive = purchase-return-in / positive adj,
+ * negative = issue / sale / negative adj), joined to the header for the
+ * date and source-doc reference. Owner ask 2026-07-17.
+ */
+exports.itemLedger = async (req, res) => {
+    try {
+        const itemId = parseInt(req.query.itemId);
+        if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'itemId is required.' });
+        const { from, to } = parseRange(req);
+
+        const pool = await getPool();
+
+        // 1. Item master (title, part #, weighted rate, warehouse, category)
+        const itmRes = await pool.request()
+            .input('id', sql.Int, itemId)
+            .query(`
+                SELECT i.ItemId,
+                       CAST(i.ItemNumber AS NVARCHAR(50)) AS ItemNumber,
+                       i.ManualNumber AS PartNumber,
+                       i.ItenName     AS ItemName,
+                       i.WeightedRate,
+                       i.ReOrderLevel,
+                       u.UOMName,
+                       c.CategoryName,
+                       w.WHDesc       AS Warehouse
+                FROM InventItems i
+                LEFT JOIN InventUOM       u ON u.UOMId      = i.UOMId
+                LEFT JOIN InventCategory  c ON c.CategoryID = i.CategoryID
+                LEFT JOIN InventWareHouse w ON w.WHID       = i.WHID
+                WHERE i.ItemId = @id`);
+        if (!itmRes.recordset.length) return res.status(404).json({ error: 'Item not found.' });
+        const item = itmRes.recordset[0];
+
+        // 2. Opening quantity — everything strictly before @from.
+        const openRes = await pool.request()
+            .input('id',   sql.Int,      itemId)
+            .input('from', sql.DateTime, from)
+            .query(`
+                SELECT
+                    ISNULL((SELECT SUM(sd.Quantity)
+                            FROM   data_StockArrivalDetail sd
+                            JOIN   data_StockArrivalInfo   si ON si.ArrivalID = sd.ArrivalID
+                            WHERE  sd.ItemId = @id AND si.ArrivalDate < @from), 0)
+                  + ISNULL((SELECT SUM(od.Quantity)
+                            FROM   data_StockInOutDetail od
+                            JOIN   data_StockInOutInfo   oi ON oi.StockIOID = od.StockIOID
+                            WHERE  od.ItemId = @id AND oi.StockIODate < @from), 0)
+                    AS OpeningQty`);
+        const openingQty = Number(openRes.recordset[0].OpeningQty) || 0;
+
+        // 3. Period rows — union of arrivals and stock IO, sorted chronologically.
+        const rowsRes = await pool.request()
+            .input('id',   sql.Int,      itemId)
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to)
+            .query(`
+                SELECT MoveDate, MoveType, SourceRef, SourceParty, Remarks,
+                       QtyIn, QtyOut, Rate, LineValue
+                FROM (
+                    -- Stock arrivals (GRN / opening stock imports)
+                    SELECT
+                        si.ArrivalDate               AS MoveDate,
+                        CASE WHEN si.ArrivalNo IS NULL THEN 'Opening' ELSE 'GRN' END AS MoveType,
+                        ISNULL(CAST(si.ArrivalNo AS NVARCHAR(50)), 'Opening') AS SourceRef,
+                        p.PartyName                  AS SourceParty,
+                        si.Remarks                   AS Remarks,
+                        sd.Quantity                  AS QtyIn,
+                        CAST(0 AS DECIMAL(18,4))     AS QtyOut,
+                        sd.StockRate                 AS Rate,
+                        CAST(sd.Quantity * sd.StockRate AS DECIMAL(18,2)) AS LineValue
+                    FROM   data_StockArrivalDetail sd
+                    JOIN   data_StockArrivalInfo   si ON si.ArrivalID = sd.ArrivalID
+                    LEFT   JOIN gen_PartiesInfo    p  ON p.PartyID    = si.PartyID
+                    WHERE  sd.ItemId = @id
+                      AND  si.ArrivalDate BETWEEN @from AND @to
+                    UNION ALL
+                    -- Stock in/out (issues, sales, adjustments, purchase returns…)
+                    SELECT
+                        oi.StockIODate               AS MoveDate,
+                        CASE
+                            WHEN od.Quantity > 0 THEN COALESCE(oi.StockType, 'Adj +')
+                            ELSE COALESCE(oi.StockType, 'Adj -')
+                        END                          AS MoveType,
+                        COALESCE(CAST(oi.StockIONo AS NVARCHAR(50)), '') AS SourceRef,
+                        p.PartyName                  AS SourceParty,
+                        oi.Remarks                   AS Remarks,
+                        CASE WHEN od.Quantity > 0 THEN od.Quantity        ELSE CAST(0 AS DECIMAL(18,4)) END AS QtyIn,
+                        CASE WHEN od.Quantity < 0 THEN ABS(od.Quantity)   ELSE CAST(0 AS DECIMAL(18,4)) END AS QtyOut,
+                        od.StockRate                 AS Rate,
+                        CAST(ABS(od.Quantity) * od.StockRate AS DECIMAL(18,2)) AS LineValue
+                    FROM   data_StockInOutDetail od
+                    JOIN   data_StockInOutInfo   oi ON oi.StockIOID = od.StockIOID
+                    LEFT   JOIN gen_PartiesInfo  p  ON p.PartyID    = oi.PartyID
+                    WHERE  od.ItemId = @id
+                      AND  oi.StockIODate BETWEEN @from AND @to
+                ) u
+                ORDER BY MoveDate, MoveType, SourceRef`);
+
+        // Running balance from opening + apply each row
+        let running = openingQty;
+        const rows = rowsRes.recordset.map(x => {
+            const qtyIn  = Number(x.QtyIn)  || 0;
+            const qtyOut = Number(x.QtyOut) || 0;
+            running = running + qtyIn - qtyOut;
+            return {
+                Date:       x.MoveDate?.toISOString().slice(0, 10) || null,
+                MoveType:   x.MoveType || '',
+                SourceRef:  x.SourceRef || '',
+                SourceParty: x.SourceParty || '',
+                Remarks:    x.Remarks || '',
+                QtyIn:      +qtyIn.toFixed(4),
+                QtyOut:     +qtyOut.toFixed(4),
+                Rate:       +Number(x.Rate || 0).toFixed(2),
+                LineValue:  +Number(x.LineValue || 0).toFixed(2),
+                Balance:    +running.toFixed(4),
+            };
+        });
+
+        const totals = {
+            openingQty: +openingQty.toFixed(4),
+            qtyIn:      +rows.reduce((s, x) => s + x.QtyIn,  0).toFixed(4),
+            qtyOut:     +rows.reduce((s, x) => s + x.QtyOut, 0).toFixed(4),
+            closingQty: +running.toFixed(4),
+            valueIn:    +rows.filter(x => x.QtyIn > 0).reduce((s, x) => s + x.LineValue, 0).toFixed(2),
+            valueOut:   +rows.filter(x => x.QtyOut > 0).reduce((s, x) => s + x.LineValue, 0).toFixed(2),
+            closingValue: +(running * Number(item.WeightedRate || 0)).toFixed(2),
+            moves:      rows.length,
+        };
+
+        res.json({
+            item,
+            from: from.toISOString().slice(0, 10),
+            to:   to.toISOString().slice(0, 10),
+            rows,
+            totals,
+        });
+    } catch (err) {
+        console.error('itemLedger:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
