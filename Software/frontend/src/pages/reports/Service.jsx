@@ -13,24 +13,44 @@ const firstOfMonthISO = () => {
 // Job Card Register
 // =====================================================================
 export function JobCardRegister() {
+    // navigate kept for other links; Parts drill-through uses window.open so
+    // the issue slip opens in a new tab (owner ask 2026-07-17).
     const navigate = useNavigate();
     const [jobTypes, setJobTypes] = useState([]);
     useEffect(() => {
         axios.get('/api/workshop/job-types').then(r => setJobTypes(r.data || [])).catch(() => {});
     }, []);
     const selectStyle = { padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' };
+    const toggleBusinessType = (params, updateParam, id) => {
+        const set = new Set(
+            String(params.businessType || '')
+                .split(',').map(s => s.trim()).filter(Boolean)
+        );
+        const key = String(id);
+        if (set.has(key)) set.delete(key); else set.add(key);
+        updateParam('businessType', Array.from(set).join(','));
+    };
+    const selectedBTSet = (params) => new Set(
+        String(params.businessType || '')
+            .split(',').map(s => s.trim()).filter(Boolean)
+    );
     const printFilterSummary = (params) => {
         const parts = [];
         if (params.from && params.to) parts.push(`Finalized Period: ${params.from} → ${params.to}`);
-        if (params.businessType) {
-            const t = jobTypes.find(x => String(x.JobCardTypeId) === String(params.businessType));
-            parts.push(`Business Type: ${t ? `${t.CardCode} — ${t.Title}` : params.businessType}`);
-        } else {
+        const btSet = selectedBTSet(params);
+        if (btSet.size === 0) {
             parts.push('Business Type: All');
+        } else {
+            const labels = jobTypes
+                .filter(t => btSet.has(String(t.JobCardTypeId)))
+                .map(t => t.CardCode || t.Title);
+            parts.push(`Business Type: ${labels.join(', ') || Array.from(btSet).join(', ')}`);
         }
         if (params.paymentMode === 'cash')       parts.push('Payment: Cash (incl. POS & Bank Transfer)');
         else if (params.paymentMode === 'credit') parts.push('Payment: Credit');
         else                                      parts.push('Payment: All');
+        if (params.hasParts === 'with')          parts.push('Parts: With parts issued');
+        else if (params.hasParts === 'without')  parts.push('Parts: Without parts issued');
         if (params.finalized === 'draft')       parts.push('Status: Draft only');
         else if (params.finalized === 'all')     parts.push('Status: All (incl. Draft)');
         else                                     parts.push('Status: Finalized only');
@@ -69,45 +89,79 @@ export function JobCardRegister() {
             subtitle="Job cards finalized in the period — the date shown is the finalize date (bill date), which is what the period filter matches on."
             icon={Wrench}
             endpoint="service/job-card-register"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized' }}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), businessType: '', paymentMode: '', finalized: 'finalized', hasParts: '' }}
             printFilterSummary={printFilterSummary}
             excelExport={excelExport}
             landscape
-            controls={({ params, updateParam }) => (
-                <>
-                    <PeriodControls params={params} updateParam={updateParam} />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
-                        Business Type:
-                        <select value={params.businessType || ''} onChange={e => updateParam('businessType', e.target.value)}
-                            style={selectStyle}>
-                            <option value="">All</option>
-                            {jobTypes.map(t => (
-                                <option key={t.JobCardTypeId} value={t.JobCardTypeId}>
-                                    {t.CardCode} — {t.Title}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
-                        Payment:
-                        <select value={params.paymentMode || ''} onChange={e => updateParam('paymentMode', e.target.value)}
-                            style={selectStyle}>
-                            <option value="">All</option>
-                            <option value="cash">Cash (incl. POS &amp; Bank Transfer)</option>
-                            <option value="credit">Credit</option>
-                        </select>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
-                        Status:
-                        <select value={params.finalized || 'finalized'} onChange={e => updateParam('finalized', e.target.value)}
-                            style={selectStyle}>
-                            <option value="finalized">Finalized only</option>
-                            <option value="draft">Draft only</option>
-                            <option value="all">All (incl. Draft)</option>
-                        </select>
-                    </label>
-                </>
-            )}
+            controls={({ params, updateParam }) => {
+                const btSet = selectedBTSet(params);
+                return (
+                    <>
+                        <PeriodControls params={params} updateParam={updateParam} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600 }}>Business Type:</span>
+                            <div style={{
+                                display: 'flex', flexWrap: 'wrap', gap: '4px 10px',
+                                padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6,
+                                background: '#f8fafc', maxWidth: 520,
+                            }}>
+                                {jobTypes.length === 0 && (
+                                    <span style={{ color: '#94a3b8' }}>Loading…</span>
+                                )}
+                                {jobTypes.map(t => (
+                                    <label key={t.JobCardTypeId} title={t.Title}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', userSelect: 'none' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={btSet.has(String(t.JobCardTypeId))}
+                                            onChange={() => toggleBusinessType(params, updateParam, t.JobCardTypeId)}
+                                        />
+                                        <span style={{ fontFamily: 'monospace' }}>{t.CardCode || t.Title}</span>
+                                    </label>
+                                ))}
+                                {btSet.size > 0 && (
+                                    <button type="button"
+                                        onClick={() => updateParam('businessType', '')}
+                                        title="Clear selection"
+                                        style={{
+                                            background: 'none', border: 'none', cursor: 'pointer',
+                                            color: '#64748b', fontSize: '0.75rem', padding: 0, marginLeft: 4,
+                                        }}>
+                                        Clear
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                            Payment:
+                            <select value={params.paymentMode || ''} onChange={e => updateParam('paymentMode', e.target.value)}
+                                style={selectStyle}>
+                                <option value="">All</option>
+                                <option value="cash">Cash (incl. POS &amp; Bank Transfer)</option>
+                                <option value="credit">Credit</option>
+                            </select>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                            Parts:
+                            <select value={params.hasParts || ''} onChange={e => updateParam('hasParts', e.target.value)}
+                                style={selectStyle}>
+                                <option value="">All</option>
+                                <option value="with">With parts issued</option>
+                                <option value="without">Without parts issued</option>
+                            </select>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                            Status:
+                            <select value={params.finalized || 'finalized'} onChange={e => updateParam('finalized', e.target.value)}
+                                style={selectStyle}>
+                                <option value="finalized">Finalized only</option>
+                                <option value="draft">Draft only</option>
+                                <option value="all">All (incl. Draft)</option>
+                            </select>
+                        </label>
+                    </>
+                );
+            }}
         >
             {(data) => (
                 <>
@@ -151,21 +205,18 @@ export function JobCardRegister() {
                                         <TD align="right" mono>{fmt(r.SubletAmount)}</TD>
                                         <TD align="right" mono color="#1d4ed8">{fmt(r.PSTAmount)}</TD>
                                         <TD align="right" mono>
-                                            <button
-                                                type="button"
-                                                onClick={() => navigate(`/parts-issue?jobCardId=${r.JobCardId}`)}
-                                                title="Open Parts Issue for this Job Card"
+                                            <a
+                                                href={`/parts-issue?jobCardId=${r.JobCardId}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title="Open Parts Issue for this Job Card (new tab)"
                                                 style={{
-                                                    background: 'none',
-                                                    border: 'none',
-                                                    padding: 0,
-                                                    font: 'inherit',
                                                     color: '#1d4ed8',
                                                     textDecoration: 'underline',
-                                                    cursor: 'pointer',
+                                                    fontFamily: 'inherit',
                                                 }}>
                                                 {fmt(r.PartsAmount)}
-                                            </button>
+                                            </a>
                                         </TD>
                                         <TD align="right" mono color="#1d4ed8">{fmt(r.GSTAmount)}</TD>
                                         <TD align="right" mono bold>{fmt(r.TotalAmount)}</TD>

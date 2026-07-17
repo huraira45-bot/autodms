@@ -41,11 +41,19 @@ exports.jobCardRegister = async (req, res) => {
         if (req.query.advisorId) { rq.input('ad', sql.Int, parseInt(req.query.advisorId)); conds.push('j.ServiceAdvisorID = @ad'); }
 
         // Business Type filter — owner's terminology for gen_JobCardType
-        // (WR, FFS, SFS, PDS, PPM, B&P, GR, CT). Frontend passes the numeric
-        // JobCardTypeId picked from the dropdown.
+        // (WR, FFS, SFS, PDS, PPM, B&P, GR, CT). Frontend passes one or many
+        // numeric JobCardTypeIds as a comma-separated list (checkbox multi-
+        // select, owner ask 2026-07-17). Empty / missing means no filter.
         if (req.query.businessType) {
-            rq.input('bt', sql.Int, parseInt(req.query.businessType));
-            conds.push('j.JobTypeId = @bt');
+            const btIds = String(req.query.businessType)
+                .split(',').map(x => parseInt(x)).filter(n => Number.isFinite(n));
+            if (btIds.length === 1) {
+                rq.input('bt', sql.Int, btIds[0]);
+                conds.push('j.JobTypeId = @bt');
+            } else if (btIds.length > 1) {
+                // Safe: parseInt filter above guarantees each element is a plain integer.
+                conds.push(`j.JobTypeId IN (${btIds.join(',')})`);
+            }
         }
 
         // Payment mode filter — Cash includes POS and Bank Transfer (owner
@@ -55,6 +63,16 @@ exports.jobCardRegister = async (req, res) => {
             conds.push("j.Status IN ('Cash','POS','Bank Transfer')");
         } else if (req.query.paymentMode === 'credit') {
             conds.push("j.Status = 'Credit'");
+        }
+
+        // With / without parts filter — owner ask 2026-07-17. Uses EXISTS on
+        // the parts-issue detail rows so it's cheaper than joining SUM > 0.
+        if (req.query.hasParts === 'with') {
+            conds.push(`EXISTS (SELECT 1 FROM data_StockIssuetoJobCardDetail sd
+                                WHERE sd.JobCardId = j.JobCardId AND ISNULL(sd.IssueQuantity, 0) > 0)`);
+        } else if (req.query.hasParts === 'without') {
+            conds.push(`NOT EXISTS (SELECT 1 FROM data_StockIssuetoJobCardDetail sd
+                                    WHERE sd.JobCardId = j.JobCardId AND ISNULL(sd.IssueQuantity, 0) > 0)`);
         }
 
         // Finalized filter — default is 'finalized' so the report shows
