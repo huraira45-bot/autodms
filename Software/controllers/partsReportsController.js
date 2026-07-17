@@ -504,14 +504,19 @@ exports.itemLedger = async (req, res) => {
                       AND  si.ArrivalDate BETWEEN @from AND @to
                     UNION ALL
                     -- Stock in/out (issues, sales, adjustments, purchase returns…)
+                    -- JOIN to data_StockIssuetoJobCard via IssuanceID so JC parts
+                    -- issues show the JobCardNo in the ref column instead of a
+                    -- bare integer; owner clarification 2026-07-17.
                     SELECT
                         oi.StockIODate               AS MoveDate,
                         CASE
                             WHEN od.Quantity > 0 THEN COALESCE(oi.StockType, 'Adj +')
                             ELSE COALESCE(oi.StockType, 'Adj -')
                         END                          AS MoveType,
-                        COALESCE(CAST(oi.StockIONo AS NVARCHAR(50)), '') AS SourceRef,
-                        p.PartyName                  AS SourceParty,
+                        COALESCE(jc.JobCardNo,
+                                 CAST(oi.StockIONo AS NVARCHAR(50)),
+                                 '')                 AS SourceRef,
+                        COALESCE(jc.VehicleRegNo, p.PartyName) AS SourceParty,
                         oi.Remarks                   AS Remarks,
                         CASE WHEN od.Quantity > 0 THEN od.Quantity        ELSE CAST(0 AS DECIMAL(18,4)) END AS QtyIn,
                         CASE WHEN od.Quantity < 0 THEN ABS(od.Quantity)   ELSE CAST(0 AS DECIMAL(18,4)) END AS QtyOut,
@@ -519,7 +524,9 @@ exports.itemLedger = async (req, res) => {
                         CAST(ABS(od.Quantity) * od.StockRate AS DECIMAL(18,2)) AS LineValue
                     FROM   data_StockInOutDetail od
                     JOIN   data_StockInOutInfo   oi ON oi.StockIOID = od.StockIOID
-                    LEFT   JOIN gen_PartiesInfo  p  ON p.PartyID    = oi.PartyID
+                    LEFT   JOIN data_StockIssuetoJobCard sij ON sij.StockIssueID = oi.IssuanceID
+                    LEFT   JOIN Addata_JobCardInfo       jc  ON jc.JobCardId    = sij.JobCardId
+                    LEFT   JOIN gen_PartiesInfo          p   ON p.PartyID       = oi.PartyID
                     WHERE  od.ItemId = @id
                       AND  oi.StockIODate BETWEEN @from AND @to
                 ) u

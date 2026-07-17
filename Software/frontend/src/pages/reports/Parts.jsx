@@ -508,8 +508,8 @@ export function ItemLedger() {
                                     <tr style={trHeader}>
                                         <TH>Date</TH>
                                         <TH>Type</TH>
-                                        <TH>Ref #</TH>
-                                        <TH>Party</TH>
+                                        <TH>JC / Ref #</TH>
+                                        <TH>Vehicle / Party</TH>
                                         <TH align="right">Qty In</TH>
                                         <TH align="right">Qty Out</TH>
                                         <TH align="right">Rate</TH>
