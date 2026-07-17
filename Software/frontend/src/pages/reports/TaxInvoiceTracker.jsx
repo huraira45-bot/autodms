@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
-import { Receipt, Save, Loader2, Check } from 'lucide-react';
+import { Receipt, Save, Loader2, Check, ChevronRight, ChevronDown } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -169,6 +169,24 @@ function TrackerTable({ initialRows, totals }) {
     const [rows, setRows] = useState(initialRows);
     useEffect(() => { setRows(initialRows); }, [initialRows]);
 
+    // expanded[JobCardId] = 'gst' | 'pst' | null. Only one expansion per row.
+    const [expanded, setExpanded] = useState({});
+    // linesCache[JobCardId] = { parts, labour, sublet } | 'loading' | 'error:msg'
+    const [linesCache, setLinesCache] = useState({});
+
+    const toggleExpand = async (jobCardId, kind) => {
+        setExpanded(prev => ({ ...prev, [jobCardId]: prev[jobCardId] === kind ? null : kind }));
+        if (!linesCache[jobCardId]) {
+            setLinesCache(prev => ({ ...prev, [jobCardId]: 'loading' }));
+            try {
+                const r = await axios.get(`/api/reports/service/tax-invoice-tracker/${jobCardId}/lines`);
+                setLinesCache(prev => ({ ...prev, [jobCardId]: r.data }));
+            } catch (e) {
+                setLinesCache(prev => ({ ...prev, [jobCardId]: 'error:' + (e.response?.data?.error || e.message) }));
+            }
+        }
+    };
+
     const updateLocal = (idx, patch) => {
         setRows(prev => {
             const next = prev.slice();
@@ -237,16 +255,32 @@ function TrackerTable({ initialRows, totals }) {
                                 No job cards in this period.
                             </td></tr>
                         )}
-                        {rows.map((r, i) => (
-                            <tr key={r.JobCardId} style={trBody}>
+                        {rows.map((r, i) => {
+                            const expandKind = expanded[r.JobCardId];
+                            const cachedLines = linesCache[r.JobCardId];
+                            return (
+                            <React.Fragment key={r.JobCardId}>
+                            <tr style={trBody}>
                                 <TD mono><strong>{r.JobCardNo}</strong></TD>
                                 <TD>{r.FinalizedAt || r.JobCardDate || '—'}</TD>
                                 <TD>{r.Status}</TD>
                                 <TD mono color="#64748b">{r.JobTypeCode}</TD>
                                 <TD align="right" mono>{fmt(r.PartsAmount)}</TD>
                                 <TD align="right" mono>{fmt(r.LabourSublet)}</TD>
-                                <TD align="right" mono color="#1d4ed8">{fmt(r.GSTAmount)}</TD>
-                                <TD align="right" mono color="#1d4ed8">{fmt(r.PSTAmount)}</TD>
+                                <TD align="right" mono>
+                                    <button type="button" onClick={() => toggleExpand(r.JobCardId, 'gst')}
+                                        title="Show parts (GST base)" style={expandBtn}>
+                                        {expandKind === 'gst' ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                                        <span style={{ color: '#1d4ed8' }}>{fmt(r.GSTAmount)}</span>
+                                    </button>
+                                </TD>
+                                <TD align="right" mono>
+                                    <button type="button" onClick={() => toggleExpand(r.JobCardId, 'pst')}
+                                        title="Show labour + sublet (PST base)" style={expandBtn}>
+                                        {expandKind === 'pst' ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                                        <span style={{ color: '#1d4ed8' }}>{fmt(r.PSTAmount)}</span>
+                                    </button>
+                                </TD>
                                 <TD>
                                     <input type="text" value={r.GSTInvoiceNo || ''}
                                         onChange={e => updateLocal(i, { GSTInvoiceNo: e.target.value })}
@@ -288,7 +322,16 @@ function TrackerTable({ initialRows, totals }) {
                                     {r._error && <div style={{ color: '#b91c1c', fontSize: '0.7rem' }}>{r._error}</div>}
                                 </TD>
                             </tr>
-                        ))}
+                            {expandKind && (
+                                <tr>
+                                    <td colSpan={13} style={{ padding: 0, background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                        <LinesSubRow kind={expandKind} lines={cachedLines} />
+                                    </td>
+                                </tr>
+                            )}
+                            </React.Fragment>
+                            );
+                        })}
                     </tbody>
                     {rows.length > 0 && (
                         <tfoot>
@@ -308,6 +351,133 @@ function TrackerTable({ initialRows, totals }) {
     );
 }
 
+// ---------- Expandable sub-row: parts (GST) or labour+sublet (PST) ----------
+function LinesSubRow({ kind, lines }) {
+    if (lines === 'loading' || !lines) {
+        return (
+            <div style={{ padding: 16, color: '#64748b', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Loader2 size={14} className="animate-spin" /> Loading lines…
+            </div>
+        );
+    }
+    if (typeof lines === 'string' && lines.startsWith('error:')) {
+        return <div style={{ padding: 16, color: '#b91c1c', fontSize: '0.8rem' }}>{lines.slice(6)}</div>;
+    }
+
+    if (kind === 'gst') {
+        const parts = lines.parts || [];
+        if (parts.length === 0) return <div style={{ padding: 12, color: '#94a3b8', fontSize: '0.8rem', fontStyle: 'italic' }}>No parts issued on this Job Card.</div>;
+        return (
+            <div style={{ padding: '8px 16px' }}>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', marginBottom: 4, fontWeight: 600 }}>
+                    Parts issued (GST base)
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                    <thead>
+                        <tr style={{ background: '#eef2ff', borderBottom: '1px solid #cbd5e1' }}>
+                            <TH>Item Code</TH><TH>Part #</TH><TH>Item Name</TH>
+                            <TH align="right">Qty</TH>
+                            <TH align="right">Sale Rate</TH>
+                            <TH align="right">Discount</TH>
+                            <TH align="right">GST</TH>
+                            <TH align="right">Line Total</TH>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {parts.map((p, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <TD mono>{p.ItemNumber || '—'}</TD>
+                                <TD mono color="#64748b">{p.ManualNumber || ''}</TD>
+                                <TD>{p.ItemName || ''}</TD>
+                                <TD align="right" mono>{fmt(p.Quantity)}</TD>
+                                <TD align="right" mono>{fmt(p.Rate)}</TD>
+                                <TD align="right" mono color={p.Discount > 0 ? '#b45309' : undefined}>
+                                    {p.Discount > 0 ? fmt(p.Discount) : '—'}
+                                </TD>
+                                <TD align="right" mono color="#1d4ed8">{fmt(p.TaxAmount)}</TD>
+                                <TD align="right" mono bold>{fmt(p.LineTotal)}</TD>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
+    // kind === 'pst'
+    const labour = lines.labour || [];
+    const sublet = lines.sublet || [];
+    if (labour.length === 0 && sublet.length === 0) {
+        return <div style={{ padding: 12, color: '#94a3b8', fontSize: '0.8rem', fontStyle: 'italic' }}>No labour or sublet lines on this Job Card.</div>;
+    }
+    return (
+        <div style={{ padding: '8px 16px' }}>
+            {labour.length > 0 && (
+                <>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', marginBottom: 4, fontWeight: 600 }}>
+                        Labour / Services (PST base)
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', marginBottom: 8 }}>
+                        <thead>
+                            <tr style={{ background: '#eef2ff', borderBottom: '1px solid #cbd5e1' }}>
+                                <TH>Description</TH>
+                                <TH align="right">Qty</TH>
+                                <TH align="right">Price</TH>
+                                <TH align="right">Discount</TH>
+                                <TH align="right">PST</TH>
+                                <TH align="right">Line Total</TH>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {labour.map((l, i) => (
+                                <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                    <TD>{l.Description || '—'}</TD>
+                                    <TD align="right" mono>{fmt(l.Quantity)}</TD>
+                                    <TD align="right" mono>{fmt(l.Price)}</TD>
+                                    <TD align="right" mono color={l.Discount > 0 ? '#b45309' : undefined}>
+                                        {l.Discount > 0 ? fmt(l.Discount) : '—'}
+                                    </TD>
+                                    <TD align="right" mono color="#1d4ed8">{fmt(l.TaxAmount)}</TD>
+                                    <TD align="right" mono bold>{fmt(l.LineTotal)}</TD>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </>
+            )}
+            {sublet.length > 0 && (
+                <>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', marginBottom: 4, fontWeight: 600 }}>
+                        Sublet (PST base)
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                        <thead>
+                            <tr style={{ background: '#eef2ff', borderBottom: '1px solid #cbd5e1' }}>
+                                <TH>Vendor</TH>
+                                <TH>Description</TH>
+                                <TH align="right">Payable</TH>
+                                <TH align="right">PST</TH>
+                                <TH align="right">Line Total</TH>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sublet.map((s, i) => (
+                                <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                    <TD>{s.VendorName || '—'}</TD>
+                                    <TD>{s.Description || '—'}</TD>
+                                    <TD align="right" mono>{fmt(s.PayableAmount)}</TD>
+                                    <TD align="right" mono color="#1d4ed8">{fmt(s.TaxAmount)}</TD>
+                                    <TD align="right" mono bold>{fmt(s.LineTotal)}</TD>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </>
+            )}
+        </div>
+    );
+}
+
 // ------------------------------ Shared style --------------------------------
 const tableStyle = { width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' };
 const trHeader   = { background: '#f8fafc', borderBottom: '2px solid #e2e8f0' };
@@ -318,6 +488,11 @@ const saveBtn    = {
     padding: '3px 8px', border: '1px solid #1d4ed8',
     background: '#1d4ed8', color: 'white', borderRadius: 4,
     fontSize: '0.75rem', cursor: 'pointer',
+};
+const expandBtn  = {
+    display: 'inline-flex', alignItems: 'center', gap: 3,
+    background: 'none', border: 'none', padding: 0,
+    font: 'inherit', color: '#64748b', cursor: 'pointer',
 };
 
 function SummaryBar({ items }) {

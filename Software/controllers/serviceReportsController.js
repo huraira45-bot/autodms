@@ -573,3 +573,66 @@ exports.saveTaxInvoice = async (req, res) => {
         });
     } catch (err) { console.error('saveTaxInvoice:', err); res.status(500).json({ error: err.message }); }
 };
+
+/**
+ * GET /reports/service/tax-invoice-tracker/:jobCardId/lines
+ *
+ * Line-level drill-down for Tax Invoice Tracker rows. Returns:
+ *   parts:  [{ ItemCode, ManualNumber, ItemName, Quantity, Rate,
+ *              Discount, TaxAmount, LineTotal }]
+ *   labour: [{ Description, Quantity, Price, Discount, TaxAmount, LineTotal }]
+ *   sublet: [{ VendorName, Description, PayableAmount, TaxAmount, LineTotal }]
+ *
+ * Owner ask 2026-07-17: clicking a GST/PST cell should show the underlying
+ * lines. GST unfolds parts (its tax base); PST unfolds labour + sublet
+ * (their tax base).
+ */
+exports.taxInvoiceLines = async (req, res) => {
+    try {
+        const jobCardId = parseInt(req.params.jobCardId);
+        if (!Number.isFinite(jobCardId)) return res.status(400).json({ error: 'Invalid jobCardId' });
+
+        const pool = await getPool();
+        const parts = await pool.request().input('id', sql.Int, jobCardId).query(`
+            SELECT i.ItemNumber, i.ManualNumber, i.ItenName AS ItemName,
+                   d.IssueQuantity AS Quantity,
+                   d.ItemRate      AS Rate,
+                   ISNULL(d.DiscAmt, 0)   AS Discount,
+                   ISNULL(d.TaxAmount, 0) AS TaxAmount,
+                   ISNULL(d.IssueQuantity, 0) * ISNULL(d.ItemRate, 0)
+                     - ISNULL(d.DiscAmt, 0) + ISNULL(d.TaxAmount, 0) AS LineTotal
+            FROM   data_StockIssuetoJobCardDetail d
+            LEFT   JOIN InventItems i ON i.ItemId = d.ItemId
+            WHERE  d.JobCardId = @id
+            ORDER  BY d.StockIssueDetailID`);
+
+        const labour = await pool.request().input('id', sql.Int, jobCardId).query(`
+            SELECT d.Remarks AS Description,
+                   ISNULL(d.Quantity, 1) AS Quantity,
+                   d.Price,
+                   ISNULL(d.DiscAmt, 0)   AS Discount,
+                   ISNULL(d.TaxAmount, 0) AS TaxAmount,
+                   ISNULL(d.Price, 0) * ISNULL(d.Quantity, 1)
+                     - ISNULL(d.DiscAmt, 0) + ISNULL(d.TaxAmount, 0) AS LineTotal
+            FROM   Addata_JobCardInfoDetail d
+            WHERE  d.JobCardId = @id
+            ORDER  BY d.DetailId`);
+
+        const sublet = await pool.request().input('id', sql.Int, jobCardId).query(`
+            SELECT p.PartyName AS VendorName,
+                   s.Remarks   AS Description,
+                   ISNULL(s.PayableAmount, 0) AS PayableAmount,
+                   ISNULL(s.TaxAmount, 0)     AS TaxAmount,
+                   ISNULL(s.PayableAmount, 0) + ISNULL(s.TaxAmount, 0) AS LineTotal
+            FROM   Addata_JobCardInfoSubletJobDetail s
+            LEFT   JOIN gen_PartiesInfo p ON p.PartyID = s.VendorID
+            WHERE  s.JobCardId = @id
+            ORDER  BY s.SubletJobDetailID`);
+
+        res.json({
+            parts:  parts.recordset,
+            labour: labour.recordset,
+            sublet: sublet.recordset,
+        });
+    } catch (err) { console.error('taxInvoiceLines:', err); res.status(500).json({ error: err.message }); }
+};
