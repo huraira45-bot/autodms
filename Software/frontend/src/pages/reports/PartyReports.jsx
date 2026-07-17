@@ -223,53 +223,69 @@ function BucketBadge({ b }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Report 2: Payments to Parties (money OUT via CPV/BPV)
+// Report 2: Store Sale Receivables — parties who owe us money on credit
+//           store sales. Grouped by party; expand to see each open SS invoice.
 // ─────────────────────────────────────────────────────────────────────────────
-export function PaymentsToParties() {
+export function StoreSaleReceivables() {
     const [expanded, setExpanded] = useState({});
     const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
+
     const excelExport = (data, params) => ({
-        filename: `payments-to-parties-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
-        headers: ['Party', 'Voucher #', 'Voucher Type', 'Date', 'Amount', 'Narration'],
+        filename: `store-sale-receivables-as-of-${params.asOf || 'today'}.csv`,
+        headers: ['Party', 'Party Type', 'Sale Invoice #', 'Voucher #', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket'],
         rows: (data.rows || []).flatMap(g =>
-            g.Vouchers.map(v => [g.PartyName, v.VoucherNo, v.VoucherType, v.VoucherDate || '', Number(v.Amount), v.Narration || ''])
+            g.Invoices.map(inv => [
+                g.PartyName, g.PartyType || '', inv.SaleInvoiceNo, inv.VoucherNo,
+                inv.InvoiceDate || '',
+                Number(inv.Invoiced), Number(inv.Paid), Number(inv.Outstanding),
+                inv.AgeDays, inv.Bucket,
+            ])
         ),
     });
+
     return (
         <ReportShell
-            title="Payments to Parties"
-            subtitle="Money paid OUT to parties via CPV / BPV in the period. Click a party to see individual voucher entries."
+            title="Store Sale Receivables"
+            subtitle="Money owed FROM parties on credit store sales. One row per party — expand to see each open SS invoice with aging."
             icon={Wallet}
-            endpoint="payments-to-parties"
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), partyId: '' }}
+            endpoint="store-sale-receivables"
+            defaultParams={{ asOf: todayISO(), partyId: '' }}
             excelExport={excelExport}
             controls={({ params, updateParam }) => (
                 <>
-                    <PeriodControls params={params} updateParam={updateParam} />
+                    <DateInput label="As of" value={params.asOf} onChange={v => updateParam('asOf', v)} />
                     <PartyPicker params={params} updateParam={updateParam} />
                 </>
             )}
         >
             {(data) => (
                 <>
-                    <div className="card report-summary-strip" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', padding: 14 }}>
-                        <div className="rss-item">
-                            <div className="rss-label" style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>Parties Paid</div>
-                            <div className="rss-value" style={{ fontWeight: 600 }}>{fmtInt(data.totals.parties)}</div>
+                    <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>{data.asOf}</div>
+                            <div style={{ fontWeight: 700, fontSize: '1.15rem' }}>
+                                {fmtInt(data.totals.parties)} parties · {fmtInt(data.totals.invoices)} open invoices
+                            </div>
                         </div>
-                        <div className="rss-item">
-                            <div className="rss-label" style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>Vouchers</div>
-                            <div className="rss-value" style={{ fontWeight: 600 }}>{fmtInt(data.totals.vouchers)}</div>
-                        </div>
-                        <div className="rss-item">
-                            <div className="rss-label" style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>Total Paid</div>
-                            <div className="rss-value" style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e40af' }}>PKR {fmt(data.totals.total)}</div>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                            {['current', 'b31_60', 'b61_90', 'b90plus'].map(k => (
+                                <div key={k} style={{ background: k === 'b90plus' ? '#fee2e2' : '#f1f5f9', padding: '8px 12px', borderRadius: 6, minWidth: 100 }}>
+                                    <div style={{ fontSize: '0.7rem', color: k === 'b90plus' ? '#b91c1c' : '#64748b', textTransform: 'uppercase' }}>
+                                        {k === 'current' ? '0–30' : k === 'b31_60' ? '31–60' : k === 'b61_90' ? '61–90' : '90+'}
+                                    </div>
+                                    <div style={{ fontWeight: 700, color: k === 'b90plus' ? '#b91c1c' : undefined }}>{fmt(data.totals[k])}</div>
+                                </div>
+                            ))}
+                            <div style={{ background: '#1e40af', color: 'white', padding: '8px 12px', borderRadius: 6, minWidth: 120 }}>
+                                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>Total Outstanding</div>
+                                <div style={{ fontWeight: 700, fontSize: '1rem' }}>PKR {fmt(data.totals.outstanding)}</div>
+                            </div>
                         </div>
                     </div>
                     <div className="card" style={{ overflowX: 'auto' }}>
                         {data.rows.length === 0 ? (
                             <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>
-                                No CPV / BPV payments to parties in this period.
+                                No outstanding store-sale receivables as of {data.asOf}. All settled.
                             </div>
                         ) : (
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
@@ -278,8 +294,12 @@ export function PaymentsToParties() {
                                         <TH width={30}></TH>
                                         <TH>Party</TH>
                                         <TH>Type</TH>
-                                        <TH align="right">Vouchers</TH>
-                                        <TH align="right">Total Paid</TH>
+                                        <TH align="right">Invoices</TH>
+                                        <TH align="right">0–30</TH>
+                                        <TH align="right">31–60</TH>
+                                        <TH align="right">61–90</TH>
+                                        <TH align="right">90+</TH>
+                                        <TH align="right">Outstanding</TH>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -294,33 +314,43 @@ export function PaymentsToParties() {
                                                 </TD>
                                                 <TD><strong>{g.PartyName}</strong></TD>
                                                 <TD color="#64748b">{g.PartyType || '—'}</TD>
-                                                <TD align="right" mono>{fmtInt(g.LineCount)}</TD>
-                                                <TD align="right" mono bold>{fmt(g.TotalAmount)}</TD>
+                                                <TD align="right" mono>{fmtInt(g.Invoices.length)}</TD>
+                                                <TD align="right" mono>{fmt(g.Buckets.current)}</TD>
+                                                <TD align="right" mono>{fmt(g.Buckets.b31_60)}</TD>
+                                                <TD align="right" mono>{fmt(g.Buckets.b61_90)}</TD>
+                                                <TD align="right" mono color={g.Buckets.b90plus > 0 ? '#b91c1c' : undefined} bold={g.Buckets.b90plus > 0}>
+                                                    {fmt(g.Buckets.b90plus)}
+                                                </TD>
+                                                <TD align="right" mono bold>{fmt(g.TotalOutstanding)}</TD>
                                             </tr>
                                             {expanded[g.PartyID] && (
                                                 <tr>
-                                                    <td colSpan={5} style={{ padding: 0, background: '#f8fafc' }}>
+                                                    <td colSpan={9} style={{ padding: 0, background: '#f8fafc' }}>
                                                         <div style={{ padding: '8px 16px' }}>
                                                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                                                                 <thead>
                                                                     <tr style={{ background: '#eef2ff', borderBottom: '1px solid #cbd5e1' }}>
+                                                                        <TH>Sale Invoice #</TH>
                                                                         <TH>Voucher #</TH>
-                                                                        <TH>Type</TH>
-                                                                        <TH>Date</TH>
-                                                                        <TH align="right">Amount</TH>
-                                                                        <TH>Narration</TH>
+                                                                        <TH>Invoice Date</TH>
+                                                                        <TH align="right">Invoiced</TH>
+                                                                        <TH align="right">Paid</TH>
+                                                                        <TH align="right">Outstanding</TH>
+                                                                        <TH align="right">Age</TH>
+                                                                        <TH align="center">Bucket</TH>
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody>
-                                                                    {g.Vouchers.map(v => (
-                                                                        <tr key={v.VoucherID} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                                                            <TD mono><strong>{v.VoucherNo}</strong></TD>
-                                                                            <TD>{v.VoucherType}</TD>
-                                                                            <TD>{v.VoucherDate || '—'}</TD>
-                                                                            <TD align="right" mono>{fmt(v.Amount)}</TD>
-                                                                            <TD color="#64748b" style={{ maxWidth: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                                                {v.Narration}
-                                                                            </TD>
+                                                                    {g.Invoices.map(inv => (
+                                                                        <tr key={inv.VoucherID} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                                            <TD mono><strong>{inv.SaleInvoiceNo || '—'}</strong></TD>
+                                                                            <TD mono color="#64748b">{inv.VoucherNo}</TD>
+                                                                            <TD>{inv.InvoiceDate || '—'}</TD>
+                                                                            <TD align="right" mono>{fmt(inv.Invoiced)}</TD>
+                                                                            <TD align="right" mono color={inv.Paid > 0 ? '#15803d' : undefined}>{fmt(inv.Paid)}</TD>
+                                                                            <TD align="right" mono bold>{fmt(inv.Outstanding)}</TD>
+                                                                            <TD align="right" mono>{inv.AgeDays}</TD>
+                                                                            <TD align="center"><BucketBadge b={inv.Bucket} /></TD>
                                                                         </tr>
                                                                     ))}
                                                                 </tbody>
@@ -335,8 +365,12 @@ export function PaymentsToParties() {
                                 <tfoot>
                                     <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
                                         <td colSpan={3} style={{ padding: 12, fontWeight: 700 }}>Grand Total</td>
-                                        <TD align="right" bold>{fmtInt(data.totals.vouchers)}</TD>
-                                        <TD align="right" bold>{fmt(data.totals.total)}</TD>
+                                        <TD align="right" bold>{fmtInt(data.totals.invoices)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.current)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.b31_60)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.b61_90)}</TD>
+                                        <TD align="right" bold color={data.totals.b90plus > 0 ? '#b91c1c' : undefined}>{fmt(data.totals.b90plus)}</TD>
+                                        <TD align="right" bold>{fmt(data.totals.outstanding)}</TD>
                                     </tr>
                                 </tfoot>
                             </table>
