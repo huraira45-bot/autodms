@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import { Wrench, Activity, ShieldCheck, UserCog } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
 
@@ -12,6 +13,7 @@ const firstOfMonthISO = () => {
 // Job Card Register
 // =====================================================================
 export function JobCardRegister() {
+    const navigate = useNavigate();
     const [jobTypes, setJobTypes] = useState([]);
     useEffect(() => {
         axios.get('/api/workshop/job-types').then(r => setJobTypes(r.data || [])).catch(() => {});
@@ -148,7 +150,23 @@ export function JobCardRegister() {
                                         <TD align="right" mono>{fmt(r.LabourAmount)}</TD>
                                         <TD align="right" mono>{fmt(r.SubletAmount)}</TD>
                                         <TD align="right" mono color="#1d4ed8">{fmt(r.PSTAmount)}</TD>
-                                        <TD align="right" mono>{fmt(r.PartsAmount)}</TD>
+                                        <TD align="right" mono>
+                                            <button
+                                                type="button"
+                                                onClick={() => navigate(`/parts-issue?jobCardId=${r.JobCardId}`)}
+                                                title="Open Parts Issue for this Job Card"
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    padding: 0,
+                                                    font: 'inherit',
+                                                    color: '#1d4ed8',
+                                                    textDecoration: 'underline',
+                                                    cursor: 'pointer',
+                                                }}>
+                                                {fmt(r.PartsAmount)}
+                                            </button>
+                                        </TD>
                                         <TD align="right" mono color="#1d4ed8">{fmt(r.GSTAmount)}</TD>
                                         <TD align="right" mono bold>{fmt(r.TotalAmount)}</TD>
                                     </tr>

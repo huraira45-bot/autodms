@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   Package, Search, Plus, Trash2, Save, Loader2, Printer,
@@ -44,6 +45,11 @@ export default function PartsIssue() {
   const [recent, setRecent]             = useState([]);
   const [recentSearch, setRecentSearch] = useState('');
 
+  // Deep-link support: /parts-issue?jobCardId=XXX preselects the JC so drill-through
+  // from Job Card Register (owner ask 2026-07-17) lands on the right issue slip.
+  const [searchParams] = useSearchParams();
+  const preselectJobCardId = searchParams.get('jobCardId');
+
   useEffect(() => {
     (async () => {
       try {
@@ -59,6 +65,22 @@ export default function PartsIssue() {
       } catch (err) { console.error(err); }
     })();
   }, []);
+
+  // Preselect the JC when arriving from a deep-link (e.g. Job Card Register).
+  useEffect(() => {
+    if (!preselectJobCardId) return;
+    const id = parseInt(preselectJobCardId);
+    if (!id || selectedJob?.JobCardId === id) return;
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/workshop/job-cards/${id}`);
+        if (r.data) selectJob(r.data);
+      } catch (err) {
+        console.error('Preselect JC failed:', err);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectJobCardId]);
 
   const searchJobs = async (val) => {
     setJobSearch(val);
