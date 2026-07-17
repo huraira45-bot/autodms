@@ -153,6 +153,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
 // Module-scoped reports
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
+import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
@@ -305,6 +306,11 @@ function LegacySidebar() {
                 {canReport('job_card_register') && (
                     <NavLink to="/reports/service/job-card-register" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Job Card Register
+                    </NavLink>
+                )}
+                {canReport('tax_invoice_tracker') && (
+                    <NavLink to="/reports/service/tax-invoice-tracker" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Tax Invoice Tracker
                     </NavLink>
                 )}
                 {canReport('advisor_performance') && (
@@ -906,6 +912,7 @@ function AppShell() {
                     <Route path="/reports/service/revenue-summary"       element={<ProtectedRoute><ServiceRevenueSummary /></ProtectedRoute>} />
                     <Route path="/reports/service/insurance-claims"      element={<ProtectedRoute><InsuranceClaims /></ProtectedRoute>} />
                     <Route path="/reports/service/mechanic-productivity" element={<ProtectedRoute><MechanicProductivity /></ProtectedRoute>} />
+                    <Route path="/reports/service/tax-invoice-tracker"   element={<ProtectedRoute><TaxInvoiceTracker /></ProtectedRoute>} />
 
                     {/* Parts reports */}
                     <Route path="/reports/parts/stock-movement"   element={<ProtectedRoute><StockMovement /></ProtectedRoute>} />

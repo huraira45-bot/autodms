@@ -166,6 +166,7 @@ export const NAV_ITEMS = [
     { id: 'r-va',        moduleGroup: 'reports', label: 'Voucher Audit Trail', path: '/reports/voucher-audit',       icon: ListChecks,   permission: 'report:voucher_audit' },
     { id: 'r-saa',       moduleGroup: 'reports', label: 'System Account Audit',path: '/reports/system-account-audit',icon: ShieldCheck,  permission: 'report:system_account_audit' },
     { id: 'r-jcr',       moduleGroup: 'reports', label: 'Job Card Register',   path: '/reports/service/job-card-register',   icon: ListChecks, permission: 'report:job_card_register' },
+    { id: 'r-jc-tax',    moduleGroup: 'reports', label: 'Tax Invoice Tracker', path: '/reports/service/tax-invoice-tracker', icon: ListChecks, permission: 'report:tax_invoice_tracker' },
     { id: 'r-adv',       moduleGroup: 'reports', label: 'Advisor Performance', path: '/reports/service/advisor-performance', icon: ListChecks, permission: 'report:advisor_performance' },
     { id: 'r-rev',       moduleGroup: 'reports', label: 'Revenue Summary',     path: '/reports/service/revenue-summary',     icon: ListChecks, permission: 'report:revenue_summary' },
     { id: 'r-ins',       moduleGroup: 'reports', label: 'Insurance Claims',    path: '/reports/service/insurance-claims',    icon: ListChecks, permission: 'report:insurance_claims' },

@@ -8,5 +8,7 @@ router.get('/advisor-performance',   requireAccess('report:advisor_performance')
 router.get('/revenue-summary',       requireAccess('report:revenue_summary'),       c.revenueSummary);
 router.get('/insurance-claims',      requireAccess('report:insurance_claims'),      c.insuranceClaims);
 router.get('/mechanic-productivity', requireAccess('report:mechanic_productivity'), c.mechanicProductivity);
+router.get('/tax-invoice-tracker',   requireAccess('report:tax_invoice_tracker'),   c.taxInvoiceTracker);
+router.patch('/tax-invoice-tracker/:jobCardId', requireAccess('report:tax_invoice_tracker'), c.saveTaxInvoice);
 
 module.exports = router;

@@ -402,3 +402,174 @@ exports.mechanicProductivity = async (req, res) => {
         res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
     } catch (err) { console.error('mechanicProductivity:', err); res.status(500).json({ error: err.message }); }
 };
+
+/**
+ * GET /reports/service/tax-invoice-tracker
+ *
+ * Same filter shape as jobCardRegister. Extra columns from dms_JCTaxInvoice
+ * (GSTInvoiceNo, PSTInvoiceNo, GSTPaid, PSTPaid) — LEFT JOIN so JCs without
+ * a tracker row still appear with empty invoice numbers and false flags.
+ *
+ * Owner ask 2026-07-17.
+ */
+exports.taxInvoiceTracker = async (req, res) => {
+    try {
+        const { from, to } = parseRange(req);
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+
+        const dateCol = 'COALESCE(j.FinalizedAt, j.JobCardDate)';
+        const conds = [`${dateCol} BETWEEN @from AND @to`];
+
+        if (req.query.businessType) {
+            const btIds = String(req.query.businessType)
+                .split(',').map(x => parseInt(x)).filter(n => Number.isFinite(n));
+            if (btIds.length === 1) {
+                rq.input('bt', sql.Int, btIds[0]);
+                conds.push('j.JobTypeId = @bt');
+            } else if (btIds.length > 1) {
+                conds.push(`j.JobTypeId IN (${btIds.join(',')})`);
+            }
+        }
+        if (req.query.paymentMode === 'cash') {
+            conds.push("j.Status IN ('Cash','POS','Bank Transfer')");
+        } else if (req.query.paymentMode === 'credit') {
+            conds.push("j.Status = 'Credit'");
+        }
+        if (req.query.hasParts === 'with') {
+            conds.push(`EXISTS (SELECT 1 FROM data_StockIssuetoJobCardDetail sd
+                                WHERE sd.JobCardId = j.JobCardId AND ISNULL(sd.IssueQuantity, 0) > 0)`);
+        } else if (req.query.hasParts === 'without') {
+            conds.push(`NOT EXISTS (SELECT 1 FROM data_StockIssuetoJobCardDetail sd
+                                    WHERE sd.JobCardId = j.JobCardId AND ISNULL(sd.IssueQuantity, 0) > 0)`);
+        }
+        const finalized = req.query.finalized || 'finalized';
+        if (finalized === 'finalized')       conds.push('j.IsFinalized = 1');
+        else if (finalized === 'draft')      conds.push('(j.IsFinalized IS NULL OR j.IsFinalized = 0)');
+
+        const r = await rq.query(`
+            SELECT j.JobCardId, j.JobCardNo, j.Status,
+                   j.FinalizedAt, j.JobCardDate,
+                   t.CardCode AS JobTypeCode, t.Title AS JobType,
+                   ISNULL((SELECT SUM(ISNULL(d.Price,0) * ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0))
+                           FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourGross,
+                   ISNULL((SELECT SUM(ISNULL(d.TaxAmount,0))
+                           FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourTax,
+                   ISNULL((SELECT SUM(ISNULL(b.PayableAmount,0))
+                           FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId), 0) AS SubletGross,
+                   ISNULL((SELECT SUM(ISNULL(b.TaxAmount,0))
+                           FROM Addata_JobCardInfoSubletJobDetail b WHERE b.JobCardId = j.JobCardId), 0) AS SubletTax,
+                   ISNULL((SELECT SUM(ISNULL(s.IssueQuantity,0) * ISNULL(s.ItemRate,0))
+                           FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsGross,
+                   ISNULL((SELECT SUM(ISNULL(s.TaxAmount,0))
+                           FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsTax,
+                   tx.GSTInvoiceNo, tx.PSTInvoiceNo,
+                   ISNULL(tx.GSTPaid, 0) AS GSTPaid,
+                   ISNULL(tx.PSTPaid, 0) AS PSTPaid,
+                   tx.UpdatedByName AS TaxUpdatedByName, tx.UpdatedAt AS TaxUpdatedAt
+            FROM Addata_JobCardInfo j
+            LEFT JOIN gen_JobCardType t   ON j.JobTypeId = t.JobCardTypeId
+            LEFT JOIN dms_JCTaxInvoice tx ON tx.JobCardId = j.JobCardId
+            WHERE ${conds.join(' AND ')}
+            ORDER BY ${dateCol} DESC, j.JobCardId DESC`);
+
+        const rows = r.recordset.map(x => {
+            const labour = Number(x.LabourGross) || 0;
+            const sublet = Number(x.SubletGross) || 0;
+            const parts  = Number(x.PartsGross)  || 0;
+            const pst    = (Number(x.LabourTax) || 0) + (Number(x.SubletTax) || 0);
+            const gst    = Number(x.PartsTax) || 0;
+            return {
+                JobCardId:      x.JobCardId,
+                JobCardNo:      x.JobCardNo,
+                FinalizedAt:    x.FinalizedAt?.toISOString().slice(0,10) || null,
+                JobCardDate:    x.JobCardDate?.toISOString().slice(0,10) || null,
+                Status:         x.Status || '',
+                JobTypeCode:    x.JobTypeCode || '',
+                JobType:        x.JobType || '',
+                PartsAmount:    +parts.toFixed(2),
+                LabourSublet:   +(labour + sublet).toFixed(2),
+                PSTAmount:      +pst.toFixed(2),
+                GSTAmount:      +gst.toFixed(2),
+                GSTInvoiceNo:   x.GSTInvoiceNo || '',
+                PSTInvoiceNo:   x.PSTInvoiceNo || '',
+                GSTPaid:        !!x.GSTPaid,
+                PSTPaid:        !!x.PSTPaid,
+                TaxUpdatedByName: x.TaxUpdatedByName || null,
+                TaxUpdatedAt:   x.TaxUpdatedAt?.toISOString().slice(0,16).replace('T',' ') || null,
+            };
+        });
+
+        const totals = {
+            count:        rows.length,
+            partsAmount:  +rows.reduce((s, x) => s + x.PartsAmount, 0).toFixed(2),
+            labourSublet: +rows.reduce((s, x) => s + x.LabourSublet, 0).toFixed(2),
+            pstAmount:    +rows.reduce((s, x) => s + x.PSTAmount, 0).toFixed(2),
+            gstAmount:    +rows.reduce((s, x) => s + x.GSTAmount, 0).toFixed(2),
+            gstPaidCount: rows.filter(x => x.GSTPaid).length,
+            pstPaidCount: rows.filter(x => x.PSTPaid).length,
+        };
+
+        res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
+    } catch (err) { console.error('taxInvoiceTracker:', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
+ * PATCH /reports/service/tax-invoice-tracker/:jobCardId
+ * Body: { GSTInvoiceNo?, PSTInvoiceNo?, GSTPaid?, PSTPaid? }
+ *
+ * Upserts into dms_JCTaxInvoice. Rows are created lazily on first PATCH.
+ * Owner ask 2026-07-17.
+ */
+exports.saveTaxInvoice = async (req, res) => {
+    try {
+        const jobCardId = parseInt(req.params.jobCardId);
+        if (!Number.isFinite(jobCardId)) return res.status(400).json({ error: 'Invalid jobCardId' });
+
+        const { GSTInvoiceNo, PSTInvoiceNo, GSTPaid, PSTPaid } = req.body || {};
+        const clean = (v) => (v == null ? null : String(v).trim().slice(0, 50) || null);
+
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('id',   sql.Int,           jobCardId)
+            .input('gst',  sql.NVarChar(50),  clean(GSTInvoiceNo))
+            .input('pst',  sql.NVarChar(50),  clean(PSTInvoiceNo))
+            .input('gp',   sql.Bit,           GSTPaid ? 1 : 0)
+            .input('pp',   sql.Bit,           PSTPaid ? 1 : 0)
+            .input('by',   sql.Int,           req.user?.userId || null)
+            .input('byN',  sql.NVarChar(100), req.user?.userName || null)
+            .query(`
+                MERGE dbo.dms_JCTaxInvoice AS tgt
+                USING (SELECT @id AS JobCardId) AS src
+                ON tgt.JobCardId = src.JobCardId
+                WHEN MATCHED THEN UPDATE SET
+                    GSTInvoiceNo  = @gst,
+                    PSTInvoiceNo  = @pst,
+                    GSTPaid       = @gp,
+                    PSTPaid       = @pp,
+                    UpdatedBy     = @by,
+                    UpdatedByName = @byN,
+                    UpdatedAt     = GETDATE()
+                WHEN NOT MATCHED THEN INSERT
+                    (JobCardId, GSTInvoiceNo, PSTInvoiceNo, GSTPaid, PSTPaid,
+                     UpdatedBy, UpdatedByName, UpdatedAt)
+                    VALUES (@id, @gst, @pst, @gp, @pp, @by, @byN, GETDATE())
+                OUTPUT INSERTED.JobCardId, INSERTED.GSTInvoiceNo, INSERTED.PSTInvoiceNo,
+                       INSERTED.GSTPaid, INSERTED.PSTPaid,
+                       INSERTED.UpdatedByName, INSERTED.UpdatedAt;
+            `);
+
+        const row = r.recordset[0];
+        res.json({
+            JobCardId:    row.JobCardId,
+            GSTInvoiceNo: row.GSTInvoiceNo || '',
+            PSTInvoiceNo: row.PSTInvoiceNo || '',
+            GSTPaid:      !!row.GSTPaid,
+            PSTPaid:      !!row.PSTPaid,
+            TaxUpdatedByName: row.UpdatedByName || null,
+            TaxUpdatedAt: row.UpdatedAt?.toISOString().slice(0,16).replace('T',' ') || null,
+        });
+    } catch (err) { console.error('saveTaxInvoice:', err); res.status(500).json({ error: err.message }); }
+};
