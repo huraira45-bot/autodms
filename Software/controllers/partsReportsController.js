@@ -408,6 +408,7 @@ exports.itemSearch = async (req, res) => {
                 LEFT JOIN InventCategory  c ON c.CategoryID = i.CategoryID
                 LEFT JOIN InventWareHouse w ON w.WHID       = i.WHID
                 WHERE i.ItemStatus = 1
+                  AND i.ItemType = 'Part'  -- exclude labour/services from the ledger picker
                   AND (@q = '%%'
                        OR i.ItenName    LIKE @q
                        OR i.ManualNumber LIKE @q
@@ -456,8 +457,8 @@ exports.itemLedger = async (req, res) => {
                 LEFT JOIN InventUOM       u ON u.UOMId      = i.UOMId
                 LEFT JOIN InventCategory  c ON c.CategoryID = i.CategoryID
                 LEFT JOIN InventWareHouse w ON w.WHID       = i.WHID
-                WHERE i.ItemId = @id`);
-        if (!itmRes.recordset.length) return res.status(404).json({ error: 'Item not found.' });
+                WHERE i.ItemId = @id AND i.ItemType = 'Part'`);
+        if (!itmRes.recordset.length) return res.status(404).json({ error: 'Item not found or not a stock part.' });
         const item = itmRes.recordset[0];
 
         // 2. Opening quantity — everything strictly before @from.
