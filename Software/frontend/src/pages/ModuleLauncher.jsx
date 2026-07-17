@@ -50,6 +50,38 @@ export default function ModuleLauncher() {
         );
     }
 
+    // Group items by their `section` label so the launcher can render
+    // sub-headings between clusters of related tiles (owner ask 2026-07-17).
+    // Items without a section fall into "General" so nothing is dropped.
+    // Preserves the order items appear in navigationConfig — first-seen wins.
+    const sections = [];
+    const sectionMap = new Map();
+    for (const it of items) {
+        const key = it.section || 'General';
+        if (!sectionMap.has(key)) {
+            const bucket = { name: key, items: [] };
+            sectionMap.set(key, bucket);
+            sections.push(bucket);
+        }
+        sectionMap.get(key).items.push(it);
+    }
+    const hasSections = sections.length > 1 || (sections.length === 1 && sections[0].name !== 'General');
+
+    const renderTile = (it) => {
+        const T = it.icon;
+        return (
+            <Link key={it.id} to={it.path} className="module-tile">
+                <div className="module-tile-icn"><T size={18} /></div>
+                <div className="module-tile-body">
+                    <div className="module-tile-title">{it.label}</div>
+                    {it.description && (
+                        <div className="module-tile-desc">{it.description}</div>
+                    )}
+                </div>
+            </Link>
+        );
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <ErpControlPanel
@@ -64,28 +96,43 @@ export default function ModuleLauncher() {
                 }
             />
 
-            <div className="module-tile-grid">
-                {items.map(it => {
-                    const T = it.icon;
-                    return (
-                        <Link key={it.id} to={it.path} className="module-tile">
-                            <div className="module-tile-icn"><T size={18} /></div>
-                            <div className="module-tile-body">
-                                <div className="module-tile-title">{it.label}</div>
-                                {it.description && (
-                                    <div className="module-tile-desc">{it.description}</div>
-                                )}
-                            </div>
-                        </Link>
-                    );
-                })}
-            </div>
+            {hasSections
+                ? sections.map(s => (
+                    <div key={s.name} className="module-section">
+                        <div className="module-section-title">{s.name}</div>
+                        <div className="module-tile-grid">
+                            {s.items.map(renderTile)}
+                        </div>
+                    </div>
+                ))
+                : (
+                    <div className="module-tile-grid">
+                        {items.map(renderTile)}
+                    </div>
+                )
+            }
 
             <div className="hint" style={{ fontSize: 11, color: 'var(--erp-text-muted)' }}>
-                {items.length} action{items.length === 1 ? '' : 's'} available.
+                {items.length} action{items.length === 1 ? '' : 's'} available
+                {hasSections && ` across ${sections.length} section${sections.length === 1 ? '' : 's'}`}.
             </div>
 
             <style>{`
+                .module-section {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                }
+                .module-section-title {
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.05em;
+                    text-transform: uppercase;
+                    color: var(--erp-text-muted);
+                    padding: 8px 4px 2px 4px;
+                    border-bottom: 1px solid var(--erp-border);
+                    margin-bottom: 2px;
+                }
                 .module-tile-grid {
                     display: grid;
                     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
