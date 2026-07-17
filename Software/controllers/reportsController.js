@@ -1418,65 +1418,66 @@ exports.getWalkInOutstanding = async (req, res) => {
         const gcGL  = await resolveRole('GENERAL_CUSTOMER');
         const advGL = await resolveRole('CUSTOMER_ADVANCE_RECEIVED');
 
-        // Owner report 2026-07-10: walk-in receipts posted as advances (Cr
-        // CUSTOMER_ADVANCE_RECEIVED tagged with JobCardID) leave the JC on the
-        // pending list even though bank/cash received the money — because the
-        // Cr never lands on Gen-Cust with AllocatedToVoucherID. Widen the paid
-        // figure to include those advance Crs (net of any Drs on the same
-        // account for the JC — reversals cancel, draw-downs reduce).
+        // Owner report 2026-07-17: paid JCs still appearing on the pending
+        // list. Previous logic only counted a settlement Cr on Gen-Cust when
+        // AllocatedToVoucherID was set — but many cashier receipts (CRV /
+        // BRV / POS) post Cr Gen-Cust tagged with JobCardID *without* filling
+        // the "allocate to invoice" field, and the report never saw them.
+        //
+        // Rewritten to walk the Gen-Cust ledger directly per JobCardID:
+        //   Invoiced   = SUM(Debit)  on Gen-Cust for the JC
+        //   Received   = SUM(Credit) on Gen-Cust for the JC (any voucher,
+        //                allocated or not — receipts are always JC-tagged)
+        //   Advance    = positive net Cr on CUSTOMER_ADVANCE_RECEIVED for JC
+        //   Outstanding = Invoiced − Received − Advance
+        // This is strictly more inclusive than the old CTE-join model and
+        // correctly handles insurance-split JCs (Gen-Cust Dr = customer
+        // share only), reversals (Dr cancels Cr), and mixed receipt routes.
         const r = await pool.request()
             .input('gl',    sql.Int,      gcGL)
             .input('advGL', sql.Int,      advGL)
             .input('asOf',  sql.DateTime, asOf)
             .query(`
-                WITH InvoiceLines AS (
-                    SELECT d.VoucherID, d.JobCardID, SUM(d.Debit) AS Invoiced, MIN(v.VoucherDate) AS InvDate
+                WITH GC AS (
+                    SELECT d.JobCardID,
+                           SUM(d.Debit)  AS Invoiced,
+                           SUM(d.Credit) AS Received,
+                           MIN(CASE WHEN v.SourceDocType='JOBCARD' AND d.Debit > 0
+                                    THEN d.VoucherID END) AS InvVoucherID
                     FROM data_FinanceVoucherDetail d
                     INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                    WHERE d.GLCAID = @gl AND d.Debit > 0
-                      AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
-                      AND v.SourceDocType='JOBCARD' AND v.VoucherDate <= @asOf
-                    GROUP BY d.VoucherID, d.JobCardID
-                ),
-                Settled AS (
-                    SELECT d.AllocatedToVoucherID, SUM(d.Credit) AS Paid
-                    FROM data_FinanceVoucherDetail d
-                    INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                    WHERE d.GLCAID = @gl AND d.Credit > 0 AND d.AllocatedToVoucherID IS NOT NULL
+                    WHERE d.GLCAID = @gl AND d.JobCardID IS NOT NULL
                       AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
                       AND v.VoucherDate <= @asOf
-                    GROUP BY d.AllocatedToVoucherID
+                    GROUP BY d.JobCardID
                 ),
                 Advances AS (
                     SELECT d.JobCardID, SUM(d.Credit) - SUM(d.Debit) AS AdvNet
                     FROM data_FinanceVoucherDetail d
                     INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                    WHERE d.GLCAID = @advGL
+                    WHERE d.GLCAID = @advGL AND d.JobCardID IS NOT NULL
                       AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
                       AND v.VoucherDate <= @asOf
-                      AND d.JobCardID IS NOT NULL
                     GROUP BY d.JobCardID
                 )
-                SELECT i.VoucherID, vi.VoucherNo,
+                SELECT gc.InvVoucherID AS VoucherID, vi.VoucherNo,
                        jc.JobCardId, jc.JobCardNo, jc.JobCardDate,
                        jc.[Status] AS PaymentType, jc.PaymentBankID,
-                       i.Invoiced,
-                       ISNULL(s.Paid, 0)                            AS AllocatedPaid,
+                       gc.Invoiced,
+                       gc.Received                                        AS AllocatedPaid,
                        CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END AS Advance,
-                       ISNULL(s.Paid, 0)
+                       gc.Received
                          + CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END AS Paid,
-                       i.Invoiced
-                         - ISNULL(s.Paid, 0)
+                       gc.Invoiced - gc.Received
                          - CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END AS Outstanding,
                        DATEDIFF(day, jc.JobCardDate, @asOf) AS AgeDays
-                FROM InvoiceLines i
-                LEFT JOIN Settled  s ON s.AllocatedToVoucherID = i.VoucherID
-                LEFT JOIN Advances a ON a.JobCardID           = i.JobCardID
-                INNER JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = i.VoucherID
-                INNER JOIN Addata_JobCardInfo jc ON jc.JobCardId = i.JobCardID
-                WHERE i.Invoiced
-                      - ISNULL(s.Paid, 0)
-                      - CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END > 0.005
+                FROM   GC
+                LEFT   JOIN Advances a ON a.JobCardID = gc.JobCardID
+                LEFT   JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = gc.InvVoucherID
+                INNER  JOIN Addata_JobCardInfo jc     ON jc.JobCardId  = gc.JobCardID
+                WHERE  gc.Invoiced > 0.005
+                  AND  gc.Invoiced - gc.Received
+                       - CASE WHEN ISNULL(a.AdvNet, 0) > 0 THEN a.AdvNet ELSE 0 END > 0.005
                 ORDER BY jc.JobCardDate ASC
             `);
 
