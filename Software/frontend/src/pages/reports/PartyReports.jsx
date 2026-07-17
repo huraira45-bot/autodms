@@ -232,13 +232,16 @@ export function StoreSaleReceivables() {
 
     const excelExport = (data, params) => ({
         filename: `store-sale-receivables-as-of-${params.asOf || 'today'}.csv`,
-        headers: ['Party', 'Party Type', 'Sale Invoice #', 'Voucher #', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket'],
+        headers: ['Party', 'Party Type', 'Sale Invoice #', 'Voucher #', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket', 'Other (non-SS) Balance'],
         rows: (data.rows || []).flatMap(g =>
-            g.Invoices.map(inv => [
+            g.Invoices.map((inv, idx) => [
                 g.PartyName, g.PartyType || '', inv.SaleInvoiceNo, inv.VoucherNo,
                 inv.InvoiceDate || '',
                 Number(inv.Invoiced), Number(inv.Paid), Number(inv.Outstanding),
                 inv.AgeDays, inv.Bucket,
+                // Only put the other-balance on the party's first invoice row so
+                // sums in Excel don't inflate.
+                idx === 0 ? Number(g.OtherBalance || 0) : '',
             ])
         ),
     });
@@ -299,7 +302,10 @@ export function StoreSaleReceivables() {
                                         <TH align="right">31–60</TH>
                                         <TH align="right">61–90</TH>
                                         <TH align="right">90+</TH>
-                                        <TH align="right">Outstanding</TH>
+                                        <TH align="right">SS Outstanding</TH>
+                                        <TH align="right" title="Party's ledger balance from JCs / JVs / advances etc. — Dr − Cr on party GL minus the SS contribution">
+                                            Other Balance
+                                        </TH>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -322,10 +328,15 @@ export function StoreSaleReceivables() {
                                                     {fmt(g.Buckets.b90plus)}
                                                 </TD>
                                                 <TD align="right" mono bold>{fmt(g.TotalOutstanding)}</TD>
+                                                <TD align="right" mono
+                                                    color={(g.OtherBalance || 0) > 0 ? '#b45309' : (g.OtherBalance || 0) < 0 ? '#15803d' : '#94a3b8'}
+                                                    title={(g.OtherBalance || 0) > 0 ? 'Party owes on non-SS activity' : (g.OtherBalance || 0) < 0 ? 'Party has credit / advance on non-SS activity' : ''}>
+                                                    {fmt(g.OtherBalance || 0)}
+                                                </TD>
                                             </tr>
                                             {expanded[g.PartyID] && (
                                                 <tr>
-                                                    <td colSpan={9} style={{ padding: 0, background: '#f8fafc' }}>
+                                                    <td colSpan={10} style={{ padding: 0, background: '#f8fafc' }}>
                                                         <div style={{ padding: '8px 16px' }}>
                                                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                                                                 <thead>
@@ -371,6 +382,10 @@ export function StoreSaleReceivables() {
                                         <TD align="right" bold>{fmt(data.totals.b61_90)}</TD>
                                         <TD align="right" bold color={data.totals.b90plus > 0 ? '#b91c1c' : undefined}>{fmt(data.totals.b90plus)}</TD>
                                         <TD align="right" bold>{fmt(data.totals.outstanding)}</TD>
+                                        <TD align="right" bold
+                                            color={(data.totals.otherBalance || 0) > 0 ? '#b45309' : (data.totals.otherBalance || 0) < 0 ? '#15803d' : undefined}>
+                                            {fmt(data.totals.otherBalance || 0)}
+                                        </TD>
                                     </tr>
                                 </tfoot>
                             </table>

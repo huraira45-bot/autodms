@@ -1872,12 +1872,48 @@ exports.getStoreSaleReceivables = async (req, res) => {
             });
         }
 
+        // Second pass: per-party total ledger balance (Dr - Cr) on their PartyGLID,
+        // then derive non-SS balance = total − SS-side contribution. Owner ask
+        // 2026-07-17: they want to see the party's other-activity balance next
+        // to the SS receivable so the full financial picture is visible.
+        if (byParty.size > 0) {
+            const ids = Array.from(byParty.keys());
+            const balRq = pool.request().input('asOf', sql.DateTime, asOf);
+            // parseInt-guarded, safe to interpolate.
+            const idList = ids.map(n => parseInt(n)).filter(Number.isFinite).join(',');
+            if (idList) {
+                const balR = await balRq.query(`
+                    SELECT l.PartyID,
+                           ISNULL(SUM(l.Debit),  0) AS SumDr,
+                           ISNULL(SUM(l.Credit), 0) AS SumCr,
+                           ISNULL(SUM(l.Debit),  0) - ISNULL(SUM(l.Credit), 0) AS TotalBalance
+                    FROM   dms_PartyLedger l
+                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                    WHERE  l.PartyID IN (${idList})
+                      AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND  v.VoucherDate <= @asOf
+                    GROUP BY l.PartyID`);
+                const balMap = new Map(balR.recordset.map(x => [x.PartyID, Number(x.TotalBalance) || 0]));
+                for (const g of byParty.values()) {
+                    const total = balMap.get(g.PartyID) || 0;
+                    // OtherBalance = total ledger balance − SS-side balance.
+                    // SS-side balance = TotalInvoiced − TotalPaid (allocations
+                    // pointing at SS invoices). Same convention as above.
+                    const ssSide = g.TotalInvoiced - g.TotalPaid;
+                    g.TotalBalance = +total.toFixed(2);
+                    g.OtherBalance = +(total - ssSide).toFixed(2);
+                }
+            }
+        }
+
         const rows = Array.from(byParty.values())
             .map(g => ({
                 ...g,
                 TotalInvoiced:    +g.TotalInvoiced.toFixed(2),
                 TotalPaid:        +g.TotalPaid.toFixed(2),
                 TotalOutstanding: +g.TotalOutstanding.toFixed(2),
+                TotalBalance:     +Number(g.TotalBalance || 0).toFixed(2),
+                OtherBalance:     +Number(g.OtherBalance || 0).toFixed(2),
                 Buckets: Object.fromEntries(
                     Object.entries(g.Buckets).map(([k, v]) => [k, +v.toFixed(2)])
                 ),
@@ -1885,15 +1921,16 @@ exports.getStoreSaleReceivables = async (req, res) => {
             .sort((a, b) => b.TotalOutstanding - a.TotalOutstanding);
 
         const totals = {
-            parties:     rows.length,
-            invoices:    r.recordset.length,
-            invoiced:    +rows.reduce((s, x) => s + x.TotalInvoiced, 0).toFixed(2),
-            paid:        +rows.reduce((s, x) => s + x.TotalPaid, 0).toFixed(2),
-            outstanding: +rows.reduce((s, x) => s + x.TotalOutstanding, 0).toFixed(2),
-            current:     +rows.reduce((s, x) => s + x.Buckets.current, 0).toFixed(2),
-            b31_60:      +rows.reduce((s, x) => s + x.Buckets.b31_60, 0).toFixed(2),
-            b61_90:      +rows.reduce((s, x) => s + x.Buckets.b61_90, 0).toFixed(2),
-            b90plus:     +rows.reduce((s, x) => s + x.Buckets.b90plus, 0).toFixed(2),
+            parties:      rows.length,
+            invoices:     r.recordset.length,
+            invoiced:     +rows.reduce((s, x) => s + x.TotalInvoiced, 0).toFixed(2),
+            paid:         +rows.reduce((s, x) => s + x.TotalPaid, 0).toFixed(2),
+            outstanding:  +rows.reduce((s, x) => s + x.TotalOutstanding, 0).toFixed(2),
+            otherBalance: +rows.reduce((s, x) => s + (x.OtherBalance || 0), 0).toFixed(2),
+            current:      +rows.reduce((s, x) => s + x.Buckets.current, 0).toFixed(2),
+            b31_60:       +rows.reduce((s, x) => s + x.Buckets.b31_60, 0).toFixed(2),
+            b61_90:       +rows.reduce((s, x) => s + x.Buckets.b61_90, 0).toFixed(2),
+            b90plus:      +rows.reduce((s, x) => s + x.Buckets.b90plus, 0).toFixed(2),
         };
 
         res.json({
