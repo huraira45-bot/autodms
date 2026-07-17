@@ -142,7 +142,7 @@ export function BalanceSheet() {
     return (
         <ReportShell
             title="Balance Sheet"
-            subtitle="Assets vs. Liabilities + Equity as of the chosen date. Click a class to see its groups; click a group to see accounts."
+            subtitle="Assets vs. Liabilities + Equity as of the chosen date. Class → Group → Sub-group → Account, aligned with the Chart of Accounts."
             icon={Scale}
             endpoint="balance-sheet"
             defaultParams={{ asOf: todayISO() }}
@@ -179,8 +179,16 @@ export function BalanceSheet() {
 function BSClassPanel({ cls, drillTo }) {
     const [openClass, setOpenClass] = useState(true);
     const [expandedGroups, setExpandedGroups] = useState(new Set());
+    const [expandedSubs, setExpandedSubs]     = useState(new Set());
     const toggleGroup = (code) => {
         setExpandedGroups(prev => {
+            const next = new Set(prev);
+            if (next.has(code)) next.delete(code); else next.add(code);
+            return next;
+        });
+    };
+    const toggleSub = (code) => {
+        setExpandedSubs(prev => {
             const next = new Set(prev);
             if (next.has(code)) next.delete(code); else next.add(code);
             return next;
@@ -204,36 +212,54 @@ function BSClassPanel({ cls, drillTo }) {
                     <thead>
                         <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                             <TH>Code</TH>
-                            <TH>Group / Account</TH>
+                            <TH>Group / Sub-group / Account</TH>
                             <TH align="right">Balance</TH>
                         </tr>
                     </thead>
                     <tbody>
                         {(cls.groups || []).map(g => {
-                            const open = expandedGroups.has(g.code);
+                            const groupOpen = expandedGroups.has(g.code);
                             return (
                                 <React.Fragment key={g.code}>
-                                    <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#f8fafc', cursor: 'pointer' }}
+                                    <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#eff6ff', cursor: 'pointer' }}
                                         onClick={() => toggleGroup(g.code)}>
-                                        <TD mono color="#475569">
-                                            {open ? <ChevronDown size={12} style={{ display: 'inline', marginRight: 4 }} />
-                                                  : <ChevronRight size={12} style={{ display: 'inline', marginRight: 4 }} />}
+                                        <TD mono color="#1e3a8a" bold>
+                                            {groupOpen ? <ChevronDown size={12} style={{ display: 'inline', marginRight: 4 }} />
+                                                       : <ChevronRight size={12} style={{ display: 'inline', marginRight: 4 }} />}
                                             {g.code}
                                         </TD>
-                                        <TD bold color="#0f172a">{g.title}</TD>
-                                        <TD align="right" bold>{fmt(g.total)}</TD>
+                                        <TD bold color="#1e3a8a">{g.title}</TD>
+                                        <TD align="right" bold color="#1e3a8a">{fmt(g.total)}</TD>
                                     </tr>
-                                    {open && g.leaves.map(l => {
-                                        const canDrill = drillTo && typeof l.GLCAID === 'number';
+                                    {groupOpen && (g.subgroups || []).map(sg => {
+                                        const subOpen = expandedSubs.has(sg.code);
                                         return (
-                                            <tr key={l.GLCAID}
-                                                style={{ borderBottom: '1px solid #f1f5f9', cursor: canDrill ? 'pointer' : 'default' }}
-                                                onClick={canDrill ? () => drillTo(l.GLCAID) : undefined}
-                                                title={canDrill ? 'Open GL Detail for this account' : undefined}>
-                                                <TD mono color="#64748b">&nbsp;&nbsp;&nbsp;&nbsp;{l.GLCode}</TD>
-                                                <TD color="#334155">{l.GLTitle}</TD>
-                                                <TD align="right">{fmt(l.PeriodAmount)}</TD>
-                                            </tr>
+                                            <React.Fragment key={sg.code}>
+                                                <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#f8fafc', cursor: 'pointer' }}
+                                                    onClick={() => toggleSub(sg.code)}>
+                                                    <TD mono color="#475569">
+                                                        &nbsp;&nbsp;&nbsp;
+                                                        {subOpen ? <ChevronDown size={12} style={{ display: 'inline', marginRight: 4 }} />
+                                                                 : <ChevronRight size={12} style={{ display: 'inline', marginRight: 4 }} />}
+                                                        {sg.code}
+                                                    </TD>
+                                                    <TD bold color="#0f172a">{sg.title}</TD>
+                                                    <TD align="right" bold>{fmt(sg.total)}</TD>
+                                                </tr>
+                                                {subOpen && sg.leaves.map(l => {
+                                                    const canDrill = drillTo && typeof l.GLCAID === 'number';
+                                                    return (
+                                                        <tr key={l.GLCAID}
+                                                            style={{ borderBottom: '1px solid #f1f5f9', cursor: canDrill ? 'pointer' : 'default' }}
+                                                            onClick={canDrill ? () => drillTo(l.GLCAID) : undefined}
+                                                            title={canDrill ? 'Open GL Detail for this account' : undefined}>
+                                                            <TD mono color="#64748b">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{l.GLCode}</TD>
+                                                            <TD color="#334155">{l.GLTitle}</TD>
+                                                            <TD align="right">{fmt(l.PeriodAmount)}</TD>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </React.Fragment>
                                         );
                                     })}
                                 </React.Fragment>

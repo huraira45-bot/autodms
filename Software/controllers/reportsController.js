@@ -655,35 +655,58 @@ exports.getBalanceSheet = async (req, res) => {
         const liabilitiesAndEquity = +(liabilities.total + equity.total + retained).toFixed(2);
         const diff = +(assets.total - liabilitiesAndEquity).toFixed(2);
 
-        // Grouped view — owner ask 2026-07-08. Two-tier tree:
-        //   Class (1/2/3) → Group (Level-3, e.g. 101 NON-CURRENT ASSETS) → Leaves.
+        // Grouped view — owner ask 2026-07-17: match P&L depth.
+        // Three-tier tree:
+        //   Class (1/2/3) → Group (Level-3, e.g. 102 CURRENT ASSETS)
+        //     → Sub-group (Level-6, e.g. 102007 TRADE RECEIVABLES - WORKSHOP PARTIES)
+        //     → Leaves (individual GL accounts / per-party ledgers).
         // Retained earnings is stitched under Class 3 as a synthetic group.
         const parents = await pool.request().query(`
             SELECT GLCode, GLTitle
             FROM GLChartOFAccount
-            WHERE isParent = 1 AND LEN(GLCode) IN (1, 3)
+            WHERE isParent = 1 AND LEN(GLCode) IN (1, 3, 6)
               AND LEFT(GLCode,1) IN ('1','2','3')`);
         const parentTitleByCode = new Map(parents.recordset.map(p => [p.GLCode, p.GLTitle]));
         const buildBSGroups = (rows, classCode) => {
-            const byCode = new Map();
+            // groupCode (3-char) → { code, title, total, subgroups: Map(subCode → { code, title, total, leaves[] }) }
+            const byGroup = new Map();
             for (const r of rows) {
-                const parentCode = String(r.GLCode || '').slice(0, 3);
-                if (!parentCode.startsWith(classCode)) continue;
-                if (!byCode.has(parentCode)) {
-                    byCode.set(parentCode, {
-                        code: parentCode,
-                        title: parentTitleByCode.get(parentCode) || parentCode,
+                const code       = String(r.GLCode || '');
+                const groupCode  = code.slice(0, 3);
+                if (!groupCode.startsWith(classCode)) continue;
+                const subCode    = code.length >= 6 ? code.slice(0, 6) : groupCode;
+                if (!byGroup.has(groupCode)) {
+                    byGroup.set(groupCode, {
+                        code:  groupCode,
+                        title: parentTitleByCode.get(groupCode) || groupCode,
+                        total: 0,
+                        subgroups: new Map(),
+                    });
+                }
+                const g = byGroup.get(groupCode);
+                if (!g.subgroups.has(subCode)) {
+                    g.subgroups.set(subCode, {
+                        code:  subCode,
+                        title: parentTitleByCode.get(subCode) || subCode,
                         total: 0,
                         leaves: [],
                     });
                 }
-                const g = byCode.get(parentCode);
+                const sg = g.subgroups.get(subCode);
                 const bal = Number(r.Balance) || 0;
-                g.leaves.push({ ...r, PeriodAmount: bal });
-                g.total += bal;
+                sg.leaves.push({ ...r, PeriodAmount: bal });
+                sg.total += bal;
+                g.total  += bal;
             }
-            return Array.from(byCode.values())
-                .map(g => ({ ...g, total: +g.total.toFixed(2) }))
+            return Array.from(byGroup.values())
+                .map(g => ({
+                    code:  g.code,
+                    title: g.title,
+                    total: +g.total.toFixed(2),
+                    subgroups: Array.from(g.subgroups.values())
+                        .map(sg => ({ ...sg, total: +sg.total.toFixed(2) }))
+                        .sort((a, b) => a.code.localeCompare(b.code)),
+                }))
                 .sort((a, b) => a.code.localeCompare(b.code));
         };
         const classes = [
@@ -710,10 +733,15 @@ exports.getBalanceSheet = async (req, res) => {
                         code: 'RE',
                         title: 'Retained Earnings (period)',
                         total: retained,
-                        leaves: [{
-                            GLCAID: 'retained', GLCode: '—',
-                            GLTitle: 'Retained Earnings (period)',
-                            PeriodAmount: retained,
+                        subgroups: [{
+                            code:  'RE',
+                            title: 'Retained Earnings (period)',
+                            total: retained,
+                            leaves: [{
+                                GLCAID: 'retained', GLCode: '—',
+                                GLTitle: 'Retained Earnings (period)',
+                                PeriodAmount: retained,
+                            }],
                         }],
                     },
                 ],
