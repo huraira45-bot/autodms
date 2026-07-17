@@ -513,31 +513,49 @@ function LegacySidebar() {
                 )}
                 </NavSection>
 
-                <NavSection title="ACCOUNT REPORTS">
-
+                {/* Owner ask 2026-07-17: split flat ACCOUNT REPORTS list into
+                    focused collapsible sub-groups so finding the right report
+                    is faster. Each NavSection remembers its open/closed state
+                    per-user via localStorage. */}
+                <NavSection title="FINANCIAL STATEMENTS">
                 {canReport('trial_balance')         && <NavLink to="/reports/trial-balance"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> Trial Balance</NavLink>}
                 {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
                 {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
                 {canReport('pnl')                   && <NavLink to="/reports/pnl"                className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Profit &amp; Loss</NavLink>}
                 {canReport('balance_sheet')         && <NavLink to="/reports/balance-sheet"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Balance Sheet</NavLink>}
                 {canReport('day_book')              && <NavLink to="/reports/day-book"           className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Day Book</NavLink>}
+                </NavSection>
+
+                <NavSection title="PARTY LEDGERS & AGING">
                 {canReport('customer_statement')    && <NavLink to="/reports/customer-statement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><UserCog size={20} /> Customer Statement</NavLink>}
                 {canReport('supplier_statement')    && <NavLink to="/reports/supplier-statement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Truck size={20} /> Supplier Statement</NavLink>}
-                {canReport('receivables_aging')     && <NavLink to="/reports/receivables-aging"  className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Receivables Aging</NavLink>}
-                {canReport('payables_aging')        && <NavLink to="/reports/payables-aging"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Payables Aging</NavLink>}
                 {canReport('party_open_invoices')   && <NavLink to="/reports/party-open-invoices" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Users size={20} /> Party Open Invoices</NavLink>}
                 {canReport('store_sale_receivables') && <NavLink to="/reports/store-sale-receivables" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Wallet size={20} /> Store Sale Receivables</NavLink>}
+                {canReport('receivables_aging')     && <NavLink to="/reports/receivables-aging"  className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Receivables Aging</NavLink>}
+                {canReport('payables_aging')        && <NavLink to="/reports/payables-aging"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Payables Aging</NavLink>}
                 {canReport('insurance_aging')       && <NavLink to="/reports/insurance-aging"    className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Insurance Aging</NavLink>}
                 {canReport('walkin_outstanding')    && <NavLink to="/reports/walkin-outstanding" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Walk-in JC Pending</NavLink>}
+                </NavSection>
+
+                <NavSection title="CASH & BANK">
                 {canReport('daily_cash_book')       && <NavLink to="/reports/daily-cash-book"    className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Wallet size={20} /> Daily Cash Book</NavLink>}
                 {canReport('bank_balances')         && <NavLink to="/reports/bank-balances"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Landmark size={20} /> Bank Balances</NavLink>}
                 {canReport('pos_pending')           && <NavLink to="/reports/pos-pending"        className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><CreditCard size={20} /> POS Pending</NavLink>}
                 {canReport('cheques_on_hand')       && <NavLink to="/reports/cheques-on-hand"    className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Receipt size={20} /> Cheques on Hand</NavLink>}
+                </NavSection>
+
+                <NavSection title="TAX">
                 {canReport('tax_summary')           && <NavLink to="/reports/tax-summary"        className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Percent size={20} /> Tax Summary</NavLink>}
                 {canReport('tax_rate_history')      && <NavLink to="/reports/tax-rate-history"   className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Percent size={20} /> Tax Rate History</NavLink>}
+                </NavSection>
+
+                <NavSection title="SALES ANALYTICS">
                 {canReport('sales_register')        && <NavLink to="/reports/sales-register"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Sales Register</NavLink>}
                 {canReport('gross_margin')          && <NavLink to="/reports/gross-margin"       className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Gross Margin</NavLink>}
                 {canReport('discount_given')        && <NavLink to="/reports/discount-given"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Discount Given</NavLink>}
+                </NavSection>
+
+                <NavSection title="AUDIT">
                 {canReport('gencust_reconciliation')&& <NavLink to="/reports/gencust-reconciliation" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Gen-Customer Recon</NavLink>}
                 {canReport('voucher_audit')         && <NavLink to="/reports/voucher-audit"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Voucher Audit Trail</NavLink>}
                 {canReport('system_account_audit') && <NavLink to="/reports/system-account-audit" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ShieldCheck size={20} /> System Account Audit</NavLink>}
