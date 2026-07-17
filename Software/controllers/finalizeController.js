@@ -100,6 +100,37 @@ exports.finalize = async (req, res) => {
         // frontend button rule set on JobCardForm. The `finalize` module
         // check above (line 76) is the only permission gate now.
 
+        // Owner ask 2026-07-17: block JC finalize when the linked customer
+        // profile is missing CNIC or DOB. Enforces that every finalized
+        // workshop invoice has identity captured for the vehicle owner /
+        // end user. Only runs for JOBCARD — GRN/GRTN/SS/SSR unaffected.
+        if (entityType === 'JOBCARD') {
+            const cust = await pool.request()
+                .input('id', sql.Int, entityId)
+                .query(`
+                    SELECT j.EndUserID,
+                           ci.CNIC,
+                           ci.DOB,
+                           ci.endUserName AS CustomerName
+                    FROM   Addata_JobCardInfo j
+                    LEFT   JOIN addata_CustomerInfo ci ON ci.ProfileID = j.EndUserID
+                    WHERE  j.JobCardId = @id
+                `);
+            const c = cust.recordset[0] || {};
+            const cnicMissing = !c.CNIC || !String(c.CNIC).trim();
+            const dobMissing  = !c.DOB;
+            if (!c.EndUserID || cnicMissing || dobMissing) {
+                const missing = [];
+                if (!c.EndUserID)  missing.push('customer profile');
+                if (cnicMissing)   missing.push('CNIC');
+                if (dobMissing)    missing.push('DOB');
+                return res.status(422).json({
+                    error: `Cannot finalize: customer detail is missing ${missing.join(' + ')}. Open the customer record and fill it in before finalizing.`,
+                    missing,
+                });
+            }
+        }
+
         // Lock + post inside one transaction.  If the posting hook throws, the lock rolls back.
         const transaction = new sql.Transaction(pool);
         await transaction.begin();
