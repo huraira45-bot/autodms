@@ -486,7 +486,10 @@ exports.itemLedger = async (req, res) => {
                 SELECT MoveDate, MoveType, SourceRef, SourceParty, Remarks,
                        QtyIn, QtyOut, Rate, LineValue
                 FROM (
-                    -- Stock arrivals (GRN / opening stock imports)
+                    -- Stock arrivals (GRN / opening stock imports).
+                    -- data_StockArrivalInfo has no PartyID; supplier for a GRN
+                    -- lives on data_PurchaseInfo — chase it through RefID when
+                    -- present so GRN rows still show the supplier name.
                     SELECT
                         si.ArrivalDate               AS MoveDate,
                         CASE WHEN si.ArrivalNo IS NULL THEN 'Opening' ELSE 'GRN' END AS MoveType,
@@ -499,7 +502,8 @@ exports.itemLedger = async (req, res) => {
                         CAST(sd.Quantity * sd.StockRate AS DECIMAL(18,2)) AS LineValue
                     FROM   data_StockArrivalDetail sd
                     JOIN   data_StockArrivalInfo   si ON si.ArrivalID = sd.ArrivalID
-                    LEFT   JOIN gen_PartiesInfo    p  ON p.PartyID    = si.PartyID
+                    LEFT   JOIN data_PurchaseInfo  pi ON pi.PurchaseID = si.RefID
+                    LEFT   JOIN gen_PartiesInfo    p  ON p.PartyID    = pi.PartyID
                     WHERE  sd.ItemId = @id
                       AND  si.ArrivalDate BETWEEN @from AND @to
                     UNION ALL
