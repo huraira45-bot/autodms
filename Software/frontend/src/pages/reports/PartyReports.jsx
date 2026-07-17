@@ -232,14 +232,14 @@ export function StoreSaleReceivables() {
 
     const excelExport = (data, params) => ({
         filename: `store-sale-receivables-as-of-${params.asOf || 'today'}.csv`,
-        headers: ['Party', 'Party Type', 'Sale Invoice #', 'Voucher #', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket', 'Other (non-SS) Balance'],
+        headers: ['Party', 'Party Type', 'Sale Invoice #', 'Voucher #', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket', 'Saher Auto Balance'],
         rows: (data.rows || []).flatMap(g =>
             g.Invoices.map((inv, idx) => [
                 g.PartyName, g.PartyType || '', inv.SaleInvoiceNo, inv.VoucherNo,
                 inv.InvoiceDate || '',
                 Number(inv.Invoiced), Number(inv.Paid), Number(inv.Outstanding),
                 inv.AgeDays, inv.Bucket,
-                // Only put the other-balance on the party's first invoice row so
+                // Only put Saher Auto balance on the party's first invoice row so
                 // sums in Excel don't inflate.
                 idx === 0 ? Number(g.OtherBalance || 0) : '',
             ])
@@ -279,9 +279,14 @@ export function StoreSaleReceivables() {
                                     <div style={{ fontWeight: 700, color: k === 'b90plus' ? '#b91c1c' : undefined }}>{fmt(data.totals[k])}</div>
                                 </div>
                             ))}
-                            <div style={{ background: '#1e40af', color: 'white', padding: '8px 12px', borderRadius: 6, minWidth: 120 }}>
+                            <div style={{ background: '#1e40af', color: 'white', padding: '8px 12px', borderRadius: 6, minWidth: 140 }}>
                                 <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>Total Outstanding</div>
-                                <div style={{ fontWeight: 700, fontSize: '1rem' }}>PKR {fmt(data.totals.outstanding)}</div>
+                                <div style={{ fontWeight: 700, fontSize: '1rem' }}>PKR {fmt(data.totals.outstanding + (data.totals.otherBalance || 0))}</div>
+                                {(data.totals.otherBalance || 0) !== 0 && (
+                                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.85)', marginTop: 3 }}>
+                                        SS {fmt(data.totals.outstanding)} + Saher Auto {fmt(data.totals.otherBalance || 0)}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -302,9 +307,8 @@ export function StoreSaleReceivables() {
                                         <TH align="right">31–60</TH>
                                         <TH align="right">61–90</TH>
                                         <TH align="right">90+</TH>
-                                        <TH align="right">SS Outstanding</TH>
-                                        <TH align="right" title="Party's ledger balance from JCs / JVs / advances etc. — Dr − Cr on party GL minus the SS contribution">
-                                            Other Balance
+                                        <TH align="right" title="Store Sale outstanding + Saher Auto opening balance (still to be received)">
+                                            Total Outstanding
                                         </TH>
                                     </tr>
                                 </thead>
@@ -327,16 +331,16 @@ export function StoreSaleReceivables() {
                                                 <TD align="right" mono color={g.Buckets.b90plus > 0 ? '#b91c1c' : undefined} bold={g.Buckets.b90plus > 0}>
                                                     {fmt(g.Buckets.b90plus)}
                                                 </TD>
-                                                <TD align="right" mono bold>{fmt(g.TotalOutstanding)}</TD>
-                                                <TD align="right" mono
-                                                    color={(g.OtherBalance || 0) > 0 ? '#b45309' : (g.OtherBalance || 0) < 0 ? '#15803d' : '#94a3b8'}
-                                                    title={(g.OtherBalance || 0) > 0 ? 'Party owes on non-SS activity' : (g.OtherBalance || 0) < 0 ? 'Party has credit / advance on non-SS activity' : ''}>
-                                                    {fmt(g.OtherBalance || 0)}
+                                                <TD align="right" mono bold
+                                                    title={(g.OtherBalance || 0) !== 0
+                                                        ? `SS ${fmt(g.TotalOutstanding)} + Saher Auto ${fmt(g.OtherBalance || 0)}`
+                                                        : undefined}>
+                                                    {fmt(g.TotalOutstanding + (g.OtherBalance || 0))}
                                                 </TD>
                                             </tr>
                                             {expanded[g.PartyID] && (
                                                 <tr>
-                                                    <td colSpan={10} style={{ padding: 0, background: '#f8fafc' }}>
+                                                    <td colSpan={9} style={{ padding: 0, background: '#f8fafc' }}>
                                                         <div style={{ padding: '8px 16px' }}>
                                                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                                                                 <thead>
@@ -364,6 +368,28 @@ export function StoreSaleReceivables() {
                                                                             <TD align="center"><BucketBadge b={inv.Bucket} /></TD>
                                                                         </tr>
                                                                     ))}
+                                                                    {(g.OtherBalance || 0) !== 0 && (
+                                                                        <tr style={{ borderTop: '1px dashed #cbd5e1', background: (g.OtherBalance || 0) > 0 ? '#fffbeb' : '#f0fdf4' }}>
+                                                                            <TD colSpan={5} style={{ fontStyle: 'italic', color: '#78350f' }}>
+                                                                                <strong>Saher Auto Balance</strong>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'normal', marginTop: 2 }}>
+                                                                                    {(g.OtherBalance || 0) > 0
+                                                                                        ? 'Opening receivable carried over from Saher Auto — still to be received.'
+                                                                                        : 'Party has a credit / advance from Saher Auto migration.'}
+                                                                                </div>
+                                                                            </TD>
+                                                                            <TD align="right" mono bold
+                                                                                color={(g.OtherBalance || 0) > 0 ? '#b45309' : '#15803d'}>
+                                                                                {fmt(g.OtherBalance || 0)}
+                                                                            </TD>
+                                                                            <td colSpan={2}></td>
+                                                                        </tr>
+                                                                    )}
+                                                                    <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f1f5f9' }}>
+                                                                        <TD colSpan={5} style={{ fontWeight: 700 }}>Total for {g.PartyName}</TD>
+                                                                        <TD align="right" mono bold>{fmt(g.TotalOutstanding + (g.OtherBalance || 0))}</TD>
+                                                                        <td colSpan={2}></td>
+                                                                    </tr>
                                                                 </tbody>
                                                             </table>
                                                         </div>
@@ -381,10 +407,11 @@ export function StoreSaleReceivables() {
                                         <TD align="right" bold>{fmt(data.totals.b31_60)}</TD>
                                         <TD align="right" bold>{fmt(data.totals.b61_90)}</TD>
                                         <TD align="right" bold color={data.totals.b90plus > 0 ? '#b91c1c' : undefined}>{fmt(data.totals.b90plus)}</TD>
-                                        <TD align="right" bold>{fmt(data.totals.outstanding)}</TD>
                                         <TD align="right" bold
-                                            color={(data.totals.otherBalance || 0) > 0 ? '#b45309' : (data.totals.otherBalance || 0) < 0 ? '#15803d' : undefined}>
-                                            {fmt(data.totals.otherBalance || 0)}
+                                            title={(data.totals.otherBalance || 0) !== 0
+                                                ? `SS ${fmt(data.totals.outstanding)} + Saher Auto ${fmt(data.totals.otherBalance || 0)}`
+                                                : undefined}>
+                                            {fmt(data.totals.outstanding + (data.totals.otherBalance || 0))}
                                         </TD>
                                     </tr>
                                 </tfoot>
