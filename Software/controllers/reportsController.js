@@ -1872,33 +1872,41 @@ exports.getStoreSaleReceivables = async (req, res) => {
             });
         }
 
-        // Second pass: per-party total ledger balance (Dr - Cr) on their PartyGLID,
-        // then derive non-SS balance = total − SS-side contribution. Owner ask
-        // 2026-07-17: they want to see the party's other-activity balance next
-        // to the SS receivable so the full financial picture is visible.
+        // Second pass: per-party total ledger balance on their dedicated
+        // PartyGLID (each party has their own COA leaf under 102xxx / 201xxx,
+        // so every leg on that GL belongs to this party — regardless of
+        // whether the voucher-detail line was explicitly PartyID-tagged).
+        // Read from data_FinanceVoucherDetail (not dms_PartyLedger) so
+        // legacy opening-balance JVs that were posted to the GL without a
+        // PartyID tag still contribute. Owner ask 2026-07-17.
+        //
+        // The delta between total-on-GL and SS-side contribution surfaces
+        // the "Saher Auto Balance" — legacy opening balance carried over
+        // from the previous system, still to be received.
         if (byParty.size > 0) {
             const ids = Array.from(byParty.keys());
-            const balRq = pool.request().input('asOf', sql.DateTime, asOf);
-            // parseInt-guarded, safe to interpolate.
             const idList = ids.map(n => parseInt(n)).filter(Number.isFinite).join(',');
             if (idList) {
-                const balR = await balRq.query(`
-                    SELECT l.PartyID,
-                           ISNULL(SUM(l.Debit),  0) AS SumDr,
-                           ISNULL(SUM(l.Credit), 0) AS SumCr,
-                           ISNULL(SUM(l.Debit),  0) - ISNULL(SUM(l.Credit), 0) AS TotalBalance
-                    FROM   dms_PartyLedger l
-                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
-                    WHERE  l.PartyID IN (${idList})
-                      AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
-                      AND  v.VoucherDate <= @asOf
-                    GROUP BY l.PartyID`);
+                const balR = await pool.request()
+                    .input('asOf', sql.DateTime, asOf)
+                    .query(`
+                        SELECT p.PartyID,
+                               ISNULL(SUM(d.Debit),  0) AS SumDr,
+                               ISNULL(SUM(d.Credit), 0) AS SumCr,
+                               ISNULL(SUM(d.Debit),  0) - ISNULL(SUM(d.Credit), 0) AS TotalBalance
+                        FROM   data_FinanceVoucherDetail d
+                        JOIN   data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                        JOIN   gen_PartiesInfo p         ON p.PartyGLID = d.GLCAID
+                        WHERE  p.PartyID IN (${idList})
+                          AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                          AND  v.VoucherDate <= @asOf
+                        GROUP BY p.PartyID`);
                 const balMap = new Map(balR.recordset.map(x => [x.PartyID, Number(x.TotalBalance) || 0]));
                 for (const g of byParty.values()) {
                     const total = balMap.get(g.PartyID) || 0;
-                    // OtherBalance = total ledger balance − SS-side balance.
-                    // SS-side balance = TotalInvoiced − TotalPaid (allocations
-                    // pointing at SS invoices). Same convention as above.
+                    // OtherBalance ("Saher Auto Balance") = total on party GL
+                    // − SS-side contribution. SS-side contribution = TotalInvoiced
+                    // − TotalPaid (SS Dr minus Cr allocated to SS invoices).
                     const ssSide = g.TotalInvoiced - g.TotalPaid;
                     g.TotalBalance = +total.toFixed(2);
                     g.OtherBalance = +(total - ssSide).toFixed(2);
