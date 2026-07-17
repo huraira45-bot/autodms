@@ -151,6 +151,8 @@ export const NAV_ITEMS = [
     { id: 'r-sup-stmt',  moduleGroup: 'reports', label: 'Supplier Statement',  path: '/reports/supplier-statement',  icon: Truck,        permission: 'report:supplier_statement' },
     { id: 'r-ra',        moduleGroup: 'reports', label: 'Receivables Aging',   path: '/reports/receivables-aging',   icon: ListChecks,   permission: 'report:receivables_aging' },
     { id: 'r-pa',        moduleGroup: 'reports', label: 'Payables Aging',      path: '/reports/payables-aging',      icon: ListChecks,   permission: 'report:payables_aging' },
+    { id: 'r-p-open',    moduleGroup: 'reports', label: 'Party Open Invoices', path: '/reports/party-open-invoices', icon: ListChecks,   permission: 'report:party_open_invoices' },
+    { id: 'r-p-pay',     moduleGroup: 'reports', label: 'Payments to Parties', path: '/reports/payments-to-parties', icon: ListChecks,   permission: 'report:payments_to_parties' },
     { id: 'r-ia',        moduleGroup: 'reports', label: 'Insurance Aging',     path: '/reports/insurance-aging',     icon: ListChecks,   permission: 'report:insurance_aging' },
     { id: 'r-walk',      moduleGroup: 'reports', label: 'Walk-in JC Pending',  path: '/reports/walkin-outstanding',  icon: ListChecks,   permission: 'report:walkin_outstanding' },
     { id: 'r-cash',      moduleGroup: 'reports', label: 'Daily Cash Book',     path: '/reports/daily-cash-book',     icon: Wallet,       permission: 'report:daily_cash_book' },

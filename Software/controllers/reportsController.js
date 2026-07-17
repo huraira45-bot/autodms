@@ -1644,3 +1644,220 @@ exports.getTaxSummary = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+/**
+ * GET /reports/party-open-invoices?partyId=X&asOf=YYYY-MM-DD
+ *
+ * For a single party: list every JC / store-sale invoice that has an
+ * outstanding balance on their party GL as of `asOf`. Each row shows
+ * days outstanding + aging bucket. Owner ask 2026-07-17.
+ */
+exports.getPartyOpenInvoices = async (req, res) => {
+    try {
+        const partyId = parseInt(req.query.partyId);
+        if (!partyId) return res.status(400).json({ error: 'partyId is required.' });
+        const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
+        const asOf = endOfDay(asOfRaw);
+
+        const pool = await getPool();
+
+        const partyRes = await pool.request()
+            .input('id', sql.Int, partyId)
+            .query(`SELECT p.PartyID, p.PartyName, p.PartyType, p.PhoneOne, p.CNIC,
+                           p.PartyGLID, g.GLCode AS PartyGLCode, g.GLTitle AS PartyGLTitle
+                    FROM   gen_PartiesInfo p
+                    LEFT   JOIN GLChartOFAccount g ON g.GLCAID = p.PartyGLID
+                    WHERE  p.PartyID = @id`);
+        if (!partyRes.recordset.length) return res.status(404).json({ error: 'Party not found.' });
+        const party = partyRes.recordset[0];
+
+        // Every invoice-side Dr on this party's PartyGLID (via dms_PartyLedger),
+        // net of Cr rows that allocate against it. Include only rows tied to a
+        // source doc (JOBCARD or STORE_SALE) so this stays a "credit invoices"
+        // list — pure JV Drs are excluded.
+        const r = await pool.request()
+            .input('pid',  sql.Int,      partyId)
+            .input('asOf', sql.DateTime, asOf)
+            .query(`
+                WITH InvoiceDrs AS (
+                    SELECT v.VoucherID AS InvVoucherID,
+                           v.VoucherNo AS InvVoucherNo,
+                           v.VoucherDate AS InvDate,
+                           v.SourceDocType,
+                           v.SourceDocID,
+                           SUM(l.Debit) AS Invoiced
+                    FROM   dms_PartyLedger l
+                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                    WHERE  l.PartyID = @pid AND l.Debit > 0
+                      AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND  v.VoucherDate <= @asOf
+                      AND  v.SourceDocType IN ('JOBCARD','STORE_SALE')
+                    GROUP BY v.VoucherID, v.VoucherNo, v.VoucherDate,
+                             v.SourceDocType, v.SourceDocID
+                ),
+                Allocations AS (
+                    SELECT l.AllocatedToVoucherID AS InvVoucherID,
+                           SUM(l.Credit) AS Paid
+                    FROM   dms_PartyLedger l
+                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                    WHERE  l.PartyID = @pid AND l.Credit > 0
+                      AND  l.AllocatedToVoucherID IS NOT NULL
+                      AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                      AND  v.VoucherDate <= @asOf
+                    GROUP BY l.AllocatedToVoucherID
+                )
+                SELECT i.InvVoucherID, i.InvVoucherNo, i.InvDate,
+                       i.SourceDocType, i.SourceDocID,
+                       jc.JobCardNo, jc.VehicleRegNo,
+                       ss.InvoiceNo AS SaleInvoiceNo,
+                       i.Invoiced,
+                       ISNULL(a.Paid, 0) AS Paid,
+                       i.Invoiced - ISNULL(a.Paid, 0) AS Outstanding,
+                       DATEDIFF(day, i.InvDate, @asOf) AS AgeDays
+                FROM   InvoiceDrs i
+                LEFT   JOIN Allocations a ON a.InvVoucherID = i.InvVoucherID
+                LEFT   JOIN Addata_JobCardInfo jc
+                          ON i.SourceDocType='JOBCARD'    AND jc.JobCardId = i.SourceDocID
+                LEFT   JOIN data_StoreSaleInfo ss
+                          ON i.SourceDocType='STORE_SALE' AND ss.SaleID    = i.SourceDocID
+                WHERE  i.Invoiced - ISNULL(a.Paid, 0) > 0.005
+                ORDER  BY i.InvDate, i.InvVoucherID`);
+
+        const bucket = (d) =>
+              d <= 30 ? 'current'
+            : d <= 60 ? 'b31_60'
+            : d <= 90 ? 'b61_90'
+            :           'b90plus';
+
+        const rows = r.recordset.map(x => ({
+            VoucherID:   x.InvVoucherID,
+            VoucherNo:   x.InvVoucherNo,
+            InvoiceDate: x.InvDate?.toISOString().slice(0,10) || null,
+            DocType:     x.SourceDocType === 'JOBCARD' ? 'Job Card' : 'Store Sale',
+            DocNo:       x.JobCardNo || x.SaleInvoiceNo || '',
+            VehicleRegNo: x.VehicleRegNo || '',
+            Invoiced:    +Number(x.Invoiced || 0).toFixed(2),
+            Paid:        +Number(x.Paid || 0).toFixed(2),
+            Outstanding: +Number(x.Outstanding || 0).toFixed(2),
+            AgeDays:     Number(x.AgeDays || 0),
+            Bucket:      bucket(Number(x.AgeDays || 0)),
+        }));
+
+        const totals = rows.reduce((t, x) => {
+            t.invoiced   += x.Invoiced;
+            t.paid       += x.Paid;
+            t.outstanding+= x.Outstanding;
+            t[x.Bucket]  += x.Outstanding;
+            t.count      += 1;
+            return t;
+        }, { count: 0, invoiced: 0, paid: 0, outstanding: 0,
+             current: 0, b31_60: 0, b61_90: 0, b90plus: 0 });
+
+        for (const k of Object.keys(totals)) if (k !== 'count') totals[k] = +totals[k].toFixed(2);
+
+        res.json({
+            asOf: asOfRaw.toISOString().slice(0,10),
+            party, rows, totals,
+        });
+    } catch (err) {
+        console.error('Party open invoices error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /reports/payments-to-parties?from=&to=&partyId=(optional)
+ *
+ * Money OUT to parties: sum of Debits on any party's PartyGLID via CPV/BPV
+ * vouchers in the period. Grouped by party. Owner ask 2026-07-17.
+ *
+ * Optional partyId narrows to one party. Otherwise every party paid in the
+ * period appears in the summary; a drill-down list of voucher rows is
+ * included on the payload so the UI can expand a party to see individual
+ * voucher entries.
+ */
+exports.getPaymentsToParties = async (req, res) => {
+    try {
+        const fromRaw = req.query.from ? new Date(req.query.from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        const toRaw   = req.query.to   ? new Date(req.query.to)   : new Date();
+        const from = new Date(fromRaw); from.setHours(0,0,0,0);
+        const to   = endOfDay(toRaw);
+
+        const partyId = req.query.partyId ? parseInt(req.query.partyId) : null;
+
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+        const partyFilter = partyId ? 'AND l.PartyID = @pid' : '';
+        if (partyId) rq.input('pid', sql.Int, partyId);
+
+        const r = await rq.query(`
+            SELECT l.PartyID,
+                   p.PartyName,
+                   p.PartyType,
+                   v.VoucherID,
+                   v.VoucherNo,
+                   v.VoucherDate,
+                   vt.Title AS VoucherType,
+                   l.Debit AS Amount,
+                   l.Narration
+            FROM   dms_PartyLedger l
+            JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+            LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
+            LEFT   JOIN gen_PartiesInfo p ON p.PartyID = l.PartyID
+            WHERE  l.Debit > 0
+              AND  l.PartyID IS NOT NULL
+              AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+              AND  v.VoucherDate BETWEEN @from AND @to
+              AND  vt.Title IN ('CPV','BPV')
+              ${partyFilter}
+            ORDER  BY p.PartyName, v.VoucherDate, v.VoucherID`);
+
+        // Group by party
+        const byParty = new Map();
+        for (const x of r.recordset) {
+            const key = x.PartyID;
+            if (!byParty.has(key)) {
+                byParty.set(key, {
+                    PartyID: x.PartyID,
+                    PartyName: x.PartyName || '',
+                    PartyType: x.PartyType || '',
+                    TotalAmount: 0,
+                    LineCount: 0,
+                    Vouchers: [],
+                });
+            }
+            const grp = byParty.get(key);
+            grp.TotalAmount += Number(x.Amount) || 0;
+            grp.LineCount   += 1;
+            grp.Vouchers.push({
+                VoucherID:   x.VoucherID,
+                VoucherNo:   x.VoucherNo,
+                VoucherDate: x.VoucherDate?.toISOString().slice(0,10) || null,
+                VoucherType: x.VoucherType,
+                Amount:      +Number(x.Amount || 0).toFixed(2),
+                Narration:   x.Narration || '',
+            });
+        }
+
+        const rows = Array.from(byParty.values())
+            .map(g => ({ ...g, TotalAmount: +g.TotalAmount.toFixed(2) }))
+            .sort((a, b) => b.TotalAmount - a.TotalAmount);
+
+        const totals = {
+            parties: rows.length,
+            vouchers: r.recordset.length,
+            total: +rows.reduce((s, x) => s + x.TotalAmount, 0).toFixed(2),
+        };
+
+        res.json({
+            from: fromRaw.toISOString().slice(0,10),
+            to:   toRaw.toISOString().slice(0,10),
+            rows, totals,
+        });
+    } catch (err) {
+        console.error('Payments to parties error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

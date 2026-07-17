@@ -17,6 +17,8 @@ router.get('/parties',                requireAnyAccess(
                                           'report:gl_detail',
                                           'report:receivables_aging',
                                           'report:payables_aging',
+                                          'report:party_open_invoices',
+                                          'report:payments_to_parties',
                                       ), reports.searchParties);
 router.get('/daily-cash-book',        requireAccess('report:daily_cash_book'),       reports.getDailyCashBook);
 router.get('/tax-summary',            requireAccess('report:tax_summary'),           reports.getTaxSummary);
@@ -43,5 +45,7 @@ router.get('/gencust-reconciliation', requireAccess('report:gencust_reconciliati
 router.get('/walkin-outstanding',     requireAccess('report:walkin_outstanding'),     reports.getWalkInOutstanding);
 router.get('/voucher-audit',          requireAccess('report:voucher_audit'),          reports.getVoucherAudit);
 router.get('/system-account-audit',   requireAccess('report:system_account_audit'),   reports.getSystemAccountAudit);
+router.get('/party-open-invoices',    requireAccess('report:party_open_invoices'),    reports.getPartyOpenInvoices);
+router.get('/payments-to-parties',    requireAccess('report:payments_to_parties'),    reports.getPaymentsToParties);
 
 module.exports = router;
