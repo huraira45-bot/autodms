@@ -553,6 +553,13 @@ exports.updateVoucher = async (req, res) => {
         if (!check.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
         const row = check.recordset[0];
         const isJV = row.VoucherType === 'JV';
+        // Charity Yes/No is mandatory ONLY on CRV/BRV — owner ask 2026-07-18 v2.
+        const isCharityScoped = row.VoucherType === 'CRV' || row.VoucherType === 'BRV';
+        if (isCharityScoped && typeof IsCharitable !== 'boolean') {
+            return res.status(400).json({
+                error: `${row.VoucherType} vouchers require an explicit charity Yes/No before saving.`,
+            });
+        }
         if (row.ReversesVoucherID) {
             return res.status(400).json({ error: 'Cannot edit a reversing voucher — reverse the reversal instead.' });
         }
@@ -610,31 +617,32 @@ exports.updateVoucher = async (req, res) => {
             await transaction.commit();
 
             // Charity side ledger reconciliation on edit (owner ask 2026-07-18).
-            // The manual voucher flag is header-only, so on every update we
+            // Only applies to CRV/BRV; other types skip. On every update we
             // drop any prior manual-source row for this voucher and re-insert
-            // one if the box is still ticked. Receive-payment rows are locked
-            // to their original CRV and never touched here. Runs OUTSIDE the
-            // tx — a charity-side failure must never block a valid edit.
-            try {
-                await pool.request()
-                    .input('vid', sql.Int, id)
-                    .query(`DELETE FROM dms_CharityTracking
-                            WHERE VoucherID = @vid AND SourceType = 'MANUAL_VOUCHER_1PCT'`);
-                if (IsCharitable && totalAmount > 0) {
+            // one if the box is still Yes. Receive-payment rows are locked to
+            // their original CRV and never touched here. Runs OUTSIDE the tx.
+            if (isCharityScoped) {
+                try {
                     await pool.request()
-                        .input('vid', sql.Int,           id)
-                        .input('src', sql.NVarChar(40),  'MANUAL_VOUCHER_1PCT')
-                        .input('va',  sql.Decimal(18,2), +totalAmount.toFixed(2))
-                        .input('ca',  sql.Decimal(18,2), +(totalAmount * 0.01).toFixed(2))
-                        .input('by',  sql.Int,           req.user?.userId || null)
-                        .input('byN', sql.NVarChar(100), req.user?.userName || null)
-                        .query(`INSERT INTO dms_CharityTracking
-                                   (VoucherID, SourceType, VoucherAmount, CharityAmount,
-                                    CreatedBy, CreatedByName)
-                                VALUES (@vid, @src, @va, @ca, @by, @byN)`);
+                        .input('vid', sql.Int, id)
+                        .query(`DELETE FROM dms_CharityTracking
+                                WHERE VoucherID = @vid AND SourceType = 'MANUAL_VOUCHER_1PCT'`);
+                    if (IsCharitable === true && totalAmount > 0) {
+                        await pool.request()
+                            .input('vid', sql.Int,           id)
+                            .input('src', sql.NVarChar(40),  'MANUAL_VOUCHER_1PCT')
+                            .input('va',  sql.Decimal(18,2), +totalAmount.toFixed(2))
+                            .input('ca',  sql.Decimal(18,2), +(totalAmount * 0.01).toFixed(2))
+                            .input('by',  sql.Int,           req.user?.userId || null)
+                            .input('byN', sql.NVarChar(100), req.user?.userName || null)
+                            .query(`INSERT INTO dms_CharityTracking
+                                       (VoucherID, SourceType, VoucherAmount, CharityAmount,
+                                        CreatedBy, CreatedByName)
+                                    VALUES (@vid, @src, @va, @ca, @by, @byN)`);
+                    }
+                } catch (e) {
+                    console.warn('[charity] voucher-update tracking failed for voucher', id, e.message);
                 }
-            } catch (e) {
-                console.warn('[charity] voucher-update tracking failed for voucher', id, e.message);
             }
 
             res.json({ message: 'Voucher updated', VoucherID: id });
@@ -708,6 +716,14 @@ exports.saveVoucher = async (req, res) => {
             if (!typeResult.recordset.length) throw new Error('Invalid voucher type.');
             const typeCode = typeResult.recordset[0].VoucherTypeCode;
 
+            // Charity Yes/No is mandatory ONLY on CRV and BRV — owner ask
+            // 2026-07-18 v2. Other manual voucher types (CPV/BPV/JV) are
+            // unaffected.
+            const isCharityScoped = typeCode === 'CRV' || typeCode === 'BRV';
+            if (isCharityScoped && typeof IsCharitable !== 'boolean') {
+                throw new Error(`${typeCode} vouchers require an explicit charity Yes/No before saving.`);
+            }
+
             // 2. Generate sequential voucher number from the per-type sequence
             // (migration 062). Old behaviour used MAX(VoucherID)+1, which mixed
             // every type's counter into one and inflated even faster than the
@@ -746,11 +762,11 @@ exports.saveVoucher = async (req, res) => {
 
             await transaction.commit();
 
-            // Charity side ledger — owner ask 2026-07-18. When the operator
-            // ticks the "Is charitable" box on a manual voucher, record 1% of
-            // the voucher total. Runs OUTSIDE the tx — a charity-side failure
-            // must never block a valid voucher save. Purely a side ledger.
-            if (IsCharitable && totalAmount > 0) {
+            // Charity side ledger — owner ask 2026-07-18. Scoped to CRV/BRV
+            // only. When the operator ticks Yes, record 1% of the voucher
+            // total. Runs OUTSIDE the tx — a charity-side failure must never
+            // block a valid voucher save. Purely a side ledger.
+            if (isCharityScoped && IsCharitable === true && totalAmount > 0) {
                 try {
                     await pool.request()
                         .input('vid', sql.Int,           voucherID)

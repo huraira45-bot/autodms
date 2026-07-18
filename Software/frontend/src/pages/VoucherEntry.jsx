@@ -71,6 +71,9 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const isFixedCash = isCPV || isCRV;
     const isFixedBank = isBPV || isBRV;
     const fixedLockedSide = (isCPV || isBPV) ? 'Debit' : (isCRV || isBRV) ? 'Credit' : null;
+    // Charity Yes/No is scoped to CRV + BRV only (owner ask 2026-07-18 v2).
+    // For JV where the type comes from the dropdown rather than forceTypeCode,
+    // resolve it via the loaded `types` list further down before validating.
 
     const [banks, setBanks] = useState([]);
     const [cashBookGLCAID, setCashBookGLCAID] = useState('');
@@ -85,7 +88,9 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         VoucherDate: todayStr,
         VoucherTypeID: '',
         Remarks: '',
-        IsCharitable: false,
+        // null = user hasn't picked yet. Required on CRV/BRV; irrelevant
+        // elsewhere. Owner ask 2026-07-18 v2.
+        IsCharitable: null,
     });
     const [items, setItems] = useState([
         { GLCAID: '', Narration: '', Debit: 0, Credit: 0 },
@@ -193,6 +198,14 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     };
     const balanced = Math.abs(totals.debit - totals.credit) < 0.01;
 
+    // Resolve the current voucher type code. When the user came in via a
+    // `forceTypeCode` route (/vouchers/crv etc.) that's the source of truth;
+    // otherwise (freeform JV entry) we resolve from the picker via `types`.
+    const activeTypeCode = forceTypeCode
+        || types.find(t => String(t.VoucherTypeID) === String(header.VoucherTypeID))?.VoucherTypeCode
+        || '';
+    const isCharityScoped = activeTypeCode === 'CRV' || activeTypeCode === 'BRV';
+
     const handleSave = async () => {
         if (!balanced) {
             notify({ type: 'warning', title: 'Voucher is not balanced', message: 'Debit must equal Credit before saving.' });
@@ -217,6 +230,15 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         ? 'Cash Book account is not configured. Ask admin to assign CASH_BOOK in Accounting Setup.'
                         : 'Bank account not selected on line 1. Pick a bank to continue.')
                     : `Line ${missingIdx + 1} has no account selected.`,
+            });
+            return;
+        }
+        // Charity Yes/No is mandatory on CRV/BRV — owner ask 2026-07-18 v2.
+        if (isCharityScoped && header.IsCharitable === null) {
+            notify({
+                type: 'warning',
+                title: 'Charity selection required',
+                message: `Pick Yes or No — every ${activeTypeCode} needs an explicit charity choice before saving.`,
             });
             return;
         }
@@ -293,7 +315,9 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                 : todayStr,
             VoucherTypeID: active.VoucherTypeID,
             Remarks: active.Remarks || '',
-            IsCharitable: !!active.IsCharitable,
+            // Server always returns a bool; treat that as the current
+            // Yes/No state so the radio hydrates correctly on edit.
+            IsCharitable: active.IsCharitable === true ? true : false,
         });
         setItems(active.lines.map(l => ({
             GLCAID: l.GLCAID,
@@ -839,16 +863,37 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     </div>
                     <div className="form-group"><label>Reference / Remarks</label><input type="text" value={header.Remarks} onChange={e => setHeader({...header, Remarks: e.target.value})} placeholder="Overall voucher description..." /></div>
                 </div>
-                {/* Charity flag — owner ask 2026-07-18. Ticked = 1% of the
-                    voucher total is recorded in dms_CharityTracking as a side
-                    ledger. Has no GL impact. */}
-                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6 }}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#78350f' }}>
-                        <input type="checkbox" checked={!!header.IsCharitable}
-                               onChange={e => setHeader({ ...header, IsCharitable: e.target.checked })} />
-                        Mark as charitable — 1% tracked (no GL impact)
-                    </label>
-                </div>
+                {/* Charity flag — owner ask 2026-07-18 v2. Yes/No is
+                    mandatory on CRV/BRV only. Yes → record 1% of the voucher
+                    total in dms_CharityTracking (side ledger, no GL impact).
+                    Hidden on CPV/BPV/JV. */}
+                {isCharityScoped && (
+                    <div style={{ marginTop: 8, padding: '8px 12px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#78350f', marginBottom: 4 }}>
+                            Is this voucher for charity?
+                            <span style={{ marginLeft: 6, fontWeight: 400 }}>(required)</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 12, color: '#78350f' }}>
+                            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                                <input type="radio" name="isCharitable"
+                                       checked={header.IsCharitable === true}
+                                       onChange={() => setHeader({ ...header, IsCharitable: true })} />
+                                Yes — track 1% (no GL impact)
+                            </label>
+                            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                                <input type="radio" name="isCharitable"
+                                       checked={header.IsCharitable === false}
+                                       onChange={() => setHeader({ ...header, IsCharitable: false })} />
+                                No
+                            </label>
+                            {header.IsCharitable === null && (
+                                <span style={{ marginLeft: 'auto', color: '#b91c1c', fontWeight: 700 }}>
+                                    Pick one before saving
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="card">
