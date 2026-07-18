@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { ListChecks, Loader2, RefreshCw, Search, ArrowLeft, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { usePagination, Paginator } from './reports/Paginator';
 import { ErpControlPanel } from '../components/erp';
 
 // Same map VoucherBrowser uses to open a voucher in view mode. Any type not
@@ -118,6 +119,10 @@ export default function GLDetail() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState(null);
+    // Owner ask 2026-07-18: paginate transaction list. Every long GL (Cash Book,
+    // Gen-Cust) was rendering 500–2,000 rows inline; now 50 per page with
+    // First/Prev/Next/Last strip.
+    const paging = usePagination(data?.lines || [], 50);
 
     const load = useCallback(async () => {
         if (!glcaid) return;
@@ -253,7 +258,7 @@ export default function GLDetail() {
                                             <td colSpan={7} style={{ padding: '8px 12px', fontStyle: 'italic', color: '#64748b' }}>Opening Balance</td>
                                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(data.openingBalance)}</td>
                                         </tr>
-                                        {data.lines.map((l, i) => {
+                                        {paging.pagedRows.map((l, i) => {
                                             // Display running per nature
                                             const sign = data.account.Nature === 'Debit' ? 1 : -1;
                                             const dispRun = (l.RunningNetDr * sign).toFixed(2);
@@ -288,6 +293,14 @@ export default function GLDetail() {
                                 </table>
                             </div>
                         )}
+                        <Paginator
+                            page={paging.page}
+                            pageSize={paging.pageSize}
+                            totalRows={paging.totalRows}
+                            totalPages={paging.totalPages}
+                            onPageChange={paging.setPage}
+                            onPageSizeChange={paging.setPageSize}
+                        />
                     </div>
                 </>
             )}

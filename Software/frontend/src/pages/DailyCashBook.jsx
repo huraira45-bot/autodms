@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Wallet, Loader2, RefreshCw, ArrowDown, ArrowUp, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { usePagination, Paginator } from './reports/Paginator';
 import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
@@ -12,6 +13,7 @@ export default function DailyCashBook() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState(null);
+    const paging = usePagination(data?.lines || [], 50);
 
     const load = useCallback(async () => {
         setLoading(true); setErr(null);
@@ -107,7 +109,7 @@ export default function DailyCashBook() {
                                             <td colSpan={5} style={{ padding: '8px 12px', fontStyle: 'italic', color: '#64748b' }}>Opening Balance</td>
                                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(data.opening)}</td>
                                         </tr>
-                                        {data.lines.map((l, i) => (
+                                        {paging.pagedRows.map((l, i) => (
                                             <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                 <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{l.VoucherNo}</td>
                                                 <td style={{ padding: '8px 12px' }}>{l.VoucherType}</td>
@@ -136,6 +138,7 @@ export default function DailyCashBook() {
                                 </table>
                             </div>
                         )}
+                        <Paginator {...paging} onPageChange={paging.setPage} onPageSizeChange={paging.setPageSize} />
                     </div>
                 </>
             )}

@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { Users, Loader2, RefreshCw, Search, ArrowLeft, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { usePagination, Paginator } from './reports/Paginator';
 import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
@@ -95,6 +96,7 @@ export default function PartyStatement({ kind }) {
 
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const paging = usePagination(data?.lines || [], 50);
     const [err, setErr] = useState(null);
 
     const load = useCallback(async () => {
@@ -219,7 +221,7 @@ export default function PartyStatement({ kind }) {
                                             <td colSpan={6} style={{ padding: '8px 12px', fontStyle: 'italic', color: '#64748b' }}>Opening Balance</td>
                                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(data.openingBalance)}</td>
                                         </tr>
-                                        {data.lines.map((l, i) => (
+                                        {paging.pagedRows.map((l, i) => (
                                             <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                 <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{new Date(l.VoucherDate).toLocaleDateString()}</td>
                                                 <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{l.VoucherNo}</td>
@@ -245,6 +247,7 @@ export default function PartyStatement({ kind }) {
                                 </table>
                             </div>
                         )}
+                        <Paginator {...paging} onPageChange={paging.setPage} onPageSizeChange={paging.setPageSize} />
                     </div>
                 </>
             )}

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Percent, Loader2, RefreshCw, Printer } from 'lucide-react';
 import { PrintHeader } from './reports/ReportShell';
+import { usePagination, Paginator } from './reports/Paginator';
 import { ErpControlPanel } from '../components/erp';
 
 const API_BASE = '/api';
@@ -23,6 +24,7 @@ export default function TaxSummary() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState(null);
+    const paging = usePagination(data?.lines || [], 50);
 
     const load = useCallback(async () => {
         setLoading(true); setErr(null);
@@ -131,7 +133,7 @@ export default function TaxSummary() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {data.lines.map((l, i) => (
+                                        {paging.pagedRows.map((l, i) => (
                                             <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                 <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{new Date(l.VoucherDate).toLocaleDateString()}</td>
                                                 <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{l.VoucherNo}</td>
@@ -159,6 +161,7 @@ export default function TaxSummary() {
                                 </table>
                             </div>
                         )}
+                        <Paginator {...paging} onPageChange={paging.setPage} onPageSizeChange={paging.setPageSize} />
                     </div>
                 </>
             )}
