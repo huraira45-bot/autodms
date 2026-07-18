@@ -50,11 +50,13 @@ exports.uploadAttachment = (req, res) => {
 exports.listUsers = async (req, res) => {
     try {
         const pool = await getPool();
+        // GLUser uses `Userid` (lowercase d) + `Active` bit; GLUserGroup exposes
+        // GroupTitle. Alias UserId so the frontend can match `u.UserId`.
         const r = await pool.request().query(`
-            SELECT u.UserId, u.UserName, ISNULL(g.GroupTitle,'') AS GroupTitle
+            SELECT u.Userid AS UserId, u.UserName, ISNULL(g.GroupTitle,'') AS GroupTitle
             FROM   GLUser u
-            LEFT   JOIN GLUserGroup g ON g.GroupId = u.GroupId
-            WHERE  ISNULL(u.Status, 1) = 1
+            LEFT   JOIN GLUserGroup g ON g.GroupID = u.GroupID
+            WHERE  ISNULL(u.Active, 1) = 1
             ORDER  BY u.UserName`);
         res.json(r.recordset.filter(u => u.UserId !== req.user.userId));
     } catch (err) { res.status(500).json({ error: err.message }); }
