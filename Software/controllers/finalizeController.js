@@ -101,10 +101,10 @@ exports.finalize = async (req, res) => {
         // check above (line 76) is the only permission gate now.
 
         // Owner ask 2026-07-17: block JC finalize when the linked customer
-        // profile is missing CNIC/DOB, or when the DMS Job Card Number
-        // (separate field the service advisor enters as the reference to
-        // Master Changan's DMS) is empty. Only runs for JOBCARD —
-        // GRN/GRTN/SS/SSR unaffected.
+        // profile is missing CNIC or DOB. DMS Job Card Number is a *soft*
+        // warning (owner ask 2026-07-18) — the frontend prompts the user;
+        // when they confirm, the request comes back with skipDmsWarning=1
+        // and finalize proceeds. Only runs for JOBCARD.
         if (entityType === 'JOBCARD') {
             const cust = await pool.request()
                 .input('id', sql.Int, entityId)
@@ -122,15 +122,27 @@ exports.finalize = async (req, res) => {
             const dmsMissing  = !c.DMSJobCardNo || !String(c.DMSJobCardNo).trim();
             const cnicMissing = !c.CNIC         || !String(c.CNIC).trim();
             const dobMissing  = !c.DOB;
-            if (dmsMissing || !c.EndUserID || cnicMissing || dobMissing) {
-                const missing = [];
-                if (dmsMissing)   missing.push('DMS Job Card Number');
-                if (!c.EndUserID) missing.push('customer profile');
-                if (cnicMissing)  missing.push('CNIC');
-                if (dobMissing)   missing.push('DOB');
+            const skipDms = req.body?.skipDmsWarning === true || req.body?.skipDmsWarning === 1 || req.query?.skipDmsWarning === '1';
+
+            // Hard blockers — CNIC / DOB / customer profile — always enforced.
+            const hardMissing = [];
+            if (!c.EndUserID) hardMissing.push('customer profile');
+            if (cnicMissing)  hardMissing.push('CNIC');
+            if (dobMissing)   hardMissing.push('DOB');
+            if (hardMissing.length) {
                 return res.status(422).json({
-                    error: `Cannot finalize: ${missing.join(' + ')} ${missing.length > 1 ? 'are' : 'is'} missing. Fill in the missing field${missing.length > 1 ? 's' : ''} before finalizing.`,
-                    missing,
+                    error: `Cannot finalize: ${hardMissing.join(' + ')} ${hardMissing.length > 1 ? 'are' : 'is'} missing. Fill in the missing field${hardMissing.length > 1 ? 's' : ''} before finalizing.`,
+                    missing: hardMissing,
+                });
+            }
+
+            // Soft blocker — DMS Job Card Number. Return 428 the first time
+            // so the frontend can confirm with the user; the next request
+            // includes skipDmsWarning=1 and passes.
+            if (dmsMissing && !skipDms) {
+                return res.status(428).json({
+                    error: 'DMS Job Card Number is empty. Finalize anyway?',
+                    warning: 'dms_missing',
                 });
             }
         }

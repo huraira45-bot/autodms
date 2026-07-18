@@ -675,7 +675,30 @@ exports.getJobCardById = async (req, res) => {
             .input('id', sql.Int, req.params.id)
             .query('SELECT * FROM dms_DamageMarks WHERE JobCardID = @id ORDER BY MarkID');
 
-        res.json({ ...jc.recordset[0], LabourItems: labour.recordset, PartsItems: parts.recordset, SubletItems: sublets.recordset, Accessories: accessories.recordset, DamageMarks: damageMarks.recordset });
+        // Active campaign application — surfaces on the Work Order print so
+        // the printed slip shows the same benefit banner the JC form does
+        // (owner ask 2026-07-18).
+        const campaign = await pool.request()
+            .input('id', sql.Int, req.params.id)
+            .query(`
+                SELECT a.ApplicationID, a.BenefitAmount, a.AppliedLines, a.Remarks AS ApplicationRemarks,
+                       c.CampaignCode, c.CampaignName, c.BorneBy, c.BenefitType,
+                       c.BenefitPercent, c.BenefitDescription,
+                       gl.GLCode, gl.GLTitle AS GLAccountTitle
+                FROM   dms_ServiceCampaignApplications a
+                JOIN   dms_ServiceCampaigns c ON a.CampaignID = c.CampaignID
+                LEFT   JOIN GLChartOFAccount gl ON c.GLAccountID = gl.GLCAID
+                WHERE  a.JobCardId = @id AND a.Status = 'Active'`);
+
+        res.json({
+            ...jc.recordset[0],
+            LabourItems: labour.recordset,
+            PartsItems: parts.recordset,
+            SubletItems: sublets.recordset,
+            Accessories: accessories.recordset,
+            DamageMarks: damageMarks.recordset,
+            Campaign: campaign.recordset[0] || null,
+        });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 

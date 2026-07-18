@@ -81,6 +81,14 @@ export default function JobCardForm() {
   // Refreshed after finalize and whenever the JC is re-opened. Owner ask
   // 2026-07-01: a finalized JC should show what the customer still owes.
   const [balance, setBalance] = useState(null);
+  const [campaign, setCampaign] = useState(null);
+  const reloadCampaign = async () => {
+    if (!isEdit) return;
+    try {
+      const r = await axios.get(`${API}/service-campaigns/applications/by-jobcard/${id}`);
+      setCampaign(r.data || null);
+    } catch { setCampaign(null); }
+  };
 
   // Insurance tab — claim header + per-part depreciation rows + payments
   const [insHeader, setInsHeader] = useState({
@@ -287,6 +295,8 @@ export default function JobCardForm() {
           } else {
             setBalance(null);
           }
+          // Load any campaign applied to this JC (used by the totals box).
+          reloadCampaign();
           try {
             const navRes = await axios.get(`${API}/job-cards/${id}/navigation`);
             setNav(navRes.data);
@@ -538,18 +548,42 @@ export default function JobCardForm() {
     if (!ok) return;
     setFinalizing(true);
     try {
-      await axios.post(`/api/finalize/JOBCARD/${id}`);
-      setIsFinalized(true);
-      // Fresh balance once the SI voucher has been posted
-      try { const r = await axios.get(`/api/payments/jobcard-balance/${id}`); setBalance(r.data); } catch {}
-      flash('Job Card finalized.');
-      notify({ type: 'success', title: 'Job Card finalized', message: 'The job card is now locked and posted.' });
+      await postFinalize(false);
     } catch (e) {
-      const text = e.response?.data?.error || 'Error';
-      flash(text, true);
-      notify({ type: 'error', title: 'Finalize failed', message: text });
+      // Soft warning from backend (428) — DMS Job Card No is empty.
+      // Prompt once; on confirm, retry with skipDmsWarning=true.
+      if (e.response?.status === 428 && e.response?.data?.warning === 'dms_missing') {
+        const confirmSkip = await confirm({
+          title: 'DMS Job Card Number is empty',
+          message: 'You have not entered a DMS Job Card Number. Finalize the job card anyway?',
+          details: 'You can still fill it in later before printing / invoicing.',
+          confirmLabel: 'Finalize anyway',
+          tone: 'warning',
+        });
+        if (confirmSkip) {
+          try { await postFinalize(true); }
+          catch (e2) {
+            const t2 = e2.response?.data?.error || 'Error';
+            flash(t2, true);
+            notify({ type: 'error', title: 'Finalize failed', message: t2 });
+          }
+        }
+      } else {
+        const text = e.response?.data?.error || 'Error';
+        flash(text, true);
+        notify({ type: 'error', title: 'Finalize failed', message: text });
+      }
     }
     finally { setFinalizing(false); }
+  };
+
+  const postFinalize = async (skipDmsWarning) => {
+    const body = skipDmsWarning ? { skipDmsWarning: true } : {};
+    await axios.post(`/api/finalize/JOBCARD/${id}`, body);
+    setIsFinalized(true);
+    try { const r = await axios.get(`/api/payments/jobcard-balance/${id}`); setBalance(r.data); } catch {}
+    flash('Job Card finalized.');
+    notify({ type: 'success', title: 'Job Card finalized', message: 'The job card is now locked and posted.' });
   };
 
   const openUnfinalizeModal = async () => {
@@ -775,7 +809,8 @@ export default function JobCardForm() {
                        grossAmount={grandTotal}
                        labourGross={totalLabour}
                        partsGross={totalParts}
-                       taxAmount={totalTax} />
+                       taxAmount={totalTax}
+                       onChange={reloadCampaign} />
 
           {/* Top row: Business Unit | Order Type | PM Type | Date In | RO Status | Promise Date | Service Advisor | Repeat RO */}
           <div style={{ ...S.groupBox }}>
@@ -1119,6 +1154,25 @@ export default function JobCardForm() {
                     <div style={S.billField}><div style={{ fontSize: 10, color: '#64748b' }}>Labour</div><div style={S.billVal}>{totalLabour.toLocaleString()}</div></div>
                     <div style={S.billField}><div style={{ fontSize: 10, color: '#64748b' }}>Total</div><div style={{ ...S.billVal, fontWeight: 700 }}>{grandTotal.toLocaleString()}</div></div>
                   </div>
+                  {campaign && Number(campaign.BenefitAmount) > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 3, marginTop: 3 }}>
+                      <div style={S.billField}>
+                        <div style={{ fontSize: 10, color: '#166534' }}>
+                          Campaign — {campaign.CampaignName}
+                          {campaign.BorneBy === 'MCML' ? ' (MCML claim)' : ' (discount)'}
+                        </div>
+                        <div style={{ ...S.billVal, fontWeight: 700, color: '#166534', background: '#f0fdf4' }}>
+                          Net {(grandTotal - Number(campaign.BenefitAmount)).toLocaleString()}
+                        </div>
+                      </div>
+                      <div style={S.billField}>
+                        <div style={{ fontSize: 10, color: '#166534' }}>Benefit</div>
+                        <div style={{ ...S.billVal, fontWeight: 700, color: '#166534', background: '#f0fdf4' }}>
+                          ({Number(campaign.BenefitAmount).toLocaleString()})
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {balance && (
                     <>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 3, marginTop: 3 }}>

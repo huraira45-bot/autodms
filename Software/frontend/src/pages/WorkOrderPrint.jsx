@@ -50,7 +50,13 @@ export default function WorkOrderPrint() {
     const pst         = (jc.LabourItems || []).reduce((s, l) => s + (Number(l.TaxAmount) || 0), 0)
                       + (jc.SubletItems || []).reduce((s, x) => s + (Number(x.TaxAmount) || 0), 0);
     const gst         = (jc.PartsItems  || []).reduce((s, p) => s + (Number(p.TaxAmount) || 0), 0);
-    const total       = labourNet + partsNet + sublet + pst + gst;
+    const grossTotal  = labourNet + partsNet + sublet + pst + gst;
+    // Campaign benefit is a rebate on the printable invoice — MCML claim
+    // (borne by Master Changan) or an internal discount ("Our expense").
+    // Not printed unless a campaign is actually attached.
+    const campaign    = jc.Campaign || null;
+    const campaignBenefit = Number(campaign?.BenefitAmount || 0);
+    const total       = grossTotal - campaignBenefit;
 
     return (
         <div className="wo-print">
@@ -183,6 +189,18 @@ export default function WorkOrderPrint() {
                                     <tr><td>Labour Total Net</td><td><b>{fmt(labourNet + pst)}</b></td></tr>
                                     <tr><td>Sublet Amount</td><td>{fmt(sublet)}</td></tr>
                                     {gst > 0 && <tr><td>GST</td><td>{fmt(gst)}</td></tr>}
+                                    {campaign && (
+                                        <>
+                                            <tr><td>Sub-Total</td><td>{fmt(grossTotal)}</td></tr>
+                                            <tr>
+                                                <td>
+                                                    Campaign — {campaign.CampaignName}
+                                                    {campaign.BorneBy === 'MCML' ? ' (MCML claim)' : ' (discount)'}
+                                                </td>
+                                                <td>({fmt(campaignBenefit)})</td>
+                                            </tr>
+                                        </>
+                                    )}
                                     <tr className="grand"><td>Total Amount</td><td><b>{fmt(total)}</b></td></tr>
                                 </tbody>
                             </table>
