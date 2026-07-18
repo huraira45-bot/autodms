@@ -120,7 +120,7 @@ export default function JobCardForm() {
   const [unfinalizeBlockers, setUnfinalizeBlockers] = useState(null);
 
   const [form, setForm] = useState({
-    JobCardNo: '', jobCode: '', JobTypeId: '', OrderTypeId: '', PMType: 'None',
+    JobCardNo: '', jobCode: '', DMSJobCardNo: '', JobTypeId: '', OrderTypeId: '', PMType: 'None',
     EndUserID: '', VehicleRegNo: '', ChasisNo: '', EngineNo: '', VersionCode: '',
     VehicleCode: '', BatteryNo: '', VehicleColor: '', KiloMeter: '', Millage: '',
     ReceiptDate: new Date().toISOString().slice(0, 16),
@@ -207,6 +207,7 @@ export default function JobCardForm() {
           setForm({
             JobCardNo: jc.JobCardNo || '',
             jobCode: jc.jobCode || '',
+            DMSJobCardNo: jc.DMSJobCardNo || '',
             JobTypeId: jc.JobTypeId || '',
             OrderTypeId: jc.OrderTypeId || '',
             PMType: jc.PMType || 'None',
@@ -750,6 +751,8 @@ export default function JobCardForm() {
         <input style={{ ...S.roInput, width: 100, background: '#e8f0fe', fontWeight: 700 }} value={form.JobCardNo || '(auto)'} readOnly />
         <span style={S.roLabel}>Job NO:</span>
         <input style={{ ...S.roInput, width: 80 }} value={form.jobCode} onChange={e => !disabled && f('jobCode', e.target.value)} readOnly={disabled} placeholder="e.g. 28931" />
+        <span style={S.roLabel}>DMS Job Card No:</span>
+        <input style={{ ...S.roInput, width: 120 }} value={form.DMSJobCardNo} onChange={e => !disabled && f('DMSJobCardNo', e.target.value)} readOnly={disabled} placeholder="required to finalize" />
         {createdByName && <span style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 4, color: '#2a5a8a', fontSize: 11 }}><UserCircle size={12} /> Created: <strong>{createdByName}</strong></span>}
         {isFinalized && finalizedByName && <span style={{ color: '#92400e', fontSize: 11 }}>| Finalized by: <strong>{finalizedByName}</strong>{finalizedAt ? ` on ${fmtDate(finalizedAt)}` : ''}</span>}
       </div>

@@ -681,7 +681,7 @@ exports.getJobCardById = async (req, res) => {
 
 exports.saveJobCard = async (req, res) => {
     try {
-        const { JobCardId, jobCode, JobTypeId, OrderTypeId, EndUserID, VehicleRegNo, ChasisNo, EngineNo,
+        const { JobCardId, jobCode, DMSJobCardNo, JobTypeId, OrderTypeId, EndUserID, VehicleRegNo, ChasisNo, EngineNo,
                 BrandCode, VersionCode, VehicleCode, KiloMeter, Millage,
                 ReceiptDate, PromisedDate, Remarks, PaymentType, PaymentCO, PaymentBankID,
                 FuelLevel, VOCRemarks, CustomerType, PartyID,
@@ -735,6 +735,7 @@ exports.saveJobCard = async (req, res) => {
                 await transaction.request()
                     .input('id', sql.Int, JobCardId)
                     .input('jobCode', sql.NVarChar(50), jobCode)
+                    .input('dmsJobCardNo', sql.NVarChar(50), DMSJobCardNo || null)
                     .input('endUserId', sql.Int, EndUserID || null)
                     .input('jobTypeId', sql.Int, JobTypeId)
                     .input('orderTypeId', sql.Int, OrderTypeId || null)
@@ -779,7 +780,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('confirmByName', sql.NVarChar(100), ConfirmByName || null)
                     .input('wacResults', sql.NVarChar(sql.MAX), WACResults || null)
                     .query(`UPDATE Addata_JobCardInfo SET
-                        jobCode=@jobCode, EndUserID=@endUserId, JobTypeId=@jobTypeId, OrderTypeId=@orderTypeId, VehicleRegNo=@regNo, ChasisNo=@chassis, EngineNo=@engine,
+                        jobCode=@jobCode, DMSJobCardNo=@dmsJobCardNo, EndUserID=@endUserId, JobTypeId=@jobTypeId, OrderTypeId=@orderTypeId, VehicleRegNo=@regNo, ChasisNo=@chassis, EngineNo=@engine,
                         KiloMeter=@km, Millage=@millage, PromisedDate=@promised, Remarks=@remarks, Status=@payType, PaymentCO=@payCO, PaymentBankID=@payBankId,
                         FuelLevel=@fuel, VOCRemarks=@voc, CustomerType=@custType, PartyID=@partyId,
                         PMType=@pmType, ServiceAdvisor=@advisor, ServiceAdvisorID=@advisorId, RepeatROID=@repeatROID, BatteryNo=@batteryNo, VehicleColor=@color,
@@ -882,6 +883,7 @@ exports.saveJobCard = async (req, res) => {
                 const insertRes = await transaction.request()
                     .input('no', sql.NVarChar(100), generatedRoNumber)
                     .input('jobCode', sql.NVarChar(50), jobCode)
+                    .input('dmsJobCardNo', sql.NVarChar(50), DMSJobCardNo || null)
                     .input('jobCardDate', sql.DateTime, receiptDt)
                     .input('createdBy', sql.Int, req.user?.userId || null)
                     .input('createdByName', sql.NVarChar(100), req.user?.userName || '')
@@ -934,7 +936,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('confirmByName', sql.NVarChar(100), ConfirmByName || null)
                     .input('wacResults', sql.NVarChar(sql.MAX), WACResults || null)
                     .query(`INSERT INTO Addata_JobCardInfo
-                        (JobCardNo, jobCode, JobCardDate, JobTypeId, OrderTypeId, EndUserID, VehicleRegNo, ChasisNo, EngineNo,
+                        (JobCardNo, jobCode, DMSJobCardNo, JobCardDate, JobTypeId, OrderTypeId, EndUserID, VehicleRegNo, ChasisNo, EngineNo,
                          BrandCode, VersionCode, VehicleCode, KiloMeter, Millage,
                          ReceiptDate, PromisedDate, Remarks, Status, JobStatus,
                          FuelLevel, VOCRemarks, CustomerType, PartyID, PaymentCO, PaymentBankID,
@@ -946,7 +948,7 @@ exports.saveJobCard = async (req, res) => {
                          DQIRNo, CheckedByID, CheckedByName, ConfirmByID, ConfirmByName, WACResults,
                          CompanyID, EntryUserDateTime, CreatedBy, CreatedByName)
                         OUTPUT INSERTED.JobCardId
-                        VALUES (@no, @jobCode, @jobCardDate, @jobTypeId, @orderTypeId, @endUserId, @regNo, @chassis, @engine,
+                        VALUES (@no, @jobCode, @dmsJobCardNo, @jobCardDate, @jobTypeId, @orderTypeId, @endUserId, @regNo, @chassis, @engine,
                                 @brand, @version, @vehicle, @km, @millage,
                                 @receipt, @promised, @remarks, @payType, 0,
                                 @fuel, @voc, @custType, @partyId, @payCO, @payBankId,

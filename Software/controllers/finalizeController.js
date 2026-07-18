@@ -101,14 +101,16 @@ exports.finalize = async (req, res) => {
         // check above (line 76) is the only permission gate now.
 
         // Owner ask 2026-07-17: block JC finalize when the linked customer
-        // profile is missing CNIC or DOB. Enforces that every finalized
-        // workshop invoice has identity captured for the vehicle owner /
-        // end user. Only runs for JOBCARD — GRN/GRTN/SS/SSR unaffected.
+        // profile is missing CNIC/DOB, or when the DMS Job Card Number
+        // (separate field the service advisor enters as the reference to
+        // Master Changan's DMS) is empty. Only runs for JOBCARD —
+        // GRN/GRTN/SS/SSR unaffected.
         if (entityType === 'JOBCARD') {
             const cust = await pool.request()
                 .input('id', sql.Int, entityId)
                 .query(`
                     SELECT j.EndUserID,
+                           j.DMSJobCardNo,
                            ci.CNIC,
                            ci.DOB,
                            ci.endUserName AS CustomerName
@@ -117,15 +119,17 @@ exports.finalize = async (req, res) => {
                     WHERE  j.JobCardId = @id
                 `);
             const c = cust.recordset[0] || {};
-            const cnicMissing = !c.CNIC || !String(c.CNIC).trim();
+            const dmsMissing  = !c.DMSJobCardNo || !String(c.DMSJobCardNo).trim();
+            const cnicMissing = !c.CNIC         || !String(c.CNIC).trim();
             const dobMissing  = !c.DOB;
-            if (!c.EndUserID || cnicMissing || dobMissing) {
+            if (dmsMissing || !c.EndUserID || cnicMissing || dobMissing) {
                 const missing = [];
-                if (!c.EndUserID)  missing.push('customer profile');
-                if (cnicMissing)   missing.push('CNIC');
-                if (dobMissing)    missing.push('DOB');
+                if (dmsMissing)   missing.push('DMS Job Card Number');
+                if (!c.EndUserID) missing.push('customer profile');
+                if (cnicMissing)  missing.push('CNIC');
+                if (dobMissing)   missing.push('DOB');
                 return res.status(422).json({
-                    error: `Cannot finalize: customer detail is missing ${missing.join(' + ')}. Open the customer record and fill it in before finalizing.`,
+                    error: `Cannot finalize: ${missing.join(' + ')} ${missing.length > 1 ? 'are' : 'is'} missing. Fill in the missing field${missing.length > 1 ? 's' : ''} before finalizing.`,
                     missing,
                 });
             }
