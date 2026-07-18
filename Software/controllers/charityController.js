@@ -15,8 +15,12 @@ exports.listEntries = async (req, res) => {
         const pool = await getPool();
         const request = pool.request();
         const where = [];
-        if (from) { request.input('from', sql.DateTime, new Date(from));            where.push('ct.CreatedAt >= @from'); }
-        if (to)   { request.input('to',   sql.DateTime, new Date(to + ' 23:59:59')); where.push('ct.CreatedAt <= @to'); }
+        // Compare on DATE (wall clock) not DATETIME — the JS→driver→SQL
+        // round trip otherwise shifts every value by the local UTC offset,
+        // so a receipt saved at 19:35 today would fall outside a From/To
+        // window ending at "today 23:59".
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(ct.CreatedAt AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(ct.CreatedAt AS DATE) <= @to'); }
         if (source && source !== 'ALL') {
             request.input('src', sql.NVarChar(40), source);
             where.push('ct.SourceType = @src');
@@ -81,8 +85,9 @@ exports.summary = async (req, res) => {
         const pool = await getPool();
         const request = pool.request();
         const where = [];
-        if (from) { request.input('from', sql.DateTime, new Date(from));            where.push('CreatedAt >= @from'); }
-        if (to)   { request.input('to',   sql.DateTime, new Date(to + ' 23:59:59')); where.push('CreatedAt <= @to'); }
+        // Same DATE-cast fix as in listEntries so filter behaviour matches.
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(CreatedAt AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(CreatedAt AS DATE) <= @to'); }
         const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
         const r = await request.query(`
             SELECT ISNULL(SUM(CharityAmount), 0) AS totalOwed,
