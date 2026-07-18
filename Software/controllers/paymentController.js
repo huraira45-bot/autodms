@@ -177,7 +177,25 @@ exports.getJobCardBalance = async (req, res) => {
                             + (parseFloat(subletRes.recordset[0].Total) || 0)
                             + (parseFloat(partsRes.recordset[0].Total) || 0);
 
-        const invoiceTotal = voucher ? parseFloat(voucher.TotalAmount) : computedTotal;
+        // If a campaign is attached, the JC's Sales Invoice voucher already
+        // splits the receivable — the customer subsidiary (Gen-Cust or party
+        // ledger) only carries `invoiceTotal − BenefitAmount`; the benefit
+        // portion sits on the campaign GL account (MCML claim / marketing
+        // expense). For Receive Payment / Gate Pass we need the customer's
+        // actual liability, not the gross invoice, or every campaign JC
+        // shows outstanding = benefit even when the customer paid in full
+        // (owner report 2026-07-18).
+        const campRes = await pool.request()
+            .input('id', sql.Int, jobCardId)
+            .query(`SELECT TOP 1 a.BenefitAmount
+                    FROM   dms_ServiceCampaignApplications a
+                    WHERE  a.JobCardId = @id AND a.Status = 'Active'`);
+        const campaignBenefit = campRes.recordset.length
+            ? Math.max(0, parseFloat(campRes.recordset[0].BenefitAmount) || 0)
+            : 0;
+
+        const grossTotal   = voucher ? parseFloat(voucher.TotalAmount) : computedTotal;
+        const invoiceTotal = Math.max(0, +(grossTotal - campaignBenefit).toFixed(2));
 
         // 4. Was the SI voucher already cash-settled at finalize?
         //    For Cash / POS / Bank Transfer / Cheque sales, the SI voucher itself debits a
@@ -247,6 +265,8 @@ exports.getJobCardBalance = async (req, res) => {
         res.json({
             jobCard,
             invoiceTotal: +invoiceTotal.toFixed(2),
+            grossTotal: +grossTotal.toFixed(2),
+            campaignBenefit: +campaignBenefit.toFixed(2),
             computedTotal: +computedTotal.toFixed(2),
             voucher,
             hasInvoiceVoucher: !!voucher,
