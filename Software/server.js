@@ -41,6 +41,9 @@ app.use('/api/finalize', require('./routes/finalizeRoutes'));
 
 // CRO public (token-based, no auth needed) — must come before authMiddleware
 app.use('/api/cro', require('./routes/croPublicRoutes'));
+// Kiosk / big-screen job-status display — public, read-only. Also mounts
+// before authMiddleware so a lobby TV can render it on a bare browser.
+app.use('/api/kiosk', require('./routes/kioskRoutes'));
 
 // Protect all remaining API routes
 app.use('/api', authMiddleware);

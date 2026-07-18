@@ -52,6 +52,7 @@ import { isDemoMode } from './demoMode';
 import Dashboard          from './pages/Dashboard';
 import ModuleLauncher     from './pages/ModuleLauncher';
 import Chat               from './pages/Chat';
+import JobKiosk           from './pages/JobKiosk';
 import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
@@ -1243,6 +1244,8 @@ function App() {
             <Routes>
                 {/* Public, unauthenticated route — customers tap this from a WhatsApp/SMS link */}
                 <Route path="/survey/:token" element={<SurveyPublic />} />
+                {/* Public lobby-TV job status board — no login, no sidebar */}
+                <Route path="/kiosk/jobs" element={<JobKiosk />} />
                 {/* Everything else goes through the app shell behind AuthProvider */}
                 <Route path="/*" element={
                     <AuthProvider>
