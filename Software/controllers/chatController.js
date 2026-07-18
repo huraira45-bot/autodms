@@ -159,6 +159,14 @@ exports.createChannel = async (req, res) => {
                     .query(`INSERT INTO dms_ChatMembers (ChannelID, UserID, Role) VALUES (@cid, @uid, 'member')`);
             }
             await tx.commit();
+            // Hot-join every live socket of every member so they receive
+            // messages in this new channel without waiting for reconnect.
+            for (const uid of seen) chatSocket.joinUserToChannel(uid, channelId);
+            for (const uid of seen) {
+                if (uid !== req.user.userId) {
+                    chatSocket.emitToUser(uid, 'channel:new', { ChannelID: channelId });
+                }
+            }
             res.status(201).json({ ChannelID: channelId });
         } catch (e) {
             await tx.rollback();
@@ -204,7 +212,10 @@ exports.getOrCreateDM = async (req, res) => {
                     .query(`INSERT INTO dms_ChatMembers (ChannelID, UserID, Role) VALUES (@cid, @uid, 'member')`);
             }
             await tx.commit();
-            // Tell the peer socket so it can hot-join.
+            // Hot-join both users' sockets and notify the peer client that a
+            // new channel exists (so their channel list refreshes).
+            chatSocket.joinUserToChannel(me, channelId);
+            chatSocket.joinUserToChannel(otherId, channelId);
             chatSocket.emitToUser(otherId, 'channel:new', { ChannelID: channelId });
             res.status(201).json({ ChannelID: channelId, existed: false });
         } catch (e) {

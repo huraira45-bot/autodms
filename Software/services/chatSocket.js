@@ -101,4 +101,12 @@ function emitToUser(userId, event, data) {
     io.of('/chat').to(userRoom(userId)).emit(event, data);
 }
 
-module.exports = { attach, emitToChannel, emitToUser };
+// Force every socket belonging to `userId` to join the room for `channelId`.
+// Called by the REST layer after createChannel / getOrCreateDM so the
+// creator's already-open socket picks up the new room without reconnecting.
+function joinUserToChannel(userId, channelId) {
+    if (!io) return;
+    io.of('/chat').in(userRoom(userId)).socketsJoin(channelRoom(channelId));
+}
+
+module.exports = { attach, emitToChannel, emitToUser, joinUserToChannel };

@@ -90,7 +90,7 @@ export default function Chat() {
         const onMessage = (msg) => {
             // If it's for the active channel, append; otherwise bump unread.
             if (msg.ChannelID === activeId) {
-                setMessages(m => [...m, msg]);
+                setMessages(m => m.some(x => x.MessageID === msg.MessageID) ? m : [...m, msg]);
                 axios.post(`${API}/channels/${activeId}/read`, { messageId: msg.MessageID }).catch(()=>{});
             } else {
                 setChannels(cs => cs.map(c =>
@@ -166,7 +166,8 @@ export default function Chat() {
                 {activeChannel ? (
                     <ChannelPane channel={activeChannel} messages={messages}
                                  loading={loadingMsgs}
-                                 onSent={(msg) => setMessages(m => [...m, msg])}
+                                 onSent={(msg) => setMessages(m =>
+                                     m.some(x => x.MessageID === msg.MessageID) ? m : [...m, msg])}
                                  currentUserId={user?.userId} />
                 ) : (
                     <div style={{ margin: 'auto', color: '#94a3b8', textAlign: 'center' }}>
@@ -253,11 +254,14 @@ function ChannelPane({ channel, messages, loading, onSent, currentUserId }) {
                     { headers: { 'Content-Type': 'multipart/form-data' } });
                 attachData = r.data;
             }
-            await axios.post(`${API}/channels/${channel.ChannelID}/messages`, {
+            const r = await axios.post(`${API}/channels/${channel.ChannelID}/messages`, {
                 Content: text.trim() || null,
                 ...(attachData || {}),
             });
-            // Socket broadcast will echo it back; don't append locally.
+            // Optimistically append the REST response so the sender sees it
+            // immediately even if the socket echo hasn't arrived (or if the
+            // socket dropped). The socket handler dedupes by MessageID.
+            if (r.data?.MessageID) onSent(r.data);
             setText(''); setAttach(null);
             if (fileRef.current) fileRef.current.value = '';
         } catch (err) {
