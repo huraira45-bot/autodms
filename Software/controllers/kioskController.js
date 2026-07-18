@@ -31,7 +31,7 @@ exports.getLiveJobs = async (req, res) => {
             LEFT   JOIN addata_CustomerInfo c ON c.ProfileID    = j.EndUserID
             WHERE  ISNULL(j.IsFinalized, 0) = 0
               AND  CAST(j.JobCardDate AS DATE) = CAST(GETDATE() AS DATE)
-              AND  ISNULL(t.CardCode, '') NOT IN ('WR', 'B&P')
+              AND  ISNULL(t.CardCode, '') NOT IN ('WR', 'B&P', 'CT')
               AND  ISNULL(j.WorkshopStatus, 'Waiting For Service') <> 'Delivered'
             ORDER  BY j.JobCardId DESC
         `);
