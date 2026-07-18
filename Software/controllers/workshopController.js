@@ -16,16 +16,43 @@ const snapshotTax = (gross, discAmt, rate) => {
 exports.getCustomers = async (req, res) => {
     try {
         const { search } = req.query;
+        // Owner report 2026-07-18: this endpoint used to return every row in
+        // vw_WorkshopCustomers (~9k rows) on every open — took ~15s and grew
+        // linearly with new customers. Cap server-side and return a total
+        // count so the UI can nudge users to refine when the cap bites.
+        const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+
         const pool = await getPool();
         const request = pool.request();
-        let query = 'SELECT * FROM vw_WorkshopCustomers';
-        if (search) {
-            request.input('search', sql.NVarChar(200), `%${search}%`);
-            query += ' WHERE CustomerName LIKE @search OR PhoneNo LIKE @search OR RegistrationNo LIKE @search OR ChasisNo LIKE @search';
+        request.input('lim', sql.Int, limit);
+        let where = '';
+        if (search && search.trim()) {
+            request.input('search', sql.NVarChar(200), `%${search.trim()}%`);
+            where = ` WHERE CustomerName LIKE @search
+                          OR PhoneNo         LIKE @search
+                          OR CNIC            LIKE @search
+                          OR CustomerCode    LIKE @search
+                          OR RegistrationNo  LIKE @search
+                          OR ChasisNo        LIKE @search`;
         }
-        query += ' ORDER BY ProfileID DESC';
-        const result = await request.query(query);
-        res.json(result.recordset);
+        const [rowsRes, countRes] = await Promise.all([
+            request.query(`SELECT TOP (@lim) * FROM vw_WorkshopCustomers${where} ORDER BY ProfileID DESC`),
+            pool.request()
+                .input('search', sql.NVarChar(200), search?.trim() ? `%${search.trim()}%` : null)
+                .query(`SELECT COUNT(*) AS Total FROM vw_WorkshopCustomers
+                        WHERE @search IS NULL OR (
+                             CustomerName    LIKE @search
+                          OR PhoneNo         LIKE @search
+                          OR CNIC            LIKE @search
+                          OR CustomerCode    LIKE @search
+                          OR RegistrationNo  LIKE @search
+                          OR ChasisNo        LIKE @search)`),
+        ]);
+        res.json({
+            rows: rowsRes.recordset,
+            total: countRes.recordset[0].Total,
+            limit,
+        });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 

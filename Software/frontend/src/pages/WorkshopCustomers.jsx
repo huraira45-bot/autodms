@@ -9,6 +9,8 @@ const API = '/api/workshop';
 export default function WorkshopCustomers() {
   const { notify } = useFeedback();
   const [customers, setCustomers] = useState([]);
+  const [totalMatches, setTotalMatches] = useState(0);
+  const [loadingList, setLoadingList] = useState(false);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [showVehicleForm, setShowVehicleForm] = useState(false);
@@ -21,13 +23,24 @@ export default function WorkshopCustomers() {
   const [customerVehicles, setCustomerVehicles] = useState([]);
 
   const fetchCustomers = async () => {
+    setLoadingList(true);
     try {
-      const res = await axios.get(`${API}/customers?search=${search}`);
-      setCustomers(res.data);
+      const res = await axios.get(`${API}/customers`, { params: { search } });
+      // Server now returns { rows, total, limit } — array response is the
+      // legacy shape (kept for any older callers that hit this endpoint).
+      const payload = Array.isArray(res.data) ? { rows: res.data, total: res.data.length } : res.data;
+      setCustomers(payload.rows || []);
+      setTotalMatches(payload.total || 0);
     } catch (err) { console.error(err); }
+    setLoadingList(false);
   };
 
-  useEffect(() => { fetchCustomers(); }, [search]);
+  // Debounce the search so we don't hit the API on every keystroke — with
+  // 8,000+ customers even the indexed LIKE scan isn't free.
+  useEffect(() => {
+    const t = setTimeout(fetchCustomers, 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const openNew = () => {
     setEditing(null);
@@ -105,6 +118,20 @@ export default function WorkshopCustomers() {
       </div>
 
       <div className="card">
+        <div style={{
+            padding: '6px 12px', fontSize: '0.78rem', color: '#475569',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
+        }}>
+            <span>
+                {loadingList ? 'Loading…'
+                 : totalMatches === 0 ? 'No customers match.'
+                 : `Showing ${customers.length.toLocaleString()} of ${totalMatches.toLocaleString()} customers`}
+            </span>
+            {totalMatches > customers.length && (
+                <span style={{ color: '#b45309' }}>Refine your search to narrow the list.</span>
+            )}
+        </div>
         <div className="table-wrapper"><table>
           <thead><tr><th>ID</th><th>Customer Name</th><th>Contact</th><th>CNIC / Email</th><th>Actions</th></tr></thead>
           <tbody>{customers.map(c => (
