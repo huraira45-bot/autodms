@@ -84,7 +84,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const [header, setHeader] = useState({
         VoucherDate: todayStr,
         VoucherTypeID: '',
-        Remarks: ''
+        Remarks: '',
+        IsCharitable: false,
     });
     const [items, setItems] = useState([
         { GLCAID: '', Narration: '', Debit: 0, Credit: 0 },
@@ -291,7 +292,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                 ? new Date(active.VoucherDate).toISOString().split('T')[0]
                 : todayStr,
             VoucherTypeID: active.VoucherTypeID,
-            Remarks: active.Remarks || ''
+            Remarks: active.Remarks || '',
+            IsCharitable: !!active.IsCharitable,
         });
         setItems(active.lines.map(l => ({
             GLCAID: l.GLCAID,
@@ -836,6 +838,16 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         </select>
                     </div>
                     <div className="form-group"><label>Reference / Remarks</label><input type="text" value={header.Remarks} onChange={e => setHeader({...header, Remarks: e.target.value})} placeholder="Overall voucher description..." /></div>
+                </div>
+                {/* Charity flag — owner ask 2026-07-18. Ticked = 1% of the
+                    voucher total is recorded in dms_CharityTracking as a side
+                    ledger. Has no GL impact. */}
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6 }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#78350f' }}>
+                        <input type="checkbox" checked={!!header.IsCharitable}
+                               onChange={e => setHeader({ ...header, IsCharitable: e.target.checked })} />
+                        Mark as charitable — 1% tracked (no GL impact)
+                    </label>
                 </div>
             </div>
 

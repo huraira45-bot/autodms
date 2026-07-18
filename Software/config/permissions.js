@@ -64,6 +64,7 @@ const SECTIONS = [
             { key: 'finance_voucher_backdate', label: 'Edit posted CPV/CRV/BPV/BRV (within 30 days)', kind: 'workflow' },
             { key: 'chat_use',   label: 'Chat: send & receive messages', kind: 'workflow' },
             { key: 'chat_admin', label: 'Chat: audit all channels + delete',   kind: 'workflow' },
+            { key: 'charity_view', label: 'Charity Tracker (view + report)', kind: 'workflow' },
             { key: 'accounting_setup',  label: 'Accounting Setup (Banks, Roles)', kind: 'document' },
             { key: 'payments',          label: 'Receive / Make Payment',  kind: 'workflow' },
             { key: 'finance_cheques',   label: 'Cheque Clearance',        kind: 'workflow' },

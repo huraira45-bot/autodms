@@ -92,6 +92,7 @@ app.use('/api/crd', require('./routes/crdRoutes'));
 app.use('/api/cro', require('./routes/croRoutes'));
 app.use('/api/sales', require('./routes/salesRoutes'));
 app.use('/api/chat', require('./routes/chatRoutes'));
+app.use('/api/charity', require('./routes/charityRoutes'));
 
 // SPA fallback — anything that isn't an API route or a static asset returns
 // index.html so React Router takes over client-side. Must come AFTER all

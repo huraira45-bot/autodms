@@ -53,6 +53,7 @@ import Dashboard          from './pages/Dashboard';
 import ModuleLauncher     from './pages/ModuleLauncher';
 import Chat               from './pages/Chat';
 import JobKiosk           from './pages/JobKiosk';
+import Charity            from './pages/reports/Charity';
 import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
@@ -943,6 +944,9 @@ function AppShell() {
                     } />
                     <Route path="/reports/gl-detail" element={
                         <ProtectedRoute moduleKey="reports"><GLDetail /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/charity" element={
+                        <ProtectedRoute moduleKey="charity_view"><Charity /></ProtectedRoute>
                     } />
                     <Route path="/reports/customer-statement" element={
                         <ProtectedRoute moduleKey="reports"><PartyStatement kind="customer" /></ProtectedRoute>

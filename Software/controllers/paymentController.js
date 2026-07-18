@@ -715,6 +715,35 @@ async function postPayment(req, res, direction) {
             }
 
             await transaction.commit();
+
+            // Charity side ledger — owner ask 2026-07-18. On every committed
+            // receive-payment, insert a dms_CharityTracking row for 1% of the
+            // CASH actually tendered (paymentLines total — WHT adjustments
+            // don't come in as cash, so they're excluded from the 1% base).
+            // Runs OUTSIDE the tx: a charity-side failure must never roll back
+            // a valid receipt. Purely a side ledger, no GL impact.
+            if (direction === 'receive') {
+                const cashIn = (paymentLines || [])
+                    .reduce((s, p) => s + (parseFloat(p.Amount) || 0), 0);
+                if (cashIn > 0) {
+                    try {
+                        await pool.request()
+                            .input('vid', sql.Int,           voucherId)
+                            .input('src', sql.NVarChar(40),  'RECEIVE_PAYMENT_1PCT')
+                            .input('va',  sql.Decimal(18,2), +cashIn.toFixed(2))
+                            .input('ca',  sql.Decimal(18,2), +(cashIn * 0.01).toFixed(2))
+                            .input('by',  sql.Int,           req.user?.userId || null)
+                            .input('byN', sql.NVarChar(100), req.user?.userName || null)
+                            .query(`INSERT INTO dms_CharityTracking
+                                       (VoucherID, SourceType, VoucherAmount, CharityAmount,
+                                        CreatedBy, CreatedByName)
+                                    VALUES (@vid, @src, @va, @ca, @by, @byN)`);
+                    } catch (e) {
+                        console.warn('[charity] receive tracking failed for voucher', voucherId, e.message);
+                    }
+                }
+            }
+
             res.status(201).json({
                 message: `${direction === 'receive' ? 'Payment received' : 'Payment made'}.`,
                 voucherId, voucherNo,

@@ -77,7 +77,15 @@ export default function ReportShell({
     const load = useCallback(async () => {
         setLoad(true); setErr(null);
         try {
-            const res = await axios.get(`${API_BASE}/reports/${endpoint}`, { params });
+            // `endpoint` is normally a slug appended to /api/reports/. If a
+            // caller passes an absolute API path (starts with `/`) we honour
+            // that instead — used by non-report screens (e.g. Charity Tracker
+            // at /api/charity/entries) that want ReportShell's pagination,
+            // print + Excel affordances.
+            const url = endpoint.startsWith('/')
+                ? endpoint
+                : `${API_BASE}/reports/${endpoint}`;
+            const res = await axios.get(url, { params });
             setData(res.data);
         } catch (e) {
             setErr(e.response?.data?.error || e.message);

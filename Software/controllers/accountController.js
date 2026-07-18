@@ -350,7 +350,17 @@ exports.getVoucher = async (req, res) => {
             WHERE d.VoucherID = @id
             ORDER BY d.VoucherDetailID
         `);
-        res.json({ ...hdr.recordset[0], lines: lines.recordset });
+        // Reflect the current state of the manual charity flag so the edit
+        // form re-hydrates the checkbox correctly (owner ask 2026-07-18).
+        const charity = await pool.request().input('id', sql.Int, id).query(`
+            SELECT TOP 1 1 AS Flag FROM dms_CharityTracking
+            WHERE VoucherID = @id AND SourceType = 'MANUAL_VOUCHER_1PCT'
+        `);
+        res.json({
+            ...hdr.recordset[0],
+            lines: lines.recordset,
+            IsCharitable: charity.recordset.length > 0,
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -514,7 +524,7 @@ exports.updateVoucherDate = async (req, res) => {
 exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { VoucherDate, VoucherTypeID, Remarks, Items } = req.body;
+        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
         const badIdx = Items.findIndex(it => !it.GLCAID);
@@ -598,6 +608,35 @@ exports.updateVoucher = async (req, res) => {
                             VALUES (@VID, @GL, @Nar, @Dr, @Cr)`);
             }
             await transaction.commit();
+
+            // Charity side ledger reconciliation on edit (owner ask 2026-07-18).
+            // The manual voucher flag is header-only, so on every update we
+            // drop any prior manual-source row for this voucher and re-insert
+            // one if the box is still ticked. Receive-payment rows are locked
+            // to their original CRV and never touched here. Runs OUTSIDE the
+            // tx — a charity-side failure must never block a valid edit.
+            try {
+                await pool.request()
+                    .input('vid', sql.Int, id)
+                    .query(`DELETE FROM dms_CharityTracking
+                            WHERE VoucherID = @vid AND SourceType = 'MANUAL_VOUCHER_1PCT'`);
+                if (IsCharitable && totalAmount > 0) {
+                    await pool.request()
+                        .input('vid', sql.Int,           id)
+                        .input('src', sql.NVarChar(40),  'MANUAL_VOUCHER_1PCT')
+                        .input('va',  sql.Decimal(18,2), +totalAmount.toFixed(2))
+                        .input('ca',  sql.Decimal(18,2), +(totalAmount * 0.01).toFixed(2))
+                        .input('by',  sql.Int,           req.user?.userId || null)
+                        .input('byN', sql.NVarChar(100), req.user?.userName || null)
+                        .query(`INSERT INTO dms_CharityTracking
+                                   (VoucherID, SourceType, VoucherAmount, CharityAmount,
+                                    CreatedBy, CreatedByName)
+                                VALUES (@vid, @src, @va, @ca, @by, @byN)`);
+                }
+            } catch (e) {
+                console.warn('[charity] voucher-update tracking failed for voucher', id, e.message);
+            }
+
             res.json({ message: 'Voucher updated', VoucherID: id });
         } catch (err) {
             await transaction.rollback();
@@ -640,7 +679,7 @@ exports.deleteVoucher = async (req, res) => {
 
 exports.saveVoucher = async (req, res) => {
     try {
-        const { VoucherDate, VoucherTypeID, Remarks, Items } = req.body;
+        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
         const dateErr = checkVoucherDateIsToday(VoucherDate);
         if (dateErr) return res.status(400).json({ error: dateErr });
         // Defensive guard: every line must have a GLCAID. A blank GLCAID slips through
@@ -706,6 +745,29 @@ exports.saveVoucher = async (req, res) => {
             }
 
             await transaction.commit();
+
+            // Charity side ledger — owner ask 2026-07-18. When the operator
+            // ticks the "Is charitable" box on a manual voucher, record 1% of
+            // the voucher total. Runs OUTSIDE the tx — a charity-side failure
+            // must never block a valid voucher save. Purely a side ledger.
+            if (IsCharitable && totalAmount > 0) {
+                try {
+                    await pool.request()
+                        .input('vid', sql.Int,           voucherID)
+                        .input('src', sql.NVarChar(40),  'MANUAL_VOUCHER_1PCT')
+                        .input('va',  sql.Decimal(18,2), +totalAmount.toFixed(2))
+                        .input('ca',  sql.Decimal(18,2), +(totalAmount * 0.01).toFixed(2))
+                        .input('by',  sql.Int,           req.user?.userId || null)
+                        .input('byN', sql.NVarChar(100), req.user?.userName || null)
+                        .query(`INSERT INTO dms_CharityTracking
+                                   (VoucherID, SourceType, VoucherAmount, CharityAmount,
+                                    CreatedBy, CreatedByName)
+                                VALUES (@vid, @src, @va, @ca, @by, @byN)`);
+                } catch (e) {
+                    console.warn('[charity] voucher-save tracking failed for voucher', voucherID, e.message);
+                }
+            }
+
             res.status(201).json({ message: 'Voucher Saved', VoucherID: voucherID, VoucherNo: voucherNo, Status: 'Draft' });
         } catch (err) {
             await transaction.rollback();
