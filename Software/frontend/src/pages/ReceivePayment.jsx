@@ -322,18 +322,31 @@ export default function ReceivePayment() {
       .filter(([, v]) => parseFloat(v) > 0)
       .map(([vid, v]) => ({ TargetVoucherID: parseInt(vid), Amount: parseFloat(v) }));
 
-    // Walk-in JC: auto-allocate to the JC's SI voucher if outstanding > 0
+    // Walk-in JC / Store Sale: auto-allocate to the source voucher.
+    // Owner ask 2026-07-18: for walk-in receipts, a paisa-precise invoice
+    // (Rs 23.50 → Rs 23 tender) should close the document with the ≤ Rs 10
+    // gap absorbed into ROUNDING_ADJUSTMENT — the same tolerance the
+    // payment journal builder already applies for named-customer shortfalls.
+    // We allocate the FULL outstanding when the shortfall is within
+    // tolerance, so the builder sees allocatedSum > totalPayment and posts
+    // the rounding leg. Larger tenders keep the old min() cap so any
+    // genuine excess still routes to Customer Advance.
+    const ROUNDING_TOLERANCE = 10;
+    const pickWalkInAllocation = (outstanding) => {
+      const gap = +(outstanding - totalPayment).toFixed(2);
+      if (gap > 0 && gap <= ROUNDING_TOLERANCE) return +outstanding.toFixed(2);
+      return +Math.min(totalPayment, outstanding).toFixed(2);
+    };
     if (mode === 'walkin' && walkInBalance && walkInBalance.hasInvoiceVoucher && walkInBalance.outstanding > 0 && walkInBalance.voucher) {
-      const toAllocate = Math.min(totalPayment, walkInBalance.outstanding);
+      const toAllocate = pickWalkInAllocation(walkInBalance.outstanding);
       if (toAllocate > 0.005) {
-        allocArray = [{ TargetVoucherID: walkInBalance.voucher.VoucherID, Amount: +toAllocate.toFixed(2) }];
+        allocArray = [{ TargetVoucherID: walkInBalance.voucher.VoucherID, Amount: toAllocate }];
       }
     }
-    // Walk-in Store Sale: auto-allocate to the SS voucher
     if (mode === 'walkinSS' && walkInSaleBalance && walkInSaleBalance.hasInvoiceVoucher && walkInSaleBalance.outstanding > 0 && walkInSaleBalance.voucher) {
-      const toAllocate = Math.min(totalPayment, walkInSaleBalance.outstanding);
+      const toAllocate = pickWalkInAllocation(walkInSaleBalance.outstanding);
       if (toAllocate > 0.005) {
-        allocArray = [{ TargetVoucherID: walkInSaleBalance.voucher.VoucherID, Amount: +toAllocate.toFixed(2) }];
+        allocArray = [{ TargetVoucherID: walkInSaleBalance.voucher.VoucherID, Amount: toAllocate }];
       }
     }
 
