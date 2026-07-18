@@ -1,9 +1,11 @@
 require('dotenv').config();
 const path = require('path');
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const { connectDB } = require('./config/db');
 const authMiddleware = require('./middleware/auth');
+const chatSocket = require('./services/chatSocket');
 
 // Fail fast if JWT secret isn't configured. Otherwise the auth layer silently
 // falls back to a known string and every token in the wild becomes forgeable.
@@ -86,6 +88,7 @@ app.use('/api/service-campaigns', require('./routes/serviceCampaignRoutes'));
 app.use('/api/crd', require('./routes/crdRoutes'));
 app.use('/api/cro', require('./routes/croRoutes'));
 app.use('/api/sales', require('./routes/salesRoutes'));
+app.use('/api/chat', require('./routes/chatRoutes'));
 
 // SPA fallback — anything that isn't an API route or a static asset returns
 // index.html so React Router takes over client-side. Must come AFTER all
@@ -98,9 +101,14 @@ app.get(/^(?!\/api\/|\/uploads\/).*/, (req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
+// Use a raw http.Server so Socket.io can attach on the same port as Express
+// (the chat feature requires WebSockets). The `.listen` semantics are the
+// same as app.listen — the raw server just makes the shared handle explicit.
+const httpServer = http.createServer(app);
+chatSocket.attach(httpServer);
 // Bind to 0.0.0.0 so the server is reachable from other machines on the LAN
 // (Express defaults to 0.0.0.0 already, but stating it explicitly is clearer).
-app.listen(PORT, '0.0.0.0', async () => {
+httpServer.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Frontend served from ${FRONTEND_DIST}`);
   console.log(`Open http://localhost:${PORT} (or http://<lan-ip>:${PORT} from another machine)`);

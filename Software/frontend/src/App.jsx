@@ -1,4 +1,5 @@
 import React, { useState, Children } from 'react';
+import axios from 'axios';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
     Car, Users, Building, Settings as SettingsIcon, LayoutDashboard, Database,
@@ -50,6 +51,7 @@ import { isDemoMode } from './demoMode';
 
 import Dashboard          from './pages/Dashboard';
 import ModuleLauncher     from './pages/ModuleLauncher';
+import Chat               from './pages/Chat';
 import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
@@ -208,6 +210,7 @@ function Sidebar() {
     const { hasModule, hasPermission } = useAuth();
     const groups = getVisibleModuleGroups(hasModule, hasPermission);
 
+    const canChat = hasModule('chat_use') || hasModule('chat_admin');
     return (
         <aside className="erp-sidebar">
             <nav>
@@ -222,8 +225,41 @@ function Sidebar() {
                         </NavLink>
                     );
                 })}
+                {canChat && <ChatNavLink />}
             </nav>
         </aside>
+    );
+}
+
+// Sidebar chat link with a live unread badge. Polls /chat/channels every 30s
+// and also listens on the shared socket so new messages update the badge
+// immediately even when the user is on a different page.
+function ChatNavLink() {
+    const [unread, setUnread] = React.useState(0);
+    React.useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            try {
+                const r = await axios.get('/api/chat/channels');
+                if (!cancelled) setUnread(r.data.reduce((s, c) => s + (Number(c.UnreadCount) || 0), 0));
+            } catch { /* not authed for chat */ }
+        };
+        load();
+        const iv = setInterval(load, 30000);
+        return () => { cancelled = true; clearInterval(iv); };
+    }, []);
+    return (
+        <NavLink to="/chat"
+            className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}
+            title="Internal chat">
+            <MessageSquare size={18} /> Chat
+            {unread > 0 && (
+                <span style={{ marginLeft: 'auto', background: '#ef4444', color: 'white',
+                               borderRadius: 10, padding: '0 6px', fontSize: '0.65rem', fontWeight: 700 }}>
+                    {unread}
+                </span>
+            )}
+        </NavLink>
     );
 }
 
@@ -847,6 +883,9 @@ function AppShell() {
                 <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/module/:groupId" element={<ModuleLauncher />} />
+                    <Route path="/chat" element={
+                        <ProtectedRoute anyModules={['chat_use','chat_admin']}><Chat /></ProtectedRoute>
+                    } />
 
                     <Route path="/coa" element={
                         <ProtectedRoute moduleKey="finance_coa"><ChartOfAccounts /></ProtectedRoute>
