@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { Loader2, RefreshCw, Printer, FileSpreadsheet } from 'lucide-react';
 import ReportPrintHeader from '../../components/ReportPrintHeader';
+import { Paginator } from './Paginator';
 
 // CSV downloader used by ReportShell's Excel button. Emits UTF-8 with BOM so
 // Excel handles non-ASCII characters (e.g. Urdu customer names) correctly.
@@ -57,6 +58,16 @@ export default function ReportShell({
     // 2026-07-14. CSV works because Excel opens .csv as a spreadsheet — no
     // xlsx library dependency needed.
     excelExport,
+    // Owner ask 2026-07-18: client-side pagination is on by default. If the
+    // payload has a `rows` array, ReportShell slices it before handing it to
+    // the child render function and renders a Paginator strip at the bottom.
+    // Reports whose payload doesn't have `rows` (Balance Sheet, P&L, etc.)
+    // are unaffected — the strip stays hidden because sourceRows is null.
+    // Pass `paginate={false}` to opt out (rare) or `paginate={{ key:'foo',
+    // size:100 }}` to point at a different array or override the page size.
+    // Excel export always sees the full unfiltered array — the cursor never
+    // truncates exports.
+    paginate = true,
 }) {
     const [params, setParams] = useState(defaultParams);
     const [data, setData]     = useState(null);
@@ -78,6 +89,27 @@ export default function ReportShell({
     useEffect(() => { load(); }, [load]);
 
     const updateParam = (k, v) => setParams(p => ({ ...p, [k]: v }));
+
+    // ---- Pagination: slice data[key] transparently ----
+    const pgCfg = useMemo(() => {
+        if (!paginate) return null;
+        if (typeof paginate === 'object') return { key: paginate.key || 'rows', size: paginate.size || 50 };
+        return { key: paginate === true ? 'rows' : paginate, size: 50 };
+    }, [paginate]);
+    const [page, setPage]         = useState(1);
+    const [pageSize, setPageSize] = useState(pgCfg?.size || 50);
+    // Reset to page 1 whenever the underlying rows change (new filter, etc.)
+    const sourceRows = pgCfg && data && Array.isArray(data[pgCfg.key]) ? data[pgCfg.key] : null;
+    useEffect(() => { setPage(1); }, [sourceRows]);
+    const totalRows  = sourceRows ? sourceRows.length : 0;
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const safePage   = Math.min(Math.max(1, page), totalPages);
+    const pagedData  = useMemo(() => {
+        if (!pgCfg || !data) return data;
+        if (!sourceRows) return data;
+        const start = (safePage - 1) * pageSize;
+        return { ...data, [pgCfg.key]: sourceRows.slice(start, start + pageSize) };
+    }, [pgCfg, data, sourceRows, safePage, pageSize]);
 
     const printedAt = new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
     const filterSummary = typeof printFilterSummary === 'function'
@@ -118,6 +150,8 @@ export default function ReportShell({
                     {excelExport && (
                         <button type="button" className="erp-btn erp-btn-sm"
                             onClick={() => {
+                                // Export always uses the FULL unfiltered data
+                                // regardless of the current page cursor.
                                 const spec = excelExport(data, params);
                                 if (!spec || !spec.headers) return;
                                 downloadCsv(spec.filename || `${endpoint.replace(/\//g,'-')}.csv`,
@@ -137,7 +171,17 @@ export default function ReportShell({
             {err && (
                 <div className="erp-alert danger">{err}</div>
             )}
-            {data && children(data, { params, updateParam, reload: load, loading, Icon })}
+            {data && children(pagedData, { params, updateParam, reload: load, loading, Icon })}
+            {pgCfg && totalRows > pageSize && (
+                <Paginator
+                    page={safePage}
+                    pageSize={pageSize}
+                    totalRows={totalRows}
+                    totalPages={totalPages}
+                    onPageChange={setPage}
+                    onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
+                />
+            )}
         </div>
     );
 }
