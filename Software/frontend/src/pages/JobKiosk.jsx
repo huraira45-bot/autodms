@@ -50,12 +50,10 @@ export default function JobKiosk() {
         return () => clearInterval(iv);
     }, []);
 
-    // Optional: business name from the public business-profile endpoint (best effort).
-    useEffect(() => {
-        axios.get('/api/settings/business-profile/public')
-            .then(r => { if (r.data?.CompanyName) setBusinessName(r.data.CompanyName); })
-            .catch(() => {});
-    }, []);
+    // (Business name previously fetched from a hypothetical
+    // /api/settings/business-profile/public endpoint. That path sits behind
+    // the auth middleware, so anonymous kiosk visitors got 401 → the global
+    // axios interceptor kicked them to /login. Fixed value only.)
 
     // Group by status; keep the STATUSES order.
     const groups = STATUSES.map(s => ({
