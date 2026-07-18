@@ -61,6 +61,7 @@ const SECTIONS = [
         items: [
             { key: 'finance_coa',       label: 'Chart of Accounts',       kind: 'document' },
             { key: 'finance_vouchers',  label: 'Vouchers (CPV/CRV/BPV/BRV/JV)', kind: 'document' },
+            { key: 'finance_voucher_backdate', label: 'Edit posted CPV/CRV/BPV/BRV (within 30 days)', kind: 'workflow' },
             { key: 'accounting_setup',  label: 'Accounting Setup (Banks, Roles)', kind: 'document' },
             { key: 'payments',          label: 'Receive / Make Payment',  kind: 'workflow' },
             { key: 'finance_cheques',   label: 'Cheque Clearance',        kind: 'workflow' },

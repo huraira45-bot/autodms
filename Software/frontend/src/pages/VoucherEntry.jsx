@@ -32,6 +32,19 @@ function Badge({ status }) {
     );
 }
 
+// Owner ask 2026-07-18: users with `finance_voucher_backdate` can edit
+// posted CPV/CRV/BPV/BRV within the last 30 days. Mirrors the backend
+// helper in accountController.js — keep both in sync if the window changes.
+const BACKDATE_WINDOW_DAYS = 30;
+function isWithinBackdateWindow(dt) {
+    if (!dt) return false;
+    const d = new Date(dt);
+    if (Number.isNaN(d.getTime())) return false;
+    const today  = new Date(); today.setHours(23, 59, 59, 999);
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - BACKDATE_WINDOW_DAYS); cutoff.setHours(0, 0, 0, 0);
+    return d >= cutoff && d <= today;
+}
+
 export default function VoucherEntry({ forceTypeCode, title }) {
     const { hasModule } = useAuth();
     const { canInsert, canEdit, canDelete } = useCan('finance_vouchers');
@@ -256,13 +269,25 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         // editable (opening balances / prior-period reclassifications /
         // corrections) — backend enforces the same rule. Reversed or
         // reversing vouchers are always locked.
+        // Owner ask 2026-07-18: users with `finance_voucher_backdate` may
+        // also edit Posted CPV/CRV/BPV/BRV within a 5-day window; keep
+        // their original date so backend can validate it.
         const isJV = active.VoucherTypeCode === 'JV';
+        const canBackdateReceiptsPayments = hasModule('finance_voucher_backdate');
+        const isBackdateEligible = canBackdateReceiptsPayments
+            && !isJV
+            && active.Status === 'Posted'
+            && !active.ReversesVoucherID
+            && isWithinBackdateWindow(active.VoucherDate);
         const allowed = active.Status === 'Draft'
-            || (isJV && active.Status === 'Posted' && !active.ReversesVoucherID);
+            || (isJV && active.Status === 'Posted' && !active.ReversesVoucherID)
+            || isBackdateEligible;
         if (!allowed) return;
         setHeader({
-            // JV keeps its existing date; other types are forced to today.
-            VoucherDate: isJV
+            // JV keeps its existing date. Backdate-eligible CPV/CRV/BPV/BRV
+            // keep their original date so the user can shift it inside the
+            // window. Everything else defaults to today.
+            VoucherDate: (isJV || isBackdateEligible)
                 ? new Date(active.VoucherDate).toISOString().split('T')[0]
                 : todayStr,
             VoucherTypeID: active.VoucherTypeID,
@@ -409,16 +434,21 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         const canFinalize  = status === 'Draft'  && hasModule('finalize');
         const canUnfReq    = status === 'Posted' && hasModule('finalize');
         const isReversed   = status === 'Reversed';
-        // Only JV vouchers get the Change Date affordance — CPV/CRV/BPV/BRV
-        // stay locked to today because they represent physical cash/bank
-        // movement.
+        // JV vouchers can always change date. CPV/CRV/BPV/BRV can change
+        // date if the user holds finance_voucher_backdate AND the voucher
+        // is dated within the last 5 days (owner ask 2026-07-18).
         const isJV         = active.VoucherTypeCode === 'JV';
-        const canChangeDate = canEdit && !isReversed && isJV && !active.ReversesVoucherID;
-        // Full-value edit: Draft (any type) OR Posted JVs. Backend enforces
-        // the same policy on the PUT endpoint. Reversed / reversing
-        // vouchers are always locked.
+        const canBackdateRP = hasModule('finance_voucher_backdate');
+        const rpBackdateOk  = canBackdateRP && !isJV
+            && status === 'Posted'
+            && !active.ReversesVoucherID
+            && isWithinBackdateWindow(active.VoucherDate);
+        const canChangeDate = canEdit && !isReversed && !active.ReversesVoucherID
+            && (isJV || rpBackdateOk);
+        // Full-value edit: Draft (any type), Posted JVs, or Posted CPV/CRV/
+        // BPV/BRV within the backdate window when the user has permission.
         const canEditValues = canEdit && !isReversed && !active.ReversesVoucherID &&
-            (status === 'Draft' || (isJV && status === 'Posted'));
+            (status === 'Draft' || (isJV && status === 'Posted') || rpBackdateOk);
 
         // Line count / total for the smart-button row.
         const linesCount = (active.lines || []).length;
@@ -497,10 +527,17 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                                 <Edit3 size={14} /> Change Date
                             </button>
                         )}
-                        {dateEditOpen && (
+                        {dateEditOpen && (() => {
+                            // JV allows any date; CPV/CRV/BPV/BRV is capped to the 5-day window.
+                            const isJVRow = active.VoucherTypeCode === 'JV';
+                            const cutoffDate = new Date(); cutoffDate.setDate(cutoffDate.getDate() - BACKDATE_WINDOW_DAYS);
+                            const minStr = isJVRow ? undefined : cutoffDate.toISOString().split('T')[0];
+                            const maxStr = isJVRow ? undefined : todayStr;
+                            return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 8px', border: '1px solid var(--erp-border)', borderRadius: 4, background: 'var(--erp-surface-alt)' }}>
                                 <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>New date:</span>
                                 <input type="date" value={dateEditVal}
+                                       min={minStr} max={maxStr}
                                        onChange={e => setDateEditVal(e.target.value)}
                                        style={{ padding: '2px 6px', fontSize: 12 }} />
                                 <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={submitDateChange} disabled={busy || !dateEditVal}>
@@ -510,7 +547,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                                     Cancel
                                 </button>
                             </div>
-                        )}
+                            );
+                        })()}
                         {isReversed && (
                             <div className="erp-alert danger" style={{ margin: 0 }}>
                                 <AlertTriangle size={14} />
@@ -750,11 +788,47 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     <FileText size={20} /><strong>Voucher Header</strong>
                 </div>
                 <div className="grid-3">
-                    <div className="form-group">
-                        <label>Date <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>(today only)</span></label>
-                        <input type="date" value={todayStr} min={todayStr} max={todayStr} readOnly disabled
-                               title="Policy: vouchers are always posted with today's date — backdate / future-date are blocked." />
-                    </div>
+                    {(() => {
+                        // For a brand-new voucher: locked to today.
+                        // For a Posted JV being edited: keep the existing date, no constraints.
+                        // For a Posted CPV/CRV/BPV/BRV within the 5-day window: allow shifting
+                        //   inside [today − 5, today]. Backend re-validates on save.
+                        const editingActive = editingId && active;
+                        const editingJV = editingActive && active.VoucherTypeCode === 'JV' && active.Status === 'Posted';
+                        const editingBackdate = editingActive
+                            && active.VoucherTypeCode !== 'JV'
+                            && active.Status === 'Posted'
+                            && hasModule('finance_voucher_backdate')
+                            && isWithinBackdateWindow(active.VoucherDate);
+                        if (editingJV) {
+                            return (
+                                <div className="form-group">
+                                    <label>Date <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>(JV — any date)</span></label>
+                                    <input type="date" value={header.VoucherDate}
+                                           onChange={e => setHeader({ ...header, VoucherDate: e.target.value })} />
+                                </div>
+                            );
+                        }
+                        if (editingBackdate) {
+                            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - BACKDATE_WINDOW_DAYS);
+                            const minStr = cutoff.toISOString().split('T')[0];
+                            return (
+                                <div className="form-group">
+                                    <label>Date <span style={{ fontSize: 11, color: '#059669', fontWeight: 400 }}>(within last {BACKDATE_WINDOW_DAYS} days)</span></label>
+                                    <input type="date" value={header.VoucherDate}
+                                           min={minStr} max={todayStr}
+                                           onChange={e => setHeader({ ...header, VoucherDate: e.target.value })} />
+                                </div>
+                            );
+                        }
+                        return (
+                            <div className="form-group">
+                                <label>Date <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>(today only)</span></label>
+                                <input type="date" value={todayStr} min={todayStr} max={todayStr} readOnly disabled
+                                       title="Policy: vouchers are always posted with today's date — backdate / future-date are blocked." />
+                            </div>
+                        );
+                    })()}
                     <div className="form-group">
                         <label>Voucher Type</label>
                         <select value={header.VoucherTypeID} onChange={e => setHeader({...header, VoucherTypeID: e.target.value})} disabled={!!forceTypeCode}>

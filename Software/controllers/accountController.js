@@ -26,6 +26,29 @@ function checkVoucherDateIsToday(input) {
         : 'Back-dated vouchers are not allowed. Please use today\'s date.';
 }
 
+// Owner ask 2026-07-18: a user with `finance_voucher_backdate` can edit
+// posted CPV/CRV/BPV/BRV vouchers dated within the last N days. Window
+// widened from 5 to 30 days later the same day so the cashier can
+// correct receipts across a full month-end cycle.
+// Returns null if the date is within [today − n, today]; a message otherwise.
+const BACKDATE_WINDOW_DAYS = 30;
+function checkVoucherDateWithinBackdateWindow(input) {
+    if (!input) return null;
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) return 'Voucher date is invalid.';
+    const today   = new Date(); today.setHours(23, 59, 59, 999);
+    const cutoff  = new Date(); cutoff.setDate(cutoff.getDate() - BACKDATE_WINDOW_DAYS); cutoff.setHours(0, 0, 0, 0);
+    if (d > today)   return 'Future-dated vouchers are not allowed.';
+    if (d < cutoff)  return `Edit is only allowed for vouchers dated within the last ${BACKDATE_WINDOW_DAYS} days.`;
+    return null;
+}
+
+function userHasBackdatePermission(req) {
+    if (req?.user?.groupId === 1) return true;
+    return Array.isArray(req?.user?.permissions)
+        && req.user.permissions.includes('finance_voucher_backdate');
+}
+
 exports.addAccount = async (req, res) => {
     try {
         const { GLTitle, GLLevel, GLNature, isParent, ParentCode, ClassRoot } = req.body;
@@ -451,20 +474,30 @@ exports.updateVoucherDate = async (req, res) => {
 
         const pool = await getPool();
         const head = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT v.VoucherID, v.Status, v.ReversesVoucherID, t.Title AS VoucherType
+            .query(`SELECT v.VoucherID, v.Status, v.ReversesVoucherID, v.VoucherDate, t.Title AS VoucherType
                     FROM   data_FinanceVoucherInfo v
                     JOIN   GLVoucherType t ON v.VoucherTypeID = t.Voucherid
                     WHERE  v.VoucherID = @id`);
         if (!head.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
         const row = head.recordset[0];
-        if (row.VoucherType !== 'JV') {
-            return res.status(400).json({ error: `Only Journal Vouchers (JV) can be back-dated. This is a ${row.VoucherType}.` });
-        }
         if (row.ReversesVoucherID) {
             return res.status(400).json({ error: 'Cannot change the date on a reversing voucher.' });
         }
         if (row.Status !== 'Posted' && row.Status !== 'Draft') {
             return res.status(400).json({ error: `Voucher is in status "${row.Status}" and cannot be edited.` });
+        }
+
+        const isJV = row.VoucherType === 'JV';
+        if (!isJV) {
+            // CPV/CRV/BPV/BRV are gated behind finance_voucher_backdate and
+            // must sit inside the last 5 days (both original + new).
+            if (!userHasBackdatePermission(req)) {
+                return res.status(403).json({ error: `Editing ${row.VoucherType} dates requires the "Edit posted CPV/CRV/BPV/BRV" permission.` });
+            }
+            const originalErr = checkVoucherDateWithinBackdateWindow(row.VoucherDate);
+            if (originalErr) return res.status(409).json({ error: `This voucher was posted ${originalErr.replace(/^Edit is only allowed for vouchers /, '')}. Reverse it if a correction is needed.` });
+            const newErr = checkVoucherDateWithinBackdateWindow(d);
+            if (newErr) return res.status(400).json({ error: newErr });
         }
 
         await pool.request()
@@ -494,13 +527,16 @@ exports.updateVoucher = async (req, res) => {
             return res.status(400).json({ error: 'Debits and credits must balance.' });
 
         const pool = await getPool();
-        // Load current voucher header + type so we can decide what edits
-        // are allowed. JVs (opening balances, prior-period adjustments,
+        // Load current voucher header + type + date so we can decide what
+        // edits are allowed. JVs (opening balances, prior-period adjustments,
         // reclassifications) can be edited in Draft OR Posted state and
-        // may carry any date. Other types (CPV/CRV/BPV/BRV) stay
-        // Draft-only + today-only per the daily-cash-movement policy.
+        // may carry any date. Other types (CPV/CRV/BPV/BRV) are Draft +
+        // today-only by default, but a user holding the workflow permission
+        // `finance_voucher_backdate` can edit them in Posted state provided
+        // BOTH the original and the incoming date are within a 5-day window
+        // (owner ask 2026-07-18 — cashier corrections).
         const check = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT v.Status, v.ReversesVoucherID, t.Title AS VoucherType
+            .query(`SELECT v.Status, v.ReversesVoucherID, v.VoucherDate, t.Title AS VoucherType
                     FROM   data_FinanceVoucherInfo v
                     JOIN   GLVoucherType t ON v.VoucherTypeID = t.Voucherid
                     WHERE  v.VoucherID = @id`);
@@ -513,10 +549,22 @@ exports.updateVoucher = async (req, res) => {
         if (row.Status === 'Reversed') {
             return res.status(409).json({ error: 'Voucher is already Reversed and cannot be edited.' });
         }
-        if (!isJV && row.Status !== 'Draft') {
+
+        const hasBackdate = userHasBackdatePermission(req);
+        const isBackdateEdit = !isJV && row.Status === 'Posted' && hasBackdate;
+        if (isBackdateEdit) {
+            // Original voucher must itself sit inside the window.
+            const originalErr = checkVoucherDateWithinBackdateWindow(row.VoucherDate);
+            if (originalErr) {
+                return res.status(409).json({ error: `This voucher was posted ${originalErr.replace(/^Edit is only allowed for vouchers /, '')}. Reverse it if a correction is needed.` });
+            }
+            // New date must also be within the window.
+            const newErr = checkVoucherDateWithinBackdateWindow(VoucherDate);
+            if (newErr) return res.status(400).json({ error: newErr });
+        } else if (!isJV && row.Status !== 'Draft') {
             return res.status(409).json({ error: `Only Draft vouchers can be edited for this type. Current status: ${row.Status}. JV vouchers can be edited in Posted state; other types must be reversed and re-entered.` });
-        }
-        if (!isJV) {
+        } else if (!isJV) {
+            // Draft CPV/CRV/BPV/BRV — still restrict to today.
             const dateErr = checkVoucherDateIsToday(VoucherDate);
             if (dateErr) return res.status(400).json({ error: dateErr });
         }
