@@ -1,6 +1,6 @@
 import React, { useState, Children } from 'react';
 import axios from 'axios';
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation, matchPath } from 'react-router-dom';
 import {
     Car, Users, Building, Settings as SettingsIcon, LayoutDashboard, Database,
     Wrench, Package, FileInput, FileOutput, ShoppingCart, Undo2, Landmark,
@@ -1238,21 +1238,35 @@ function AppShell() {
     );
 }
 
+// Top-level dispatcher: explicit pathname check so public routes bypass
+// AuthProvider entirely. Relying on <Route path="/*"> ranking alongside the
+// specific /kiosk/jobs and /survey/:token routes was letting the splat win
+// under react-router-dom v7 — every request to /kiosk/jobs bounced through
+// AppShell, hit the `if (!user) return <Login />` guard, and landed on the
+// sign-in page. matchPath here is deterministic.
+function RootDispatcher() {
+    const { pathname } = useLocation();
+    if (pathname === '/kiosk/jobs') return <JobKiosk />;
+    // Survey needs its :token path param exposed via useParams, so it stays
+    // inside a matched <Route>.
+    if (matchPath('/survey/:token', pathname)) {
+        return (
+            <Routes>
+                <Route path="/survey/:token" element={<SurveyPublic />} />
+            </Routes>
+        );
+    }
+    return (
+        <AuthProvider>
+            <AppShell />
+        </AuthProvider>
+    );
+}
+
 function App() {
     return (
         <BrowserRouter>
-            <Routes>
-                {/* Public, unauthenticated route — customers tap this from a WhatsApp/SMS link */}
-                <Route path="/survey/:token" element={<SurveyPublic />} />
-                {/* Public lobby-TV job status board — no login, no sidebar */}
-                <Route path="/kiosk/jobs" element={<JobKiosk />} />
-                {/* Everything else goes through the app shell behind AuthProvider */}
-                <Route path="/*" element={
-                    <AuthProvider>
-                        <AppShell />
-                    </AuthProvider>
-                } />
-            </Routes>
+            <RootDispatcher />
         </BrowserRouter>
     );
 }
