@@ -69,6 +69,23 @@ export default function ModuleLauncher() {
 
     const renderTile = (it) => {
         const T = it.icon;
+        // `newTab: true` on the nav entry opens the tile in a fresh window —
+        // used for the public kiosk / big-screen displays where the operator
+        // wants to keep their current session tab open. Falls back to a
+        // regular in-app Link for everything else.
+        if (it.newTab) {
+            return (
+                <a key={it.id} href={it.path} target="_blank" rel="noreferrer" className="module-tile">
+                    <div className="module-tile-icn"><T size={18} /></div>
+                    <div className="module-tile-body">
+                        <div className="module-tile-title">{it.label}</div>
+                        {it.description && (
+                            <div className="module-tile-desc">{it.description}</div>
+                        )}
+                    </div>
+                </a>
+            );
+        }
         return (
             <Link key={it.id} to={it.path} className="module-tile">
                 <div className="module-tile-icn"><T size={18} /></div>

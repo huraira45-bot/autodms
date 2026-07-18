@@ -23,7 +23,7 @@ import {
     SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
     ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
     Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
-    Gauge, ScrollText,
+    Gauge, ScrollText, Monitor,
 } from 'lucide-react';
 
 // Top-level module groups (order = sidebar order). Each has an id / label /
@@ -65,6 +65,7 @@ export const NAV_ITEMS = [
     { id: 'w-access',    moduleGroup: 'workshop', label: 'Accessories',          path: '/workshop/accessories',     icon: Boxes,          moduleKey: 'workshop_accessories', description: 'JC accessory checklist master.', keywords: 'accessory' },
     { id: 'w-ctrl',      moduleGroup: 'workshop', label: 'Job Controller',       path: '/workshop/controller',      icon: Gauge,          moduleKey: 'workshop_controller', description: 'Real-time RO status board.', keywords: 'status bay', isQueue: true },
     { id: 'w-gatepass',  moduleGroup: 'workshop', label: 'Gate Pass',            path: '/gatepass',                 icon: ClipboardCheck, moduleKey: 'workshop_gatepass',  description: 'Issue and audit vehicle gate passes.', keywords: 'gate exit' },
+    { id: 'w-kiosk',     moduleGroup: 'workshop', label: 'Lobby Job Kiosk',      path: '/kiosk/jobs',               icon: Monitor,        moduleKey: 'workshop_jobs',      description: 'Big-screen public job status board (opens in a new tab).', keywords: 'kiosk tv lobby big-screen', newTab: true },
 
     // ── Parts & Inventory ────────────────────────────────────
     { id: 'p-spare',     moduleGroup: 'parts', label: 'Spare Parts',              path: '/parts',        icon: Package, moduleKey: 'parts_spare',           description: 'Parts master + stock.', keywords: 'inventory items', priority: 6 },
