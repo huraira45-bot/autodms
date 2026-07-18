@@ -1,18 +1,21 @@
-// Public "Job Performance" big-screen — designed for a lobby TV.
+// Public "Service Performance Board" big-screen — designed for a lobby TV.
 // No login required. Auto-refreshes every 15s. Shows every draft JC opened
-// today except warranty (WR) and B&P types, grouped by status in a
-// bay-style layout with light colours, gentle animations, and a live
-// clock so customers waiting in the lounge can spot their vehicle.
+// today except warranty (WR) / B&P / CT types, grouped by status in a
+// bay-style layout with light colours, gentle animations, a live clock,
+// per-JC progress bar, active bay/technician chip, and a floor-plan mini-
+// map. Survives LAN dropouts via a 10-minute localStorage cache.
 //
-// Route:  /kiosk/jobs   (renders full-viewport, no sidebar / header)
-import React, { useEffect, useMemo, useState } from 'react';
+// Route: /kiosk/jobs (renders full-viewport, no sidebar / header)
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
     Clock, Wrench, ShieldCheck, Droplets, CheckCircle,
-    Car, Sparkles,
+    Car, Sparkles, MapPin, User,
 } from 'lucide-react';
 
 const REFRESH_MS = 15_000;
+const CACHE_KEY  = 'kiosk:cache';
+const CACHE_TTL_MS = 10 * 60_000;   // 10 minutes — beyond that we hide stale data
 
 const STATUSES = [
     { key: 'Waiting For Service',   short: 'Waiting Bay',    icon: Clock,       accent: '#f59e0b', soft: '#fef3c7', ring: '#fcd34d' },
@@ -46,24 +49,58 @@ const KEYFRAMES = `
     50%  { opacity: 1;   }
     100% { opacity: 0.6; }
 }
+@keyframes bayProgressGrow {
+    from { width: 0; }
+    to   { width: var(--pct); }
+}
 `;
 
 const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '';
 
+// --- localStorage cache helpers (survive LAN dropouts) ------------------
+// Read cache; return null if empty or older than TTL.
+function readCache() {
+    try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.at || !Array.isArray(parsed?.jobs)) return null;
+        if (Date.now() - parsed.at > CACHE_TTL_MS) return null;
+        return parsed;
+    } catch { return null; }
+}
+function writeCache(jobs) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), jobs })); }
+    catch { /* quota / private mode — silently ignore */ }
+}
+
 export default function JobKiosk() {
-    const [jobs, setJobs]     = useState([]);
+    // Seed from cache so a cold-load with a dead backend still shows
+    // something instead of flashing "Reconnecting…".
+    const cached = readCache();
+    const [jobs, setJobs]     = useState(cached?.jobs || []);
+    const [staleAt, setStale] = useState(cached ? cached.at : null);
     const [now, setNow]       = useState(new Date());
     const [error, setError]   = useState(null);
 
-    // Poll every 15s
+    // Poll every 15s. On success clear stale marker + refresh cache. On
+    // failure, keep whatever we last showed and mark the header stale.
     useEffect(() => {
         let cancelled = false;
         const load = async () => {
             try {
                 const r = await axios.get('/api/kiosk/jobs-live');
-                if (!cancelled) { setJobs(r.data || []); setError(null); }
+                if (cancelled) return;
+                const list = r.data || [];
+                setJobs(list);
+                setError(null);
+                setStale(null);
+                writeCache(list);
             } catch (e) {
-                if (!cancelled) setError(e.message);
+                if (cancelled) return;
+                setError(e.message);
+                const c = readCache();
+                if (c) { setJobs(c.jobs); setStale(c.at); }
             }
         };
         load();
@@ -84,25 +121,31 @@ export default function JobKiosk() {
         })), [jobs]);
 
     const totalOnFloor = jobs.length;
+    const readyCount   = groups[groups.length - 1].jobs.length;
 
     return (
         <div style={S.page}>
             <style>{KEYFRAMES}</style>
 
-            {/* HEADER */}
+            {/* HEADER — co-branded, live clock, counters, stale indicator */}
             <div style={S.header}>
                 <div style={S.brandRow}>
+                    {/* TODO: swap the text badges for real SVGs at
+                        assets/logo-changan.svg + assets/logo-saher.svg once
+                        marketing shares them. */}
+                    <div style={S.brandChangan}>MASTER<br/>CHANGAN</div>
                     <div style={S.brandBadge}>
                         <Car size={26} strokeWidth={2.4} />
                     </div>
                     <div>
                         <div style={S.brandLabel}>Service Performance Board</div>
-                        <div style={S.brandTitle}>Live Workshop Status</div>
+                        <div style={S.brandTitle}>Saher · Live Workshop Status</div>
                     </div>
+                    {staleAt && <StaleChip at={staleAt} />}
                 </div>
                 <div style={S.headerCounters}>
                     <Counter label="On the floor" value={totalOnFloor} accent="#0f172a" />
-                    <Counter label="Ready for pickup" value={groups[groups.length - 1].jobs.length} accent="#16a34a" />
+                    <Counter label="Ready for pickup" value={readyCount} accent="#16a34a" />
                 </div>
                 <div style={S.clockBlock}>
                     <div style={S.clock}>
@@ -151,15 +194,18 @@ export default function JobKiosk() {
                 ))}
             </div>
 
+            {/* FLOOR PLAN MINI-MAP */}
+            <FloorPlan jobs={jobs} />
+
             {/* TICKER + STATUS STRIP */}
             <div style={S.footer}>
-                {error ? (
+                {error && !staleAt ? (
                     <div style={S.errStrip}>Reconnecting… ({error})</div>
                 ) : (
                     <div style={S.tickerWrap}>
                         <span style={S.tickerLabel}>READY FOR PICKUP</span>
                         <span style={S.tickerText}>
-                            {groups[groups.length - 1].jobs.length === 0
+                            {readyCount === 0
                                 ? 'No vehicles ready yet — thank you for your patience.'
                                 : groups[groups.length - 1].jobs.map(j =>
                                     `${j.VehicleRegNo}${j.CustomerFirstName ? ` · ${j.CustomerFirstName}` : ''}`).join('   ✦   ')}
@@ -177,6 +223,14 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
     const inMin = Math.max(0, Math.floor(inMs / 60000));
     const inLabel = inMin < 60 ? `${inMin}m` : `${Math.floor(inMin/60)}h ${inMin%60}m`;
     const overdue = inMin > 180;   // > 3 hours on floor → subtle amber cue
+
+    const total = Number(j.LabourTotal) || 0;
+    const done  = Number(j.LabourDone)  || 0;
+    const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    const activeBay  = j.ActiveBay;
+    const activeTech = j.ActiveTechnician;
+    const hasActive  = !!(activeBay || activeTech);
 
     // Staggered fade-in so a fresh page load doesn't blast everything at once.
     const cardStyle = {
@@ -212,6 +266,26 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
                     <div style={S.customer}>{j.CustomerFirstName || '—'}</div>
                     <div style={S.advisor}>{j.ServiceAdvisor || ''}</div>
                 </div>
+
+                {/* Progress bar — labour lines with JobEndTime filled */}
+                <ProgressRow total={total} done={done} pct={pct} accent={accent} soft={soft} />
+
+                {/* Active bay + tech chip — only when something is actively running */}
+                {hasActive && (
+                    <div style={S.chipRow}>
+                        {activeBay && (
+                            <span style={{ ...S.chip, borderColor: accent, color: accent }}>
+                                <MapPin size={10} /> Bay {activeBay}
+                            </span>
+                        )}
+                        {activeTech && (
+                            <span style={{ ...S.chip, borderColor: '#cbd5e1', color: '#334155' }}>
+                                <User size={10} /> {activeTech}
+                            </span>
+                        )}
+                    </div>
+                )}
+
                 <div style={S.cardBottom}>
                     <span>In · {fmtTime(j.ReceiptDate)}</span>
                     <span style={{ color: overdue ? '#b45309' : '#94a3b8', fontWeight: overdue ? 700 : 500 }}>
@@ -223,12 +297,114 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
     );
 }
 
+// Progress bar row. When LabourTotal=0 (fresh JC, no labour lines yet) shows
+// a subdued "warming up" hint instead of a false 100%.
+function ProgressRow({ total, done, pct, accent, soft }) {
+    if (total === 0) {
+        return (
+            <div style={S.progressWrap}>
+                <div style={{ ...S.progressTrack, background: soft }}>
+                    <div style={{
+                        ...S.progressFill,
+                        width: '15%', background: `linear-gradient(90deg, ${accent}66, transparent)`,
+                        animation: 'bayShimmer 3s linear infinite',
+                    }} />
+                </div>
+                <div style={S.progressLine}>
+                    <span style={S.progressLabel}>Awaiting job details</span>
+                    <span style={S.progressPct}>—</span>
+                </div>
+            </div>
+        );
+    }
+    return (
+        <div style={S.progressWrap}>
+            <div style={{ ...S.progressTrack, background: soft }}>
+                <div style={{
+                    ...S.progressFill,
+                    width: `${pct}%`,
+                    background: accent,
+                    // CSS var used by the grow keyframe so cards refresh a
+                    // smooth animation to their new width each poll.
+                    '--pct': `${pct}%`,
+                    animation: 'bayProgressGrow 0.6s ease-out',
+                }} />
+            </div>
+            <div style={S.progressLine}>
+                <span style={S.progressLabel}>{done}/{total} jobs done</span>
+                <span style={{ ...S.progressPct, color: accent }}>{pct}%</span>
+            </div>
+        </div>
+    );
+}
+
+// ----- Floor plan mini-map --------------------------------------------
+// Single-line horizontal strip. One square per bay code appearing on
+// today's jobs (natural sort). Each square shows bay code + plate of the
+// car currently in it. Bays with no active JC render dimmed. Deliberately
+// compact — 1080p TV fits ~12 bays before scrolling starts.
+function FloorPlan({ jobs }) {
+    const bays = useMemo(() => {
+        // Collect every bay that has an active labour line (ActiveBay set).
+        // We only care about bays currently in use; empty bays we haven't
+        // heard of at all stay off the map to avoid guessing capacity.
+        const map = new Map(); // bayCode → { code, jc }
+        for (const j of jobs) {
+            const bay = (j.ActiveBay || '').toString().trim();
+            if (!bay) continue;
+            if (!map.has(bay)) map.set(bay, { code: bay, jc: j });
+        }
+        // Natural sort: pure-numeric bays first (numerically), then the rest alpha.
+        return [...map.values()].sort((a, b) => {
+            const na = Number(a.code), nb = Number(b.code);
+            const aNum = Number.isFinite(na), bNum = Number.isFinite(nb);
+            if (aNum && bNum) return na - nb;
+            if (aNum) return -1;
+            if (bNum) return 1;
+            return a.code.localeCompare(b.code);
+        });
+    }, [jobs]);
+
+    if (bays.length === 0) return null;
+
+    return (
+        <div style={S.floorWrap}>
+            <div style={S.floorTitle}>
+                <MapPin size={14} /> Workshop Floor
+            </div>
+            <div style={S.floorRow}>
+                {bays.map(b => (
+                    <div key={b.code} style={S.floorBay}>
+                        <div style={S.floorBayCode}>Bay {b.code}</div>
+                        <div style={S.floorBayPlate}>{b.jc.VehicleRegNo || '—'}</div>
+                        {b.jc.ActiveTechnician && (
+                            <div style={S.floorBayTech}>{b.jc.ActiveTechnician}</div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 // ----- Small components -----------------------------------------------
 function Counter({ label, value, accent }) {
     return (
         <div style={S.counter}>
             <div style={{ ...S.counterValue, color: accent }}>{value}</div>
             <div style={S.counterLabel}>{label}</div>
+        </div>
+    );
+}
+
+// "Last update HH:MM" chip — appears when the poll is failing but we still
+// have cached data less than the TTL old. Subtle amber so a customer can
+// still read the board while staff sees that the data isn't live.
+function StaleChip({ at }) {
+    const label = new Date(at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+    return (
+        <div style={S.staleChip} title="Live feed unavailable — showing last known state">
+            <Clock size={12} /> Last update {label}
         </div>
     );
 }
@@ -246,55 +422,69 @@ const S = {
         display: 'grid',
         gridTemplateColumns: '1fr auto auto',
         alignItems: 'center', gap: 32,
-        padding: '18px 30px',
+        padding: '14px 28px',
         background: 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.72))',
         borderBottom: '1px solid #e2e8f0',
         backdropFilter: 'blur(6px)',
     },
-    brandRow: { display: 'flex', alignItems: 'center', gap: 16 },
+    brandRow: { display: 'flex', alignItems: 'center', gap: 14 },
+    brandChangan: {
+        background: '#e11d48', color: 'white',
+        padding: '6px 10px', borderRadius: 6,
+        fontSize: '0.7rem', fontWeight: 800, lineHeight: 1.1,
+        letterSpacing: '0.06em', textAlign: 'center',
+        boxShadow: '0 3px 8px rgba(225,29,72,0.28)',
+    },
     brandBadge: {
-        width: 52, height: 52, borderRadius: 14,
+        width: 46, height: 46, borderRadius: 12,
         background: 'linear-gradient(135deg, #4f46e5, #2563eb)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'white', boxShadow: '0 6px 14px rgba(37,99,235,0.35)',
     },
     brandLabel: {
-        fontSize: '0.75rem', color: '#64748b', letterSpacing: '0.25em',
+        fontSize: '0.72rem', color: '#64748b', letterSpacing: '0.25em',
         textTransform: 'uppercase', fontWeight: 700,
     },
     brandTitle: {
-        fontSize: '1.7rem', fontWeight: 800, color: '#0f172a',
+        fontSize: '1.55rem', fontWeight: 800, color: '#0f172a',
         lineHeight: 1.15, marginTop: 2,
     },
-    headerCounters: { display: 'flex', gap: 20 },
+    staleChip: {
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: '#fef3c7', color: '#92400e',
+        border: '1px solid #fde68a',
+        padding: '3px 10px', borderRadius: 999,
+        fontSize: '0.72rem', fontWeight: 700, marginLeft: 12,
+    },
+    headerCounters: { display: 'flex', gap: 18 },
     counter: {
-        background: 'white', padding: '10px 20px', borderRadius: 12,
-        border: '1px solid #e2e8f0', minWidth: 130, textAlign: 'center',
+        background: 'white', padding: '8px 18px', borderRadius: 12,
+        border: '1px solid #e2e8f0', minWidth: 120, textAlign: 'center',
         boxShadow: '0 2px 6px rgba(15,23,42,0.05)',
     },
-    counterValue: { fontSize: '2rem', fontWeight: 800, lineHeight: 1 },
+    counterValue: { fontSize: '1.9rem', fontWeight: 800, lineHeight: 1 },
     counterLabel: {
-        fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase',
+        fontSize: '0.66rem', color: '#64748b', textTransform: 'uppercase',
         letterSpacing: '0.14em', fontWeight: 700, marginTop: 4,
     },
     clockBlock: { textAlign: 'right' },
     clock: {
-        fontSize: '2.6rem', fontWeight: 800, letterSpacing: '0.04em',
+        fontSize: '2.4rem', fontWeight: 800, letterSpacing: '0.04em',
         color: '#0f172a', display: 'inline-flex', alignItems: 'baseline', gap: 6,
     },
     clockSecs: {
-        fontSize: '1rem', color: '#94a3b8', fontWeight: 600,
+        fontSize: '0.95rem', color: '#94a3b8', fontWeight: 600,
         letterSpacing: 0, marginLeft: 4,
     },
     date: {
-        fontSize: '0.9rem', color: '#64748b', marginTop: 2, fontWeight: 500,
+        fontSize: '0.85rem', color: '#64748b', marginTop: 2, fontWeight: 500,
     },
 
     body: {
         flex: 1,
         display: 'grid',
         gridTemplateColumns: `repeat(${STATUSES.length}, minmax(0,1fr))`,
-        gap: 14, padding: '16px 20px',
+        gap: 14, padding: '14px 20px 6px',
         overflow: 'hidden',
     },
     bayCol: {
@@ -351,9 +541,65 @@ const S = {
     },
     customer: { fontSize: '0.95rem', color: '#334155', fontWeight: 600 },
     advisor:  { fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' },
+
+    progressWrap: { marginTop: 6 },
+    progressTrack: {
+        position: 'relative', height: 6, borderRadius: 999,
+        overflow: 'hidden',
+    },
+    progressFill: {
+        height: '100%', borderRadius: 999,
+    },
+    progressLine: {
+        display: 'flex', justifyContent: 'space-between', marginTop: 3,
+        fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600,
+    },
+    progressLabel: {},
+    progressPct: { fontWeight: 800 },
+
+    chipRow: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' },
+    chip: {
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        background: 'white', border: '1px solid',
+        padding: '2px 7px', borderRadius: 999,
+        fontSize: '0.7rem', fontWeight: 700,
+    },
+
     cardBottom: {
         display: 'flex', justifyContent: 'space-between',
         fontSize: '0.72rem', color: '#94a3b8', marginTop: 6,
+    },
+
+    // Floor plan mini-map
+    floorWrap: {
+        background: 'rgba(255,255,255,0.85)',
+        borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
+        padding: '8px 20px 10px',
+    },
+    floorTitle: {
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: '0.7rem', color: '#64748b', fontWeight: 800,
+        textTransform: 'uppercase', letterSpacing: '0.14em',
+        marginBottom: 6,
+    },
+    floorRow: {
+        display: 'flex', gap: 8, overflowX: 'auto',
+    },
+    floorBay: {
+        minWidth: 90, padding: '6px 10px',
+        borderRadius: 8, background: '#f1f5f9',
+        border: '1px solid #cbd5e1', flexShrink: 0,
+    },
+    floorBayCode: {
+        fontSize: '0.65rem', color: '#64748b', fontWeight: 800,
+        letterSpacing: '0.1em', textTransform: 'uppercase',
+    },
+    floorBayPlate: {
+        fontFamily: 'monospace', fontSize: '1rem', fontWeight: 800,
+        color: '#0f172a', letterSpacing: '0.05em',
+    },
+    floorBayTech: {
+        fontSize: '0.65rem', color: '#64748b',
     },
 
     footer: {
