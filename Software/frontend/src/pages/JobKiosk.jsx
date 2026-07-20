@@ -277,7 +277,9 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
                     <div style={S.jcNo}>{j.JobCardNo}</div>
                 </div>
                 <div style={S.cardMid}>
-                    <div style={S.customer}>{j.CustomerFirstName || '—'}</div>
+                    <div style={S.customer} title={j.CustomerFirstName || ''}>
+                        {j.CustomerFirstName || '—'}
+                    </div>
                     <div style={S.advisor}>{j.ServiceAdvisor || ''}</div>
                 </div>
 
@@ -614,10 +616,17 @@ const S = {
     },
     cardMid: {
         display: 'flex', justifyContent: 'space-between',
-        marginTop: 3, alignItems: 'baseline',
+        marginTop: 3, alignItems: 'baseline', gap: 8, minWidth: 0,
     },
-    customer: { fontSize: '0.95rem', color: '#334155', fontWeight: 600 },
-    advisor:  { fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' },
+    customer: {
+        fontSize: '0.95rem', color: '#334155', fontWeight: 600,
+        flex: '1 1 auto', minWidth: 0,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+    },
+    advisor:  {
+        fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic',
+        flex: '0 0 auto', whiteSpace: 'nowrap',
+    },
 
     progressWrap: { marginTop: 6 },
     progressTrack: {

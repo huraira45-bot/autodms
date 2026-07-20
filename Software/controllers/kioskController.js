@@ -30,12 +30,10 @@ exports.getLiveJobs = async (req, res) => {
                    j.ServiceAdvisor,
                    t.CardCode AS JobTypeCode,
                    t.Title    AS JobTypeName,
-                   -- First name only for public display.
-                   CASE
-                       WHEN CHARINDEX(' ', ISNULL(c.endUserName,'')) > 0
-                            THEN LEFT(c.endUserName, CHARINDEX(' ', c.endUserName) - 1)
-                       ELSE c.endUserName
-                   END AS CustomerFirstName,
+                   -- Full customer name — owner ask 2026-07-20. Column
+                   -- alias kept as `CustomerFirstName` so the frontend
+                   -- render doesn't need to change.
+                   c.endUserName AS CustomerFirstName,
                    -- Labour progress + active bay/tech aggregate.
                    ISNULL(lb.LabourTotal, 0)      AS LabourTotal,
                    ISNULL(lb.LabourDone,  0)      AS LabourDone,
