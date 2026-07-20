@@ -135,6 +135,33 @@ exports.addCustomerVehicle = async (req, res) => {
     } catch (err) { res.status(400).json({ error: err.message }); }
 };
 
+exports.updateCustomerVehicle = async (req, res) => {
+    try {
+        const { RegistrationNo, ChasisNo, EngineNo, BrandName, VehicleModel, VehicleColor } = req.body;
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('vid',     sql.Int,          parseInt(req.params.vehicleId))
+            .input('userId',  sql.Int,          parseInt(req.params.id))
+            .input('regNo',   sql.NVarChar(150), RegistrationNo)
+            .input('chassis', sql.NVarChar(150), ChasisNo)
+            .input('engine',  sql.NVarChar(150), EngineNo)
+            .input('brand',   sql.NVarChar(150), BrandName)
+            .input('model',   sql.NVarChar(150), VehicleModel)
+            .input('color',   sql.NVarChar(100), VehicleColor || null)
+            .query(`UPDATE WorkshopVehicles
+                       SET RegistrationNo = @regNo,
+                           ChasisNo       = @chassis,
+                           EngineNo       = @engine,
+                           BrandName      = @brand,
+                           VehicleModel   = @model,
+                           VehicleColor   = @color
+                     OUTPUT INSERTED.*
+                     WHERE VehicleID = @vid AND EndUserID = @userId`);
+        if (!r.recordset.length) return res.status(404).json({ error: 'Vehicle not found for this customer' });
+        res.json(r.recordset[0]);
+    } catch (err) { res.status(400).json({ error: err.message }); }
+};
+
 // ============== PARTIES (Credit) ==============
 exports.getParties = async (req, res) => {
     try {

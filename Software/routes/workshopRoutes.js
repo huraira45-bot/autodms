@@ -9,6 +9,7 @@ router.get(   '/customers/:id',             requirePerm('workshop_customers', 'v
 router.post(  '/customers',                 requirePerm('workshop_customers', 'insert'), wc.saveCustomer);
 router.get(   '/customers/:id/vehicles',    requirePerm('workshop_customers', 'view'),   wc.getCustomerVehicles);
 router.post(  '/customers/:id/vehicles',    requirePerm('workshop_customers', 'insert'), wc.addCustomerVehicle);
+router.put(   '/customers/:id/vehicles/:vehicleId', requirePerm('workshop_customers', 'edit'), wc.updateCustomerVehicle);
 
 // ── Parties (read-only — used by JC create + various pickers) ──────────────
 router.get(   '/parties',                   requireAnyAccess('workshop_jobs:view', 'crm_parties:view'), wc.getParties);

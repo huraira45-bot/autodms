@@ -15,8 +15,11 @@ export default function WorkshopCustomers() {
   const [showForm, setShowForm] = useState(false);
   const [showVehicleForm, setShowVehicleForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  // VehicleID being edited in-place, or null when adding a new vehicle.
+  const [editingVehicleId, setEditingVehicleId] = useState(null);
   const [form, setForm] = useState({ CustomerName: '', PhoneNo: '', Email: '', CNIC: '', Address: '', DOB: '' });
-  const [vehicleForm, setVehicleForm] = useState({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '', VehicleColor: '' });
+  const emptyVehicle = { RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '', VehicleColor: '' };
+  const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [saving, setSaving] = useState(false);
   
   // To hold vehicles for the currently editing customer
@@ -46,9 +49,12 @@ export default function WorkshopCustomers() {
     setEditing(null);
     setForm({ CustomerName: '', PhoneNo: '', Email: '', CNIC: '', Address: '', DOB: '' });
     setCustomerVehicles([]);
+    setShowVehicleForm(false);
+    setEditingVehicleId(null);
+    setVehicleForm(emptyVehicle);
     setShowForm(true);
   };
-  
+
   const openEdit = async (c) => {
     setEditing(c.ProfileID);
     setForm({
@@ -56,7 +62,10 @@ export default function WorkshopCustomers() {
       CNIC: c.CNIC || '', Address: c.Address || '',
       DOB: c.DOB ? new Date(c.DOB).toISOString().slice(0, 10) : ''
     });
-    setShowForm(true); 
+    setShowVehicleForm(false);
+    setEditingVehicleId(null);
+    setVehicleForm(emptyVehicle);
+    setShowForm(true);
     // Fetch vehicles for this customer
     try {
       const res = await axios.get(`${API}/customers/${c.ProfileID}/vehicles`);
@@ -80,22 +89,45 @@ export default function WorkshopCustomers() {
     setSaving(false);
   };
 
-  const handleAddVehicle = async (e) => {
+  const handleSaveVehicle = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
       const regNo = vehicleForm.RegistrationNo;
-      await axios.post(`${API}/customers/${editing}/vehicles`, vehicleForm);
+      if (editingVehicleId) {
+        await axios.put(`${API}/customers/${editing}/vehicles/${editingVehicleId}`, vehicleForm);
+      } else {
+        await axios.post(`${API}/customers/${editing}/vehicles`, vehicleForm);
+      }
       setShowVehicleForm(false);
-      setVehicleForm({ RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: '', VehicleModel: '', VehicleColor: '' });
-      // Refresh vehicles
+      setEditingVehicleId(null);
+      setVehicleForm(emptyVehicle);
       const res = await axios.get(`${API}/customers/${editing}/vehicles`);
       setCustomerVehicles(res.data);
-      notify({ type: 'success', title: 'Vehicle added', message: regNo });
+      notify({ type: 'success', title: editingVehicleId ? 'Vehicle updated' : 'Vehicle added', message: regNo });
     } catch (err) {
-      notify({ type: 'error', title: 'Could not add vehicle', message: err.response?.data?.error || err.message });
+      notify({ type: 'error', title: editingVehicleId ? 'Could not update vehicle' : 'Could not add vehicle', message: err.response?.data?.error || err.message });
     }
     setSaving(false);
+  };
+
+  const openEditVehicle = (v) => {
+    setEditingVehicleId(v.VehicleID);
+    setVehicleForm({
+      RegistrationNo: v.RegistrationNo || '',
+      ChasisNo:       v.ChasisNo       || '',
+      EngineNo:       v.EngineNo       || '',
+      BrandName:      v.BrandName      || '',
+      VehicleModel:   v.VehicleModel   || '',
+      VehicleColor:   v.VehicleColor   || '',
+    });
+    setShowVehicleForm(true);
+  };
+
+  const cancelVehicleForm = () => {
+    setShowVehicleForm(false);
+    setEditingVehicleId(null);
+    setVehicleForm(emptyVehicle);
   };
 
   return (
@@ -175,11 +207,14 @@ export default function WorkshopCustomers() {
                 <div style={{marginTop:'30px',borderTop:'1px solid #e2e8f0',paddingTop:'20px'}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
                     <h4 style={{display:'flex',alignItems:'center',gap:'8px',color:'var(--primary)'}}><Car size={18} /> Customer Vehicles</h4>
-                    {!showVehicleForm && <button onClick={() => setShowVehicleForm(true)} className="btn" style={{padding:'6px 12px',fontSize:'0.85rem',display:'flex',alignItems:'center',gap:'4px'}}><Plus size={14} /> Add Vehicle</button>}
+                    {!showVehicleForm && <button onClick={() => { setEditingVehicleId(null); setVehicleForm(emptyVehicle); setShowVehicleForm(true); }} className="btn" style={{padding:'6px 12px',fontSize:'0.85rem',display:'flex',alignItems:'center',gap:'4px'}}><Plus size={14} /> Add Vehicle</button>}
                   </div>
 
                   {showVehicleForm && (
-                    <form onSubmit={handleAddVehicle} style={{background:'#f8fafc',padding:'16px',borderRadius:'8px',border:'1px solid #e2e8f0',marginBottom:'16px'}}>
+                    <form onSubmit={handleSaveVehicle} style={{background:'#f8fafc',padding:'16px',borderRadius:'8px',border:'1px solid #e2e8f0',marginBottom:'16px'}}>
+                      <div style={{fontSize:'0.85rem',fontWeight:600,color:'#334155',marginBottom:'10px'}}>
+                        {editingVehicleId ? 'Edit Vehicle' : 'Add Vehicle'}
+                      </div>
                       <div className="grid-2" style={{marginBottom:'12px'}}>
                         <div className="form-group"><label>Reg No *</label><input required type="text" value={vehicleForm.RegistrationNo} onChange={e => setVehicleForm({...vehicleForm, RegistrationNo: e.target.value})} /></div>
                         <div className="form-group"><label>Brand</label><input type="text" value={vehicleForm.BrandName} onChange={e => setVehicleForm({...vehicleForm, BrandName: e.target.value})} /></div>
@@ -193,8 +228,8 @@ export default function WorkshopCustomers() {
                         <div className="form-group"><label>Color</label><input type="text" value={vehicleForm.VehicleColor} onChange={e => setVehicleForm({...vehicleForm, VehicleColor: e.target.value})} placeholder="e.g. WHITE, GRAY, BLACK" /></div>
                       </div>
                       <div style={{display:'flex',gap:'8px'}}>
-                        <button type="submit" disabled={saving} className="btn" style={{flex:1}}>Save Vehicle</button>
-                        <button type="button" onClick={() => setShowVehicleForm(false)} className="btn" style={{background:'#e2e8f0',color:'#475569'}}>Cancel</button>
+                        <button type="submit" disabled={saving} className="btn" style={{flex:1}}>{editingVehicleId ? 'Update Vehicle' : 'Save Vehicle'}</button>
+                        <button type="button" onClick={cancelVehicleForm} className="btn" style={{background:'#e2e8f0',color:'#475569'}}>Cancel</button>
                       </div>
                     </form>
                   )}
@@ -203,7 +238,7 @@ export default function WorkshopCustomers() {
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.85rem'}}>
                       <thead>
                         <tr style={{background:'#f1f5f9',color:'#64748b',textAlign:'left'}}>
-                          <th style={{padding:'8px 12px'}}>Reg No</th><th style={{padding:'8px 12px'}}>Brand/Model</th><th style={{padding:'8px 12px'}}>Color</th><th style={{padding:'8px 12px'}}>Chassis/Engine</th>
+                          <th style={{padding:'8px 12px'}}>Reg No</th><th style={{padding:'8px 12px'}}>Brand/Model</th><th style={{padding:'8px 12px'}}>Color</th><th style={{padding:'8px 12px'}}>Chassis/Engine</th><th style={{padding:'8px 12px',width:'1%'}}></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -213,6 +248,11 @@ export default function WorkshopCustomers() {
                             <td style={{padding:'8px 12px'}}>{v.BrandName} {v.VehicleModel}</td>
                             <td style={{padding:'8px 12px'}}>{v.VehicleColor || '—'}</td>
                             <td style={{padding:'8px 12px'}}><span style={{color:'#64748b'}}>C: {v.ChasisNo}</span><br/><span style={{color:'#64748b'}}>E: {v.EngineNo}</span></td>
+                            <td style={{padding:'8px 12px'}}>
+                              <button type="button" onClick={() => openEditVehicle(v)} title="Edit vehicle" style={{background:'none',border:'1px solid #e2e8f0',borderRadius:'6px',padding:'4px 6px',cursor:'pointer'}}>
+                                <Edit size={14} />
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
