@@ -55,7 +55,33 @@ const KEYFRAMES = `
 }
 `;
 
-const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '';
+// Always display in Pakistan Standard Time regardless of the PC's OS TZ —
+// if the lobby PC is set to UTC (common on fresh Windows installs) the
+// default toLocaleTimeString would render ~5h off from wall-clock local
+// time, which is what owner saw on 2026-07-20 ("05:44 am" for a JC just
+// created at 10:44 am).
+const PK_TZ = 'Asia/Karachi';
+const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', timeZone: PK_TZ }) : '';
+// Elapsed calc is JS Date subtraction (UTC ms), so it's already TZ-neutral —
+// but only if both sides agree on the absolute moment. `Date.now()` is the
+// browser's current UTC ms. If the server stored ReceiptDate as a naive PKT
+// wall-clock and the driver labels it Z, the JSON string comes back with the
+// PKT time marked as UTC — 5h ahead of the real moment. Normalise by
+// stripping the trailing 'Z' when we spot a plain ISO with no timezone
+// offset from the server; that treats the value as wall-clock and lets the
+// browser convert it to local (which is what the operator visually expects).
+function parseServerDate(v) {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    const s = String(v);
+    // "2026-07-20T05:44:00.000Z" from a naive DB DATETIME → drop the Z so
+    // the browser parses as local. Any string that already carries an
+    // explicit offset (+05:00 etc.) is left alone.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z$/.test(s)) {
+        return new Date(s.slice(0, -1));
+    }
+    return new Date(s);
+}
 
 // --- localStorage cache helpers (survive LAN dropouts) ------------------
 // Read cache; return null if empty or older than TTL.
@@ -149,13 +175,13 @@ export default function JobKiosk() {
                 </div>
                 <div style={S.clockBlock}>
                     <div style={S.clock}>
-                        {now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                        {now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', timeZone: PK_TZ })}
                         <span style={{ ...S.clockSecs, animation: 'bayClockTick 1s ease-in-out infinite' }}>
-                            {now.toLocaleTimeString('en-PK', { second: '2-digit' }).slice(-2)}
+                            {now.toLocaleTimeString('en-PK', { second: '2-digit', timeZone: PK_TZ }).slice(-2)}
                         </span>
                     </div>
                     <div style={S.date}>
-                        {now.toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                        {now.toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: PK_TZ })}
                     </div>
                 </div>
             </div>
@@ -219,7 +245,8 @@ export default function JobKiosk() {
 
 // ----- Card -----------------------------------------------------------
 function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
-    const inMs = new Date() - new Date(j.ReceiptDate || Date.now());
+    const receipt = parseServerDate(j.ReceiptDate) || new Date();
+    const inMs = new Date() - receipt;
     const inMin = Math.max(0, Math.floor(inMs / 60000));
     const inLabel = inMin < 60 ? `${inMin}m` : `${Math.floor(inMin/60)}h ${inMin%60}m`;
     const overdue = inMin > 180;   // > 3 hours on floor → subtle amber cue
@@ -287,7 +314,7 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
                 )}
 
                 <div style={S.cardBottom}>
-                    <span>In · {fmtTime(j.ReceiptDate)}</span>
+                    <span>In · {fmtTime(receipt)}</span>
                     <span style={{ color: overdue ? '#b45309' : '#94a3b8', fontWeight: overdue ? 700 : 500 }}>
                         {inLabel} on floor
                     </span>
@@ -411,21 +438,32 @@ function StaleChip({ at }) {
 
 // ----- Styles ---------------------------------------------------------
 const S = {
+    // Full-viewport board sized to `100dvh/100dvw` (dynamic viewport units)
+    // so it respects Windows / TV browser chrome + display-scaling variations,
+    // with a small internal safe-area padding that keeps content off the edges
+    // — most TVs still clip 3-5% via overscan on HDMI. `overflow: hidden`
+    // stops any inner blowout from turning into a page-level scrollbar.
     page: {
         position: 'fixed', inset: 0,
+        width: '100dvw', height: '100dvh',
+        boxSizing: 'border-box',
+        padding: '6px',
         background: 'radial-gradient(circle at 20% 0%, #eff6ff 0%, #f8fafc 45%, #f1f5f9 100%)',
         color: '#0f172a',
         display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
         fontFamily: '"Segoe UI", Inter, Roboto, Arial, sans-serif',
     },
     header: {
         display: 'grid',
         gridTemplateColumns: '1fr auto auto',
-        alignItems: 'center', gap: 32,
-        padding: '14px 28px',
+        alignItems: 'center', gap: 20,
+        padding: '10px 18px',
         background: 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.72))',
         borderBottom: '1px solid #e2e8f0',
         backdropFilter: 'blur(6px)',
+        flexShrink: 0,
+        minWidth: 0,
     },
     brandRow: { display: 'flex', alignItems: 'center', gap: 14 },
     brandChangan: {
@@ -481,17 +519,18 @@ const S = {
     },
 
     body: {
-        flex: 1,
+        flex: 1, minHeight: 0,
         display: 'grid',
         gridTemplateColumns: `repeat(${STATUSES.length}, minmax(0,1fr))`,
-        gap: 14, padding: '14px 20px 6px',
+        gap: 10, padding: '10px 14px 6px',
         overflow: 'hidden',
     },
     bayCol: {
         display: 'flex', flexDirection: 'column',
         background: 'rgba(255,255,255,0.85)',
-        borderRadius: 14, border: '1.5px solid',
+        borderRadius: 12, border: '1.5px solid',
         overflow: 'hidden',
+        minWidth: 0,   // let grid column collapse; children hard-cap width
         boxShadow: '0 4px 14px rgba(15,23,42,0.06)',
     },
     bayHeader: {
@@ -574,7 +613,8 @@ const S = {
     floorWrap: {
         background: 'rgba(255,255,255,0.85)',
         borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
-        padding: '8px 20px 10px',
+        padding: '6px 16px 8px',
+        flexShrink: 0,
     },
     floorTitle: {
         display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -605,8 +645,9 @@ const S = {
     footer: {
         background: 'linear-gradient(180deg, #0f172a, #1e293b)',
         color: 'white',
-        padding: '10px 20px',
+        padding: '8px 18px',
         display: 'flex', alignItems: 'center', gap: 16,
+        flexShrink: 0,
     },
     tickerWrap: {
         display: 'flex', alignItems: 'center', gap: 18, flex: 1, overflow: 'hidden',
