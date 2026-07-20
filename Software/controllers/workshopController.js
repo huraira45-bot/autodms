@@ -332,6 +332,12 @@ exports.getVehicleHistory = async (req, res) => {
         if (r) { request.input('r', sql.NVarChar(200), r); preds.push('j.VehicleRegNo = @r'); }
         let where = '(' + preds.join(' OR ') + ')';
         if (excludeJc) { request.input('ex', sql.Int, parseInt(excludeJc)); where += ' AND j.JobCardId <> @ex'; }
+        // Legacy shadow tables (from ssMasterVehicle import) are optional —
+        // presence is detected at query time so this endpoint works on any
+        // environment where migration 091 hasn't been applied yet.
+        const legacyCheck = await pool.request().query(
+            `SELECT CASE WHEN OBJECT_ID('dbo.Legacy_JobCards','U') IS NULL THEN 0 ELSE 1 END AS HasLegacy`);
+        const hasLegacy = legacyCheck.recordset[0].HasLegacy === 1;
         const q = await request.query(`
             SELECT j.JobCardId, j.JobCardNo, j.jobCode, j.JobCardDate, j.IsFinalized,
                    j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter AS Odometer,
@@ -403,6 +409,107 @@ exports.getVehicleHistory = async (req, res) => {
                 row.LabourLines = labourByJc[row.JobCardId] || [];
                 row.SubletLines = subletByJc[row.JobCardId] || [];
                 row.PartsLines  = partsByJc[row.JobCardId]  || [];
+            }
+        }
+
+        // Legacy history — imported from the old FIS "ssMasterVehicle" DB
+        // into shadow tables (Legacy_JobCards etc.). Fields are remapped to
+        // the same shape as the current-JC rows so the frontend does not
+        // need any legacy-specific branch. Legacy rows are flagged with
+        // IsLegacy=1 and use synthetic JobCardId "LEG-<LegacyID>".
+        if (hasLegacy) {
+            const lgRequest = pool.request();
+            const lgPreds = [];
+            if (c) { lgRequest.input('lc', sql.NVarChar(200), c); lgPreds.push('l.ChassisNumber = @lc'); }
+            if (e) { lgRequest.input('le', sql.NVarChar(200), e); lgPreds.push('l.EngineNumber  = @le'); }
+            if (r) { lgRequest.input('lr', sql.NVarChar(200), r); lgPreds.push('l.RegistrationNumber = @lr'); }
+            const lgWhere = '(' + lgPreds.join(' OR ') + ')';
+            const lgHeaders = await lgRequest.query(`
+                SELECT l.LegacyID, l.WorkOrderNo, l.JobCardDate, l.IsFinal,
+                       l.RegistrationNumber AS VehicleRegNo, l.ChassisNumber AS ChasisNo,
+                       l.EngineNumber AS EngineNo, l.OdMeter AS Odometer,
+                       l.ServiceType AS JobTypeCode, l.ServiceType AS JobTypeName,
+                       l.AdvisorName AS ServiceAdvisor,
+                       COALESCE(NULLIF(l.PartyName,''), l.CustomerName) AS CustomerName,
+                       l.PartyName,
+                       l.Mobile1 AS CustomerPhone,
+                       ISNULL(l.LabourAmount,0)       AS LabourAmount,
+                       ISNULL(l.SparesAmount,0)
+                         + ISNULL(l.LubricantsAmount,0) AS PartsAmount,
+                       ISNULL(l.SubletRepairAmount,0) AS SubletAmount,
+                       ISNULL(l.NetAmount,0)          AS NetAmount
+                FROM Legacy_JobCards l
+                WHERE ${lgWhere}
+                ORDER BY l.JobCardDate DESC, l.LegacyID DESC`);
+            if (lgHeaders.recordset.length > 0) {
+                const legacyIds = lgHeaders.recordset.map(x => x.LegacyID);
+                const legacyIdList = legacyIds.join(',');
+                const [lgLab, lgSub, lgPar] = await Promise.all([
+                    pool.request().query(`
+                        SELECT LegacyJobCardID, JobDescription AS Description,
+                               Rate AS Price, Qty AS Quantity,
+                               ISNULL(DiscountedAmount,0) AS DiscAmt,
+                               ISNULL(PST,0) AS TaxAmount
+                        FROM Legacy_JobCardLabour
+                        WHERE LegacyJobCardID IN (${legacyIdList})
+                        ORDER BY LegacyJobCardID DESC, LegacyDetailID`),
+                    pool.request().query(`
+                        SELECT LegacyJobCardID, RepairDescription AS Description,
+                               ISNULL(BillAmount,0) AS InvoiceAmount,
+                               ISNULL(BillAmount,0) AS PayableAmount,
+                               ISNULL(Pst,0)        AS TaxAmount
+                        FROM Legacy_JobCardSublets
+                        WHERE LegacyJobCardID IN (${legacyIdList})
+                        ORDER BY LegacyJobCardID DESC, SubletRepairDetailId`),
+                    pool.request().query(`
+                        SELECT LegacyJobCardID, ItemNumber, ItemDescription AS ItemName,
+                               Qty AS IssueQuantity, NetUnitRate AS ItemRate,
+                               ISNULL(SaleTaxAmount,0) AS TaxAmount
+                        FROM Legacy_JobCardParts
+                        WHERE LegacyJobCardID IN (${legacyIdList})
+                        ORDER BY LegacyJobCardID DESC, SIRDetailId`),
+                ]);
+                const lgBucket = (recs) => {
+                    const m = {};
+                    for (const rec of recs) {
+                        const id = rec.LegacyJobCardID;
+                        if (!m[id]) m[id] = [];
+                        m[id].push(rec);
+                    }
+                    return m;
+                };
+                const lgLabByJc = lgBucket(lgLab.recordset);
+                const lgSubByJc = lgBucket(lgSub.recordset);
+                const lgParByJc = lgBucket(lgPar.recordset);
+                for (const lh of lgHeaders.recordset) {
+                    const total = Number(lh.LabourAmount) + Number(lh.PartsAmount) + Number(lh.SubletAmount);
+                    rows.push({
+                        JobCardId: `LEG-${lh.LegacyID}`,
+                        JobCardNo: lh.WorkOrderNo,
+                        JobCardDate: lh.JobCardDate,
+                        IsFinalized: lh.IsFinal ? 1 : 0,
+                        IsLegacy: 1,
+                        VehicleRegNo: lh.VehicleRegNo,
+                        ChasisNo: lh.ChasisNo,
+                        EngineNo: lh.EngineNo,
+                        Odometer: lh.Odometer,
+                        JobTypeCode: lh.JobTypeCode,
+                        JobTypeName: lh.JobTypeName,
+                        CustomerName: lh.CustomerName,
+                        CustomerPhone: lh.CustomerPhone,
+                        PartyName: lh.PartyName,
+                        ServiceAdvisor: lh.ServiceAdvisor,
+                        LabourAmount: Number(lh.LabourAmount),
+                        PartsAmount: Number(lh.PartsAmount),
+                        SubletAmount: Number(lh.SubletAmount),
+                        TotalAmount: +total.toFixed(2),
+                        LabourLines: lgLabByJc[lh.LegacyID] || [],
+                        SubletLines: lgSubByJc[lh.LegacyID] || [],
+                        PartsLines:  lgParByJc[lh.LegacyID] || [],
+                    });
+                }
+                // Re-sort combined rows newest-first now that legacy has been folded in.
+                rows.sort((a, b) => new Date(b.JobCardDate) - new Date(a.JobCardDate));
             }
         }
 
