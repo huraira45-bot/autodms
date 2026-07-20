@@ -132,11 +132,23 @@ export default function JobController() {
   const searchEmp = (idx, val) => {
     setEmpSearch(p => ({ ...p, [idx]: val }));
     updateDetail(idx, 'PerformedByName', val);
-    if (val.length < 2) { setShowEmpDD(p => ({ ...p, [idx]: false })); return; }
-    const s = val.toLowerCase();
-    const filtered = allEmployees.filter(e => e.EmployeeName?.toLowerCase().includes(s)).slice(0, 6);
+    // Owner report 2026-07-20: nothing appeared when typing a random string
+    // because we hid the dropdown on 0 matches. Now: empty query lists all
+    // techs (up to 8) so the user can browse, non-matching query opens the
+    // dropdown too with an explicit "no match" row so it never looks broken.
+    const s = val.trim().toLowerCase();
+    const filtered = (s
+        ? allEmployees.filter(e => e.EmployeeName?.toLowerCase().includes(s))
+        : allEmployees
+    ).slice(0, 8);
     empDDRef.current[idx] = filtered;
-    setShowEmpDD(p => ({ ...p, [idx]: filtered.length > 0 }));
+    setShowEmpDD(p => ({ ...p, [idx]: true }));
+  };
+
+  const openEmpList = (idx) => {
+    // Open the picker with the full technician list on focus / click.
+    const val = empSearch[idx] !== undefined ? empSearch[idx] : '';
+    searchEmp(idx, val);
   };
 
   const selectEmp = (idx, emp) => {
@@ -295,11 +307,18 @@ export default function JobController() {
                             <input style={S.input}
                               value={empSearch[idx] !== undefined ? empSearch[idx] : (row.PerformedByName || '')}
                               onChange={e => searchEmp(idx, e.target.value)}
+                              onFocus={() => openEmpList(idx)}
                               onBlur={() => setTimeout(() => setShowEmpDD(p => ({ ...p, [idx]: false })), 150)}
                               placeholder="Search technician..." />
-                            {showEmpDD[idx] && (empDDRef.current[idx] || []).length > 0 && (
-                              <div style={{ position: 'absolute', left: 6, right: 6, top: '100%', background: '#fff', border: '1px solid #9aaac0', zIndex: 30, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', maxHeight: 120, overflowY: 'auto' }}>
-                                {(empDDRef.current[idx] || []).map(emp => (
+                            {showEmpDD[idx] && (
+                              <div style={{ position: 'absolute', left: 6, right: 6, top: '100%', background: '#fff', border: '1px solid #9aaac0', zIndex: 30, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', maxHeight: 160, overflowY: 'auto' }}>
+                                {(empDDRef.current[idx] || []).length === 0 ? (
+                                  <div style={{ padding: '4px 8px', fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                                    {allEmployees.length === 0
+                                      ? 'No employees flagged as technician yet. Turn on the wrench badge in HR → Employees.'
+                                      : 'No technician matches that name.'}
+                                  </div>
+                                ) : (empDDRef.current[idx] || []).map(emp => (
                                   <div key={emp.EmployeeID} onMouseDown={() => selectEmp(idx, emp)}
                                     style={{ padding: '3px 8px', cursor: 'pointer', fontSize: 11, borderBottom: '1px solid #f0f4f8' }}
                                     onMouseEnter={e => e.currentTarget.style.background='#e8f0fe'}
