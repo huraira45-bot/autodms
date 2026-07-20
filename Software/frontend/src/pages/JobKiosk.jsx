@@ -289,7 +289,10 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
                     <div style={S.chipRow}>
                         {activeBay && (
                             <span style={{ ...S.chip, borderColor: accent, color: accent }}>
-                                <MapPin size={10} /> Bay {activeBay}
+                                <MapPin size={10} />
+                                {/* BayName from the master already contains
+                                    "Bay 3", "Bay B-1" etc. — don't double-prefix. */}
+                                {/^bay\b/i.test(String(activeBay).trim()) ? activeBay : `Bay ${activeBay}`}
                             </span>
                         )}
                         {activeTech && (
@@ -389,7 +392,9 @@ function FloorPlan({ jobs }) {
             <div style={S.floorRow}>
                 {bays.map(b => (
                     <div key={b.code} style={S.floorBay}>
-                        <div style={S.floorBayCode}>Bay {b.code}</div>
+                        <div style={S.floorBayCode}>
+                            {/^bay\b/i.test(String(b.code).trim()) ? b.code : `Bay ${b.code}`}
+                        </div>
                         <div style={S.floorBayPlate}>{b.jc.VehicleRegNo || '—'}</div>
                         {b.jc.ActiveTechnician && (
                             <div style={S.floorBayTech}>{b.jc.ActiveTechnician}</div>
