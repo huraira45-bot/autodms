@@ -18,12 +18,14 @@ exports.getLiveJobs = async (req, res) => {
                    j.VehicleRegNo,
                    j.ReceiptDate,
                    j.PromisedDate,
-                   -- Owner report 2026-07-20: browser-side time formatting
-                   -- shifted "In · HH:MM" by the OS timezone offset. Fixed by
-                   -- letting SQL Server format the values directly — the DB
-                   -- clock is authoritative wall-clock, no client TZ drift.
-                   FORMAT(j.ReceiptDate, 'hh:mm tt') AS ReceiptTimeText,
-                   DATEDIFF(MINUTE, j.ReceiptDate, GETDATE()) AS MinutesOnFloor,
+                   -- Owner report 2026-07-20 (v3): ReceiptDate is unreliable
+                   -- (frontend TZ double-shift stored it 10h off wall-clock).
+                   -- EntryUserDateTime is set server-side via GETDATE() at
+                   -- JC insert, so it always matches the server clock. Fall
+                   -- back to ReceiptDate for legacy rows where EntryUserDate
+                   -- Time might be NULL.
+                   FORMAT(ISNULL(j.EntryUserDateTime, j.ReceiptDate), 'hh:mm tt') AS ReceiptTimeText,
+                   DATEDIFF(MINUTE, ISNULL(j.EntryUserDateTime, j.ReceiptDate), GETDATE()) AS MinutesOnFloor,
                    ISNULL(j.WorkshopStatus, 'Waiting For Service') AS WorkshopStatus,
                    j.ServiceAdvisor,
                    t.CardCode AS JobTypeCode,
