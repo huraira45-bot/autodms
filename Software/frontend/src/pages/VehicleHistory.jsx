@@ -125,7 +125,10 @@ function JCCard({ jc, open, onToggle, onOpen }) {
         ? { label: 'Finalized', bg: '#d1fae5', color: '#065f46' }
         : { label: 'Draft',     bg: '#fef3c7', color: '#92400e' };
     return (
-        <div className="card" style={{ padding: 0, overflow: 'hidden', ...(jc.IsLegacy ? { borderLeft: '4px solid #94a3b8' } : {}) }}>
+        <div className="card" style={{
+            padding: 0, overflow: 'hidden',
+            ...(jc.IsLegacy ? { borderLeft: '4px solid #f59e0b', background: '#fffbeb' } : {}),
+        }}>
             <div onClick={onToggle}
                  style={{ padding: '12px 14px', display: 'grid',
                           gridTemplateColumns: '24px 1fr auto', gap: 12, alignItems: 'center',
@@ -143,9 +146,9 @@ function JCCard({ jc, open, onToggle, onOpen }) {
                     <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: badge.bg, color: badge.color, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {jc.IsFinalized && <Lock size={10} />} {badge.label}
                     </span>
-                    {jc.IsLegacy === 1 && (
+                    {!!jc.IsLegacy && (
                         <span title="Imported from the legacy FIS system — read only."
-                              style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: '#e2e8f0', color: '#475569', letterSpacing: 0.5 }}>
+                              style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: '#fef3c7', color: '#92400e', letterSpacing: 0.5, border: '1px solid #fde68a' }}>
                             LEGACY
                         </span>
                     )}
