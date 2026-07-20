@@ -43,7 +43,10 @@ export default function NewComplaintModal({ onClose, onCreated }) {
         const t = setTimeout(async () => {
             try {
                 const r = await axios.get(`${API}/workshop/customers`, { params: { search: custQuery } });
-                if (!cancelled) setCustResults(r.data.slice(0, 12));
+                // Endpoint returns { rows, total, limit } since the 2026-07-18
+                // perf fix; tolerate the legacy array shape too.
+                const rows = Array.isArray(r.data) ? r.data : (r.data?.rows || []);
+                if (!cancelled) setCustResults(rows.slice(0, 12));
             } catch (e) {
                 if (!cancelled) setCustResults([]);
             }

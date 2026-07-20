@@ -310,7 +310,13 @@ export default function JobCardForm() {
 
   const searchCustomers = useCallback(async (val) => {
     if (val.length < 2) { setCustomers([]); return; }
-    try { const res = await axios.get(`${API}/customers?search=${val}`); setCustomers(res.data); } catch {}
+    try {
+      const res = await axios.get(`${API}/customers`, { params: { search: val } });
+      // Endpoint now returns { rows, total, limit } (owner ask 2026-07-18
+      // perf fix). Older callers received a bare array — tolerate both.
+      const rows = Array.isArray(res.data) ? res.data : (res.data?.rows || []);
+      setCustomers(rows);
+    } catch {}
   }, []);
 
   const selectCustomer = async (c) => {
