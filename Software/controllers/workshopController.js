@@ -373,11 +373,11 @@ exports.getVehicleHistory = async (req, res) => {
                     WHERE JobCardId IN (${jcIdList})
                     ORDER BY JobCardId DESC, DetailId`),
                 pool.request().query(`
-                    SELECT JobCardId, SubletDetailID, Remarks AS Description,
+                    SELECT JobCardId, SubletJobDetailID AS SubletDetailID, Remarks AS Description,
                            InvoiceAmount, PayableAmount, TaxAmount
                     FROM Addata_JobCardInfoSubletJobDetail
                     WHERE JobCardId IN (${jcIdList})
-                    ORDER BY JobCardId DESC, SubletDetailID`),
+                    ORDER BY JobCardId DESC, SubletJobDetailID`),
                 pool.request().query(`
                     SELECT sid.JobCardId, sid.StockIssueDetailID, sid.ItemId,
                            sid.IssueQuantity, sid.ItemRate, sid.TaxAmount,
