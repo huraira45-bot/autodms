@@ -18,6 +18,12 @@ exports.getLiveJobs = async (req, res) => {
                    j.VehicleRegNo,
                    j.ReceiptDate,
                    j.PromisedDate,
+                   -- Owner report 2026-07-20: browser-side time formatting
+                   -- shifted "In · HH:MM" by the OS timezone offset. Fixed by
+                   -- letting SQL Server format the values directly — the DB
+                   -- clock is authoritative wall-clock, no client TZ drift.
+                   FORMAT(j.ReceiptDate, 'hh:mm tt') AS ReceiptTimeText,
+                   DATEDIFF(MINUTE, j.ReceiptDate, GETDATE()) AS MinutesOnFloor,
                    ISNULL(j.WorkshopStatus, 'Waiting For Service') AS WorkshopStatus,
                    j.ServiceAdvisor,
                    t.CardCode AS JobTypeCode,
@@ -56,8 +62,18 @@ exports.getLiveJobs = async (req, res) => {
               AND  ISNULL(j.WorkshopStatus, 'Waiting For Service') <> 'Delivered'
             ORDER  BY j.JobCardId DESC
         `);
+        // Include the server's current wall clock so the header clock can
+        // sync to server-time (the display TV's OS TZ might be wrong).
+        const nowRes = await pool.request().query(`
+            SELECT FORMAT(GETDATE(), 'yyyy-MM-dd') AS ServerDate,
+                   FORMAT(GETDATE(), 'HH:mm:ss')   AS ServerTime24,
+                   DATENAME(WEEKDAY, GETDATE())    AS ServerWeekday,
+                   FORMAT(GETDATE(), 'd MMMM yyyy') AS ServerDateText`);
         res.set('Cache-Control', 'no-store');
-        res.json(r.recordset);
+        res.json({
+            jobs: r.recordset,
+            server: nowRes.recordset[0],
+        });
     } catch (err) {
         console.error('kiosk/jobs-live error:', err);
         res.status(500).json({ error: err.message });

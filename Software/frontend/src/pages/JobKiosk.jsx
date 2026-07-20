@@ -55,33 +55,15 @@ const KEYFRAMES = `
 }
 `;
 
-// Always display in Pakistan Standard Time regardless of the PC's OS TZ —
-// if the lobby PC is set to UTC (common on fresh Windows installs) the
-// default toLocaleTimeString would render ~5h off from wall-clock local
-// time, which is what owner saw on 2026-07-20 ("05:44 am" for a JC just
-// created at 10:44 am).
-const PK_TZ = 'Asia/Karachi';
-const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', timeZone: PK_TZ }) : '';
-// Elapsed calc is JS Date subtraction (UTC ms), so it's already TZ-neutral —
-// but only if both sides agree on the absolute moment. `Date.now()` is the
-// browser's current UTC ms. If the server stored ReceiptDate as a naive PKT
-// wall-clock and the driver labels it Z, the JSON string comes back with the
-// PKT time marked as UTC — 5h ahead of the real moment. Normalise by
-// stripping the trailing 'Z' when we spot a plain ISO with no timezone
-// offset from the server; that treats the value as wall-clock and lets the
-// browser convert it to local (which is what the operator visually expects).
-function parseServerDate(v) {
-    if (!v) return null;
-    if (v instanceof Date) return v;
-    const s = String(v);
-    // "2026-07-20T05:44:00.000Z" from a naive DB DATETIME → drop the Z so
-    // the browser parses as local. Any string that already carries an
-    // explicit offset (+05:00 etc.) is left alone.
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z$/.test(s)) {
-        return new Date(s.slice(0, -1));
-    }
-    return new Date(s);
-}
+// Owner report 2026-07-20: browser-side TZ conversion of ReceiptDate kept
+// producing wrong times on TVs where the PC's OS clock isn't PKT. Fixed by
+// letting SQL Server format the values (see kioskController). The kiosk now
+// consumes ReceiptTimeText + MinutesOnFloor + server.ServerTime24 verbatim
+// and does no local TZ math at all.
+const fmtMins = (m) => {
+    const n = Math.max(0, Number(m) || 0);
+    return n < 60 ? `${n}m` : `${Math.floor(n/60)}h ${n%60}m`;
+};
 
 // --- localStorage cache helpers (survive LAN dropouts) ------------------
 // Read cache; return null if empty or older than TTL.
@@ -95,19 +77,21 @@ function readCache() {
         return parsed;
     } catch { return null; }
 }
-function writeCache(jobs) {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), jobs })); }
-    catch { /* quota / private mode — silently ignore */ }
+function writeCache({ jobs, server }) {
+    try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), jobs, server }));
+    } catch { /* quota / private mode — silently ignore */ }
 }
 
 export default function JobKiosk() {
     // Seed from cache so a cold-load with a dead backend still shows
     // something instead of flashing "Reconnecting…".
     const cached = readCache();
-    const [jobs, setJobs]     = useState(cached?.jobs || []);
-    const [staleAt, setStale] = useState(cached ? cached.at : null);
-    const [now, setNow]       = useState(new Date());
-    const [error, setError]   = useState(null);
+    const [jobs, setJobs]         = useState(cached?.jobs || []);
+    const [server, setServer]     = useState(cached?.server || null);
+    const [staleAt, setStale]     = useState(cached ? cached.at : null);
+    const [now, setNow]           = useState(new Date());
+    const [error, setError]       = useState(null);
 
     // Poll every 15s. On success clear stale marker + refresh cache. On
     // failure, keep whatever we last showed and mark the header stale.
@@ -117,16 +101,25 @@ export default function JobKiosk() {
             try {
                 const r = await axios.get('/api/kiosk/jobs-live');
                 if (cancelled) return;
-                const list = r.data || [];
+                // Response is { jobs, server } since 2026-07-20 (owner ask).
+                // Tolerate the legacy array shape from earlier deploys so a
+                // half-updated live server doesn't blank the screen.
+                const list   = Array.isArray(r.data) ? r.data : (r.data?.jobs || []);
+                const srv    = r.data?.server || null;
                 setJobs(list);
+                setServer(srv);
                 setError(null);
                 setStale(null);
-                writeCache(list);
+                writeCache({ jobs: list, server: srv });
             } catch (e) {
                 if (cancelled) return;
                 setError(e.message);
                 const c = readCache();
-                if (c) { setJobs(c.jobs); setStale(c.at); }
+                if (c) {
+                    setJobs(c.jobs || []);
+                    setServer(c.server || null);
+                    setStale(c.at);
+                }
             }
         };
         load();
@@ -134,7 +127,9 @@ export default function JobKiosk() {
         return () => { cancelled = true; clearInterval(iv); };
     }, []);
 
-    // Live clock tick
+    // Live clock tick (1s). The `now` state is only used to add elapsed
+    // seconds on top of the last-fetched server time so the wall-clock
+    // reading stays smooth between the 15s polls.
     useEffect(() => {
         const iv = setInterval(() => setNow(new Date()), 1000);
         return () => clearInterval(iv);
@@ -174,15 +169,7 @@ export default function JobKiosk() {
                     <Counter label="Ready for pickup" value={readyCount} accent="#16a34a" />
                 </div>
                 <div style={S.clockBlock}>
-                    <div style={S.clock}>
-                        {now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', timeZone: PK_TZ })}
-                        <span style={{ ...S.clockSecs, animation: 'bayClockTick 1s ease-in-out infinite' }}>
-                            {now.toLocaleTimeString('en-PK', { second: '2-digit', timeZone: PK_TZ }).slice(-2)}
-                        </span>
-                    </div>
-                    <div style={S.date}>
-                        {now.toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: PK_TZ })}
-                    </div>
+                    <ServerClock server={server} tick={now} />
                 </div>
             </div>
 
@@ -245,11 +232,11 @@ export default function JobKiosk() {
 
 // ----- Card -----------------------------------------------------------
 function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
-    const receipt = parseServerDate(j.ReceiptDate) || new Date();
-    const inMs = new Date() - receipt;
-    const inMin = Math.max(0, Math.floor(inMs / 60000));
-    const inLabel = inMin < 60 ? `${inMin}m` : `${Math.floor(inMin/60)}h ${inMin%60}m`;
-    const overdue = inMin > 180;   // > 3 hours on floor → subtle amber cue
+    // Server-computed values — no browser TZ math at all.
+    const inMin   = Math.max(0, Number(j.MinutesOnFloor) || 0);
+    const inLabel = fmtMins(inMin);
+    const overdue = inMin > 180;                 // > 3 hours on floor → amber cue
+    const receiptLabel = (j.ReceiptTimeText || '').trim();
 
     const total = Number(j.LabourTotal) || 0;
     const done  = Number(j.LabourDone)  || 0;
@@ -314,7 +301,7 @@ function JobCard({ j, accent, soft, isReady, isService, delayIndex }) {
                 )}
 
                 <div style={S.cardBottom}>
-                    <span>In · {fmtTime(receipt)}</span>
+                    <span>In · {receiptLabel || '—'}</span>
                     <span style={{ color: overdue ? '#b45309' : '#94a3b8', fontWeight: overdue ? 700 : 500 }}>
                         {inLabel} on floor
                     </span>
@@ -421,6 +408,52 @@ function Counter({ label, value, accent }) {
             <div style={{ ...S.counterValue, color: accent }}>{value}</div>
             <div style={S.counterLabel}>{label}</div>
         </div>
+    );
+}
+
+// Header clock — reads the server-provided wall clock and drifts forward
+// with the browser's setInterval tick so seconds move smoothly between
+// 15-second polls. Falls back to a placeholder if we haven't heard from
+// the server yet (first-load / cache miss).
+function ServerClock({ server, tick }) {
+    if (!server?.ServerTime24) {
+        return (
+            <>
+                <div style={S.clock}>--:--</div>
+                <div style={S.date}>Connecting…</div>
+            </>
+        );
+    }
+    // Parse server wall clock as absolute epoch anchored at page-load; add
+    // the difference between now and the last server sync every second.
+    const anchorRef = React.useRef(null);
+    if (!anchorRef.current || anchorRef.current.raw !== server.ServerTime24 + server.ServerDate) {
+        const [Y, Mo, D] = server.ServerDate.split('-').map(Number);
+        const [H, Mi, S] = server.ServerTime24.split(':').map(Number);
+        anchorRef.current = {
+            raw:   server.ServerTime24 + server.ServerDate,
+            base:  new Date(Y, Mo - 1, D, H, Mi, S).getTime(),
+            wall:  Date.now(),
+        };
+    }
+    const drift = tick.getTime() - anchorRef.current.wall;
+    const shown = new Date(anchorRef.current.base + drift);
+    const hh = String(((shown.getHours() + 11) % 12) + 1).padStart(2, '0');
+    const mm = String(shown.getMinutes()).padStart(2, '0');
+    const ss = String(shown.getSeconds()).padStart(2, '0');
+    const ampm = shown.getHours() < 12 ? 'AM' : 'PM';
+    return (
+        <>
+            <div style={S.clock}>
+                {hh}:{mm}
+                <span style={{ ...S.clockSecs, animation: 'bayClockTick 1s ease-in-out infinite' }}>
+                    :{ss} {ampm}
+                </span>
+            </div>
+            <div style={S.date}>
+                {server.ServerWeekday}, {server.ServerDateText}
+            </div>
+        </>
     );
 }
 
