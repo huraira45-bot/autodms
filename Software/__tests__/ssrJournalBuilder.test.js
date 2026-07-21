@@ -88,10 +88,17 @@ describe('ssrJournalBuilder — refund mode variations', () => {
         expect(c.Credit).toBe(1170);
     });
 
+    test('Walk-in Cash refund emits zero dms_PartyLedger writes (avoids CK_PartyLedger_Tag)', () => {
+        const r = buildSSRJournalLines({ ssr: { ...ssr, RefundMode: 'Cash' }, lines, accounts: ACC });
+        // Journal legs on the voucher still exist; only the subsidiary trail is empty.
+        expect(r.subsidiaryWrites).toEqual([]);
+    });
+
     test('Credit refund: credits named-party Trade Debtors (no cash outflow)', () => {
         const r = buildSSRJournalLines({
             ssr: { ...ssr, RefundMode: 'Credit', PartyID: 88 },
             lines, accounts: ACC,
+            partyGL: { GLCAID: ACC.TRADE_DEBTORS.GLCAID },
         });
         // No payment-side leg
         const cashIds = [ACC.CASH_BOOK.GLCAID, ACC.POS_CLEARING.GLCAID, ACC.CHEQUES_ON_HAND.GLCAID];

@@ -138,6 +138,12 @@ function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null, p
     }
 
     // (6) & (7) Refund leg — transit through customer subsidiary
+    //
+    // The GL voucher lines (data_FinanceVoucherDetail) always get written,
+    // but dms_PartyLedger is the per-named-party subsidiary — it only takes
+    // rows with a party tag. Walk-in refunds hit GENERAL_CUSTOMER, which
+    // has no subsidiary trail to keep. This mirrors storeSaleJournalBuilder
+    // where the subsidiary push is gated on `if (partyTagForInvoiceLeg)`.
     if (refundAmount > 0) {
         // (6) Cr customer subsidiary — we owe the customer (or reduce what they owe us)
         journalLines.push({
@@ -146,13 +152,15 @@ function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null, p
             Narration: `Refund credit — ${narrationRef}`,
             PartyID: partyTagForRefundLeg, JobCardID: null,
         });
-        subsidiaryWrites.push({
-            GLCAID: customerSubsidiaryAccount.GLCAID,
-            Debit: 0, Credit: refundAmount,
-            PartyID: partyTagForRefundLeg,
-            JobCardID: null,
-            Narration: `Refund — ${narrationRef}`,
-        });
+        if (partyTagForRefundLeg) {
+            subsidiaryWrites.push({
+                GLCAID: customerSubsidiaryAccount.GLCAID,
+                Debit: 0, Credit: refundAmount,
+                PartyID: partyTagForRefundLeg,
+                JobCardID: null,
+                Narration: `Refund — ${narrationRef}`,
+            });
+        }
 
         if (refundMode !== 'Credit') {
             // (6.5) Dr customer subsidiary again — settles the refund
@@ -162,12 +170,8 @@ function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null, p
                 Narration: `Settle refund via ${refundMode} — ${narrationRef}`,
                 PartyID: null, JobCardID: null,
             });
-            subsidiaryWrites.push({
-                GLCAID: customerSubsidiaryAccount.GLCAID,
-                Debit: refundAmount, Credit: 0,
-                PartyID: null, JobCardID: null,
-                Narration: `Settle refund — ${narrationRef}`,
-            });
+            // No subsidiary write for the settle leg — it's the same-voucher
+            // wash of the Cr above and would land untagged in dms_PartyLedger.
             // (7) Cr payment-side account (cash/POS/cheque/bank goes out)
             journalLines.push({
                 GLCAID: refundSideAccount.GLCAID,
