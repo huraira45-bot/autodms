@@ -78,7 +78,7 @@ export default function UnfinalizeLog() {
                     r.JobCardNo || r.EntityRef || '',
                     fmtD(r.JobCardDate),
                     r.ServiceAdvisor || '',
-                    r.CustomerName || '',
+                    r.CustomerName || r.PartyName || '',
                     r.VehicleRegNo || '',
                     r.RequestedByName || '',
                     r.Reason || '',
@@ -137,7 +137,7 @@ export default function UnfinalizeLog() {
                                                 <TD>{r.ServiceAdvisor || <span style={{ color: '#94a3b8' }}>—</span>}</TD>
                                                 <TD>
                                                     <div style={{ lineHeight: 1.3 }}>
-                                                        <div>{r.CustomerName || '—'}</div>
+                                                        <div>{r.CustomerName || r.PartyName || '—'}</div>
                                                         {r.VehicleRegNo && <div style={{ color: '#64748b', fontSize: '0.78rem' }}>{r.VehicleRegNo}</div>}
                                                     </div>
                                                 </TD>

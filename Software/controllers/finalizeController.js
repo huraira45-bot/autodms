@@ -320,10 +320,14 @@ exports.getUnfinalizeLog = async (req, res) => {
                    ur.AdminApprovedBy, ur.AdminApprovedByName, ur.AdminApprovedAt,
                    ur.RejectedBy, ur.RejectedByName, ur.RejectedAt, ur.RejectionReason,
                    j.JobCardNo, j.jobCode, j.JobCardDate,
-                   j.ServiceAdvisor, j.CustomerName, j.VehicleRegNo,
+                   j.ServiceAdvisor, j.VehicleRegNo,
+                   c.endUserName AS CustomerName,
+                   p.PartyName,
                    j.IsFinalized AS JCIsFinalizedNow
             FROM   dms_UnfinalizeRequests ur
-            LEFT   JOIN Addata_JobCardInfo j ON j.JobCardId = ur.EntityID
+            LEFT   JOIN Addata_JobCardInfo   j ON j.JobCardId = ur.EntityID
+            LEFT   JOIN addata_CustomerInfo  c ON c.ProfileID = j.EndUserID
+            LEFT   JOIN gen_PartiesInfo      p ON p.PartyID   = j.PartyID
             ${whereSql}
             ORDER  BY ur.RequestedAt DESC, ur.RequestID DESC
         `);
