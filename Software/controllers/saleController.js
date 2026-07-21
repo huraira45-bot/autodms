@@ -200,7 +200,8 @@ exports.getStoreSaleById = async (req, res) => {
         if (!hdr.recordset.length) return res.status(404).json({ error: 'Store Sale not found' });
         const lines = await pool.request()
             .input('id', sql.Int, parseInt(req.params.id))
-            .query(`SELECT d.*, i.ItenName, i.ItemNumber
+            .query(`SELECT d.*, i.ItenName,
+                           COALESCE(NULLIF(CAST(i.ItemNumber AS NVARCHAR(50)), ''), i.ManualNumber) AS ItemNumber
                     FROM data_StoreSaleDetail d
                     LEFT JOIN InventItems i ON i.ItemId = d.ItemID
                     WHERE d.SaleID=@id`);

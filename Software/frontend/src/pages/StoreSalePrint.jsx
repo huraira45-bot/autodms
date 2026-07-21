@@ -125,8 +125,8 @@ export default function StoreSalePrint() {
             {/* Words + totals row */}
             <div className="totals-row">
                 <div className="words">
-                    <div className="lbl"><b>Bill Amount In Words:</b></div>
-                    <div className="words-val">{toWords(netBill)}</div>
+                    <b>Bill Amount In Words:</b>&nbsp;
+                    <span className="words-val">{toWords(netBill)}</span>
                 </div>
                 <table className="totals">
                     <tbody>
@@ -177,8 +177,8 @@ export default function StoreSalePrint() {
                 .items th { background: #f0f0f0; text-align: left; }
                 .no-item { text-align: center; font-family: 'Times New Roman', serif; font-style: italic; font-weight: 700; color: #b91c1c; font-size: 22px; padding: 10px 0; letter-spacing: 1px; border-bottom: 1px solid #000; }
                 .totals-row { display: flex; justify-content: space-between; gap: 24px; margin-top: 8px; align-items: flex-start; }
-                .words { flex: 1; }
-                .words-val { padding: 4px 0; }
+                .words { flex: 1 1 0; min-width: 0; font-size: 12px; padding-top: 4px; }
+                .words-val { font-weight: 600; }
                 .totals { font-size: 12px; min-width: 220px; border-collapse: collapse; }
                 .totals td:first-child { font-weight: 700; padding: 3px 12px 3px 0; text-align: right; }
                 .totals td:last-child { text-align: right; min-width: 110px; font-weight: 600; }
