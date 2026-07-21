@@ -79,20 +79,12 @@ export default function WorkOrderPrint() {
                     </tr>
                     <tr>
                         <td className="lbl">Delivered By</td><td colSpan={3} className="val">{jc.DeliveredTo || ''}</td>
-                        <td className="lbl">Mobile #</td><td colSpan={2} className="val">{jc.BringByMobile || jc.CustomerPhone || ''}
-                            <span style={{ float: 'right' }}>
-                                <b>PM</b> [{jc.PMType === 'PM' ? '✓' : ' '}] &nbsp; <b>GR</b> [{(jc.JobTypeCode||'').includes('GR') ? '✓' : ' '}]
-                            </span>
-                        </td>
+                        <td className="lbl">Mobile #</td><td colSpan={2} className="val">{jc.BringByMobile || jc.CustomerPhone || ''}</td>
                     </tr>
                     <tr>
                         <td className="lbl">Reg #</td><td className="val">{jc.VehicleRegNo || ''}</td>
                         <td className="lbl">Type</td><td className="val">{jc.JobTypeCode || jc.CustomerType || ''}</td>
-                        <td className="lbl">Odometer</td><td colSpan={2} className="val">{Number(jc.Odometer || 0).toLocaleString()}
-                            <span style={{ float: 'right' }}>
-                                <b>Warranty</b> [{(jc.JobTypeCode||'').includes('WR') ? '✓' : ' '}] &nbsp; <b>Other</b> [ ]
-                            </span>
-                        </td>
+                        <td className="lbl">Odometer</td><td colSpan={2} className="val">{Number(jc.Odometer || 0).toLocaleString()}</td>
                         <td className="lbl wo-lbl">WO Date</td>
                         <td className="val wo-val">{d(jc.JobCardDate)}</td>
                     </tr>
