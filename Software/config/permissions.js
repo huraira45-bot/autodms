@@ -146,6 +146,7 @@ const SECTIONS = [
             { key: 'report:walkin_outstanding',    label: 'Walk-in Outstanding',   kind: 'report' },
             { key: 'report:voucher_audit',         label: 'Voucher Audit',         kind: 'report' },
             { key: 'report:system_account_audit',  label: 'System Account Audit',  kind: 'report' },
+            { key: 'report:unfinalize_log',        label: 'Unfinalize Log (JC)',   kind: 'report' },
             { key: 'report:party_open_invoices',    label: 'Party Open Invoices',   kind: 'report' },
             { key: 'report:store_sale_receivables', label: 'Store Sale Receivables', kind: 'report' },
         ],

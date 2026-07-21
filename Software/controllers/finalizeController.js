@@ -280,6 +280,73 @@ exports.getRequests = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+// GET /api/reports/unfinalize-log?from&to&status&search&requester
+// Full history of Job Card unfinalize requests across every workflow state.
+// Filters:
+//   from / to  — YYYY-MM-DD, matched against DATE(RequestedAt)
+//   status     — ALL | PENDING | AM_APPROVED | COMPLETED | REJECTED
+//   search     — matches JobCardNo (RO#) or EntityRef LIKE
+//   requester  — matches RequestedByName LIKE (case-insensitive)
+// Payload shape (rows + total + summary) matches ReportShell's expectations.
+exports.getUnfinalizeLog = async (req, res) => {
+    try {
+        const { from, to, status, search, requester } = req.query;
+        const pool = await getPool();
+        const request = pool.request();
+        const where = [`ur.EntityType = 'JOBCARD'`];
+
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(ur.RequestedAt AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(ur.RequestedAt AS DATE) <= @to'); }
+        if (status && status !== 'ALL') {
+            request.input('st', sql.NVarChar(20), String(status));
+            where.push('ur.Status = @st');
+        }
+        if (search) {
+            request.input('s', sql.NVarChar(60), `%${String(search).trim()}%`);
+            where.push('(ur.EntityRef LIKE @s OR j.JobCardNo LIKE @s)');
+        }
+        if (requester) {
+            request.input('rq', sql.NVarChar(120), `%${String(requester).trim()}%`);
+            where.push('ur.RequestedByName LIKE @rq');
+        }
+
+        const whereSql = 'WHERE ' + where.join(' AND ');
+
+        const r = await request.query(`
+            SELECT ur.RequestID, ur.EntityType, ur.EntityID, ur.EntityRef,
+                   ur.RequestedBy, ur.RequestedByName, ur.RequestedAt,
+                   ur.Reason, ur.Status,
+                   ur.AMApprovedBy, ur.AMApprovedByName, ur.AMApprovedAt,
+                   ur.AdminApprovedBy, ur.AdminApprovedByName, ur.AdminApprovedAt,
+                   ur.RejectedBy, ur.RejectedByName, ur.RejectedAt, ur.RejectionReason,
+                   j.JobCardNo, j.jobCode, j.JobCardDate,
+                   j.ServiceAdvisor, j.CustomerName, j.VehicleRegNo,
+                   j.IsFinalized AS JCIsFinalizedNow
+            FROM   dms_UnfinalizeRequests ur
+            LEFT   JOIN Addata_JobCardInfo j ON j.JobCardId = ur.EntityID
+            ${whereSql}
+            ORDER  BY ur.RequestedAt DESC, ur.RequestID DESC
+        `);
+
+        const rows = r.recordset;
+        const count = (st) => rows.filter(x => x.Status === st).length;
+        res.json({
+            rows,
+            total: rows.length,
+            summary: {
+                requestCount: rows.length,
+                pending:      count('PENDING'),
+                amApproved:   count('AM_APPROVED'),
+                completed:    count('COMPLETED'),
+                rejected:     count('REJECTED'),
+            },
+        });
+    } catch (err) {
+        console.error('getUnfinalizeLog:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 // PUT /api/finalize/requests/:requestId/am-approve
 exports.amApprove = async (req, res) => {
     if (!req.user.modules.includes('am_approve')) return res.status(403).json({ error: 'AM approval permission required' });

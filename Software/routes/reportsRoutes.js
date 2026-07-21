@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const reports = require('../controllers/reportsController');
+const finalize = require('../controllers/finalizeController');
 const { requireAccess, requireAnyAccess } = require('../middleware/permissions');
 
 // Each report is its own permission key (report:<slug>). See config/permissions.js.
@@ -47,5 +48,9 @@ router.get('/voucher-audit',          requireAccess('report:voucher_audit'),    
 router.get('/system-account-audit',   requireAccess('report:system_account_audit'),   reports.getSystemAccountAudit);
 router.get('/party-open-invoices',    requireAccess('report:party_open_invoices'),    reports.getPartyOpenInvoices);
 router.get('/store-sale-receivables', requireAccess('report:store_sale_receivables'), reports.getStoreSaleReceivables);
+// Unfinalize activity log — anyone in the workflow (AM or Admin) can view it,
+// even if they don't have the general finance-reports permission.
+router.get('/unfinalize-log',         requireAnyAccess('am_approve', 'admin_unfinalize', 'report:unfinalize_log'),
+                                      finalize.getUnfinalizeLog);
 
 module.exports = router;

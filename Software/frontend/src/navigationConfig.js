@@ -172,6 +172,7 @@ export const NAV_ITEMS = [
     { id: 'r-va',        moduleGroup: 'reports', section: 'Audit',                 label: 'Voucher Audit Trail', path: '/reports/voucher-audit',       icon: ListChecks,   permission: 'report:voucher_audit' },
     { id: 'r-saa',       moduleGroup: 'reports', section: 'Audit',                 label: 'System Account Audit',path: '/reports/system-account-audit',icon: ShieldCheck,  permission: 'report:system_account_audit' },
     { id: 'r-charity',   moduleGroup: 'reports', section: 'Audit',                 label: 'Charity Tracker',     path: '/reports/charity',              icon: HeartHandshake, permission: 'charity_view', description: 'Every 1% charity accrual with voucher detail.' },
+    { id: 'r-unfin',     moduleGroup: 'reports', section: 'Audit',                 label: 'Unfinalize Log (JC)', path: '/reports/unfinalize-log',       icon: Undo2,        anyPermissions: ['report:unfinalize_log', 'am_approve', 'admin_unfinalize'], description: 'JC unfinalize requests: pending, approved, executed, rejected.' },
     { id: 'r-jcr',       moduleGroup: 'reports', section: 'Workshop',              label: 'Job Card Register',   path: '/reports/service/job-card-register',   icon: ListChecks, permission: 'report:job_card_register' },
     { id: 'r-jc-tax',    moduleGroup: 'reports', section: 'Workshop',              label: 'Tax Invoice Tracker', path: '/reports/service/tax-invoice-tracker', icon: ListChecks, permission: 'report:tax_invoice_tracker' },
     { id: 'r-adv',       moduleGroup: 'reports', section: 'Workshop',              label: 'Advisor Performance', path: '/reports/service/advisor-performance', icon: ListChecks, permission: 'report:advisor_performance' },
@@ -208,6 +209,13 @@ export function canAccessNavItem(item, hasModule, hasPermission) {
     const okPerm   = item.permission
         ? !!(hasPermission && hasPermission(item.permission))
         : false;
+    // Optional list-form guard for items reachable via multiple roles
+    // (e.g. an Unfinalize report visible to AMs, admins, or dedicated
+    // report-viewers). Item is visible if the user matches ANY entry.
+    const okAny = Array.isArray(item.anyPermissions) && item.anyPermissions.length
+        ? item.anyPermissions.some(k => hasModule(k) || (hasPermission && hasPermission(k)))
+        : false;
+    if (item.anyPermissions) return okAny;
     if (item.moduleKey && item.permission) return okModule || okPerm;
     if (item.moduleKey) return okModule;
     if (item.permission) return okPerm;
