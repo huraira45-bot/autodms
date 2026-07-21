@@ -1,4 +1,5 @@
 const { sql, dbConfig, getPool } = require('../config/db');
+const { postSSRVoucher } = require('../services/ssrPostingService');
 
 exports.saveSSR = async (req, res) => {
   try {
@@ -65,10 +66,45 @@ exports.saveSSR = async (req, res) => {
       }
     }
 
+    // Auto-finalize: post the SR voucher + flip IsFinalized=1 in one
+    // transaction. UI presents this as a single "Finalize Return" action
+    // so we do both server-side. Mirrors the Store Sale flow at
+    // saleController.saveSale. If posting fails we leave the SSR in
+    // draft (the SP has already restated stock; deleting the header
+    // wouldn't roll that back cleanly, so let the user retry finalize
+    // via the finalize endpoint after fixing the underlying issue).
+    let voucherId = null;
+    if (newReturnId) {
+      const postTx = new sql.Transaction(pool);
+      await postTx.begin();
+      try {
+        await new sql.Request(postTx)
+          .input('id', sql.Int, newReturnId)
+          .input('by', sql.Int, req.user?.userId || null)
+          .input('byName', sql.NVarChar(100), req.user?.userName || '')
+          .query(`UPDATE data_StoreSaleReturnInfo
+                  SET IsFinalized=1, FinalizedBy=@by, FinalizedByName=@byName, FinalizedAt=GETDATE()
+                  WHERE ReturnID=@id`);
+
+        voucherId = await postSSRVoucher(newReturnId, req.user, postTx);
+        await postTx.commit();
+      } catch (postErr) {
+        try { await postTx.rollback(); } catch {}
+        console.error('SSR GL posting failed for ReturnID', newReturnId, ':', postErr.message);
+        return res.status(500).json({
+          error: 'SSR was saved as draft but GL posting failed. Please finalize manually after fixing the issue.',
+          ReturnID: newReturnId,
+          ReturnNo: newReturnNo,
+          details: postErr.message,
+        });
+      }
+    }
+
     res.status(201).json({
-      message: 'Store Sale Return Saved Successfully',
+      message: 'Store Sale Return Saved & Finalized Successfully',
       ReturnNo: newReturnNo,
       ReturnID: newReturnId,
+      VoucherID: voucherId,
     });
   } catch (err) {
     console.error(err);
