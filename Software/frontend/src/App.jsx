@@ -55,6 +55,7 @@ import Chat               from './pages/Chat';
 import JobKiosk           from './pages/JobKiosk';
 import Charity            from './pages/reports/Charity';
 import UnfinalizeLog      from './pages/reports/UnfinalizeLog';
+import RevenueSplit       from './pages/reports/RevenueSplit';
 import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
@@ -953,6 +954,9 @@ function AppShell() {
                         <ProtectedRoute anyModules={['report:unfinalize_log', 'am_approve', 'admin_unfinalize']}>
                             <UnfinalizeLog />
                         </ProtectedRoute>
+                    } />
+                    <Route path="/reports/revenue-split" element={
+                        <ProtectedRoute moduleKey="report:revenue_split"><RevenueSplit /></ProtectedRoute>
                     } />
                     <Route path="/reports/customer-statement" element={
                         <ProtectedRoute moduleKey="reports"><PartyStatement kind="customer" /></ProtectedRoute>

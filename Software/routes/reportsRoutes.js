@@ -48,6 +48,7 @@ router.get('/voucher-audit',          requireAccess('report:voucher_audit'),    
 router.get('/system-account-audit',   requireAccess('report:system_account_audit'),   reports.getSystemAccountAudit);
 router.get('/party-open-invoices',    requireAccess('report:party_open_invoices'),    reports.getPartyOpenInvoices);
 router.get('/store-sale-receivables', requireAccess('report:store_sale_receivables'), reports.getStoreSaleReceivables);
+router.get('/revenue-split',          requireAccess('report:revenue_split'),          reports.getRevenueSplit);
 // Unfinalize activity log — anyone in the workflow (AM or Admin) can view it,
 // even if they don't have the general finance-reports permission.
 router.get('/unfinalize-log',         requireAnyAccess('am_approve', 'admin_unfinalize', 'report:unfinalize_log'),

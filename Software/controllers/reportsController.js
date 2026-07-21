@@ -1979,3 +1979,104 @@ exports.getStoreSaleReceivables = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+// ============================================================================
+// GET /api/reports/revenue-split?from&to&mode=all|cash|credit
+//
+// All-revenue report split by payment mode.
+//   Cash   = voucher's customer subsidiary Dr line hit GENERAL_CUSTOMER
+//            (walk-in — paid same day via Cash / POS / Bank Transfer /
+//             Cheque, no Trade Debtors balance created)
+//   Credit = voucher's customer subsidiary Dr line hit a named-party GL
+//            (Trade Debtors under that party) — i.e. anything OTHER than
+//            GENERAL_CUSTOMER
+//
+// Owner ask 2026-07-21. Payload shape matches ReportShell.
+// ============================================================================
+exports.getRevenueSplit = async (req, res) => {
+    try {
+        const { from, to, mode } = req.query;
+        const generalCustGL = await resolveRole('GENERAL_CUSTOMER');
+        if (!generalCustGL) return res.status(500).json({ error: 'GENERAL_CUSTOMER role is not mapped.' });
+
+        const pool = await getPool();
+        const request = pool.request().input('gc', sql.Int, generalCustGL);
+        const where = [
+            `v.Status='Posted'`,
+            `v.ReversesVoucherID IS NULL`,
+            `LEFT(g.GLCode, 3)='401'`,        // Workshop Revenue umbrella
+        ];
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(v.VoucherDate AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(v.VoucherDate AS DATE) <= @to'); }
+        if (mode === 'cash')   where.push(`EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d2 WHERE d2.VoucherID=v.VoucherID AND d2.GLCAID=@gc AND d2.Debit>0)`);
+        if (mode === 'credit') where.push(`NOT EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d2 WHERE d2.VoucherID=v.VoucherID AND d2.GLCAID=@gc AND d2.Debit>0)`);
+
+        const rows = (await request.query(`
+            SELECT v.VoucherID,
+                   v.VoucherNo,
+                   v.VoucherDate,
+                   v.SourceDocType,
+                   v.SourceDocID,
+                   vt.Title AS VoucherTypeCode,
+                   g.GLCode,
+                   g.GLTitle,
+                   SUM(d.Credit) - SUM(d.Debit) AS RevenueAmount,
+                   CASE
+                       WHEN EXISTS (
+                           SELECT 1 FROM data_FinanceVoucherDetail d2
+                           WHERE d2.VoucherID = v.VoucherID
+                             AND d2.GLCAID    = @gc
+                             AND d2.Debit     > 0
+                       ) THEN 'CASH'
+                       ELSE 'CREDIT'
+                   END AS Mode,
+                   (
+                       SELECT TOP 1 p.PartyName
+                       FROM   data_FinanceVoucherDetail dd
+                       JOIN   gen_PartiesInfo           p ON p.PartyGLID = dd.GLCAID
+                       WHERE  dd.VoucherID = v.VoucherID
+                         AND  dd.Debit     > 0
+                   ) AS PartyName
+            FROM   data_FinanceVoucherDetail d
+            JOIN   data_FinanceVoucherInfo   v  ON v.VoucherID   = d.VoucherID
+            JOIN   GLChartOFAccount          g  ON g.GLCAID      = d.GLCAID
+            LEFT   JOIN GLVoucherType        vt ON vt.Voucherid  = v.VoucherTypeID
+            WHERE  ${where.join(' AND ')}
+            GROUP  BY v.VoucherID, v.VoucherNo, v.VoucherDate, v.SourceDocType,
+                     v.SourceDocID, vt.Title, g.GLCode, g.GLTitle
+            HAVING SUM(d.Credit) - SUM(d.Debit) <> 0
+            ORDER  BY v.VoucherDate DESC, v.VoucherID DESC, g.GLCode
+        `)).recordset;
+
+        const sum   = (arr) => arr.reduce((s, x) => s + Number(x.RevenueAmount || 0), 0);
+        const cash  = rows.filter(r => r.Mode === 'CASH');
+        const cred  = rows.filter(r => r.Mode === 'CREDIT');
+        const glMix = {};
+        for (const r of rows) {
+            const bucket = glMix[r.GLCode] ||= { GLCode: r.GLCode, GLTitle: r.GLTitle, Cash: 0, Credit: 0, Total: 0 };
+            const amt = Number(r.RevenueAmount || 0);
+            if (r.Mode === 'CASH') bucket.Cash += amt; else bucket.Credit += amt;
+            bucket.Total += amt;
+        }
+        const byGL = Object.values(glMix)
+            .map(b => ({ GLCode: b.GLCode, GLTitle: b.GLTitle,
+                         Cash: +b.Cash.toFixed(2), Credit: +b.Credit.toFixed(2), Total: +b.Total.toFixed(2) }))
+            .sort((a, b) => a.GLCode.localeCompare(b.GLCode));
+
+        res.json({
+            rows,
+            total: rows.length,
+            summary: {
+                cash:   +sum(cash).toFixed(2),
+                credit: +sum(cred).toFixed(2),
+                total:  +(sum(cash) + sum(cred)).toFixed(2),
+                cashVoucherCount:   new Set(cash.map(r => r.VoucherID)).size,
+                creditVoucherCount: new Set(cred.map(r => r.VoucherID)).size,
+                byGL,
+            },
+        });
+    } catch (err) {
+        console.error('getRevenueSplit:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

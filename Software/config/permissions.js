@@ -149,6 +149,7 @@ const SECTIONS = [
             { key: 'report:unfinalize_log',        label: 'Unfinalize Log (JC)',   kind: 'report' },
             { key: 'report:party_open_invoices',    label: 'Party Open Invoices',   kind: 'report' },
             { key: 'report:store_sale_receivables', label: 'Store Sale Receivables', kind: 'report' },
+            { key: 'report:revenue_split',         label: 'Revenue Split (Cash/Credit)', kind: 'report' },
         ],
     },
     {
