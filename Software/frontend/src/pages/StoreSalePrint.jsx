@@ -6,32 +6,6 @@ import PrintBusinessHeader from '../components/PrintBusinessHeader';
 const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = v => v ? new Date(v).toLocaleDateString('en-GB').replace(/\//g, '/') : '';
 
-// Convert a number to English words — sized for Pakistani rupee amounts
-// (lakh/crore not used; standard international grouping). Outputs e.g.
-// "Three Thousand Twenty Rupees Only."
-function toWords(n) {
-    n = Math.round(Number(n) || 0);
-    if (n === 0) return 'Zero Rupees Only.';
-    const A = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-    const B = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-    const chunk = (x) => {
-        if (x === 0) return '';
-        if (x < 20) return A[x];
-        if (x < 100) return B[Math.floor(x/10)] + (x % 10 ? ' ' + A[x % 10] : '');
-        return A[Math.floor(x/100)] + ' Hundred' + (x % 100 ? ' ' + chunk(x % 100) : '');
-    };
-    const parts = [];
-    const crore = Math.floor(n / 10000000); n %= 10000000;
-    const lakh  = Math.floor(n / 100000);   n %= 100000;
-    const thou  = Math.floor(n / 1000);     n %= 1000;
-    const rest  = n;
-    if (crore) parts.push(chunk(crore) + ' Crore');
-    if (lakh)  parts.push(chunk(lakh)  + ' Lakh');
-    if (thou)  parts.push(chunk(thou)  + ' Thousand');
-    if (rest)  parts.push(chunk(rest));
-    return parts.join(' ').trim() + ' Rupees Only.';
-}
-
 export default function StoreSalePrint() {
     const { id } = useParams();
     const [ss, setSs] = useState(null);
@@ -122,12 +96,8 @@ export default function StoreSalePrint() {
             {/* NO-ITEM-BELOW banner */}
             <div className="no-item">NO ITEM BELOW THIS AREA.</div>
 
-            {/* Words + totals row */}
+            {/* Totals row — right-aligned */}
             <div className="totals-row">
-                <div className="words">
-                    <b>Bill Amount In Words:</b>&nbsp;
-                    <span className="words-val">{toWords(netBill)}</span>
-                </div>
                 <table className="totals">
                     <tbody>
                         <tr><td>Total Bill:</td><td>RS. {fmt(totalBill)}</td></tr>
@@ -176,9 +146,7 @@ export default function StoreSalePrint() {
                 .items th, .items td { padding: 6px 8px; border-bottom: 1px solid #cbd5e1; font-size: 11px; }
                 .items th { background: #f0f0f0; text-align: left; }
                 .no-item { text-align: center; font-family: 'Times New Roman', serif; font-style: italic; font-weight: 700; color: #b91c1c; font-size: 22px; padding: 10px 0; letter-spacing: 1px; border-bottom: 1px solid #000; }
-                .totals-row { display: flex; justify-content: space-between; gap: 24px; margin-top: 8px; align-items: flex-start; }
-                .words { flex: 1 1 0; min-width: 0; font-size: 12px; padding-top: 4px; }
-                .words-val { font-weight: 600; }
+                .totals-row { display: flex; justify-content: flex-end; margin-top: 8px; }
                 .totals { font-size: 12px; min-width: 220px; border-collapse: collapse; }
                 .totals td:first-child { font-weight: 700; padding: 3px 12px 3px 0; text-align: right; }
                 .totals td:last-child { text-align: right; min-width: 110px; font-weight: 600; }
