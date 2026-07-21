@@ -17,6 +17,12 @@
 --
 -- Safe to re-run: guarded by a check on the current AvgCost.
 -- =============================================================================
+-- QUOTED_IDENTIFIER + ANSI_NULLS must be ON because paint_Item.StockValue
+-- is a PERSISTED computed column — SQL Server refuses UPDATEs against such
+-- tables when these session settings are OFF (Msg 1934). sqlcmd defaults
+-- QUOTED_IDENTIFIER to OFF, so we set it explicitly.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS       ON;
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
