@@ -74,7 +74,7 @@ export default function StoreSalePrint() {
                         <th style={{ width: '15%' }}>Item Code</th>
                         <th>Item Name</th>
                         <th style={{ width: '8%', textAlign: 'right' }}>Qty</th>
-                        <th style={{ width: '15%', textAlign: 'right' }}>Rate</th>
+                        <th style={{ width: '15%', textAlign: 'right' }}>Unit Rate</th>
                         <th style={{ width: '15%', textAlign: 'right' }}>Disc.</th>
                         <th style={{ width: '15%', textAlign: 'right' }}>Amount</th>
                     </tr>
