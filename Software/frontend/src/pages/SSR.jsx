@@ -228,6 +228,37 @@ export default function SSR() {
     } finally { setLoading(false); }
   };
 
+  // Explicit finalize for existing DRAFT returns. New returns finalize
+  // automatically on save (see ssrController.saveSSR); this handles the
+  // pre-fix drafts still sitting in the DB, plus any where the initial
+  // auto-finalize failed and the SSR was left in draft.
+  const handleFinalize = async (id) => {
+    const returnId = id || editingId;
+    if (!returnId) return;
+    const ok = await confirm({
+      title: 'Finalize this sale return?',
+      message: 'This will post the return voucher and lock the SSR against edits.',
+      confirmLabel: 'Finalize return',
+      tone: 'warning',
+    });
+    if (!ok) return;
+    setLoading(true);
+    try {
+      await axios.post(`${API_BASE}/finalize/SSR/${returnId}`);
+      notify({ type: 'success', title: 'Return finalized', message: 'SR voucher posted and return locked.' });
+      if (editingId === returnId) {
+        // Refresh the open editor state.
+        const r = await axios.get(`${API_BASE}/sales/ssr/${returnId}`);
+        setIsFinalized(!!r.data.IsFinalized);
+        setFinalizedBy(r.data.FinalizedByName || '');
+        setFinalizedAt(r.data.FinalizedAt);
+      }
+      fetchReturns();
+    } catch (err) {
+      notify({ type: 'error', title: 'Finalize failed', message: err.response?.data?.error || err.response?.data?.details || err.message });
+    } finally { setLoading(false); }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div className="print-only print-header">
@@ -267,6 +298,11 @@ export default function SSR() {
           {!disabled && (editingId ? canEdit : canInsert) && <button className="btn" style={{ background: '#f59e0b' }} onClick={handleSave} disabled={loading}>
             <Undo2 size={18} /> {loading ? 'Saving...' : (editingId ? 'Save Changes' : 'Finalize Return')}
           </button>}
+          {editingId && !isFinalized && canEdit && (
+            <button className="btn" style={{ background: '#16a34a' }} onClick={() => handleFinalize()} disabled={loading} title="Post the SR voucher and lock this return">
+              <CheckCircle2 size={18} /> Finalize Return
+            </button>
+          )}
         </div>
       </div>
 
@@ -301,8 +337,15 @@ export default function SSR() {
                         {r.IsFinalized ? 'Finalized' : 'Draft'}
                       </span>
                     </td>
-                    <td style={{ padding: 8 }}>
+                    <td style={{ padding: 8, display: 'flex', gap: 6 }}>
                       <button className="btn-sm" onClick={() => openReturn(r.ReturnID)}>Open</button>
+                      {!r.IsFinalized && canEdit && (
+                        <button className="btn-sm" style={{ background: '#16a34a', color: 'white' }}
+                                onClick={() => handleFinalize(r.ReturnID)}
+                                title="Post the SR voucher and lock this return">
+                          Finalize
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
