@@ -42,14 +42,18 @@ WHERE  ServiceAdvisor = @fromName OR ServiceAdvisorID = @fromId;
 
 DECLARE @jcAffected INT = @@ROWCOUNT;
 
--- CRO Complaints (if the table exists — some environments don't run the
--- CRO migrations). Match on ServiceAdvisor name text.
+-- CRO Complaints — only if both the table and the ServiceAdvisor column
+-- exist on this environment (schema drift is common across dev/live).
 DECLARE @croAffected INT = 0;
 IF OBJECT_ID('dbo.dms_CRO_Complaints', 'U') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID('dbo.dms_CRO_Complaints')
+                  AND name = 'ServiceAdvisor')
 BEGIN
-    UPDATE dms_CRO_Complaints
-    SET    ServiceAdvisor = @toName
-    WHERE  ServiceAdvisor = @fromName;
+    EXEC sp_executesql
+        N'UPDATE dms_CRO_Complaints SET ServiceAdvisor=@to WHERE ServiceAdvisor=@from',
+        N'@to NVARCHAR(100), @from NVARCHAR(100)',
+        @to=@toName, @from=@fromName;
     SET @croAffected = @@ROWCOUNT;
 END;
 
