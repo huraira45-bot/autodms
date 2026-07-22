@@ -57,6 +57,7 @@ import Charity            from './pages/reports/Charity';
 import UnfinalizeLog      from './pages/reports/UnfinalizeLog';
 import RevenueSplit       from './pages/reports/RevenueSplit';
 import BuPnL              from './pages/reports/BuPnL';
+import StoreSalePnL       from './pages/reports/StoreSalePnL';
 import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
@@ -961,6 +962,9 @@ function AppShell() {
                     } />
                     <Route path="/reports/bu-pnl" element={
                         <ProtectedRoute moduleKey="report:bu_pnl"><BuPnL /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/store-sale-pnl" element={
+                        <ProtectedRoute moduleKey="report:store_sale_pnl"><StoreSalePnL /></ProtectedRoute>
                     } />
                     <Route path="/reports/customer-statement" element={
                         <ProtectedRoute moduleKey="reports"><PartyStatement kind="customer" /></ProtectedRoute>
