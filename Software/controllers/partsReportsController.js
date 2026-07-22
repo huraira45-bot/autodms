@@ -605,7 +605,7 @@ exports.partsSoldFinalized = async (req, res) => {
             CROSS  APPLY (
                 SELECT TOP 1 fv.VoucherDate
                 FROM   data_FinanceVoucherInfo fv
-                WHERE  fv.SourceDocType = 'SI'
+                WHERE  fv.SourceDocType IN ('STORE_SALE','SI','SS')
                   AND  fv.SourceDocID   = si.SaleID
                   AND  fv.Status = 'Posted'
                   AND  fv.ReversesVoucherID IS NULL
