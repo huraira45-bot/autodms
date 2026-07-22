@@ -785,15 +785,24 @@ exports.partsSoldFinalized = async (req, res) => {
         const returnRows  = rows.filter(r => r.Channel === 'SR');
         const grossRevenue   = +salesRows.reduce((s, x) => s + x.Revenue, 0).toFixed(2);
         const returnsRevenue = +Math.abs(returnRows.reduce((s, x) => s + x.Revenue, 0)).toFixed(2);
+        const salesTax = +salesRows.reduce((s, x) => s + x.Tax, 0).toFixed(2);
+        const salesLineNet = +salesRows.reduce((s, x) => s + x.LineNet, 0).toFixed(2);
+        const returnsGrossWithTax = +Math.abs(returnRows.reduce((s, x) => s + x.LineNet, 0)).toFixed(2);
+
         const totals = {
             lines:    rows.length,
             docs:     new Set(rows.map(r => r.DocRef)).size,
             quantity: +rows.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
             discount: +rows.reduce((s, x) => s + x.Discount, 0).toFixed(2),
-            tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
-            grossRevenue,                                         // JC + SS Cr on 401003001
-            returns:      returnsRevenue,                         // SSR Dr on 401003001 (positive number)
-            revenue:      +(grossRevenue - returnsRevenue).toFixed(2),  // matches GL 401003001 closing movement
+            // Full customer-facing invoice total for the sales side (Cr on
+            // customer subsidiary): Qty*Rate + Tax. The report walks down
+            // from this to Net Revenue by subtracting Tax and Returns.
+            grossWithTax: salesLineNet,
+            tax:          salesTax,
+            grossRevenue,                                                    // = grossWithTax - salesTax = Cr on 401003001
+            returns:      returnsRevenue,                                    // Dr on 401003001 (positive number)
+            returnsGrossWithTax,                                             // customer-facing SSR gross (incl GST)
+            revenue:      +(grossRevenue - returnsRevenue).toFixed(2),       // matches GL 401003001 closing movement
             net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
             byBusinessUnit,
             byMode: { cash: modeSum('CASH'), credit: modeSum('CREDIT') },

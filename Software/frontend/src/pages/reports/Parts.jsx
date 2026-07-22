@@ -530,12 +530,12 @@ export function PartsSoldFinalized() {
             {(data) => (
                 <>
                     <SummaryBar items={[
-                        { label: 'Documents',       value: fmtInt(data.totals.docs) },
-                        { label: 'Lines',           value: fmtInt(data.totals.lines) },
-                        { label: 'Gross Revenue',   value: 'PKR ' + fmt(data.totals.grossRevenue || 0) },
-                        { label: 'Returns (SSR)',   value: 'PKR ' + fmt(data.totals.returns || 0) },
-                        { label: 'GST',             value: fmt(data.totals.tax) },
-                        { label: 'Net Revenue (GL)', value: 'PKR ' + fmt(data.totals.revenue), strong: true },
+                        { label: 'Documents',           value: fmtInt(data.totals.docs) },
+                        { label: 'Lines',               value: fmtInt(data.totals.lines) },
+                        { label: 'Gross (incl. GST)',   value: 'PKR ' + fmt(data.totals.grossWithTax || 0) },
+                        { label: '(−) GST',             value: 'PKR ' + fmt(data.totals.tax || 0) },
+                        { label: '(−) Returns (SSR)',   value: 'PKR ' + fmt(data.totals.returns || 0) },
+                        { label: 'Net Revenue (GL)',    value: 'PKR ' + fmt(data.totals.revenue), strong: true },
                     ]} />
 
                     {/* By-Business-Unit × Cash/Credit — Revenue (excl. GST) so it matches 401003001 */}
