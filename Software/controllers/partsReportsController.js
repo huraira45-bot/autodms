@@ -500,6 +500,7 @@ exports.partsSoldFinalized = async (req, res) => {
         const businessType = req.query.businessType ? parseInt(req.query.businessType) : null;
         const mode = (req.query.mode || '').toUpperCase();
         const includeStoreSale = String(req.query.includeStoreSale || '1') !== '0';
+        const includeReturns   = String(req.query.includeReturns   || '1') !== '0';
 
         const pool = await getPool();
         const rq = pool.request()
@@ -616,7 +617,63 @@ exports.partsSoldFinalized = async (req, res) => {
             WHERE  ${ssWhere}`;
         }
 
-        const r = await rq.query(`${jcQuery} ${ssQuery} ORDER BY DocDate DESC, RefNo DESC`);
+        // ── Store Sale Return side ─────────────────────────────────────
+        // SSR posts Dr to PARTS_REVENUE (reversing the sale), so it's a
+        // NEGATIVE contribution to 401003001 Cr. Emit each return-detail
+        // line with a NEGATIVE Quantity so downstream Revenue = qty * rate
+        // is already signed.
+        let ssrQuery = '';
+        if (includeReturns && !businessType) {
+            let ssrWhere = `srv.VoucherDate BETWEEN @from AND @to AND ri.IsFinalized = 1`;
+            if (mode === 'CASH')   ssrWhere += ' AND ri.PartyID IS NULL';
+            if (mode === 'CREDIT') ssrWhere += ' AND ri.PartyID IS NOT NULL';
+            if (search) {
+                ssrWhere += ` AND (
+                    ri.ReturnNo LIKE @s
+                    OR ii.ItenName LIKE @s
+                    OR ISNULL(ii.ManualNumber, '') LIKE @s
+                    OR CAST(ii.ItemNumber AS NVARCHAR(50)) LIKE @s
+                    OR ISNULL(ri.CustomerName, '') LIKE @s
+                    OR ISNULL(rp.PartyName, '')    LIKE @s
+                )`;
+            }
+            ssrQuery = `
+            UNION ALL
+            SELECT 'SR' AS Channel,
+                   srv.VoucherDate   AS DocDate,
+                   ri.ReturnID       AS DocNo,
+                   ri.ReturnNo       AS RefNo,
+                   NULL              AS VehicleRegNo,
+                   'SR'              AS BusinessUnitCode,
+                   'Sale Return'     AS BusinessUnitName,
+                   ri.CustomerName   AS CustomerName,
+                   rp.PartyName,
+                   CASE WHEN ri.PartyID IS NULL THEN 'CASH' ELSE 'CREDIT' END AS Mode,
+                   ii.ItenName       AS ItemName,
+                   ii.ItemNumber,
+                   ii.ManualNumber,
+                   -rd.Quantity      AS Quantity,        -- NEGATIVE so qty*rate signs correctly
+                   rd.SaleRate       AS Rate,
+                   -ISNULL(rd.DiscountAmount, 0) AS Discount,
+                   -ISNULL(rd.TaxAmount, 0)      AS Tax,
+                   -(rd.Quantity * rd.SaleRate) + ISNULL(rd.DiscountAmount, 0) - ISNULL(rd.TaxAmount, 0) AS LineNet
+            FROM   data_StoreSaleReturnDetail rd
+            JOIN   data_StoreSaleReturnInfo   ri ON ri.ReturnID = rd.ReturnID
+            CROSS  APPLY (
+                SELECT TOP 1 fv.VoucherDate
+                FROM   data_FinanceVoucherInfo fv
+                WHERE  fv.SourceDocType = 'SSR'
+                  AND  fv.SourceDocID   = ri.ReturnID
+                  AND  fv.Status = 'Posted'
+                  AND  fv.ReversesVoucherID IS NULL
+                ORDER  BY fv.VoucherID
+            ) srv
+            JOIN   InventItems          ii ON ii.ItemId = rd.ItemID
+            LEFT   JOIN gen_PartiesInfo rp ON rp.PartyID = ri.PartyID
+            WHERE  ${ssrWhere}`;
+        }
+
+        const r = await rq.query(`${jcQuery} ${ssQuery} ${ssrQuery} ORDER BY DocDate DESC, RefNo DESC`);
 
         const rows = r.recordset.map(x => {
             const lineNet  = +Number(x.LineNet || 0).toFixed(2);
@@ -721,13 +778,22 @@ exports.partsSoldFinalized = async (req, res) => {
             };
         };
 
+        // Split into sales-side (JC + SS) and returns-side (SSR) so the
+        // UI can show gross sales, returns, and net revenue as separate
+        // lines. Revenue on SR rows is already negative.
+        const salesRows   = rows.filter(r => r.Channel !== 'SR');
+        const returnRows  = rows.filter(r => r.Channel === 'SR');
+        const grossRevenue   = +salesRows.reduce((s, x) => s + x.Revenue, 0).toFixed(2);
+        const returnsRevenue = +Math.abs(returnRows.reduce((s, x) => s + x.Revenue, 0)).toFixed(2);
         const totals = {
             lines:    rows.length,
             docs:     new Set(rows.map(r => r.DocRef)).size,
             quantity: +rows.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
             discount: +rows.reduce((s, x) => s + x.Discount, 0).toFixed(2),
             tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
-            revenue:  +rows.reduce((s, x) => s + x.Revenue, 0).toFixed(2),  // matches GL 401003001
+            grossRevenue,                                         // JC + SS Cr on 401003001
+            returns:      returnsRevenue,                         // SSR Dr on 401003001 (positive number)
+            revenue:      +(grossRevenue - returnsRevenue).toFixed(2),  // matches GL 401003001 closing movement
             net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
             byBusinessUnit,
             byMode: { cash: modeSum('CASH'), credit: modeSum('CREDIT') },

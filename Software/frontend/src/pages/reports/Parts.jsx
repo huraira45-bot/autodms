@@ -486,7 +486,8 @@ export function PartsSoldFinalized() {
             landscape
             defaultParams={{
                 from: firstOfMonthISO(), to: todayISO(),
-                search: '', businessType: '', mode: '', includeStoreSale: '1',
+                search: '', businessType: '', mode: '',
+                includeStoreSale: '1', includeReturns: '1',
             }}
             controls={({ params, updateParam }) => (
                 <>
@@ -509,6 +510,13 @@ export function PartsSoldFinalized() {
                                onChange={e => updateParam('includeStoreSale', e.target.checked ? '1' : '0')} />
                         Include Store Sales
                     </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer' }}
+                           title="Net-off finalized Store Sale Returns (SSR) — matches the ledger's Period Debits">
+                        <input type="checkbox"
+                               checked={String(params.includeReturns || '1') !== '0'}
+                               onChange={e => updateParam('includeReturns', e.target.checked ? '1' : '0')} />
+                        Net returns (SSR)
+                    </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
                         Search:
                         <input value={params.search || ''}
@@ -524,10 +532,10 @@ export function PartsSoldFinalized() {
                     <SummaryBar items={[
                         { label: 'Documents',       value: fmtInt(data.totals.docs) },
                         { label: 'Lines',           value: fmtInt(data.totals.lines) },
-                        { label: 'Cash Revenue',    value: 'PKR ' + fmt(data.totals.byMode?.cash?.revenue || 0) },
-                        { label: 'Credit Revenue',  value: 'PKR ' + fmt(data.totals.byMode?.credit?.revenue || 0) },
+                        { label: 'Gross Revenue',   value: 'PKR ' + fmt(data.totals.grossRevenue || 0) },
+                        { label: 'Returns (SSR)',   value: 'PKR ' + fmt(data.totals.returns || 0) },
                         { label: 'GST',             value: fmt(data.totals.tax) },
-                        { label: 'Revenue (GL)',    value: 'PKR ' + fmt(data.totals.revenue), strong: true },
+                        { label: 'Net Revenue (GL)', value: 'PKR ' + fmt(data.totals.revenue), strong: true },
                     ]} />
 
                     {/* By-Business-Unit × Cash/Credit — Revenue (excl. GST) so it matches 401003001 */}
@@ -601,9 +609,14 @@ export function PartsSoldFinalized() {
                             </thead>
                             <tbody>
                                 {data.rows.length === 0 && <Empty cols={15}>No finalized parts sales in this period.</Empty>}
-                                {data.rows.map((r, i) => (
-                                    <tr key={i} style={trBody}>
-                                        <TD mono><strong style={{ color: r.Channel === 'SS' ? '#0f766e' : '#7c3aed' }}>{r.Channel}</strong></TD>
+                                {data.rows.map((r, i) => {
+                                    const channelColour = r.Channel === 'SR' ? '#b91c1c'
+                                                        : r.Channel === 'SS' ? '#0f766e'
+                                                        : '#7c3aed';
+                                    const isReturn = r.Channel === 'SR';
+                                    return (
+                                    <tr key={i} style={{ ...trBody, background: isReturn ? '#fef2f2' : undefined }}>
+                                        <TD mono><strong style={{ color: channelColour }}>{r.Channel}</strong></TD>
                                         <TD>{r.DocDate}</TD>
                                         <TD mono>{r.Channel === 'JC' ? `JC-${r.RefNo}` : (r.RefNo || r.DocRef)}</TD>
                                         <TD mono title={r.BusinessUnitName}>{r.BusinessUnitCode}</TD>
@@ -619,7 +632,8 @@ export function PartsSoldFinalized() {
                                         <TD align="right" mono color="#1d4ed8">{fmt(r.Tax)}</TD>
                                         <TD align="right" mono>{fmt(r.LineNet)}</TD>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
