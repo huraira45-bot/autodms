@@ -507,7 +507,12 @@ exports.partsSoldFinalized = async (req, res) => {
             .input('to',   sql.DateTime, to);
 
         // ── JC side ────────────────────────────────────────────────────
-        let jcWhere = 'v.IssueDate BETWEEN @from AND @to AND j.IsFinalized = 1';
+        // Date filter is on the JC finalize voucher's date so the report
+        // aligns to the GL revenue account 401003001. Only Posted, non-
+        // reversed vouchers count. Parts issue lines are then joined via
+        // JobCardId. A JC's finalize voucher is unique per JC, so we pick
+        // the first one via CROSS APPLY TOP 1.
+        let jcWhere = `jcv.VoucherDate BETWEEN @from AND @to AND j.IsFinalized = 1`;
         if (businessType) { rq.input('bt', sql.Int, businessType); jcWhere += ' AND j.JobTypeId = @bt'; }
         if (mode === 'CASH')   jcWhere += ' AND j.PartyID IS NULL';
         if (mode === 'CREDIT') jcWhere += ' AND j.PartyID IS NOT NULL';
@@ -524,7 +529,7 @@ exports.partsSoldFinalized = async (req, res) => {
         }
         const jcQuery = `
             SELECT 'JC' AS Channel,
-                   v.IssueDate       AS DocDate,
+                   jcv.VoucherDate   AS DocDate,
                    v.IssueNo         AS DocNo,
                    v.JobCardNo       AS RefNo,
                    j.VehicleRegNo,
@@ -541,6 +546,15 @@ exports.partsSoldFinalized = async (req, res) => {
                    v.LineNet         AS LineNet
             FROM   vw_PartsIssueToJobCard v
             LEFT   JOIN Addata_JobCardInfo  j ON v.JobCardId = j.JobCardId
+            CROSS  APPLY (
+                SELECT TOP 1 fv.VoucherDate
+                FROM   data_FinanceVoucherInfo fv
+                WHERE  fv.SourceDocType IN ('JC','JOBCARD')
+                  AND  fv.SourceDocID   = j.JobCardId
+                  AND  fv.Status = 'Posted'
+                  AND  fv.ReversesVoucherID IS NULL
+                ORDER  BY fv.VoucherID
+            ) jcv
             LEFT   JOIN gen_JobCardType     t ON t.JobCardTypeId = j.JobTypeId
             LEFT   JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
             LEFT   JOIN gen_PartiesInfo     p ON p.PartyID   = j.PartyID
@@ -551,7 +565,9 @@ exports.partsSoldFinalized = async (req, res) => {
         if (includeStoreSale && !businessType) {
             // Only include Store Sales when the BU filter is empty — Store Sale
             // has no workshop JC type, so any BU filter naturally excludes it.
-            let ssWhere = `CAST(si.SaleDate AS DATE) BETWEEN @from AND @to AND si.IsFinalized = 1`;
+            // Date filter runs on the SS finalize voucher date so this matches
+            // the GL 401003001 credits for store-sale-originated revenue.
+            let ssWhere = `ssv.VoucherDate BETWEEN @from AND @to AND si.IsFinalized = 1`;
             if (mode === 'CASH')   ssWhere += ' AND si.PartyID IS NULL';
             if (mode === 'CREDIT') ssWhere += ' AND si.PartyID IS NOT NULL';
             if (search) {
@@ -567,7 +583,7 @@ exports.partsSoldFinalized = async (req, res) => {
             ssQuery = `
             UNION ALL
             SELECT 'SS' AS Channel,
-                   si.SaleDate       AS DocDate,
+                   ssv.VoucherDate   AS DocDate,
                    si.SaleID         AS DocNo,
                    si.InvoiceNo      AS RefNo,
                    NULL              AS VehicleRegNo,
@@ -586,6 +602,15 @@ exports.partsSoldFinalized = async (req, res) => {
                    (sd.Quantity * sd.SaleRate) - ISNULL(sd.DiscountAmount, 0) + ISNULL(sd.TaxAmount, 0) AS LineNet
             FROM   data_StoreSaleDetail sd
             JOIN   data_StoreSaleInfo   si ON si.SaleID = sd.SaleID
+            CROSS  APPLY (
+                SELECT TOP 1 fv.VoucherDate
+                FROM   data_FinanceVoucherInfo fv
+                WHERE  fv.SourceDocType = 'SI'
+                  AND  fv.SourceDocID   = si.SaleID
+                  AND  fv.Status = 'Posted'
+                  AND  fv.ReversesVoucherID IS NULL
+                ORDER  BY fv.VoucherID
+            ) ssv
             JOIN   InventItems          ii ON ii.ItemId = sd.ItemID
             LEFT   JOIN gen_PartiesInfo sp ON sp.PartyID = si.PartyID
             WHERE  ${ssWhere}`;
@@ -593,27 +618,35 @@ exports.partsSoldFinalized = async (req, res) => {
 
         const r = await rq.query(`${jcQuery} ${ssQuery} ORDER BY DocDate DESC, RefNo DESC`);
 
-        const rows = r.recordset.map(x => ({
-            Channel:          x.Channel,
-            DocDate:          x.DocDate?.toISOString().slice(0, 10),
-            DocRef:           x.Channel === 'JC'
-                                ? 'PI-' + String(x.DocNo || 0).padStart(4, '0')
-                                : (x.RefNo || `SS-${x.DocNo}`),
-            RefNo:            x.RefNo || '',
-            VehicleRegNo:     x.VehicleRegNo || '',
-            BusinessUnitCode: x.BusinessUnitCode,
-            BusinessUnitName: x.BusinessUnitName,
-            Mode:             x.Mode,
-            Customer:         x.CustomerName || x.PartyName || '',
-            PartyName:        x.PartyName || '',
-            ItemCode:         x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
-            ItemName:         x.ItemName || '',
-            Quantity:         +Number(x.Quantity || 0).toFixed(2),
-            Rate:             +Number(x.Rate || 0).toFixed(2),
-            Discount:         +Number(x.Discount || 0).toFixed(2),
-            Tax:              +Number(x.Tax || 0).toFixed(2),
-            LineNet:          +Number(x.LineNet || 0).toFixed(2),
-        }));
+        const rows = r.recordset.map(x => {
+            const lineNet = +Number(x.LineNet || 0).toFixed(2);
+            const tax     = +Number(x.Tax || 0).toFixed(2);
+            // Revenue is the GL-side Cr on 401xxx: net of discount but
+            // BEFORE output GST (which lands on a separate GST Payable GL).
+            const revenue = +(lineNet - tax).toFixed(2);
+            return {
+                Channel:          x.Channel,
+                DocDate:          x.DocDate?.toISOString().slice(0, 10),
+                DocRef:           x.Channel === 'JC'
+                                    ? 'PI-' + String(x.DocNo || 0).padStart(4, '0')
+                                    : (x.RefNo || `SS-${x.DocNo}`),
+                RefNo:            x.RefNo || '',
+                VehicleRegNo:     x.VehicleRegNo || '',
+                BusinessUnitCode: x.BusinessUnitCode,
+                BusinessUnitName: x.BusinessUnitName,
+                Mode:             x.Mode,
+                Customer:         x.CustomerName || x.PartyName || '',
+                PartyName:        x.PartyName || '',
+                ItemCode:         x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
+                ItemName:         x.ItemName || '',
+                Quantity:         +Number(x.Quantity || 0).toFixed(2),
+                Rate:             +Number(x.Rate || 0).toFixed(2),
+                Discount:         +Number(x.Discount || 0).toFixed(2),
+                Tax:              tax,
+                Revenue:          revenue,   // matches GL 401003001 Cr
+                LineNet:          lineNet,   // Revenue + Tax (what customer paid)
+            };
+        });
 
         // BU × Mode rollup — same shape as partsIssuedToJc
         const buMap = new Map();
@@ -624,6 +657,7 @@ exports.partsSoldFinalized = async (req, res) => {
             cell.Quantity += row.Quantity;
             cell.Discount += row.Discount;
             cell.Tax      += row.Tax;
+            cell.Revenue  += row.Revenue;
             cell.Net      += row.LineNet;
         };
         for (const row of rows) {
@@ -632,8 +666,8 @@ exports.partsSoldFinalized = async (req, res) => {
             if (!b) {
                 b = {
                     Code: row.BusinessUnitCode, Name: row.BusinessUnitName,
-                    CASH:   { Lines: 0, Docs: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0 },
-                    CREDIT: { Lines: 0, Docs: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0 },
+                    CASH:   { Lines: 0, Docs: new Set(), Quantity: 0, Discount: 0, Tax: 0, Revenue: 0, Net: 0 },
+                    CREDIT: { Lines: 0, Docs: new Set(), Quantity: 0, Discount: 0, Tax: 0, Revenue: 0, Net: 0 },
                 };
                 buMap.set(key, b);
             }
@@ -645,6 +679,7 @@ exports.partsSoldFinalized = async (req, res) => {
             Quantity: +c.Quantity.toFixed(2),
             Discount: +c.Discount.toFixed(2),
             Tax:      +c.Tax.toFixed(2),
+            Revenue:  +c.Revenue.toFixed(2),
             Net:      +c.Net.toFixed(2),
         });
         const byBusinessUnit = Array.from(buMap.values())
@@ -660,11 +695,12 @@ exports.partsSoldFinalized = async (req, res) => {
                         Quantity: +(cash.Quantity + credit.Quantity).toFixed(2),
                         Discount: +(cash.Discount + credit.Discount).toFixed(2),
                         Tax:      +(cash.Tax      + credit.Tax).toFixed(2),
+                        Revenue:  +(cash.Revenue  + credit.Revenue).toFixed(2),
                         Net:      +(cash.Net      + credit.Net).toFixed(2),
                     },
                 };
             })
-            .sort((a, b) => b.Total.Net - a.Total.Net);
+            .sort((a, b) => b.Total.Revenue - a.Total.Revenue);
 
         const modeSum = (m) => {
             const filtered = rows.filter(r => r.Mode === m);
@@ -674,6 +710,7 @@ exports.partsSoldFinalized = async (req, res) => {
                 quantity: +filtered.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
                 discount: +filtered.reduce((s, x) => s + x.Discount, 0).toFixed(2),
                 tax:      +filtered.reduce((s, x) => s + x.Tax, 0).toFixed(2),
+                revenue:  +filtered.reduce((s, x) => s + x.Revenue, 0).toFixed(2),
                 net:      +filtered.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
             };
         };
@@ -684,6 +721,7 @@ exports.partsSoldFinalized = async (req, res) => {
             quantity: +rows.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
             discount: +rows.reduce((s, x) => s + x.Discount, 0).toFixed(2),
             tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
+            revenue:  +rows.reduce((s, x) => s + x.Revenue, 0).toFixed(2),  // matches GL 401003001
             net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
             byBusinessUnit,
             byMode: { cash: modeSum('CASH'), credit: modeSum('CREDIT') },

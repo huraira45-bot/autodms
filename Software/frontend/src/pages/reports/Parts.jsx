@@ -480,7 +480,7 @@ export function PartsSoldFinalized() {
     return (
         <ReportShell
             title="Parts Sold (Finalized)"
-            subtitle="Parts sold via finalized Job Cards, and (optional toggle) finalized Store Sales — segregated by Business Unit and Cash / Credit."
+            subtitle="Parts sold via finalized JCs + (optional) finalized Store Sales — dated by voucher, so Revenue equals GL 401003001 (excl. GST)."
             icon={ShoppingCart}
             endpoint="parts/sold-finalized"
             landscape
@@ -522,21 +522,21 @@ export function PartsSoldFinalized() {
             {(data) => (
                 <>
                     <SummaryBar items={[
-                        { label: 'Documents',   value: fmtInt(data.totals.docs) },
-                        { label: 'Lines',       value: fmtInt(data.totals.lines) },
-                        { label: 'Cash Net',    value: 'PKR ' + fmt(data.totals.byMode?.cash?.net || 0) },
-                        { label: 'Credit Net',  value: 'PKR ' + fmt(data.totals.byMode?.credit?.net || 0) },
-                        { label: 'GST',         value: fmt(data.totals.tax) },
-                        { label: 'Net',         value: 'PKR ' + fmt(data.totals.net), strong: true },
+                        { label: 'Documents',       value: fmtInt(data.totals.docs) },
+                        { label: 'Lines',           value: fmtInt(data.totals.lines) },
+                        { label: 'Cash Revenue',    value: 'PKR ' + fmt(data.totals.byMode?.cash?.revenue || 0) },
+                        { label: 'Credit Revenue',  value: 'PKR ' + fmt(data.totals.byMode?.credit?.revenue || 0) },
+                        { label: 'GST',             value: fmt(data.totals.tax) },
+                        { label: 'Revenue (GL)',    value: 'PKR ' + fmt(data.totals.revenue), strong: true },
                     ]} />
 
-                    {/* By-Business-Unit × Cash/Credit — same grid as issued-to-JC */}
+                    {/* By-Business-Unit × Cash/Credit — Revenue (excl. GST) so it matches 401003001 */}
                     {data.totals.byBusinessUnit && data.totals.byBusinessUnit.length > 0 && (
                         <div className="card" style={{ overflowX: 'auto' }}>
                             <div style={{ padding: '10px 12px', fontWeight: 700, color: '#334155',
                                           borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
                                           fontSize: '0.85rem' }}>
-                                By Business Unit — Cash vs Credit (finalized only)
+                                By Business Unit — Cash vs Credit (Revenue excl. GST)
                             </div>
                             <table style={tableStyle}>
                                 <thead>
@@ -549,11 +549,11 @@ export function PartsSoldFinalized() {
                                     </tr>
                                     <tr style={trHeader}>
                                         <TH align="right" style={{ background: '#f0fdf4' }}>Docs</TH>
-                                        <TH align="right" style={{ background: '#f0fdf4' }}>Net</TH>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Revenue</TH>
                                         <TH align="right" style={{ background: '#eff6ff' }}>Docs</TH>
-                                        <TH align="right" style={{ background: '#eff6ff' }}>Net</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Revenue</TH>
                                         <TH align="right">Docs</TH>
-                                        <TH align="right">Net</TH>
+                                        <TH align="right">Revenue</TH>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -562,11 +562,11 @@ export function PartsSoldFinalized() {
                                             <TD mono bold>{b.Code}</TD>
                                             <TD>{b.Name}</TD>
                                             <TD align="right" mono color="#166534">{fmtInt(b.Cash.Docs)}</TD>
-                                            <TD align="right" mono color="#166534">{fmt(b.Cash.Net)}</TD>
+                                            <TD align="right" mono color="#166534">{fmt(b.Cash.Revenue)}</TD>
                                             <TD align="right" mono color="#1e3a8a">{fmtInt(b.Credit.Docs)}</TD>
-                                            <TD align="right" mono color="#1e3a8a">{fmt(b.Credit.Net)}</TD>
+                                            <TD align="right" mono color="#1e3a8a">{fmt(b.Credit.Revenue)}</TD>
                                             <TD align="right" mono bold>{fmtInt(b.Total.Docs)}</TD>
-                                            <TD align="right" mono bold>{fmt(b.Total.Net)}</TD>
+                                            <TD align="right" mono bold>{fmt(b.Total.Revenue)}</TD>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -574,11 +574,11 @@ export function PartsSoldFinalized() {
                                     <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
                                         <td colSpan={2} style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right' }}>Total:</td>
                                         <TD align="right" mono bold color="#166534">{fmtInt(data.totals.byMode?.cash?.docs || 0)}</TD>
-                                        <TD align="right" mono bold color="#166534">{fmt(data.totals.byMode?.cash?.net || 0)}</TD>
+                                        <TD align="right" mono bold color="#166534">{fmt(data.totals.byMode?.cash?.revenue || 0)}</TD>
                                         <TD align="right" mono bold color="#1e3a8a">{fmtInt(data.totals.byMode?.credit?.docs || 0)}</TD>
-                                        <TD align="right" mono bold color="#1e3a8a">{fmt(data.totals.byMode?.credit?.net || 0)}</TD>
+                                        <TD align="right" mono bold color="#1e3a8a">{fmt(data.totals.byMode?.credit?.revenue || 0)}</TD>
                                         <TD align="right" mono bold>{fmtInt(data.totals.docs)}</TD>
-                                        <TD align="right" mono bold>{fmt(data.totals.net)}</TD>
+                                        <TD align="right" mono bold>{fmt(data.totals.revenue)}</TD>
                                     </tr>
                                 </tfoot>
                             </table>
@@ -589,17 +589,18 @@ export function PartsSoldFinalized() {
                         <table style={tableStyle}>
                             <thead>
                                 <tr style={trHeader}>
-                                    <TH>Doc</TH><TH>Date</TH>
+                                    <TH>Doc</TH><TH>Voucher Date</TH>
                                     <TH>Reference</TH><TH>BU</TH><TH>Mode</TH>
                                     <TH>Customer / Party</TH><TH>Vehicle</TH>
                                     <TH>Part #</TH><TH>Item</TH>
                                     <TH align="right">Qty</TH><TH align="right">Rate</TH>
-                                    <TH align="right">Disc</TH><TH align="right">GST</TH>
-                                    <TH align="right">Net</TH>
+                                    <TH align="right">Disc</TH><TH align="right">Revenue</TH>
+                                    <TH align="right">GST</TH>
+                                    <TH align="right">Gross</TH>
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={14}>No finalized parts sales in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={15}>No finalized parts sales in this period.</Empty>}
                                 {data.rows.map((r, i) => (
                                     <tr key={i} style={trBody}>
                                         <TD mono><strong style={{ color: r.Channel === 'SS' ? '#0f766e' : '#7c3aed' }}>{r.Channel}</strong></TD>
@@ -614,8 +615,9 @@ export function PartsSoldFinalized() {
                                         <TD align="right" mono>{fmt(r.Quantity)}</TD>
                                         <TD align="right" mono>{fmt(r.Rate)}</TD>
                                         <TD align="right" mono>{fmt(r.Discount)}</TD>
+                                        <TD align="right" mono bold>{fmt(r.Revenue)}</TD>
                                         <TD align="right" mono color="#1d4ed8">{fmt(r.Tax)}</TD>
-                                        <TD align="right" mono bold>{fmt(r.LineNet)}</TD>
+                                        <TD align="right" mono>{fmt(r.LineNet)}</TD>
                                     </tr>
                                 ))}
                             </tbody>
