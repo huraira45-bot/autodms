@@ -58,7 +58,8 @@ exports.getStoreSalePnL = async (req, res) => {
                    ISNULL(sd.DiscountAmount, 0) AS DiscountAmount,
                    ISNULL(sd.TaxAmount, 0)      AS TaxAmount,
                    ISNULL(sd.UnitLandedCost, 0) AS UnitLandedCost,
-                   (sd.Quantity * sd.SaleRate) - ISNULL(sd.DiscountAmount, 0) AS LineRevenue,
+                   (sd.Quantity * sd.SaleRate)                                AS LineRevenue,
+                   ISNULL(sd.DiscountAmount, 0)                               AS LineDiscount,
                    (sd.Quantity * ISNULL(sd.UnitLandedCost, 0))               AS LineCost
             FROM   data_StoreSaleInfo si
             JOIN   data_StoreSaleDetail sd ON sd.SaleID = si.SaleID
@@ -95,23 +96,31 @@ exports.getStoreSalePnL = async (req, res) => {
                     Mode:        line.Mode,
                     Lines:       0,
                     Revenue:     0,
+                    Discount:    0,
                     Cost:        0,
                 };
                 invMap.set(key, inv);
             }
-            inv.Lines   += 1;
-            inv.Revenue += Number(line.LineRevenue) || 0;
-            inv.Cost    += Number(line.LineCost)    || 0;
+            inv.Lines    += 1;
+            inv.Revenue  += Number(line.LineRevenue)  || 0;
+            inv.Discount += Number(line.LineDiscount) || 0;
+            inv.Cost     += Number(line.LineCost)     || 0;
         }
         const invoices = Array.from(invMap.values())
             .map(inv => {
-                const margin = inv.Revenue - inv.Cost;
+                // Margin = Gross Revenue - Discount given - Cost of goods.
+                // Revenue itself stays gross so it ties to 401003001 Cr
+                // (which is also gross of discount).
+                const netRevenue = inv.Revenue - inv.Discount;
+                const margin = netRevenue - inv.Cost;
                 return {
                     ...inv,
-                    Revenue:   +inv.Revenue.toFixed(2),
-                    Cost:      +inv.Cost.toFixed(2),
-                    Margin:    +margin.toFixed(2),
-                    MarginPct: inv.Revenue > 0 ? +((margin / inv.Revenue) * 100).toFixed(2) : 0,
+                    Revenue:    +inv.Revenue.toFixed(2),
+                    Discount:   +inv.Discount.toFixed(2),
+                    NetRevenue: +netRevenue.toFixed(2),
+                    Cost:       +inv.Cost.toFixed(2),
+                    Margin:     +margin.toFixed(2),
+                    MarginPct:  inv.Revenue > 0 ? +((margin / inv.Revenue) * 100).toFixed(2) : 0,
                 };
             });
 
@@ -127,6 +136,7 @@ exports.getStoreSalePnL = async (req, res) => {
                     Invoices: 0,
                     Lines:    0,
                     Revenue:  0,
+                    Discount: 0,
                     Cost:     0,
                 };
                 partyMap.set(key, b);
@@ -134,6 +144,7 @@ exports.getStoreSalePnL = async (req, res) => {
             b.Invoices += 1;
             b.Lines    += inv.Lines;
             b.Revenue  += inv.Revenue;
+            b.Discount += inv.Discount;
             b.Cost     += inv.Cost;
         };
         for (const inv of invoices) {
@@ -147,17 +158,20 @@ exports.getStoreSalePnL = async (req, res) => {
         }
         const byParty = Array.from(partyMap.values())
             .map(b => {
-                const margin = b.Revenue - b.Cost;
+                const netRevenue = b.Revenue - b.Discount;
+                const margin = netRevenue - b.Cost;
                 return {
-                    Key:       b.Key,
-                    Label:     b.Label,
-                    Mode:      b.Mode,
-                    Invoices:  b.Invoices,
-                    Lines:     b.Lines,
-                    Revenue:   +b.Revenue.toFixed(2),
-                    Cost:      +b.Cost.toFixed(2),
-                    Margin:    +margin.toFixed(2),
-                    MarginPct: b.Revenue > 0 ? +((margin / b.Revenue) * 100).toFixed(2) : 0,
+                    Key:        b.Key,
+                    Label:      b.Label,
+                    Mode:       b.Mode,
+                    Invoices:   b.Invoices,
+                    Lines:      b.Lines,
+                    Revenue:    +b.Revenue.toFixed(2),
+                    Discount:   +b.Discount.toFixed(2),
+                    NetRevenue: +netRevenue.toFixed(2),
+                    Cost:       +b.Cost.toFixed(2),
+                    Margin:     +margin.toFixed(2),
+                    MarginPct:  b.Revenue > 0 ? +((margin / b.Revenue) * 100).toFixed(2) : 0,
                 };
             })
             .sort((a, b) => b.Revenue - a.Revenue);
@@ -166,14 +180,18 @@ exports.getStoreSalePnL = async (req, res) => {
         const modeAgg = (m) => {
             const filtered = invoices.filter(x => x.Mode === m);
             const rev  = filtered.reduce((s, x) => s + x.Revenue, 0);
+            const disc = filtered.reduce((s, x) => s + x.Discount, 0);
             const cost = filtered.reduce((s, x) => s + x.Cost, 0);
-            const margin = rev - cost;
+            const netRev = rev - disc;
+            const margin = netRev - cost;
             return {
-                Invoices:  filtered.length,
-                Revenue:   +rev.toFixed(2),
-                Cost:      +cost.toFixed(2),
-                Margin:    +margin.toFixed(2),
-                MarginPct: rev > 0 ? +((margin / rev) * 100).toFixed(2) : 0,
+                Invoices:   filtered.length,
+                Revenue:    +rev.toFixed(2),
+                Discount:   +disc.toFixed(2),
+                NetRevenue: +netRev.toFixed(2),
+                Cost:       +cost.toFixed(2),
+                Margin:     +margin.toFixed(2),
+                MarginPct:  rev > 0 ? +((margin / rev) * 100).toFixed(2) : 0,
             };
         };
         const totals = {
@@ -181,15 +199,19 @@ exports.getStoreSalePnL = async (req, res) => {
             Credit: modeAgg('CREDIT'),
             Total: (() => {
                 const cash = modeAgg('CASH'), credit = modeAgg('CREDIT');
-                const rev = cash.Revenue + credit.Revenue;
-                const cost = cash.Cost + credit.Cost;
-                const margin = rev - cost;
+                const rev  = cash.Revenue  + credit.Revenue;
+                const disc = cash.Discount + credit.Discount;
+                const cost = cash.Cost     + credit.Cost;
+                const netRev = rev - disc;
+                const margin = netRev - cost;
                 return {
-                    Invoices:  cash.Invoices + credit.Invoices,
-                    Revenue:   +rev.toFixed(2),
-                    Cost:      +cost.toFixed(2),
-                    Margin:    +margin.toFixed(2),
-                    MarginPct: rev > 0 ? +((margin / rev) * 100).toFixed(2) : 0,
+                    Invoices:   cash.Invoices + credit.Invoices,
+                    Revenue:    +rev.toFixed(2),
+                    Discount:   +disc.toFixed(2),
+                    NetRevenue: +netRev.toFixed(2),
+                    Cost:       +cost.toFixed(2),
+                    Margin:     +margin.toFixed(2),
+                    MarginPct:  rev > 0 ? +((margin / rev) * 100).toFixed(2) : 0,
                 };
             })(),
         };

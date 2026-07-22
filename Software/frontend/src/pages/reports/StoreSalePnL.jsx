@@ -50,10 +50,10 @@ export default function StoreSalePnL() {
             controls={Controls}
             excelExport={(data) => ({
                 filename: `store-sale-pnl-${todayISO()}.csv`,
-                headers: ['Date','Invoice #','Customer / Party','Mode','Lines','Revenue','Cost','Margin','Margin %'],
+                headers: ['Date','Invoice #','Customer / Party','Mode','Lines','Revenue (Gross)','Discount','Net Revenue','Cost','Margin','Margin %'],
                 rows: (data?.invoices || []).map(r => [
                     r.DocDate, r.InvoiceNo, r.Customer, r.Mode,
-                    r.Lines, r.Revenue, r.Cost, r.Margin, r.MarginPct,
+                    r.Lines, r.Revenue, r.Discount, r.NetRevenue, r.Cost, r.Margin, r.MarginPct,
                 ]),
             })}
         >
@@ -63,14 +63,14 @@ export default function StoreSalePnL() {
                 return (
                     <>
                         <div className="card" style={S.kpiRow}>
-                            <KPI label="Total Revenue"   value={`PKR ${fmt(t.Total?.Revenue || 0)}`} big strong />
-                            <KPI label="Total Cost"      value={`PKR ${fmt(t.Total?.Cost    || 0)}`} colour="#b45309" />
-                            <KPI label="Total Margin"    value={`PKR ${fmt(t.Total?.Margin  || 0)}`}
+                            <KPI label="Gross Revenue"      value={`PKR ${fmt(t.Total?.Revenue    || 0)}`} big strong />
+                            <KPI label="(−) Discount"       value={`PKR ${fmt(t.Total?.Discount   || 0)}`} colour="#b45309" />
+                            <KPI label="(−) Cost"           value={`PKR ${fmt(t.Total?.Cost       || 0)}`} colour="#b45309" />
+                            <KPI label="Margin"             value={`PKR ${fmt(t.Total?.Margin     || 0)}`}
                                  colour={marginColour(t.Total?.Margin)} strong />
-                            <KPI label="Cash Margin"     value={`PKR ${fmt(t.Cash?.Margin   || 0)}`} colour="#166534" />
-                            <KPI label="Credit Margin"   value={`PKR ${fmt(t.Credit?.Margin || 0)}`} colour="#1e3a8a" />
-                            <KPI label="Total Margin %"
-                                 value={`${t.Total?.MarginPct || 0}%`}
+                            <KPI label="Cash Margin"        value={`PKR ${fmt(t.Cash?.Margin      || 0)}`} colour="#166534" />
+                            <KPI label="Credit Margin"      value={`PKR ${fmt(t.Credit?.Margin    || 0)}`} colour="#1e3a8a" />
+                            <KPI label="Margin %"           value={`${t.Total?.MarginPct || 0}%`}
                                  colour={marginColour(t.Total?.MarginPct)} strong />
                         </div>
 
@@ -100,6 +100,7 @@ function PartyTable({ rows, totals }) {
                         <TH align="right">Invoices</TH>
                         <TH align="right">Lines</TH>
                         <TH align="right">Revenue</TH>
+                        <TH align="right">Discount</TH>
                         <TH align="right">Cost</TH>
                         <TH align="right">Margin</TH>
                         <TH align="right">Margin %</TH>
@@ -107,7 +108,7 @@ function PartyTable({ rows, totals }) {
                 </thead>
                 <tbody>
                     {rows.length === 0 && (
-                        <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
+                        <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
                             No finalized store sales in this period.
                         </td></tr>
                     )}
@@ -127,6 +128,7 @@ function PartyTable({ rows, totals }) {
                                 <TD align="right" mono>{fmtInt(r.Invoices)}</TD>
                                 <TD align="right" mono>{fmtInt(r.Lines)}</TD>
                                 <TD align="right" mono bold>{fmt(r.Revenue)}</TD>
+                                <TD align="right" mono color="#b45309">{fmt(r.Discount)}</TD>
                                 <TD align="right" mono color="#b45309">{fmt(r.Cost)}</TD>
                                 <TD align="right" mono bold color={c}>{fmt(r.Margin)}</TD>
                                 <TD align="right" mono bold color={c}>{r.MarginPct}%</TD>
@@ -141,6 +143,7 @@ function PartyTable({ rows, totals }) {
                             <TD align="right" mono bold>{fmtInt(totals.Total?.Invoices || 0)}</TD>
                             <TD align="right" mono bold>—</TD>
                             <TD align="right" mono bold>{fmt(totals.Total?.Revenue || 0)}</TD>
+                            <TD align="right" mono bold color="#b45309">{fmt(totals.Total?.Discount || 0)}</TD>
                             <TD align="right" mono bold color="#b45309">{fmt(totals.Total?.Cost || 0)}</TD>
                             <TD align="right" mono bold color={(totals.Total?.Margin || 0) >= 0 ? '#166534' : '#991b1b'}>{fmt(totals.Total?.Margin || 0)}</TD>
                             <TD align="right" mono bold color={(totals.Total?.MarginPct || 0) >= 0 ? '#166534' : '#991b1b'}>{totals.Total?.MarginPct || 0}%</TD>
@@ -169,6 +172,7 @@ function InvoiceTable({ rows }) {
                         <TH>Mode</TH>
                         <TH align="right">Lines</TH>
                         <TH align="right">Revenue</TH>
+                        <TH align="right">Discount</TH>
                         <TH align="right">Cost</TH>
                         <TH align="right">Margin</TH>
                         <TH align="right">Margin %</TH>
@@ -176,7 +180,7 @@ function InvoiceTable({ rows }) {
                 </thead>
                 <tbody>
                     {rows.length === 0 && (
-                        <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
+                        <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
                             No invoices.
                         </td></tr>
                     )}
@@ -197,6 +201,7 @@ function InvoiceTable({ rows }) {
                                 </TD>
                                 <TD align="right" mono>{fmtInt(r.Lines)}</TD>
                                 <TD align="right" mono bold>{fmt(r.Revenue)}</TD>
+                                <TD align="right" mono color="#b45309">{fmt(r.Discount)}</TD>
                                 <TD align="right" mono color="#b45309">{fmt(r.Cost)}</TD>
                                 <TD align="right" mono bold color={c}>{fmt(r.Margin)}</TD>
                                 <TD align="right" mono bold color={c}>{r.MarginPct}%</TD>
