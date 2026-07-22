@@ -317,24 +317,47 @@ function BusinessUnitPicker({ params, updateParam }) {
     );
 }
 
+const ModePill = ({ mode }) => {
+    const meta = mode === 'CREDIT'
+        ? { label: 'Credit', bg: '#dbeafe', color: '#1e3a8a' }
+        : { label: 'Cash',   bg: '#dcfce7', color: '#166534' };
+    return (
+        <span style={{ background: meta.bg, color: meta.color,
+                        padding: '2px 8px', borderRadius: 12,
+                        fontSize: '0.72rem', fontWeight: 700 }}>
+            {meta.label}
+        </span>
+    );
+};
+
 export function PartsIssuedToJc() {
     return (
         <ReportShell
             title="Parts Issued to Job Cards"
-            subtitle="Line-by-line record of every spare part issued to a workshop job card in the period, segregated by Business Unit."
+            subtitle="Line-by-line record of every spare part issued to a workshop job card, segregated by Business Unit and Cash / Credit."
             icon={Wrench}
             endpoint="parts/issued-to-jc"
             landscape
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '', businessType: '' }}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '', businessType: '', mode: '' }}
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
                     <BusinessUnitPicker params={params} updateParam={updateParam} />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Mode:
+                        <select value={params.mode || ''}
+                                onChange={e => updateParam('mode', e.target.value)}
+                                style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }}>
+                            <option value="">All</option>
+                            <option value="CASH">Cash only</option>
+                            <option value="CREDIT">Credit only</option>
+                        </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
                         Search:
                         <input value={params.search || ''}
                             onChange={e => updateParam('search', e.target.value)}
-                            placeholder="Job No, Part No, Item Name, Customer"
+                            placeholder="Job No, Part No, Item Name, Customer / Party"
                             style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 260 }} />
                     </label>
                 </>
@@ -343,32 +366,37 @@ export function PartsIssuedToJc() {
             {(data) => (
                 <>
                     <SummaryBar items={[
-                        { label: 'Slips',    value: fmtInt(data.totals.slips) },
-                        { label: 'Lines',    value: fmtInt(data.totals.lines) },
-                        { label: 'Quantity', value: fmt(data.totals.quantity) },
-                        { label: 'Discount', value: fmt(data.totals.discount) },
-                        { label: 'GST',      value: fmt(data.totals.tax) },
-                        { label: 'Net',      value: 'PKR ' + fmt(data.totals.net), strong: true },
+                        { label: 'Slips',       value: fmtInt(data.totals.slips) },
+                        { label: 'Lines',       value: fmtInt(data.totals.lines) },
+                        { label: 'Cash Net',    value: 'PKR ' + fmt(data.totals.byMode?.cash?.net || 0) },
+                        { label: 'Credit Net',  value: 'PKR ' + fmt(data.totals.byMode?.credit?.net || 0) },
+                        { label: 'GST',         value: fmt(data.totals.tax) },
+                        { label: 'Net',         value: 'PKR ' + fmt(data.totals.net), strong: true },
                     ]} />
 
-                    {/* By-Business-Unit segregation */}
+                    {/* By-Business-Unit × Cash/Credit segregation */}
                     {data.totals.byBusinessUnit && data.totals.byBusinessUnit.length > 0 && (
                         <div className="card" style={{ overflowX: 'auto' }}>
                             <div style={{ padding: '10px 12px', fontWeight: 700, color: '#334155',
                                           borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
                                           fontSize: '0.85rem' }}>
-                                By Business Unit
+                                By Business Unit — Cash vs Credit
                             </div>
                             <table style={tableStyle}>
                                 <thead>
                                     <tr style={trHeader}>
-                                        <TH>Code</TH>
-                                        <TH>Business Unit</TH>
+                                        <TH rowSpan={2}>Code</TH>
+                                        <TH rowSpan={2}>Business Unit</TH>
+                                        <TH align="right" colSpan={2} style={{ background: '#f0fdf4' }}>Cash (walk-in)</TH>
+                                        <TH align="right" colSpan={2} style={{ background: '#eff6ff' }}>Credit (named party)</TH>
+                                        <TH align="right" colSpan={2}>Total</TH>
+                                    </tr>
+                                    <tr style={trHeader}>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Slips</TH>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Net</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Slips</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Net</TH>
                                         <TH align="right">Slips</TH>
-                                        <TH align="right">Lines</TH>
-                                        <TH align="right">Quantity</TH>
-                                        <TH align="right">Discount</TH>
-                                        <TH align="right">GST</TH>
                                         <TH align="right">Net</TH>
                                     </tr>
                                 </thead>
@@ -377,23 +405,23 @@ export function PartsIssuedToJc() {
                                         <tr key={b.Code} style={trBody}>
                                             <TD mono bold>{b.Code}</TD>
                                             <TD>{b.Name}</TD>
-                                            <TD align="right" mono>{fmtInt(b.Slips)}</TD>
-                                            <TD align="right" mono>{fmtInt(b.Lines)}</TD>
-                                            <TD align="right" mono>{fmt(b.Quantity)}</TD>
-                                            <TD align="right" mono>{fmt(b.Discount)}</TD>
-                                            <TD align="right" mono color="#1d4ed8">{fmt(b.Tax)}</TD>
-                                            <TD align="right" mono bold>{fmt(b.Net)}</TD>
+                                            <TD align="right" mono color="#166534">{fmtInt(b.Cash.Slips)}</TD>
+                                            <TD align="right" mono color="#166534">{fmt(b.Cash.Net)}</TD>
+                                            <TD align="right" mono color="#1e3a8a">{fmtInt(b.Credit.Slips)}</TD>
+                                            <TD align="right" mono color="#1e3a8a">{fmt(b.Credit.Net)}</TD>
+                                            <TD align="right" mono bold>{fmtInt(b.Total.Slips)}</TD>
+                                            <TD align="right" mono bold>{fmt(b.Total.Net)}</TD>
                                         </tr>
                                     ))}
                                 </tbody>
                                 <tfoot>
                                     <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
                                         <td colSpan={2} style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right' }}>Total:</td>
+                                        <TD align="right" mono bold color="#166534">{fmtInt(data.totals.byMode?.cash?.slips || 0)}</TD>
+                                        <TD align="right" mono bold color="#166534">{fmt(data.totals.byMode?.cash?.net || 0)}</TD>
+                                        <TD align="right" mono bold color="#1e3a8a">{fmtInt(data.totals.byMode?.credit?.slips || 0)}</TD>
+                                        <TD align="right" mono bold color="#1e3a8a">{fmt(data.totals.byMode?.credit?.net || 0)}</TD>
                                         <TD align="right" mono bold>{fmtInt(data.totals.slips)}</TD>
-                                        <TD align="right" mono bold>{fmtInt(data.totals.lines)}</TD>
-                                        <TD align="right" mono bold>{fmt(data.totals.quantity)}</TD>
-                                        <TD align="right" mono bold>{fmt(data.totals.discount)}</TD>
-                                        <TD align="right" mono bold color="#1d4ed8">{fmt(data.totals.tax)}</TD>
                                         <TD align="right" mono bold>{fmt(data.totals.net)}</TD>
                                     </tr>
                                 </tfoot>
@@ -406,8 +434,8 @@ export function PartsIssuedToJc() {
                             <thead>
                                 <tr style={trHeader}>
                                     <TH>Slip #</TH><TH>Date</TH>
-                                    <TH>Job Card</TH><TH>BU</TH>
-                                    <TH>Customer</TH><TH>Vehicle</TH>
+                                    <TH>Job Card</TH><TH>BU</TH><TH>Mode</TH>
+                                    <TH>Customer / Party</TH><TH>Vehicle</TH>
                                     <TH>Part #</TH><TH>Item</TH>
                                     <TH align="right">Qty</TH><TH align="right">Rate</TH>
                                     <TH align="right">Disc</TH><TH align="right">GST</TH>
@@ -415,13 +443,14 @@ export function PartsIssuedToJc() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={13}>No parts issued in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={14}>No parts issued in this period.</Empty>}
                                 {data.rows.map((r, i) => (
                                     <tr key={i} style={trBody}>
                                         <TD mono>{r.SlipNo}</TD>
                                         <TD>{r.IssueDate}</TD>
                                         <TD mono><strong>JC-{r.JobCardNo}</strong></TD>
                                         <TD mono title={r.BusinessUnitName}>{r.BusinessUnitCode}</TD>
+                                        <TD><ModePill mode={r.Mode} /></TD>
                                         <TD>{r.Customer}</TD>
                                         <TD mono>{r.VehicleRegNo}</TD>
                                         <TD mono>{r.ItemCode}</TD>

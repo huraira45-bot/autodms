@@ -329,12 +329,15 @@ exports.partsIssuedToJc = async (req, res) => {
         const { from, to } = parseRange(req);
         const search = (req.query.search || '').trim();
         const businessType = req.query.businessType ? parseInt(req.query.businessType) : null;
+        const mode = (req.query.mode || '').toUpperCase();   // 'CASH' | 'CREDIT' | ''
         const pool = await getPool();
         const rq = pool.request()
             .input('from', sql.DateTime, from)
             .input('to',   sql.DateTime, to);
         let where = 'v.IssueDate BETWEEN @from AND @to';
         if (businessType) { rq.input('bt', sql.Int, businessType); where += ' AND j.JobTypeId = @bt'; }
+        if (mode === 'CASH')   where += ' AND j.PartyID IS NULL';
+        if (mode === 'CREDIT') where += ' AND j.PartyID IS NOT NULL';
         if (search) {
             rq.input('s', sql.NVarChar(200), `%${search}%`);
             where += ` AND (
@@ -343,16 +346,19 @@ exports.partsIssuedToJc = async (req, res) => {
                 OR v.ManualNumber LIKE @s
                 OR CAST(v.ItemNumber AS NVARCHAR(50)) LIKE @s
                 OR ISNULL(c.endUserName, '') LIKE @s
+                OR ISNULL(p.PartyName, '')   LIKE @s
             )`;
         }
         const r = await rq.query(`
             SELECT v.StockIssueDetailID, v.IssueNo, v.IssueDate,
                    v.JobCardId, v.JobCardNo,
                    c.endUserName AS CustomerName,
+                   p.PartyName,
                    j.VehicleRegNo,
                    j.JobTypeId,
                    ISNULL(t.CardCode, '—') AS BusinessUnitCode,
                    ISNULL(t.Title,    '—') AS BusinessUnitName,
+                   CASE WHEN j.PartyID IS NULL THEN 'CASH' ELSE 'CREDIT' END AS Mode,
                    v.ItemId, v.ItemName, v.ItemNumber, v.ManualNumber,
                    v.IssueQuantity, v.ItemRate, v.Discount, v.DiscAmt,
                    v.TaxRate, v.TaxAmount, v.LineNet
@@ -360,6 +366,7 @@ exports.partsIssuedToJc = async (req, res) => {
             LEFT JOIN Addata_JobCardInfo  j ON v.JobCardId = j.JobCardId
             LEFT JOIN gen_JobCardType     t ON t.JobCardTypeId = j.JobTypeId
             LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
+            LEFT JOIN gen_PartiesInfo     p ON p.PartyID   = j.PartyID
             WHERE ${where}
             ORDER BY v.IssueDate DESC, v.StockIssueID DESC, v.StockIssueDetailID DESC
         `);
@@ -367,10 +374,12 @@ exports.partsIssuedToJc = async (req, res) => {
             SlipNo:           'PI-' + String(x.IssueNo || 0).padStart(4, '0'),
             IssueDate:        x.IssueDate?.toISOString().slice(0, 10),
             JobCardNo:        x.JobCardNo || '',
-            Customer:         x.CustomerName || '',
+            Customer:         x.CustomerName || x.PartyName || '',
+            PartyName:        x.PartyName || '',
             VehicleRegNo:     x.VehicleRegNo || '',
             BusinessUnitCode: x.BusinessUnitCode || '—',
             BusinessUnitName: x.BusinessUnitName || '—',
+            Mode:             x.Mode || 'CASH',
             ItemCode:         x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
             ItemName:         x.ItemName || '',
             Quantity:         +Number(x.IssueQuantity || 0).toFixed(2),
@@ -380,36 +389,72 @@ exports.partsIssuedToJc = async (req, res) => {
             LineNet:          +Number(x.LineNet || 0).toFixed(2),
         }));
 
-        // Per-Business-Unit rollup. One row per (Code, Name) with counts +
-        // money aggregates so the frontend can render a segregation table
-        // above the line-level detail.
+        // Per-Business-Unit rollup, split by Mode (Cash / Credit). Each row
+        // is (Code, Name) with Cash + Credit + Total sub-totals so the
+        // frontend can render one BU × Mode grid.
         const buMap = new Map();
-        for (const r of rows) {
-            const key = r.BusinessUnitCode;
-            const b = buMap.get(key) || {
-                Code: r.BusinessUnitCode, Name: r.BusinessUnitName,
-                Lines: 0, Slips: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0,
-            };
-            b.Lines    += 1;
-            b.Slips.add(r.SlipNo);
-            b.Quantity += r.Quantity;
-            b.Discount += r.Discount;
-            b.Tax      += r.Tax;
-            b.Net      += r.LineNet;
-            buMap.set(key, b);
+        const bumpCell = (bucket, mode, row) => {
+            const cell = bucket[mode];
+            cell.Lines += 1;
+            cell.Slips.add(row.SlipNo);
+            cell.Quantity += row.Quantity;
+            cell.Discount += row.Discount;
+            cell.Tax      += row.Tax;
+            cell.Net      += row.LineNet;
+        };
+        for (const row of rows) {
+            const key = row.BusinessUnitCode;
+            let b = buMap.get(key);
+            if (!b) {
+                b = {
+                    Code: row.BusinessUnitCode, Name: row.BusinessUnitName,
+                    CASH:   { Lines: 0, Slips: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0 },
+                    CREDIT: { Lines: 0, Slips: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0 },
+                };
+                buMap.set(key, b);
+            }
+            bumpCell(b, row.Mode, row);
         }
+        const finalizeCell = (c) => ({
+            Lines:    c.Lines,
+            Slips:    c.Slips.size,
+            Quantity: +c.Quantity.toFixed(2),
+            Discount: +c.Discount.toFixed(2),
+            Tax:      +c.Tax.toFixed(2),
+            Net:      +c.Net.toFixed(2),
+        });
         const byBusinessUnit = Array.from(buMap.values())
-            .map(b => ({
-                Code:     b.Code,
-                Name:     b.Name,
-                Lines:    b.Lines,
-                Slips:    b.Slips.size,
-                Quantity: +b.Quantity.toFixed(2),
-                Discount: +b.Discount.toFixed(2),
-                Tax:      +b.Tax.toFixed(2),
-                Net:      +b.Net.toFixed(2),
-            }))
-            .sort((a, b) => b.Net - a.Net);
+            .map(b => {
+                const cash   = finalizeCell(b.CASH);
+                const credit = finalizeCell(b.CREDIT);
+                return {
+                    Code:     b.Code,
+                    Name:     b.Name,
+                    Cash:     cash,
+                    Credit:   credit,
+                    Total: {
+                        Lines:    cash.Lines + credit.Lines,
+                        Slips:    (new Set([...Array.from(b.CASH.Slips), ...Array.from(b.CREDIT.Slips)])).size,
+                        Quantity: +(cash.Quantity + credit.Quantity).toFixed(2),
+                        Discount: +(cash.Discount + credit.Discount).toFixed(2),
+                        Tax:      +(cash.Tax      + credit.Tax).toFixed(2),
+                        Net:      +(cash.Net      + credit.Net).toFixed(2),
+                    },
+                };
+            })
+            .sort((a, b) => b.Total.Net - a.Total.Net);
+
+        const modeSum = (m) => {
+            const filtered = rows.filter(r => r.Mode === m);
+            return {
+                lines:    filtered.length,
+                slips:    new Set(filtered.map(r => r.SlipNo)).size,
+                quantity: +filtered.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
+                discount: +filtered.reduce((s, x) => s + x.Discount, 0).toFixed(2),
+                tax:      +filtered.reduce((s, x) => s + x.Tax, 0).toFixed(2),
+                net:      +filtered.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
+            };
+        };
 
         const totals = {
             lines:    rows.length,
@@ -419,6 +464,7 @@ exports.partsIssuedToJc = async (req, res) => {
             tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
             net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
             byBusinessUnit,
+            byMode: { cash: modeSum('CASH'), credit: modeSum('CREDIT') },
         };
         res.json({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), rows, totals });
     } catch (err) { console.error('partsIssuedToJc:', err); res.status(500).json({ error: err.message }); }
