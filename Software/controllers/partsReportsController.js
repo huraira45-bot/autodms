@@ -476,6 +476,222 @@ exports.partsIssuedToJc = async (req, res) => {
  * Typeahead helper for the Item Ledger. Returns up to 50 items whose
  * name / item number / part number matches the query. Owner ask 2026-07-17.
  */
+/**
+ * GET /reports/parts/sold-finalized?from&to&businessType&mode&search&includeStoreSale
+ *
+ * All parts SOLD (with the underlying document finalized) in the period,
+ * across two channels:
+ *   1. Parts issued to Job Cards where the JC IsFinalized = 1
+ *   2. Store Sale detail lines where the sale IsFinalized = 1 (only when
+ *      includeStoreSale=1)
+ *
+ * Same BU × Cash/Credit segregation as partsIssuedToJc:
+ *   Cash   = PartyID IS NULL   (walk-in)
+ *   Credit = PartyID IS NOT NULL (named party — corporate / HPA / insurance)
+ * Store Sale entries carry a synthetic BusinessUnitCode of "SS" so they can
+ * be told apart from workshop JC codes (GR/WR/B&P/PPM/…).
+ *
+ * Owner ask 2026-07-22.
+ */
+exports.partsSoldFinalized = async (req, res) => {
+    try {
+        const { from, to } = parseRange(req);
+        const search = (req.query.search || '').trim();
+        const businessType = req.query.businessType ? parseInt(req.query.businessType) : null;
+        const mode = (req.query.mode || '').toUpperCase();
+        const includeStoreSale = String(req.query.includeStoreSale || '1') !== '0';
+
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+
+        // ── JC side ────────────────────────────────────────────────────
+        let jcWhere = 'v.IssueDate BETWEEN @from AND @to AND j.IsFinalized = 1';
+        if (businessType) { rq.input('bt', sql.Int, businessType); jcWhere += ' AND j.JobTypeId = @bt'; }
+        if (mode === 'CASH')   jcWhere += ' AND j.PartyID IS NULL';
+        if (mode === 'CREDIT') jcWhere += ' AND j.PartyID IS NOT NULL';
+        if (search) {
+            rq.input('s', sql.NVarChar(200), `%${search}%`);
+            jcWhere += ` AND (
+                v.JobCardNo LIKE @s
+                OR v.ItemName LIKE @s
+                OR v.ManualNumber LIKE @s
+                OR CAST(v.ItemNumber AS NVARCHAR(50)) LIKE @s
+                OR ISNULL(c.endUserName, '') LIKE @s
+                OR ISNULL(p.PartyName, '')   LIKE @s
+            )`;
+        }
+        const jcQuery = `
+            SELECT 'JC' AS Channel,
+                   v.IssueDate       AS DocDate,
+                   v.IssueNo         AS DocNo,
+                   v.JobCardNo       AS RefNo,
+                   j.VehicleRegNo,
+                   ISNULL(t.CardCode, '—') AS BusinessUnitCode,
+                   ISNULL(t.Title,    '—') AS BusinessUnitName,
+                   c.endUserName     AS CustomerName,
+                   p.PartyName,
+                   CASE WHEN j.PartyID IS NULL THEN 'CASH' ELSE 'CREDIT' END AS Mode,
+                   v.ItemName, v.ItemNumber, v.ManualNumber,
+                   v.IssueQuantity   AS Quantity,
+                   v.ItemRate        AS Rate,
+                   v.DiscAmt         AS Discount,
+                   v.TaxAmount       AS Tax,
+                   v.LineNet         AS LineNet
+            FROM   vw_PartsIssueToJobCard v
+            LEFT   JOIN Addata_JobCardInfo  j ON v.JobCardId = j.JobCardId
+            LEFT   JOIN gen_JobCardType     t ON t.JobCardTypeId = j.JobTypeId
+            LEFT   JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
+            LEFT   JOIN gen_PartiesInfo     p ON p.PartyID   = j.PartyID
+            WHERE  ${jcWhere}`;
+
+        // ── Store Sale side ────────────────────────────────────────────
+        let ssQuery = '';
+        if (includeStoreSale && !businessType) {
+            // Only include Store Sales when the BU filter is empty — Store Sale
+            // has no workshop JC type, so any BU filter naturally excludes it.
+            let ssWhere = `CAST(si.SaleDate AS DATE) BETWEEN @from AND @to AND si.IsFinalized = 1`;
+            if (mode === 'CASH')   ssWhere += ' AND si.PartyID IS NULL';
+            if (mode === 'CREDIT') ssWhere += ' AND si.PartyID IS NOT NULL';
+            if (search) {
+                ssWhere += ` AND (
+                    si.InvoiceNo LIKE @s
+                    OR ii.ItenName LIKE @s
+                    OR ISNULL(ii.ManualNumber, '') LIKE @s
+                    OR CAST(ii.ItemNumber AS NVARCHAR(50)) LIKE @s
+                    OR ISNULL(si.CustomerName, '') LIKE @s
+                    OR ISNULL(sp.PartyName, '')    LIKE @s
+                )`;
+            }
+            ssQuery = `
+            UNION ALL
+            SELECT 'SS' AS Channel,
+                   si.SaleDate       AS DocDate,
+                   si.SaleID         AS DocNo,
+                   si.InvoiceNo      AS RefNo,
+                   NULL              AS VehicleRegNo,
+                   'SS'              AS BusinessUnitCode,
+                   'Store Sale'      AS BusinessUnitName,
+                   si.CustomerName   AS CustomerName,
+                   sp.PartyName,
+                   CASE WHEN si.PartyID IS NULL THEN 'CASH' ELSE 'CREDIT' END AS Mode,
+                   ii.ItenName       AS ItemName,
+                   ii.ItemNumber,
+                   ii.ManualNumber,
+                   sd.Quantity,
+                   sd.SaleRate       AS Rate,
+                   ISNULL(sd.DiscountAmount, 0) AS Discount,
+                   ISNULL(sd.TaxAmount, 0)      AS Tax,
+                   (sd.Quantity * sd.SaleRate) - ISNULL(sd.DiscountAmount, 0) + ISNULL(sd.TaxAmount, 0) AS LineNet
+            FROM   data_StoreSaleDetail sd
+            JOIN   data_StoreSaleInfo   si ON si.SaleID = sd.SaleID
+            JOIN   InventItems          ii ON ii.ItemId = sd.ItemID
+            LEFT   JOIN gen_PartiesInfo sp ON sp.PartyID = si.PartyID
+            WHERE  ${ssWhere}`;
+        }
+
+        const r = await rq.query(`${jcQuery} ${ssQuery} ORDER BY DocDate DESC, RefNo DESC`);
+
+        const rows = r.recordset.map(x => ({
+            Channel:          x.Channel,
+            DocDate:          x.DocDate?.toISOString().slice(0, 10),
+            DocRef:           x.Channel === 'JC'
+                                ? 'PI-' + String(x.DocNo || 0).padStart(4, '0')
+                                : (x.RefNo || `SS-${x.DocNo}`),
+            RefNo:            x.RefNo || '',
+            VehicleRegNo:     x.VehicleRegNo || '',
+            BusinessUnitCode: x.BusinessUnitCode,
+            BusinessUnitName: x.BusinessUnitName,
+            Mode:             x.Mode,
+            Customer:         x.CustomerName || x.PartyName || '',
+            PartyName:        x.PartyName || '',
+            ItemCode:         x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
+            ItemName:         x.ItemName || '',
+            Quantity:         +Number(x.Quantity || 0).toFixed(2),
+            Rate:             +Number(x.Rate || 0).toFixed(2),
+            Discount:         +Number(x.Discount || 0).toFixed(2),
+            Tax:              +Number(x.Tax || 0).toFixed(2),
+            LineNet:          +Number(x.LineNet || 0).toFixed(2),
+        }));
+
+        // BU × Mode rollup — same shape as partsIssuedToJc
+        const buMap = new Map();
+        const bumpCell = (bucket, m, row) => {
+            const cell = bucket[m];
+            cell.Lines += 1;
+            cell.Docs.add(row.DocRef);
+            cell.Quantity += row.Quantity;
+            cell.Discount += row.Discount;
+            cell.Tax      += row.Tax;
+            cell.Net      += row.LineNet;
+        };
+        for (const row of rows) {
+            const key = row.BusinessUnitCode;
+            let b = buMap.get(key);
+            if (!b) {
+                b = {
+                    Code: row.BusinessUnitCode, Name: row.BusinessUnitName,
+                    CASH:   { Lines: 0, Docs: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0 },
+                    CREDIT: { Lines: 0, Docs: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0 },
+                };
+                buMap.set(key, b);
+            }
+            bumpCell(b, row.Mode, row);
+        }
+        const finalizeCell = (c) => ({
+            Lines:    c.Lines,
+            Docs:     c.Docs.size,
+            Quantity: +c.Quantity.toFixed(2),
+            Discount: +c.Discount.toFixed(2),
+            Tax:      +c.Tax.toFixed(2),
+            Net:      +c.Net.toFixed(2),
+        });
+        const byBusinessUnit = Array.from(buMap.values())
+            .map(b => {
+                const cash   = finalizeCell(b.CASH);
+                const credit = finalizeCell(b.CREDIT);
+                return {
+                    Code:  b.Code, Name: b.Name,
+                    Cash:  cash, Credit: credit,
+                    Total: {
+                        Lines:    cash.Lines + credit.Lines,
+                        Docs:     (new Set([...Array.from(b.CASH.Docs), ...Array.from(b.CREDIT.Docs)])).size,
+                        Quantity: +(cash.Quantity + credit.Quantity).toFixed(2),
+                        Discount: +(cash.Discount + credit.Discount).toFixed(2),
+                        Tax:      +(cash.Tax      + credit.Tax).toFixed(2),
+                        Net:      +(cash.Net      + credit.Net).toFixed(2),
+                    },
+                };
+            })
+            .sort((a, b) => b.Total.Net - a.Total.Net);
+
+        const modeSum = (m) => {
+            const filtered = rows.filter(r => r.Mode === m);
+            return {
+                lines:    filtered.length,
+                docs:     new Set(filtered.map(r => r.DocRef)).size,
+                quantity: +filtered.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
+                discount: +filtered.reduce((s, x) => s + x.Discount, 0).toFixed(2),
+                tax:      +filtered.reduce((s, x) => s + x.Tax, 0).toFixed(2),
+                net:      +filtered.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
+            };
+        };
+
+        const totals = {
+            lines:    rows.length,
+            docs:     new Set(rows.map(r => r.DocRef)).size,
+            quantity: +rows.reduce((s, x) => s + x.Quantity, 0).toFixed(2),
+            discount: +rows.reduce((s, x) => s + x.Discount, 0).toFixed(2),
+            tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
+            net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
+            byBusinessUnit,
+            byMode: { cash: modeSum('CASH'), credit: modeSum('CREDIT') },
+        };
+        res.json({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), rows, totals });
+    } catch (err) { console.error('partsSoldFinalized:', err); res.status(500).json({ error: err.message }); }
+};
+
 exports.itemSearch = async (req, res) => {
     try {
         const q = (req.query.q || '').trim();

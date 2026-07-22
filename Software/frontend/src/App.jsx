@@ -161,7 +161,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 // Module-scoped reports
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
-import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, ItemLedger } from './pages/reports/Parts';
+import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
@@ -1002,6 +1002,7 @@ function AppShell() {
                     <Route path="/reports/parts/sales-register"   element={<ProtectedRoute><PartsSalesRegister /></ProtectedRoute>} />
                     <Route path="/reports/parts/purchase-summary" element={<ProtectedRoute><PartsPurchaseSummary /></ProtectedRoute>} />
                     <Route path="/reports/parts/issued-to-jc"     element={<ProtectedRoute><PartsIssuedToJc /></ProtectedRoute>} />
+                    <Route path="/reports/parts/sold-finalized"   element={<ProtectedRoute><PartsSoldFinalized /></ProtectedRoute>} />
                     <Route path="/reports/parts/item-ledger"      element={<ProtectedRoute><ItemLedger /></ProtectedRoute>} />
 
                     {/* Sales (vehicle) reports */}
