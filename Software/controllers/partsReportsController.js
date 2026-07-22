@@ -358,7 +358,11 @@ exports.partsIssuedToJc = async (req, res) => {
                    j.JobTypeId,
                    ISNULL(t.CardCode, '—') AS BusinessUnitCode,
                    ISNULL(t.Title,    '—') AS BusinessUnitName,
-                   CASE WHEN j.PartyID IS NULL THEN 'CASH' ELSE 'CREDIT' END AS Mode,
+                   CASE
+                       WHEN j.PartyID IS NOT NULL           THEN 'CREDIT'
+                       WHEN t.ReceivableAccount IS NOT NULL THEN 'CREDIT'
+                       ELSE 'CASH'
+                   END AS Mode,
                    v.ItemId, v.ItemName, v.ItemNumber, v.ManualNumber,
                    v.IssueQuantity, v.ItemRate, v.Discount, v.DiscAmt,
                    v.TaxRate, v.TaxAmount, v.LineNet
@@ -515,8 +519,14 @@ exports.partsSoldFinalized = async (req, res) => {
         // the first one via CROSS APPLY TOP 1.
         let jcWhere = `jcv.VoucherDate BETWEEN @from AND @to AND j.IsFinalized = 1`;
         if (businessType) { rq.input('bt', sql.Int, businessType); jcWhere += ' AND j.JobTypeId = @bt'; }
-        if (mode === 'CASH')   jcWhere += ' AND j.PartyID IS NULL';
-        if (mode === 'CREDIT') jcWhere += ' AND j.PartyID IS NOT NULL';
+        // A JC counts as Credit when EITHER the JC has a named PartyID
+        // OR the JC's Business Unit (gen_JobCardType.ReceivableAccount)
+        // has a type-specific receivable GL set (per Workshop Settings —
+        // e.g. PPM's MCML campaign account 102006012). Only true walk-ins
+        // — no Party AND no type receivable — post to GENERAL_CUSTOMER
+        // and count as Cash. Owner ask 2026-07-22.
+        if (mode === 'CASH')   jcWhere += ' AND j.PartyID IS NULL AND t.ReceivableAccount IS NULL';
+        if (mode === 'CREDIT') jcWhere += ' AND (j.PartyID IS NOT NULL OR t.ReceivableAccount IS NOT NULL)';
         if (search) {
             rq.input('s', sql.NVarChar(200), `%${search}%`);
             jcWhere += ` AND (
@@ -538,7 +548,11 @@ exports.partsSoldFinalized = async (req, res) => {
                    ISNULL(t.Title,    '—') AS BusinessUnitName,
                    c.endUserName     AS CustomerName,
                    p.PartyName,
-                   CASE WHEN j.PartyID IS NULL THEN 'CASH' ELSE 'CREDIT' END AS Mode,
+                   CASE
+                       WHEN j.PartyID IS NOT NULL           THEN 'CREDIT'
+                       WHEN t.ReceivableAccount IS NOT NULL THEN 'CREDIT'
+                       ELSE 'CASH'
+                   END AS Mode,
                    v.ItemName, v.ItemNumber, v.ManualNumber,
                    v.IssueQuantity   AS Quantity,
                    v.ItemRate        AS Rate,
