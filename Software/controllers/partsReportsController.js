@@ -619,11 +619,17 @@ exports.partsSoldFinalized = async (req, res) => {
         const r = await rq.query(`${jcQuery} ${ssQuery} ORDER BY DocDate DESC, RefNo DESC`);
 
         const rows = r.recordset.map(x => {
-            const lineNet = +Number(x.LineNet || 0).toFixed(2);
-            const tax     = +Number(x.Tax || 0).toFixed(2);
-            // Revenue is the GL-side Cr on 401xxx: net of discount but
-            // BEFORE output GST (which lands on a separate GST Payable GL).
-            const revenue = +(lineNet - tax).toFixed(2);
+            const lineNet  = +Number(x.LineNet || 0).toFixed(2);
+            const tax      = +Number(x.Tax || 0).toFixed(2);
+            const qty      = +Number(x.Quantity || 0).toFixed(2);
+            const rate     = +Number(x.Rate || 0).toFixed(2);
+            // Revenue is the GL-side Cr on 401xxx (partsGross in the JC /
+            // SS journal builders). That's GROSS: quantity × rate, WITHOUT
+            // subtracting discount (discount is Cr'd to a separate contra-
+            // revenue GL — DEFAULT_DISCOUNT_GIVEN — so it does NOT reduce
+            // 401003001 credits) and WITHOUT GST (output GST lives on its
+            // own GST Payable GL).
+            const revenue = +(qty * rate).toFixed(2);
             return {
                 Channel:          x.Channel,
                 DocDate:          x.DocDate?.toISOString().slice(0, 10),
