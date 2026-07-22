@@ -293,18 +293,43 @@ export function PartsPurchaseSummary() {
 // =====================================================================
 // Parts Issued to Job Cards (owner ask 2026-07-03)
 // =====================================================================
+function BusinessUnitPicker({ params, updateParam }) {
+    const [types, setTypes] = useState([]);
+    useEffect(() => {
+        axios.get('/api/workshop/job-types')
+            .then(r => setTypes(r.data || []))
+            .catch(() => setTypes([]));
+    }, []);
+    return (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+            Business Unit:
+            <select value={params.businessType || ''}
+                    onChange={e => updateParam('businessType', e.target.value)}
+                    style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }}>
+                <option value="">All</option>
+                {types.map(t => (
+                    <option key={t.JobCardTypeId} value={t.JobCardTypeId}>
+                        {t.CardCode} — {t.Title}
+                    </option>
+                ))}
+            </select>
+        </label>
+    );
+}
+
 export function PartsIssuedToJc() {
     return (
         <ReportShell
             title="Parts Issued to Job Cards"
-            subtitle="Line-by-line record of every spare part issued to a workshop job card in the period."
+            subtitle="Line-by-line record of every spare part issued to a workshop job card in the period, segregated by Business Unit."
             icon={Wrench}
             endpoint="parts/issued-to-jc"
             landscape
-            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '', businessType: '' }}
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
+                    <BusinessUnitPicker params={params} updateParam={updateParam} />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
                         Search:
                         <input value={params.search || ''}
@@ -325,12 +350,64 @@ export function PartsIssuedToJc() {
                         { label: 'GST',      value: fmt(data.totals.tax) },
                         { label: 'Net',      value: 'PKR ' + fmt(data.totals.net), strong: true },
                     ]} />
+
+                    {/* By-Business-Unit segregation */}
+                    {data.totals.byBusinessUnit && data.totals.byBusinessUnit.length > 0 && (
+                        <div className="card" style={{ overflowX: 'auto' }}>
+                            <div style={{ padding: '10px 12px', fontWeight: 700, color: '#334155',
+                                          borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
+                                          fontSize: '0.85rem' }}>
+                                By Business Unit
+                            </div>
+                            <table style={tableStyle}>
+                                <thead>
+                                    <tr style={trHeader}>
+                                        <TH>Code</TH>
+                                        <TH>Business Unit</TH>
+                                        <TH align="right">Slips</TH>
+                                        <TH align="right">Lines</TH>
+                                        <TH align="right">Quantity</TH>
+                                        <TH align="right">Discount</TH>
+                                        <TH align="right">GST</TH>
+                                        <TH align="right">Net</TH>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.totals.byBusinessUnit.map(b => (
+                                        <tr key={b.Code} style={trBody}>
+                                            <TD mono bold>{b.Code}</TD>
+                                            <TD>{b.Name}</TD>
+                                            <TD align="right" mono>{fmtInt(b.Slips)}</TD>
+                                            <TD align="right" mono>{fmtInt(b.Lines)}</TD>
+                                            <TD align="right" mono>{fmt(b.Quantity)}</TD>
+                                            <TD align="right" mono>{fmt(b.Discount)}</TD>
+                                            <TD align="right" mono color="#1d4ed8">{fmt(b.Tax)}</TD>
+                                            <TD align="right" mono bold>{fmt(b.Net)}</TD>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                                <tfoot>
+                                    <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
+                                        <td colSpan={2} style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right' }}>Total:</td>
+                                        <TD align="right" mono bold>{fmtInt(data.totals.slips)}</TD>
+                                        <TD align="right" mono bold>{fmtInt(data.totals.lines)}</TD>
+                                        <TD align="right" mono bold>{fmt(data.totals.quantity)}</TD>
+                                        <TD align="right" mono bold>{fmt(data.totals.discount)}</TD>
+                                        <TD align="right" mono bold color="#1d4ed8">{fmt(data.totals.tax)}</TD>
+                                        <TD align="right" mono bold>{fmt(data.totals.net)}</TD>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    )}
+
                     <div className="card" style={{ overflowX: 'auto' }}>
                         <table style={tableStyle}>
                             <thead>
                                 <tr style={trHeader}>
                                     <TH>Slip #</TH><TH>Date</TH>
-                                    <TH>Job Card</TH><TH>Customer</TH><TH>Vehicle</TH>
+                                    <TH>Job Card</TH><TH>BU</TH>
+                                    <TH>Customer</TH><TH>Vehicle</TH>
                                     <TH>Part #</TH><TH>Item</TH>
                                     <TH align="right">Qty</TH><TH align="right">Rate</TH>
                                     <TH align="right">Disc</TH><TH align="right">GST</TH>
@@ -338,12 +415,13 @@ export function PartsIssuedToJc() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={12}>No parts issued in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={13}>No parts issued in this period.</Empty>}
                                 {data.rows.map((r, i) => (
                                     <tr key={i} style={trBody}>
                                         <TD mono>{r.SlipNo}</TD>
                                         <TD>{r.IssueDate}</TD>
                                         <TD mono><strong>JC-{r.JobCardNo}</strong></TD>
+                                        <TD mono title={r.BusinessUnitName}>{r.BusinessUnitCode}</TD>
                                         <TD>{r.Customer}</TD>
                                         <TD mono>{r.VehicleRegNo}</TD>
                                         <TD mono>{r.ItemCode}</TD>

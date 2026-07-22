@@ -328,11 +328,13 @@ exports.partsIssuedToJc = async (req, res) => {
     try {
         const { from, to } = parseRange(req);
         const search = (req.query.search || '').trim();
+        const businessType = req.query.businessType ? parseInt(req.query.businessType) : null;
         const pool = await getPool();
         const rq = pool.request()
             .input('from', sql.DateTime, from)
             .input('to',   sql.DateTime, to);
         let where = 'v.IssueDate BETWEEN @from AND @to';
+        if (businessType) { rq.input('bt', sql.Int, businessType); where += ' AND j.JobTypeId = @bt'; }
         if (search) {
             rq.input('s', sql.NVarChar(200), `%${search}%`);
             where += ` AND (
@@ -348,29 +350,67 @@ exports.partsIssuedToJc = async (req, res) => {
                    v.JobCardId, v.JobCardNo,
                    c.endUserName AS CustomerName,
                    j.VehicleRegNo,
+                   j.JobTypeId,
+                   ISNULL(t.CardCode, '—') AS BusinessUnitCode,
+                   ISNULL(t.Title,    '—') AS BusinessUnitName,
                    v.ItemId, v.ItemName, v.ItemNumber, v.ManualNumber,
                    v.IssueQuantity, v.ItemRate, v.Discount, v.DiscAmt,
                    v.TaxRate, v.TaxAmount, v.LineNet
             FROM vw_PartsIssueToJobCard v
             LEFT JOIN Addata_JobCardInfo  j ON v.JobCardId = j.JobCardId
+            LEFT JOIN gen_JobCardType     t ON t.JobCardTypeId = j.JobTypeId
             LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
             WHERE ${where}
             ORDER BY v.IssueDate DESC, v.StockIssueID DESC, v.StockIssueDetailID DESC
         `);
         const rows = r.recordset.map(x => ({
-            SlipNo:       'PI-' + String(x.IssueNo || 0).padStart(4, '0'),
-            IssueDate:    x.IssueDate?.toISOString().slice(0, 10),
-            JobCardNo:    x.JobCardNo || '',
-            Customer:     x.CustomerName || '',
-            VehicleRegNo: x.VehicleRegNo || '',
-            ItemCode:     x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
-            ItemName:     x.ItemName || '',
-            Quantity:     +Number(x.IssueQuantity || 0).toFixed(2),
-            Rate:         +Number(x.ItemRate || 0).toFixed(2),
-            Discount:     +Number(x.DiscAmt || 0).toFixed(2),
-            Tax:          +Number(x.TaxAmount || 0).toFixed(2),
-            LineNet:      +Number(x.LineNet || 0).toFixed(2),
+            SlipNo:           'PI-' + String(x.IssueNo || 0).padStart(4, '0'),
+            IssueDate:        x.IssueDate?.toISOString().slice(0, 10),
+            JobCardNo:        x.JobCardNo || '',
+            Customer:         x.CustomerName || '',
+            VehicleRegNo:     x.VehicleRegNo || '',
+            BusinessUnitCode: x.BusinessUnitCode || '—',
+            BusinessUnitName: x.BusinessUnitName || '—',
+            ItemCode:         x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
+            ItemName:         x.ItemName || '',
+            Quantity:         +Number(x.IssueQuantity || 0).toFixed(2),
+            Rate:             +Number(x.ItemRate || 0).toFixed(2),
+            Discount:         +Number(x.DiscAmt || 0).toFixed(2),
+            Tax:              +Number(x.TaxAmount || 0).toFixed(2),
+            LineNet:          +Number(x.LineNet || 0).toFixed(2),
         }));
+
+        // Per-Business-Unit rollup. One row per (Code, Name) with counts +
+        // money aggregates so the frontend can render a segregation table
+        // above the line-level detail.
+        const buMap = new Map();
+        for (const r of rows) {
+            const key = r.BusinessUnitCode;
+            const b = buMap.get(key) || {
+                Code: r.BusinessUnitCode, Name: r.BusinessUnitName,
+                Lines: 0, Slips: new Set(), Quantity: 0, Discount: 0, Tax: 0, Net: 0,
+            };
+            b.Lines    += 1;
+            b.Slips.add(r.SlipNo);
+            b.Quantity += r.Quantity;
+            b.Discount += r.Discount;
+            b.Tax      += r.Tax;
+            b.Net      += r.LineNet;
+            buMap.set(key, b);
+        }
+        const byBusinessUnit = Array.from(buMap.values())
+            .map(b => ({
+                Code:     b.Code,
+                Name:     b.Name,
+                Lines:    b.Lines,
+                Slips:    b.Slips.size,
+                Quantity: +b.Quantity.toFixed(2),
+                Discount: +b.Discount.toFixed(2),
+                Tax:      +b.Tax.toFixed(2),
+                Net:      +b.Net.toFixed(2),
+            }))
+            .sort((a, b) => b.Net - a.Net);
+
         const totals = {
             lines:    rows.length,
             slips:    new Set(rows.map(r => r.SlipNo)).size,
@@ -378,6 +418,7 @@ exports.partsIssuedToJc = async (req, res) => {
             discount: +rows.reduce((s, x) => s + x.Discount, 0).toFixed(2),
             tax:      +rows.reduce((s, x) => s + x.Tax, 0).toFixed(2),
             net:      +rows.reduce((s, x) => s + x.LineNet, 0).toFixed(2),
+            byBusinessUnit,
         };
         res.json({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), rows, totals });
     } catch (err) { console.error('partsIssuedToJc:', err); res.status(500).json({ error: err.message }); }
