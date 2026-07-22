@@ -385,19 +385,14 @@ export function PartsIssuedToJc() {
                             <table style={tableStyle}>
                                 <thead>
                                     <tr style={trHeader}>
-                                        <TH rowSpan={2}>Code</TH>
-                                        <TH rowSpan={2}>Business Unit</TH>
-                                        <TH align="right" colSpan={2} style={{ background: '#f0fdf4' }}>Cash (walk-in)</TH>
-                                        <TH align="right" colSpan={2} style={{ background: '#eff6ff' }}>Credit (named party)</TH>
-                                        <TH align="right" colSpan={2}>Total</TH>
-                                    </tr>
-                                    <tr style={trHeader}>
-                                        <TH align="right" style={{ background: '#f0fdf4' }}>Slips</TH>
-                                        <TH align="right" style={{ background: '#f0fdf4' }}>Net</TH>
-                                        <TH align="right" style={{ background: '#eff6ff' }}>Slips</TH>
-                                        <TH align="right" style={{ background: '#eff6ff' }}>Net</TH>
-                                        <TH align="right">Slips</TH>
-                                        <TH align="right">Net</TH>
+                                        <TH>Code</TH>
+                                        <TH>Business Unit</TH>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Cash Slips</TH>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Cash Net</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Credit Slips</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Credit Net</TH>
+                                        <TH align="right">Total Slips</TH>
+                                        <TH align="right">Total Net</TH>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -549,19 +544,14 @@ export function PartsSoldFinalized() {
                             <table style={tableStyle}>
                                 <thead>
                                     <tr style={trHeader}>
-                                        <TH rowSpan={2}>Code</TH>
-                                        <TH rowSpan={2}>Business Unit</TH>
-                                        <TH align="right" colSpan={2} style={{ background: '#f0fdf4' }}>Cash (walk-in)</TH>
-                                        <TH align="right" colSpan={2} style={{ background: '#eff6ff' }}>Credit (named party)</TH>
-                                        <TH align="right" colSpan={2}>Total</TH>
-                                    </tr>
-                                    <tr style={trHeader}>
-                                        <TH align="right" style={{ background: '#f0fdf4' }}>Docs</TH>
-                                        <TH align="right" style={{ background: '#f0fdf4' }}>Revenue</TH>
-                                        <TH align="right" style={{ background: '#eff6ff' }}>Docs</TH>
-                                        <TH align="right" style={{ background: '#eff6ff' }}>Revenue</TH>
-                                        <TH align="right">Docs</TH>
-                                        <TH align="right">Revenue</TH>
+                                        <TH>Code</TH>
+                                        <TH>Business Unit</TH>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Cash Docs</TH>
+                                        <TH align="right" style={{ background: '#f0fdf4' }}>Cash Revenue</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Credit Docs</TH>
+                                        <TH align="right" style={{ background: '#eff6ff' }}>Credit Revenue</TH>
+                                        <TH align="right">Total Docs</TH>
+                                        <TH align="right">Total Revenue</TH>
                                     </tr>
                                 </thead>
                                 <tbody>
