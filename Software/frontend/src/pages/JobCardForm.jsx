@@ -401,12 +401,29 @@ export default function JobCardForm() {
     setCareOff(newCareOff);
   };
 
+  // When a discount change would exceed the current cap, we either flash
+  // an error (default) OR open the cap-elevation modal if the user has
+  // careoff_request_elevation. The discount change itself is still
+  // rejected until an admin approves; the user just gets a discoverable
+  // path to escalate instead of a dead-end warning.
+  const flashCapOrOfferElevation = (curMax, verb = 'Cap exceeded') => {
+    if (hasModule('careoff_request_elevation') && id && form.CareOffID) {
+      setCapElevationCtx({
+        baseCapPct:      careOff?.MaxDiscountPct ?? 0,
+        effectiveCapPct: careOff?.MaxDiscountPct ?? 0,
+        message: `${verb}. Current cap: PKR ${curMax.toLocaleString()}. Request an admin to raise it for this JC.`,
+      });
+    } else {
+      flash(`${verb}. Max: PKR ${curMax.toLocaleString()}`, true);
+    }
+  };
+
   const handleDiscountChange = (idx, newVal) => {
     const discType = labourItems[idx].DiscType || 'Percent';
     const newItems = labourItems.map((it, j) => j === idx ? { ...it, Discount: newVal, DiscType: discType } : it);
     const newTotal = +newItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
     const curMax = +(totalLabour * (careOff.MaxDiscountPct / 100)).toFixed(2);
-    if (newTotal > curMax + 0.005) { flash(`Cap exceeded. Max: PKR ${curMax.toLocaleString()}`, true); return; }
+    if (newTotal > curMax + 0.005) { flashCapOrOfferElevation(curMax); return; }
     setLabourItems(newItems);
   };
 
@@ -415,7 +432,7 @@ export default function JobCardForm() {
     const newItems = labourItems.map((it, j) => j === idx ? { ...it, DiscType: newType } : it);
     const newTotal = +newItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
     const curMax = +(totalLabour * (careOff.MaxDiscountPct / 100)).toFixed(2);
-    if (newTotal > curMax + 0.005) { flash(`Switching to ${newType} would exceed cap (max PKR ${curMax.toLocaleString()}).`, true); return; }
+    if (newTotal > curMax + 0.005) { flashCapOrOfferElevation(curMax, `Switching to ${newType} would exceed the cap`); return; }
     setLabourItems(newItems);
   };
 
