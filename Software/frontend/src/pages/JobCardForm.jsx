@@ -841,7 +841,24 @@ export default function JobCardForm() {
 
       {statusMsg && <div style={{ background: '#dcfce7', color: '#166534', padding: '4px 10px', fontSize: 11 }}>{statusMsg}</div>}
       {statusErr && <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', fontSize: 11 }}>{statusErr}</div>}
-      {capOver && <div style={{ background: '#fef9c3', color: '#854d0e', padding: '4px 10px', fontSize: 11, borderBottom: '1px solid #fde68a' }}>⚠ Discount cap exceeded: PKR {totalDiscountUsed.toLocaleString()} used, max PKR {maxDiscountAllowed.toLocaleString()}. Reduce discounts before saving.</div>}
+      {capOver && (
+        <div style={{ background: '#fef9c3', color: '#854d0e', padding: '4px 10px', fontSize: 11, borderBottom: '1px solid #fde68a',
+                      display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>⚠ Discount cap exceeded: PKR {totalDiscountUsed.toLocaleString()} used, max PKR {maxDiscountAllowed.toLocaleString()}. Reduce discounts before saving.</span>
+          {hasModule('careoff_request_elevation') && form.CareOffID && id && (
+            <button type="button"
+                    onClick={() => setCapElevationCtx({
+                        baseCapPct: careOff?.MaxDiscountPct ?? 0,
+                        effectiveCapPct: careOff?.MaxDiscountPct ?? 0,
+                        message: `Total discount PKR ${totalDiscountUsed.toLocaleString()} exceeds the current cap (max PKR ${maxDiscountAllowed.toLocaleString()}).`,
+                    })}
+                    style={{ background: '#0f172a', color: 'white', border: 'none', padding: '2px 10px',
+                              borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+              Request higher cap →
+            </button>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div style={S.body}>
