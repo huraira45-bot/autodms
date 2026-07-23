@@ -407,14 +407,20 @@ export default function JobCardForm() {
   // rejected until an admin approves; the user just gets a discoverable
   // path to escalate instead of a dead-end warning.
   const flashCapOrOfferElevation = (curMax, verb = 'Cap exceeded') => {
-    if (hasModule('careoff_request_elevation') && id && form.CareOffID) {
+    const hasPerm = hasModule('careoff_request_elevation');
+    const hasId   = !!id;
+    const hasCO   = !!form.CareOffID;
+    if (hasPerm && hasId && hasCO) {
       setCapElevationCtx({
         baseCapPct:      careOff?.MaxDiscountPct ?? 0,
         effectiveCapPct: careOff?.MaxDiscountPct ?? 0,
         message: `${verb}. Current cap: PKR ${curMax.toLocaleString()}. Request an admin to raise it for this JC.`,
       });
     } else {
-      flash(`${verb}. Max: PKR ${curMax.toLocaleString()}`, true);
+      // Diagnostic: reveal which condition is blocking the elevation modal
+      // so the operator knows what to fix (relogin / save first / assign
+      // care-off). Owner ask 2026-07-23 while debugging farukh.
+      flash(`${verb}. Max: PKR ${curMax.toLocaleString()} [perm=${hasPerm} id=${hasId} careoff=${hasCO}]`, true);
     }
   };
 
