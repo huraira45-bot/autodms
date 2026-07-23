@@ -407,20 +407,17 @@ export default function JobCardForm() {
   // rejected until an admin approves; the user just gets a discoverable
   // path to escalate instead of a dead-end warning.
   const flashCapOrOfferElevation = (curMax, verb = 'Cap exceeded') => {
-    const hasPerm = hasModule('careoff_request_elevation');
-    const hasId   = !!id;
-    const hasCO   = !!form.CareOffID;
-    if (hasPerm && hasId && hasCO) {
+    // CareOffID lives on the `careOff` object state (loaded via
+    // setCareOff), NOT on `form` — form state is only for the raw
+    // JC header fields. Check the right variable.
+    if (hasModule('careoff_request_elevation') && id && careOff?.CareOffID) {
       setCapElevationCtx({
         baseCapPct:      careOff?.MaxDiscountPct ?? 0,
         effectiveCapPct: careOff?.MaxDiscountPct ?? 0,
         message: `${verb}. Current cap: PKR ${curMax.toLocaleString()}. Request an admin to raise it for this JC.`,
       });
     } else {
-      // Diagnostic: reveal which condition is blocking the elevation modal
-      // so the operator knows what to fix (relogin / save first / assign
-      // care-off). Owner ask 2026-07-23 while debugging farukh.
-      flash(`${verb}. Max: PKR ${curMax.toLocaleString()} [perm=${hasPerm} id=${hasId} careoff=${hasCO}]`, true);
+      flash(`${verb}. Max: PKR ${curMax.toLocaleString()}`, true);
     }
   };
 
@@ -475,7 +472,7 @@ export default function JobCardForm() {
       const msg = data?.error || err.message;
       // Cap-overrun → offer to request an elevation if the user has the
       // permission. Otherwise fall through to the normal error flash.
-      if (data?.capOverrun && hasModule('careoff_request_elevation') && form.CareOffID && id) {
+      if (data?.capOverrun && hasModule('careoff_request_elevation') && careOff?.CareOffID && id) {
         setCapElevationCtx({
           baseCapPct:      data.baseCapPct,
           effectiveCapPct: data.effectiveCapPct,
@@ -506,7 +503,7 @@ export default function JobCardForm() {
     try {
       await axios.post('/api/careoff-elevations', {
         JobCardID: parseInt(id),
-        CareOffID: parseInt(form.CareOffID),
+        CareOffID: parseInt(careOff.CareOffID),
         RequestedCapPct: requested,
         Reason: elevReason,
       });
@@ -868,7 +865,7 @@ export default function JobCardForm() {
         <div style={{ background: '#fef9c3', color: '#854d0e', padding: '4px 10px', fontSize: 11, borderBottom: '1px solid #fde68a',
                       display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <span>⚠ Discount cap exceeded: PKR {totalDiscountUsed.toLocaleString()} used, max PKR {maxDiscountAllowed.toLocaleString()}. Reduce discounts before saving.</span>
-          {hasModule('careoff_request_elevation') && form.CareOffID && id && (
+          {hasModule('careoff_request_elevation') && careOff?.CareOffID && id && (
             <button type="button"
                     onClick={() => setCapElevationCtx({
                         baseCapPct: careOff?.MaxDiscountPct ?? 0,
