@@ -448,9 +448,51 @@ export default function JobCardForm() {
         navigate(`/workshop/jobs/${res.data.JobCardId}`, { replace: true });
       }
     } catch (err) {
-      const msg = err.response?.data?.error || err.message;
-      flash(msg, true);
+      const data = err.response?.data;
+      const msg = data?.error || err.message;
+      // Cap-overrun → offer to request an elevation if the user has the
+      // permission. Otherwise fall through to the normal error flash.
+      if (data?.capOverrun && hasModule('careoff_request_elevation') && form.CareOffID && id) {
+        setCapElevationCtx({
+          baseCapPct:      data.baseCapPct,
+          effectiveCapPct: data.effectiveCapPct,
+          message:         msg,
+        });
+      } else {
+        flash(msg, true);
+      }
     } finally { setSaving(false); }
+  };
+
+  // ─── Cap elevation modal state ───────────────────────────────
+  const [capElevationCtx, setCapElevationCtx] = useState(null);
+  const [elevReqPct, setElevReqPct] = useState('');
+  const [elevReason, setElevReason] = useState('');
+  const [elevSaving, setElevSaving] = useState(false);
+  const submitElevation = async () => {
+    const requested = Number(elevReqPct);
+    if (!requested || requested <= (capElevationCtx.baseCapPct || 0)) {
+      notify({ type: 'warning', title: 'Higher cap needed', message: `Requested cap must be higher than the current ${capElevationCtx.baseCapPct}%.` });
+      return;
+    }
+    if (!elevReason.trim()) {
+      notify({ type: 'warning', title: 'Reason required', message: 'Give a short reason so the admin can decide.' });
+      return;
+    }
+    setElevSaving(true);
+    try {
+      await axios.post('/api/careoff-elevations', {
+        JobCardID: parseInt(id),
+        CareOffID: parseInt(form.CareOffID),
+        RequestedCapPct: requested,
+        Reason: elevReason,
+      });
+      notify({ type: 'success', title: 'Request submitted', message: 'Admin will review it. You can save once approved.' });
+      setCapElevationCtx(null);
+      setElevReqPct(''); setElevReason('');
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not submit', message: err.response?.data?.error || err.message });
+    } finally { setElevSaving(false); }
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2021,6 +2063,38 @@ export default function JobCardForm() {
       <style>{`
         @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
       `}</style>
+
+      {capElevationCtx && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'white', borderRadius: 12, width: 520, padding: 20 }}>
+            <h3 style={{ marginTop: 0 }}>Discount cap exceeded</h3>
+            <p style={{ color: '#334155', fontSize: '0.88rem' }}>{capElevationCtx.message}</p>
+            <p style={{ color: '#64748b', fontSize: '0.82rem' }}>
+              Current cap: <strong>{capElevationCtx.baseCapPct}%</strong>{'  '}
+              (effective for this JC: <strong>{capElevationCtx.effectiveCapPct}%</strong>).
+              You can request an admin to raise it for this JC only.
+            </p>
+            <label style={{ display: 'block', marginTop: 12, fontSize: '0.85rem', fontWeight: 600 }}>
+              Requested cap %
+              <input type="number" step="0.01" min={0} max={100}
+                     value={elevReqPct} onChange={e => setElevReqPct(e.target.value)}
+                     style={{ width: '100%', marginTop: 4, padding: 8, border: '1px solid #cbd5e1', borderRadius: 6 }} />
+            </label>
+            <label style={{ display: 'block', marginTop: 12, fontSize: '0.85rem', fontWeight: 600 }}>
+              Reason (short)
+              <textarea rows={3} value={elevReason} onChange={e => setElevReason(e.target.value)}
+                        style={{ width: '100%', marginTop: 4, padding: 8, border: '1px solid #cbd5e1', borderRadius: 6, resize: 'vertical' }} />
+            </label>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button className="btn" style={{ background: '#e2e8f0', color: '#475569' }} onClick={() => setCapElevationCtx(null)}>Cancel</button>
+              <button className="btn" disabled={elevSaving} onClick={submitElevation}>
+                {elevSaving ? 'Submitting…' : 'Submit request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

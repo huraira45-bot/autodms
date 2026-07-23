@@ -75,6 +75,7 @@ app.use('/api/sales/ssr', require('./routes/ssrRoutes'));
 app.use('/api/accounts', require('./routes/accountRoutes'));
 app.use('/api/workshop', require('./routes/workshopRoutes'));
 app.use('/api/care-offs', require('./routes/careOffRoutes'));
+app.use('/api/careoff-elevations', require('./routes/careOffElevationRoutes'));
 app.use('/api/accessories', require('./routes/accessoriesRoutes'));
 app.use('/api/system-accounts', require('./routes/systemAccountsRoutes'));
 app.use('/api/tax-rates', require('./routes/taxRatesRoutes'));

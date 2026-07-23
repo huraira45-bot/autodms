@@ -65,6 +65,8 @@ const SECTIONS = [
             { key: 'chat_use',   label: 'Chat: send & receive messages', kind: 'workflow' },
             { key: 'chat_admin', label: 'Chat: audit all channels + delete',   kind: 'workflow' },
             { key: 'charity_view', label: 'Charity Tracker (view + report)', kind: 'workflow' },
+            { key: 'careoff_request_elevation', label: 'Care-Off: request higher discount cap', kind: 'workflow' },
+            { key: 'careoff_approve_elevation', label: 'Care-Off: approve/reject cap elevation', kind: 'workflow' },
             { key: 'accounting_setup',  label: 'Accounting Setup (Banks, Roles)', kind: 'document' },
             { key: 'payments',          label: 'Receive / Make Payment',  kind: 'workflow' },
             { key: 'finance_cheques',   label: 'Cheque Clearance',        kind: 'workflow' },

@@ -1,6 +1,7 @@
 const { sql, getPool } = require('../config/db');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { computeLineDiscAmt, validateDiscountCap } = require('../utils/careOffUtils');
+const { getEffectiveCapForJC } = require('./careOffElevationController');
 const { resolveRate } = require('./taxRatesController');
 const { assertEnoughStock } = require('../services/stockBalanceService');
 
@@ -888,9 +889,18 @@ exports.saveJobCard = async (req, res) => {
                 .query('SELECT MaxDiscountPct FROM dms_CareOff WHERE CareOffID=@coId AND IsActive=1');
             if (!coRes.recordset.length)
                 return res.status(400).json({ error: 'Selected Care-Off is inactive or not found.' });
-            const cap = validateDiscountCap(LabourItems, coRes.recordset[0].MaxDiscountPct);
+            // If an admin has APPROVED a cap-elevation request for this JC,
+            // use the higher cap. Otherwise the care-off's normal cap applies.
+            const baseCap = Number(coRes.recordset[0].MaxDiscountPct) || 0;
+            const effCap  = JobCardId ? await getEffectiveCapForJC(JobCardId, baseCap) : baseCap;
+            const cap = validateDiscountCap(LabourItems, effCap);
             if (!cap.valid)
-                return res.status(422).json({ error: `Discount cap exceeded. Total: PKR ${cap.totalDiscount}, max allowed: PKR ${cap.maxAllowed}.` });
+                return res.status(422).json({
+                    error: `Discount cap exceeded. Total: PKR ${cap.totalDiscount}, max allowed: PKR ${cap.maxAllowed}.`,
+                    capOverrun: true,
+                    baseCapPct: baseCap,
+                    effectiveCapPct: effCap,
+                });
         }
 
         // Resolve current PST rate once for tax snapshot per §14.4

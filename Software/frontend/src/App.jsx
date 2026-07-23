@@ -106,6 +106,7 @@ import SubletRepair       from './pages/SubletRepair';
 import LabourServices     from './pages/LabourServices';
 import WorkshopSettings   from './pages/WorkshopSettings';
 import CareOffAdmin       from './pages/CareOffAdmin';
+import CareOffElevationRequests from './pages/CareOffElevationRequests';
 import SystemAccounts     from './pages/SystemAccounts';
 import TaxRates           from './pages/TaxRates';
 import ReceivePayment     from './pages/ReceivePayment';
@@ -1084,6 +1085,11 @@ function AppShell() {
                     } />
                     <Route path="/workshop/care-off" element={
                         <ProtectedRoute moduleKey="workshop_careoff"><CareOffAdmin /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/careoff-elevations" element={
+                        <ProtectedRoute anyModules={['careoff_request_elevation', 'careoff_approve_elevation']}>
+                            <CareOffElevationRequests />
+                        </ProtectedRoute>
                     } />
                     <Route path="/workshop/accessories" element={
                         <ProtectedRoute moduleKey="workshop_accessories"><Accessories /></ProtectedRoute>
