@@ -209,8 +209,53 @@ exports.updateGRN = async (req, res) => {
                                 @tr, @ta, @addp, @adda, @ait, @ulc)`);
         }
 
+        // Resync the linked stock movement rows so quantity edits actually
+        // land in stock. Migration 093 adds data_StockInOutInfo.PurchaseID
+        // and backfills it for old rows. If we still can't find a linked
+        // stock row (unlinked legacy GRN), we refuse the edit rather than
+        // let stock silently drift out of sync — user must delete + recreate.
+        const stockHdr = await new sql.Request(tx)
+            .input('pid', sql.Int, id)
+            .query(`SELECT TOP 1 StockIOID, WHID FROM data_StockInOutInfo
+                    WHERE PurchaseID = @pid AND StockType = 'Purchase'
+                    ORDER BY StockIOID DESC`);
+        if (!stockHdr.recordset.length) {
+            const e = new Error('This GRN has no linked stock movement row (legacy record from before migration 093). Cannot safely edit — please delete and re-create it so stock stays consistent.');
+            e.statusCode = 409;
+            throw e;
+        }
+        const { StockIOID: stockIOID, WHID: stockWHID } = stockHdr.recordset[0];
+
+        await new sql.Request(tx)
+            .input('sid', sql.Int, stockIOID)
+            .query('DELETE FROM data_StockInOutDetail WHERE StockIOID = @sid');
+
+        for (const li of (parsedItems || [])) {
+            await new sql.Request(tx)
+                .input('sid',  sql.Int,           stockIOID)
+                .input('iid',  sql.Int,           parseInt(li.ItemId))
+                .input('qty',  sql.Decimal(18,2), parseFloat(li.Quantity) || 0)
+                .input('rate', sql.Decimal(18,2), parseFloat(li.ItemRate) || 0)
+                .input('wh',   sql.Int,           WHID || stockWHID)
+                .query(`INSERT INTO data_StockInOutDetail
+                            (StockIOID, ItemId, Quantity, StockRate, LocationId)
+                        VALUES (@sid, @iid, @qty, @rate, @wh)`);
+        }
+
+        // Keep the stock header in sync with the edited GRN header
+        await new sql.Request(tx)
+            .input('sid',  sql.Int,          stockIOID)
+            .input('pd',   sql.DateTime,     PurchaseDate)
+            .input('wh',   sql.Int,          WHID)
+            .input('pty',  sql.Int,          PartyID)
+            .input('rem',  sql.NVarChar(sql.MAX), Remarks || '')
+            .query(`UPDATE data_StockInOutInfo
+                    SET    StockIODate = @pd, WHID = @wh, PartyID = @pty, Remarks = @rem,
+                           ModifyUserDateTime = GETDATE()
+                    WHERE  StockIOID = @sid`);
+
         await tx.commit();
-        res.json({ message: 'GRN updated.' });
+        res.json({ message: 'GRN updated (stock resynced).' });
     } catch (err) {
         try { await tx.rollback(); } catch {}
         console.error('updateGRN:', err);
