@@ -129,7 +129,7 @@ export default function StoreSale() {
           SaleRate: rate,
           PurRate:  Number(it.PurchaseRate) || 0,
           TaxPercent: Number(it.TaxPercent) || 0,
-          IsGST:    it.IsGST !== false,
+          IsGST:    true,
           Discount: discAmt,
           DiscType: 'Amount',
           TaxAmt:   taxAmt,
@@ -188,11 +188,11 @@ export default function StoreSale() {
     const rate      = Number(currentItem.SaleRate) || 0;
     const subtotal  = qty * rate;
 
-    // GST is per-line now. When IsGST is on, charge the configured rate on
-    // the line subtotal; when off (Non-GST), no tax.
-    const isGST   = !!currentItem.IsGST;
-    const taxPct  = isGST ? Number(gstRate) : 0;
-    const taxAmt  = isGST ? (subtotal * taxPct / 100) : 0;
+    // GST is always applied at the configured rate — no opt-out toggle
+    // (owner ask 2026-07-24). Charged on the line subtotal.
+    const isGST   = true;
+    const taxPct  = Number(gstRate) || 0;
+    const taxAmt  = subtotal * taxPct / 100;
 
     // Discount: when typed as Amount, it's PER UNIT (so it covers all qty).
     // When typed as Percent, it's a % of the full line subtotal.
@@ -235,7 +235,7 @@ export default function StoreSale() {
       TaxPercent: row.TaxPercent,
       Discount:   row.DiscAmt / (row.Qty || 1),  // back to per-unit
       DiscType:   'Amount',
-      IsGST:      row.IsGST !== false,
+      IsGST:      true,
       WHID:       row.WHID || warehouses[0]?.WHID || '',
     });
     setEditingLineIdx(idx);
@@ -251,7 +251,7 @@ export default function StoreSale() {
   const previewQty     = Number(currentItem.Qty) || 0;
   const previewRate    = Number(currentItem.SaleRate) || 0;
   const previewSubtotal = previewQty * previewRate;
-  const previewTax     = currentItem.IsGST ? (previewSubtotal * Number(gstRate) / 100) : 0;
+  const previewTax     = previewSubtotal * Number(gstRate) / 100;
   const previewDiscInput = Number(currentItem.Discount) || 0;
   const previewDisc    = currentItem.DiscType === 'Percent'
     ? (previewSubtotal * previewDiscInput / 100)
@@ -578,9 +578,9 @@ export default function StoreSale() {
             <div className="form-group" style={{ flex: 1 }}><label>Qty</label><input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({...currentItem, Qty: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}><label>Price</label><input type="number" value={currentItem.SaleRate} onChange={e => setCurrentItem({...currentItem, SaleRate: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}>
-              <label>{currentItem.IsGST ? `GST (${gstRate}%)` : 'GST (off)'}</label>
-              <div className={`input-with-icon ${!currentItem.IsGST ? 'disabled' : ''}`} title="GST rate is set in Inventory Settings. Toggle the button below to opt out for non-GST items.">
-                <input type="number" disabled value={currentItem.IsGST ? gstRate : 0} readOnly />
+              <label>GST ({gstRate}%)</label>
+              <div className="input-with-icon disabled" title="GST rate is set in Inventory Settings and applied to every line.">
+                <input type="number" disabled value={gstRate} readOnly />
                 <Percent size={14} />
               </div>
             </div>
@@ -595,16 +595,6 @@ export default function StoreSale() {
                   {currentItem.DiscType === 'Amount' ? <DollarSign size={14} /> : <Percent size={14} />}
                 </button>
               </div>
-            </div>
-            <div className="form-group" style={{ flex: 1.2 }}>
-              <label>Tax</label>
-              <button type="button"
-                      className={`toggle-btn ${currentItem.IsGST ? 'active' : ''}`}
-                      onClick={() => setCurrentItem({ ...currentItem, IsGST: !currentItem.IsGST })}
-                      title="Toggle 18% GST on this line">
-                {currentItem.IsGST ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                {currentItem.IsGST ? 'GST 18%' : 'Non-GST'}
-              </button>
             </div>
             <div className="form-group" style={{ flex: 2 }}>
               <label>Issue From</label>

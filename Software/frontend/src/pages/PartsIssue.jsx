@@ -120,9 +120,9 @@ export default function PartsIssue() {
     const discAmt = row.DiscType === 'Percent'
       ? (subtotal * discInput / 100)
       : (discInput * qty);
-    const isGst  = !!row.IsGST;
-    const taxPct = isGst ? Number(row.TaxPercent || gstRate) : 0;
-    const taxAmt = isGst ? ((subtotal - discAmt) * taxPct / 100) : 0;
+    // GST is always applied at the configured rate — no opt-out toggle.
+    const taxPct = Number(gstRate) || 0;
+    const taxAmt = (subtotal - discAmt) * taxPct / 100;
     const net    = subtotal - discAmt + taxAmt;
     return { subtotal, discAmt, taxPct, taxAmt, net };
   };
@@ -169,8 +169,8 @@ export default function PartsIssue() {
       Rate:       row.Rate,
       Discount:   row.Discount,
       DiscType:   row.DiscType || 'Amount',
-      IsGST:      row.IsGST !== false,
-      TaxPercent: row.TaxPercent || gstRate,
+      IsGST:      true,
+      TaxPercent: gstRate,
     });
     setEditingIdx(idx);
   };
@@ -417,12 +417,12 @@ export default function PartsIssue() {
                   <input type="number" value={entry.Rate} onChange={e => setEntry(v => ({ ...v, Rate: e.target.value }))} style={inp} />
                 </div>
                 <div>
-                  <label style={label}>{entry.IsGST ? `GST (${gstRate}%)` : 'GST (off)'}</label>
-                  <input type="number" readOnly value={entry.IsGST ? gstRate : 0} style={{ ...inp, background: '#f1f5f9', color: '#64748b' }} />
+                  <label style={label}>GST ({gstRate}%)</label>
+                  <input type="number" readOnly value={gstRate} style={{ ...inp, background: '#f1f5f9', color: '#64748b' }} />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 3fr auto', gap: 12, alignItems: 'end' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 3fr auto', gap: 12, alignItems: 'end' }}>
                 <div>
                   <label style={label}>Discount{entry.DiscType === 'Amount' ? ' (per unit)' : ' (%)'}</label>
                   <div style={{ display: 'flex' }}>
@@ -434,15 +434,6 @@ export default function PartsIssue() {
                       {entry.DiscType === 'Amount' ? <DollarSign size={14} /> : <Percent size={14} />}
                     </button>
                   </div>
-                </div>
-                <div>
-                  <label style={label}>Tax</label>
-                  <button type="button" onClick={() => setEntry(v => ({ ...v, IsGST: !v.IsGST }))}
-                          className={`toggle-btn ${entry.IsGST ? 'active' : ''}`}
-                          style={{ ...inp, background: entry.IsGST ? 'var(--primary)' : '#f1f5f9', color: entry.IsGST ? 'white' : '#334155', border: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
-                    {entry.IsGST ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                    {entry.IsGST ? `GST ${gstRate}%` : 'Non-GST'}
-                  </button>
                 </div>
                 <div>
                   <label style={label}>Remarks (issue slip)</label>
