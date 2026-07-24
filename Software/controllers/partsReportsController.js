@@ -33,7 +33,11 @@ exports.stockMovement = async (req, res) => {
         // Inflow = StockArrival rows + positive StockInOut rows (purchase, return-in)
         // Outflow = |negative StockInOut rows| (issue, sale)
         const itemsReq = pool.request();
-        const itemsWhere = ['i.ItemStatus = 1'];
+        // ItemType='Part' filter — the InventItems table also carries ~900
+        // Service (labour catalog) rows that surface as "jobs" in a stock
+        // report even though they have no physical stock. Owner ask
+        // 2026-07-24: hide them from Stock Movement.
+        const itemsWhere = [`i.ItemStatus = 1`, `ISNULL(i.ItemType, 'Part') = 'Part'`];
         if (search) {
             itemsReq.input('q', sql.NVarChar(200), `%${search}%`);
             itemsWhere.push('(i.ItenName LIKE @q OR i.ManualNumber LIKE @q OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @q)');
