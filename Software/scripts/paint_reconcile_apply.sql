@@ -5,6 +5,11 @@
 --   Inserts: rows with no match get created with PaintUOMID=NULL,
 --            IsActive=1, AvgCost = xlsx Rate (initial cost).
 --   Deletes: none (no same-name duplicates were found).
+--   PaintUOMID: forced to "Piece" when xlsx unit-size = 1 (owner rule).
+--                Items with unit-size > 1 keep their existing PaintUOMID.
+--   paint_ItemUOM: MERGE FactorToBase = xlsx unit-size on the item's
+--                  current PaintUOMID (owner ask). Items with NULL
+--                  PaintUOMID are skipped and counted.
 --
 -- No paint_StockLedger row is written — CK_paint_Ledger_Source doesn't
 -- allow a PHYSICAL_COUNT source type. Same pattern as the opening-stock
@@ -188,27 +193,64 @@ LEFT JOIN paint_Item pByName ON pByCode.PaintItemID IS NULL
 
 DECLARE @updated INT = 0, @inserted INT = 0;
 
--- === UPDATE matched rows: StockQty AND AvgCost from xlsx =================
+-- === Look up "Piece" UOMID once (owner rule: unit-size 1 => Piece) =======
+DECLARE @pieceUomId INT;
+SELECT @pieceUomId = PaintUOMID FROM paint_UOM WHERE UOMName = 'Piece';
+IF @pieceUomId IS NULL RAISERROR('paint_UOM row "Piece" not found — cannot classify unit-size=1 items.', 16, 1);
+
+-- === UPDATE matched rows: StockQty + AvgCost + PaintUOMID (if unit=1) ====
 UPDATE pi
-   SET pi.StockQty  = m.Qty,
-       pi.AvgCost   = m.Rate,
-       pi.UpdatedAt = GETDATE()
+   SET pi.StockQty   = m.Qty,
+       pi.AvgCost    = m.Rate,
+       pi.PaintUOMID = CASE WHEN m.UnitSize = 1 THEN @pieceUomId ELSE pi.PaintUOMID END,
+       pi.UpdatedAt  = GETDATE()
   FROM paint_Item pi
   INNER JOIN #matched m ON m.MatchedID = pi.PaintItemID
  WHERE ABS(pi.StockQty - m.Qty) > 0.0001
-    OR ABS(pi.AvgCost  - m.Rate) > 0.0001;
+    OR ABS(pi.AvgCost  - m.Rate) > 0.0001
+    OR (m.UnitSize = 1 AND (pi.PaintUOMID IS NULL OR pi.PaintUOMID <> @pieceUomId));
 SET @updated = @@ROWCOUNT;
 
--- === INSERT new rows =====================================================
+-- === INSERT new rows (unit-size 1 => Piece; else PaintUOMID NULL) =========
 INSERT INTO paint_Item (PaintCode, PaintName, PaintCategoryID, PaintBrandID,
                         PaintUOMID, GSTDefaultOn, IsActive, StockQty, AvgCost)
-SELECT CAST(m.Code AS NVARCHAR(50)), m.Name, NULL, NULL, NULL, 1, 1, m.Qty, m.Rate
+SELECT CAST(m.Code AS NVARCHAR(50)), m.Name, NULL, NULL,
+       CASE WHEN m.UnitSize = 1 THEN @pieceUomId ELSE NULL END,
+       1, 1, m.Qty, m.Rate
   FROM #matched m
  WHERE m.MatchedID IS NULL;
 SET @inserted = @@ROWCOUNT;
 
+-- === UPSERT paint_ItemUOM FactorToBase from xlsx unit-size =================
+-- Owner ask: treat xlsx unit-size as the FactorToBase for the item's
+-- current base UoM. Skip items with PaintUOMID = NULL (they need a UoM
+-- classified in the UI before pack-size can be attached).
+DECLARE @uomUpserted INT = 0, @uomSkipped INT = 0;
+
+MERGE paint_ItemUOM AS tgt
+USING (
+    SELECT pi.PaintItemID, pi.PaintUOMID, CAST(m.UnitSize AS DECIMAL(18,6)) AS Factor
+      FROM paint_Item pi
+      INNER JOIN #matched m ON m.MatchedID = pi.PaintItemID
+     WHERE pi.PaintUOMID IS NOT NULL
+) AS src
+   ON tgt.PaintItemID = src.PaintItemID AND tgt.PaintUOMID = src.PaintUOMID
+ WHEN MATCHED AND ABS(tgt.FactorToBase - src.Factor) > 0.000001 THEN
+      UPDATE SET FactorToBase = src.Factor
+ WHEN NOT MATCHED BY TARGET THEN
+      INSERT (PaintItemID, PaintUOMID, FactorToBase)
+      VALUES (src.PaintItemID, src.PaintUOMID, src.Factor);
+SET @uomUpserted = @@ROWCOUNT;
+
+SELECT @uomSkipped = COUNT(*)
+  FROM paint_Item pi
+  INNER JOIN #matched m ON m.MatchedID = pi.PaintItemID
+ WHERE pi.PaintUOMID IS NULL;
+
 PRINT '--- SUMMARY ---';
-SELECT @updated AS RowsUpdated, @inserted AS RowsInserted;
+SELECT @updated AS RowsUpdated, @inserted AS RowsInserted,
+       @uomUpserted AS UomFactorsWritten,
+       @uomSkipped AS UomSkippedNoBaseUOM;
 
 PRINT '--- Sample of updated rows (top 20 by biggest Qty delta) ---';
 SELECT TOP 20 pi.PaintItemID, pi.PaintCode, pi.PaintName,
