@@ -19,6 +19,8 @@
 -- swap the last two lines to COMMIT and re-run.
 -- ================================================================
 SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;   -- required: paint_Item.StockValue is a PERSISTED computed column
+SET ANSI_NULLS ON;
 BEGIN TRANSACTION;
 
 IF OBJECT_ID('tempdb..#xlsx') IS NOT NULL DROP TABLE #xlsx;
