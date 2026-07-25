@@ -59,7 +59,25 @@ export default function WorkOrderPrint() {
     const total       = grossTotal - campaignBenefit;
 
     return (
-        <div className="wo-print">
+        <div className="wo-print" style={{ position: 'relative' }}>
+            {/* DRAFT watermark — printing a non-finalized JC (work-order slip
+                handed to the customer at the counter) is allowed, but the
+                page carries a diagonal DRAFT stamp so it's never mistaken
+                for the final invoice. Owner ask 2026-07-25. */}
+            {!jc.IsFinalized && (
+                <div style={{
+                    position: 'fixed', inset: 0, pointerEvents: 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 9999,
+                }}>
+                    <div style={{
+                        transform: 'rotate(-30deg)',
+                        fontSize: '9rem', fontWeight: 900,
+                        color: 'rgba(220, 38, 38, 0.16)',
+                        letterSpacing: '0.4rem', userSelect: 'none',
+                    }}>DRAFT</div>
+                </div>
+            )}
             {/* Shared business header — owner ask 2026-07-04: same letterhead
                 on every printed document, sourced from Business Profile.
                 Job Card / Work Order print keeps ONLY the business band —

@@ -597,10 +597,11 @@ exports.getJobCardPrintData = async (req, res) => {
             .input('id', sql.Int, req.params.id)
             .query('SELECT IsFinalized FROM Addata_JobCardInfo WHERE JobCardId=@id');
         if (!head.recordset.length) return res.status(404).json({ error: 'Job Card not found' });
-        if (!head.recordset[0].IsFinalized) {
-            return res.status(409).json({ error: 'Job Card must be finalized before printing.' });
-        }
-        // Delegate to the regular fetcher
+        // Drafts CAN be printed — advisors hand the printout to the customer
+        // at the counter as a work-order slip before the JC finalizes.
+        // The print page shows a DRAFT watermark for non-finalized JCs so
+        // the paper is never mistaken for a final invoice. Owner ask
+        // 2026-07-25.
         return exports.getJobCardById(req, res);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
