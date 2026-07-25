@@ -1,7 +1,7 @@
 -- ================================================================
 -- Paint Lab reconciliation — apply xlsx physical count to paint_Item
 --   Match: PaintCode (numeric) first, fall back to PaintName (case-insens).
---   Updates: StockQty only. AvgCost/PaintName left as-is on matched rows.
+--   Updates: StockQty AND AvgCost (from xlsx Rate). PaintName left as-is.
 --   Inserts: rows with no match get created with PaintUOMID=NULL,
 --            IsActive=1, AvgCost = xlsx Rate (initial cost).
 --   Deletes: none (no same-name duplicates were found).
@@ -188,13 +188,15 @@ LEFT JOIN paint_Item pByName ON pByCode.PaintItemID IS NULL
 
 DECLARE @updated INT = 0, @inserted INT = 0;
 
--- === UPDATE matched rows: StockQty only ===================================
+-- === UPDATE matched rows: StockQty AND AvgCost from xlsx =================
 UPDATE pi
-   SET pi.StockQty = m.Qty,
+   SET pi.StockQty  = m.Qty,
+       pi.AvgCost   = m.Rate,
        pi.UpdatedAt = GETDATE()
   FROM paint_Item pi
   INNER JOIN #matched m ON m.MatchedID = pi.PaintItemID
- WHERE ABS(pi.StockQty - m.Qty) > 0.0001;
+ WHERE ABS(pi.StockQty - m.Qty) > 0.0001
+    OR ABS(pi.AvgCost  - m.Rate) > 0.0001;
 SET @updated = @@ROWCOUNT;
 
 -- === INSERT new rows =====================================================
