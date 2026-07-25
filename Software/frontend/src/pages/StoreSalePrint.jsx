@@ -71,25 +71,34 @@ export default function StoreSalePrint() {
             <table className="items">
                 <thead>
                     <tr>
-                        <th style={{ width: '15%' }}>Item Code</th>
+                        <th style={{ width: '13%' }}>Item Code</th>
                         <th>Item Name</th>
-                        <th style={{ width: '8%', textAlign: 'right' }}>Qty</th>
-                        <th style={{ width: '15%', textAlign: 'right' }}>Unit Rate</th>
-                        <th style={{ width: '15%', textAlign: 'right' }}>Disc.</th>
-                        <th style={{ width: '15%', textAlign: 'right' }}>Amount</th>
+                        <th style={{ width: '7%', textAlign: 'right' }}>Qty</th>
+                        <th style={{ width: '12%', textAlign: 'right' }}>Unit Rate</th>
+                        <th style={{ width: '11%', textAlign: 'right' }}>Disc.</th>
+                        <th style={{ width: '12%', textAlign: 'right' }}>GST</th>
+                        <th style={{ width: '13%', textAlign: 'right' }}>Amount</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {items.map((it, i) => (
-                        <tr key={i}>
-                            <td style={{ fontFamily: 'monospace' }}>{it.ItemNumber || ''}</td>
-                            <td>{it.ItenName || ''}</td>
-                            <td style={{ textAlign: 'right' }}>{Number(it.Quantity || 0).toFixed(0)}</td>
-                            <td style={{ textAlign: 'right' }}>{fmt(it.SaleRate)}</td>
-                            <td style={{ textAlign: 'right' }}>{fmt(it.DiscountAmount)}</td>
-                            <td style={{ textAlign: 'right' }}>{fmt(it.NetAmount)}</td>
-                        </tr>
-                    ))}
+                    {items.map((it, i) => {
+                        const qty  = Number(it.Quantity)       || 0;
+                        const rate = Number(it.SaleRate)       || 0;
+                        const disc = Number(it.DiscountAmount) || 0;
+                        const gst  = Number(it.TaxAmount)      || 0;
+                        const lineTotal = qty * rate - disc + gst;
+                        return (
+                            <tr key={i}>
+                                <td style={{ fontFamily: 'monospace' }}>{it.ItemNumber || ''}</td>
+                                <td>{it.ItenName || ''}</td>
+                                <td style={{ textAlign: 'right' }}>{qty.toFixed(0)}</td>
+                                <td style={{ textAlign: 'right' }}>{fmt(rate)}</td>
+                                <td style={{ textAlign: 'right' }}>{fmt(disc)}</td>
+                                <td style={{ textAlign: 'right' }}>{fmt(gst)}</td>
+                                <td style={{ textAlign: 'right' }}>{fmt(lineTotal)}</td>
+                            </tr>
+                        );
+                    })}
                 </tbody>
             </table>
 
@@ -102,9 +111,9 @@ export default function StoreSalePrint() {
                     <tbody>
                         <tr><td>Total Bill:</td><td>RS. {fmt(totalBill)}</td></tr>
                         {totalDisc > 0 && <tr><td>Total Disc:</td><td>RS. {fmt(totalDisc)}</td></tr>}
-                        {totalTax > 0 && <tr><td>GST:</td><td>RS. {fmt(totalTax)}</td></tr>}
+                        {totalTax > 0 && <tr><td>Total GST:</td><td>RS. {fmt(totalTax)}</td></tr>}
                         {delivery > 0 && <tr><td>Delivery Expense:</td><td>RS. {fmt(delivery)}</td></tr>}
-                        <tr className="net"><td>Net Bill:</td><td>RS. {fmt(netBill)}</td></tr>
+                        <tr className="net"><td>Total (incl. GST):</td><td>RS. {fmt(netBill)}</td></tr>
                     </tbody>
                 </table>
             </div>
