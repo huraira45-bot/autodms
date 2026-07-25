@@ -1,69 +1,211 @@
 -- ================================================================
--- Backfill paint_ItemUOM for the 21 newly-inserted paint items.
---   Rule: unit-size = 1  =>  PaintUOMID = Piece, FactorToBase = 1
---         unit-size > 1  =>  PaintUOMID = ML,    FactorToBase = unit-size
+-- Apply xlsx UoM rule to every paint item.
+--   xlsx unit-size = 1  =>  PaintUOMID = Piece, FactorToBase = 1
+--   xlsx unit-size > 1  =>  PaintUOMID = Gram,  FactorToBase = unit-size
 --
--- These items got StockQty + AvgCost from the earlier reconcile run
--- but paint_ItemUOM was never populated for them (the MERGE only
--- iterated matched items). This closes the gap.
+--   xlsx "unit size" == "GRAMS PER UNIT" in the UI.
 --
--- Dry-run by default (ROLLBACK). Flip to COMMIT after review.
+-- Covers ALL 148 xlsx rows (both matched and previously-inserted new).
+-- Match rule: PaintCode first, else PaintName (case-insensitive).
+-- Old paint_ItemUOM rows for other UoMs are LEFT ALONE (in case any
+-- future GRN wants to enter in those units).
+--
+-- Dry-run by default. Flip ROLLBACK -> COMMIT after review.
 -- ================================================================
 SET NOCOUNT ON;
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 BEGIN TRANSACTION;
 
-IF OBJECT_ID('tempdb..#new') IS NOT NULL DROP TABLE #new;
-CREATE TABLE #new (Code INT NOT NULL, UnitSize INT NOT NULL);
-INSERT INTO #new (Code, UnitSize) VALUES
-  (100396, 1),
-  (100400, 946),
-  (100401, 1),
-  (100129, 1000),
-  (100050, 1000),
-  (100352, 1),
-  (100353, 1),
-  (100210, 1000),
-  (100216, 355),
-  (100217, 355),
-  (100220, 473),
-  (100221, 473),
-  (100222, 141),
-  (100226, 200),
-  (100306, 12),
-  (100320, 3),
-  (100323, 3),
-  (100324, 3),
-  (100188, 1000),
-  (100189, 1000),
-  (100351, 1);
+IF OBJECT_ID('tempdb..#xlsx') IS NOT NULL DROP TABLE #xlsx;
+CREATE TABLE #xlsx (
+    Code     INT NOT NULL,
+    Name     NVARCHAR(200) NOT NULL,
+    UnitSize INT NOT NULL
+);
+INSERT INTO #xlsx (Code, Name, UnitSize) VALUES
+  (100073, 'CONVERTER', 1000),
+  (100074, '1K ACRYLIC.PRIME FULLER', 1000),
+  (100075, 'FISH EYE PREVENTER', 1000),
+  (100076, 'FLIP CONTROLLER', 2500),
+  (100077, 'FADE OUT THINNER', 3600),
+  (100079, 'POLISH', 500),
+  (100395, '60 REGMAL', 1),
+  (100344, 'TAPE (R-M)', 1),
+  (100396, 'CANCOAT', 1),
+  (100083, '3M 2000 REGMAL', 1),
+  (100084, 'P2000 REGMAL', 1),
+  (100400, 'MEGUAIRS ULTRA PRO FINISHING POLISH', 946),
+  (100090, '120 REGMAL', 1),
+  (100091, '320 REGMAL', 1),
+  (100092, '220 REGMAL', 1),
+  (100345, 'STEEL PUTTEN (R-M)', 1000),
+  (100401, 'BLACK COATING GLOVES', 1),
+  (100098, 'ZEN 1K ACRYLIC PREMMER', 1000),
+  (100404, 'RAGMAL 600', 1),
+  (100103, 'ZEN Z2S SILKY  SILVER', 1000),
+  (100099, 'ZEN 2K PREMMER', 1000),
+  (100113, 'RT PALE WHITE', 1000),
+  (100129, '2K CLEARCOAT SUPRIME', 1000),
+  (100154, '2K THINNER  MEDIUM', 5000),
+  (100421, 'NEXA REGMAL P80', 1),
+  (100422, 'NEXA REGMAL P150', 1),
+  (100423, 'NEXA REGMAL P400', 1),
+  (100349, 'DECO MAT BLACK', 910),
+  (100141, 'FIBER PUTTI GELASO', 1000),
+  (100424, 'NEXA REGMAL P240', 1),
+  (100425, '233MM 22H P80', 1),
+  (100184, 'STAIN MEX (APC)', 1000),
+  (100428, 'NEXA P800', 1),
+  (100429, 'DRY SANDING PAD', 1),
+  (100168, 'ZEN 1F8 MILD SILVER', 1000),
+  (100010, 'RT MEDIUM PALE YELLOW', 1000),
+  (100011, 'RT TRANSPARENT BLACK', 1000),
+  (100012, 'YELLOW OXIDE', 1000),
+  (100013, 'RED OXIDE', 1000),
+  (100014, 'RT RUSSET', 1000),
+  (100015, 'RT DEEP BLUE', 1000),
+  (100016, 'ULTRA FINE WHITE', 1000),
+  (100025, 'TONE CONTROLER', 1000),
+  (100018, 'VOILET', 1000),
+  (100019, 'HS CLARET', 1000),
+  (100020, 'HS LAGOON BLUE', 1000),
+  (100021, 'HS BRIGHT MAROON', 1000),
+  (100022, 'SUPER RED', 1000),
+  (100023, 'HS SUN YELLOW', 1000),
+  (100024, 'HS PALE YELLOW', 1000),
+  (100026, 'TRANSOXIDE RED', 1000),
+  (100027, 'HS VERY COARSE ALUMINIUM', 1000),
+  (100028, 'HS BLACK', 1000),
+  (100029, 'HS JET BLACK', 1000),
+  (100030, 'HSW BLUE GREEN', 1000),
+  (100031, 'HS SUPER BLUE', 1000),
+  (100032, 'HS FAST BLUE', 1000),
+  (100033, 'RT BURGUNDY', 1000),
+  (100034, 'HS CLEAN MAGENTA', 1000),
+  (100035, 'HS BRILLIANT RED', 1000),
+  (100036, 'BRONZE GREEN', 1000),
+  (100037, 'HS RED VOILET', 1000),
+  (100038, 'BROWN', 1000),
+  (100039, 'TRANSOXIDE YELLOW', 1000),
+  (100040, 'STRONG YELLOW', 1000),
+  (100041, 'HS MEDIUM FINE ALUMINIUM', 1000),
+  (100042, 'HS FINE ALUMINIUM', 1000),
+  (100043, 'HS COARSE ALUMINIUM', 1000),
+  (100044, 'HS SHINNING COARSE ALUMINIUM', 1000),
+  (100045, 'HS COARSE SILVER DOLLAR ALUMINIUM', 1000),
+  (100046, 'WHITE PEARL', 1000),
+  (100047, 'FINE WHITE PEARL', 1000),
+  (100048, 'BLUE PEARL', 1000),
+  (100049, 'RED PEARL', 1000),
+  (100050, 'GOLD PEARL', 1000),
+  (100051, 'COPPER PEARL', 1000),
+  (100052, 'WHITE SATIN PEARL', 1000),
+  (100053, 'FINE RED PEARL', 1000),
+  (100054, 'FINE RUSSET PEARL', 1000),
+  (100055, 'FINE BLUE PEARL', 1000),
+  (100056, 'MEDIUM VOILET PEARL', 1000),
+  (100057, 'MEDIUM GREEN PEARL', 1000),
+  (100058, 'MATTING AGENT', 1000),
+  (100059, 'GRAPHITE FLAKE', 1000),
+  (100061, 'HS MEDIUM COARSE ALUMINIUM', 2500),
+  (100062, 'BLUE BLACK', 2500),
+  (100063, 'HS SUPER WHITE', 3500),
+  (100064, 'BLUE LAKE', 2500),
+  (100065, 'CRYSTAL SILVER', 330),
+  (100066, 'SUNBEAM GOLD', 330),
+  (100067, 'RADIANT RED', 330),
+  (100068, 'GALAXY BLUE', 330),
+  (100069, 'STELLAR GREEN', 330),
+  (100070, 'ADJUSTER', 2500),
+  (100078, 'PROMOTER FOR PLASTIC', 1000),
+  (100100, '2K CLEAR', 1000),
+  (100108, '1200 REGMAL', 1),
+  (100115, 'SOLARIS RED', 330),
+  (100118, 'GRAPHITE GREY ZDL', 1000),
+  (100352, 'HAND BLOCK BIG', 1),
+  (100353, 'HAND BLOCK SMALL', 1),
+  (100354, '1K ASTAR (R-M) (NAX LUMINA)', 1000),
+  (100200, 'FAST BLUE', 1000),
+  (100201, 'DEEP ANGLE BLACK', 1000),
+  (100202, 'SPEED RED', 1000),
+  (100203, 'GOLD FLASH', 1000),
+  (100204, 'FIRESIDE COPPER', 330),
+  (100205, 'COSMIC TORQUOISE', 1000),
+  (100124, 'HS MIXING BASIC STRONG', 1000),
+  (100210, 'MACHINE POLISH', 1000),
+  (100216, 'LEATHER  CARE', 355),
+  (100217, 'LEATHER CONDITIONER', 355),
+  (100219, 'CMX SURFACE PREP', 1000),
+  (100220, 'CERAMIC 3 IN 1 POLISH', 473),
+  (100221, 'BACK TO BLACK', 473),
+  (100222, 'MAG & ALUMINUM POLISH', 141),
+  (100223, 'PROFLINE NP 03-06', 5000),
+  (100226, 'DETAILING CLAY', 200),
+  (100306, 'ST APPLICATOR PAD YELLOW 30 PCS PACK', 12),
+  (100312, 'SIPRIT WIPE', 700),
+  (100233, 'RUST PREVENTIVE UNDERCOAT', 1000),
+  (100313, '100 REGMAL', 1),
+  (100390, 'SCRAPPER STEEL R-M', 1000),
+  (100317, 'DISS ENGINE D GREASER 5 LTR', 5000),
+  (100318, 'HARRIS DRESSING 5 LTR', 5000),
+  (100320, 'MAXIMA WOOLPAD LAMB SKIN 5"', 3),
+  (100373, 'SILICON RM', 900),
+  (100323, 'PD CUTTING PAD FLATE SURFACE RED 5"', 3),
+  (100324, 'PD POLISHING PAD YELLOW FLAT SURFFACE 5"', 3),
+  (100337, 'DECO WHITE (R-M)', 1000),
+  (100339, 'SILVER PASTE', 100),
+  (100376, 'WHITE KARVAAN', 4000),
+  (100188, 'ULTRAFINA SE POLISH', 1000),
+  (100189, '3M POLISH ROSA', 1000),
+  (100193, 'MICROFIBRE DETAILING CLOTH', 1),
+  (100346, 'NEWZ PAPER (R-M)', 1000),
+  (100351, 'STEANER SET', 1),
+  (100387, '2K HARDNER', 500),
+  (100391, 'SCRAPPER PLASTIC R-M', 1),
+  (100393, 'SPRAY AIR FRESHNER 250 ML', 250),
+  (100236, 'PETROL', 1000),
+  (100241, 'DECO BLACK PAINT', 1000),
+  (100327, 'THINER LOCAL (R-M)', 800),
+  (100329, '400 REGMAL (R-M)', 1),
+  (100378, 'KOCHCHEMILE HEAVY CUT H9 01 (1LTR)', 1000),
+  (100369, 'MEGUIARS ULTIMATE POLISH 473ML', 473),
+  (100147, 'THINNER SLOW', 5000),
+  (100150, 'BROWAN  PAINT', 1000);
 
-DECLARE @pieceUomId INT, @mlUomId INT;
+DECLARE @pieceUomId INT, @gramUomId INT;
 SELECT @pieceUomId = PaintUOMID FROM paint_UOM WHERE UOMName = 'Piece';
-SELECT @mlUomId    = PaintUOMID FROM paint_UOM WHERE UOMName = 'ML';
-IF @pieceUomId IS NULL RAISERROR('paint_UOM Piece not found.', 16, 1);
-IF @mlUomId    IS NULL RAISERROR('paint_UOM ML not found.',    16, 1);
+SELECT @gramUomId  = PaintUOMID FROM paint_UOM WHERE UOMName = 'Gram';
+IF @pieceUomId IS NULL RAISERROR('paint_UOM "Piece" not found.', 16, 1);
+IF @gramUomId  IS NULL RAISERROR('paint_UOM "Gram" not found - add it via the UI first.', 16, 1);
 
--- 1) Force PaintUOMID on the 16 unclassified new items to ML
-DECLARE @setML INT = 0;
+IF OBJECT_ID('tempdb..#matched') IS NOT NULL DROP TABLE #matched;
+SELECT
+    x.Code, x.Name, x.UnitSize,
+    COALESCE(pByCode.PaintItemID, pByName.PaintItemID) AS PaintItemID,
+    CASE WHEN x.UnitSize = 1 THEN @pieceUomId ELSE @gramUomId END AS TargetUomID
+INTO #matched
+FROM #xlsx x
+LEFT JOIN paint_Item pByCode ON pByCode.PaintCode = CAST(x.Code AS NVARCHAR(50))
+LEFT JOIN paint_Item pByName ON pByCode.PaintItemID IS NULL
+                             AND UPPER(LTRIM(RTRIM(pByName.PaintName))) = UPPER(LTRIM(RTRIM(x.Name)));
+
+DECLARE @uomChanged INT = 0;
 UPDATE pi
-   SET pi.PaintUOMID = @mlUomId,
+   SET pi.PaintUOMID = m.TargetUomID,
        pi.UpdatedAt  = GETDATE()
   FROM paint_Item pi
-  INNER JOIN #new n ON n.Code = TRY_CAST(pi.PaintCode AS INT)
- WHERE pi.PaintUOMID IS NULL AND n.UnitSize > 1;
-SET @setML = @@ROWCOUNT;
+  INNER JOIN #matched m ON m.PaintItemID = pi.PaintItemID
+ WHERE m.PaintItemID IS NOT NULL
+   AND (pi.PaintUOMID IS NULL OR pi.PaintUOMID <> m.TargetUomID);
+SET @uomChanged = @@ROWCOUNT;
 
--- 2) MERGE paint_ItemUOM for all 21 new items using their now-set PaintUOMID
 DECLARE @uomWritten INT = 0;
 MERGE paint_ItemUOM AS tgt
 USING (
-    SELECT pi.PaintItemID, pi.PaintUOMID,
-           CAST(n.UnitSize AS DECIMAL(18,6)) AS Factor
-      FROM paint_Item pi
-      INNER JOIN #new n ON n.Code = TRY_CAST(pi.PaintCode AS INT)
-     WHERE pi.PaintUOMID IS NOT NULL
+    SELECT m.PaintItemID, m.TargetUomID AS PaintUOMID, CAST(m.UnitSize AS DECIMAL(18,6)) AS Factor
+      FROM #matched m
+     WHERE m.PaintItemID IS NOT NULL
 ) AS src
    ON tgt.PaintItemID = src.PaintItemID AND tgt.PaintUOMID = src.PaintUOMID
  WHEN MATCHED AND ABS(tgt.FactorToBase - src.Factor) > 0.000001 THEN
@@ -74,15 +216,26 @@ USING (
 SET @uomWritten = @@ROWCOUNT;
 
 PRINT '--- SUMMARY ---';
-SELECT @setML AS ItemsSetToML, @uomWritten AS UomRowsWritten;
+SELECT
+    (SELECT COUNT(*) FROM #matched WHERE PaintItemID IS NOT NULL) AS XlsxRowsResolved,
+    (SELECT COUNT(*) FROM #matched WHERE PaintItemID IS NULL)     AS XlsxRowsUnmatched,
+    @uomChanged   AS PaintItemsRepointedUoM,
+    @uomWritten   AS ItemUomRowsWritten;
 
-PRINT '--- Final state of the 21 new items ---';
-SELECT pi.PaintCode, pi.PaintName, u.UOMName AS UoM, iu.FactorToBase, pi.StockQty, pi.AvgCost
+PRINT '--- Any unmatched xlsx rows (should be 0) ---';
+SELECT Code, Name, UnitSize FROM #matched WHERE PaintItemID IS NULL;
+
+PRINT '--- Sample after: 30 items with their new UoM + FactorToBase ---';
+SELECT TOP 30
+       pi.PaintCode, pi.PaintName,
+       u.UOMName AS UoM,
+       iu.FactorToBase,
+       pi.StockQty, pi.AvgCost
   FROM paint_Item pi
-  INNER JOIN #new n ON n.Code = TRY_CAST(pi.PaintCode AS INT)
+  INNER JOIN #matched m ON m.PaintItemID = pi.PaintItemID
   LEFT  JOIN paint_UOM u ON u.PaintUOMID = pi.PaintUOMID
   LEFT  JOIN paint_ItemUOM iu ON iu.PaintItemID = pi.PaintItemID AND iu.PaintUOMID = pi.PaintUOMID
- ORDER BY pi.PaintName;
+ ORDER BY pi.PaintItemID DESC;
 
 ROLLBACK TRANSACTION;
 -- COMMIT TRANSACTION;
