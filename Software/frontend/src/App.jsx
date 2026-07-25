@@ -849,6 +849,10 @@ function AppShell() {
                         <Route path="/grtn/:id/print"          element={<GRTNPrint />} />
                         <Route path="/ssr/:id/print"           element={<SSRPrint />} />
                         <Route path="/vouchers/:id/print"      element={<VoucherPrint />} />
+                        {/* Paint Lab print routes — same chromeless shell. */}
+                        <Route path="/paint/grn/:id/print"     element={<PaintGRNPrint />} />
+                        <Route path="/paint/grtn/:id/print"    element={<PaintGRTNPrint />} />
+                        <Route path="/paint/issue/:id/print"   element={<PaintIssuePrint />} />
                     </Routes>
                 </main>
             </FeedbackProvider>
