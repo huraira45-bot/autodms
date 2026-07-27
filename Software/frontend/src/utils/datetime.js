@@ -31,3 +31,21 @@ export const fmtDate = (v) =>
 /** Time only — "12:59 PM" */
 export const fmtTime = (v) =>
     v ? new Date(v).toLocaleTimeString(LOCALE, { ...TZ_OPT, timeStyle: 'short' }) : '';
+
+/** "2026-07-27T11:17" for a <input type="datetime-local"> from a DB value.
+ *  Same "read as UTC" trick used by fmtDT — the DB stored server-local
+ *  time but the driver tags it with a Z, so we read the UTC clock faces
+ *  to get the wall-clock time the operator originally saw.               */
+export const toDTLocalInput = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+};
+
+/** Now, in the local wall clock ("YYYY-MM-DDTHH:MM") — for new-form defaults. */
+export const nowDTLocalInput = () => {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};

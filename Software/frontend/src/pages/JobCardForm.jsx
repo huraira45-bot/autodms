@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import KYCBanner from '../components/KYCBanner';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
-import { fmtDate } from '../utils/datetime';
+import { fmtDate, toDTLocalInput, nowDTLocalInput } from '../utils/datetime';
 import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api/workshop';
@@ -131,7 +131,7 @@ export default function JobCardForm() {
     JobCardNo: '', jobCode: '', DMSJobCardNo: '', JobTypeId: '', OrderTypeId: '', PMType: 'None',
     EndUserID: '', VehicleRegNo: '', ChasisNo: '', EngineNo: '', VersionCode: '',
     VehicleCode: '', BatteryNo: '', VehicleColor: '', KiloMeter: '', Millage: '',
-    ReceiptDate: new Date().toISOString().slice(0, 16),
+    ReceiptDate: nowDTLocalInput(),
     PromisedDate: '', RevisedDelivery: '',
     Remarks: '', PaymentType: 'Cash', PaymentCO: '', PaymentBankID: '', PartyID: '',
     FuelLevel: '1/2', VOCRemarks: '', CustomerType: 'Walk-in',
@@ -229,9 +229,9 @@ export default function JobCardForm() {
             VehicleColor: jc.VehicleColor || '',
             KiloMeter: jc.Odometer || '',
             Millage: jc.Millage || '',
-            ReceiptDate: jc.ReceiptDate ? new Date(jc.ReceiptDate).toISOString().slice(0, 16) : '',
-            PromisedDate: jc.PromisedDate ? new Date(jc.PromisedDate).toISOString().slice(0, 16) : '',
-            RevisedDelivery: jc.RevisedDelivery ? new Date(jc.RevisedDelivery).toISOString().slice(0, 16) : '',
+            ReceiptDate: toDTLocalInput(jc.ReceiptDate),
+            PromisedDate: toDTLocalInput(jc.PromisedDate),
+            RevisedDelivery: toDTLocalInput(jc.RevisedDelivery),
             Remarks: jc.Remarks || '',
             PaymentType: jc.PaymentType || 'Cash',
             PaymentCO: jc.PaymentCO || '',
@@ -253,7 +253,7 @@ export default function JobCardForm() {
             BringByMobile: jc.BringByMobile || '',
             DeliveredTo: jc.DeliveredTo || '',
             DeliveryMobile: jc.DeliveryMobile || '',
-            DeliveredAt: jc.DeliveredAt ? new Date(jc.DeliveredAt).toISOString().slice(0, 16) : '',
+            DeliveredAt: toDTLocalInput(jc.DeliveredAt),
             DQIRNo: jc.DQIRNo || '',
             CheckedByID: jc.CheckedByID || '',
             CheckedByName: jc.CheckedByName || '',
