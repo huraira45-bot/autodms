@@ -13,6 +13,20 @@ const snapshotTax = (gross, discAmt, rate) => {
     return { taxRate: rate, taxAmount };
 };
 
+// Frontend datetime-local inputs send "YYYY-MM-DDTHH:MM" with no timezone.
+// If we hand that raw string to mssql it gets re-interpreted as server-local
+// (Asia/Karachi) and shifts -5h before storage — combined with the frontend's
+// old toISOString() shift that gave rows a 10-hour drift (owner report
+// 2026-07-27). Wrap the string in a Date whose UTC face matches the intended
+// wall clock, so mssql writes the literal HH:MM the operator picked.
+const parseWallDateTime = (v) => {
+    if (v == null || v === '') return null;
+    if (v instanceof Date) return v;
+    const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(v));
+    if (!m) return new Date(v);
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
+};
+
 // ============== CUSTOMERS ==============
 exports.getCustomers = async (req, res) => {
     try {
@@ -939,7 +953,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('engine', sql.NVarChar(150), EngineNo)
                     .input('km', sql.Decimal(18,2), KiloMeter || 0)
                     .input('millage', sql.Decimal(18,2), Millage || 0)
-                    .input('promised', sql.DateTime, PromisedDate || null)
+                    .input('promised', sql.DateTime, parseWallDateTime(PromisedDate))
                     .input('remarks', sql.NVarChar(sql.MAX), Remarks)
                     .input('payType', sql.NVarChar(50), PaymentType)
                     .input('payCO', sql.NVarChar(100), PaymentCO || null)
@@ -957,7 +971,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('isEst', sql.Bit, IsEstimatedRO ? 1 : 0)
                     .input('estRONo', sql.NVarChar(50), EstimatedRONo || null)
                     .input('approvedBy', sql.NVarChar(100), ApprovedBy || null)
-                    .input('revisedDel', sql.DateTime, RevisedDelivery || null)
+                    .input('revisedDel', sql.DateTime, parseWallDateTime(RevisedDelivery))
                     .input('jobResult', sql.NVarChar(20), JobResult || null)
                     .input('isFIR', sql.Bit, IsFIR ? 1 : 0)
                     .input('bringByType', sql.NVarChar(50), BringByType || 'Self')
@@ -965,7 +979,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('bringByMobile', sql.NVarChar(20), BringByMobile || null)
                     .input('deliveredTo', sql.NVarChar(100), DeliveredTo || null)
                     .input('delivMobile', sql.NVarChar(20), DeliveryMobile || null)
-                    .input('deliveredAt', sql.DateTime, DeliveredAt || null)
+                    .input('deliveredAt', sql.DateTime, parseWallDateTime(DeliveredAt))
                     .input('careOffId', sql.Int, CareOffID || null)
                     .input('careOffName', sql.NVarChar(100), CareOffName || null)
                     .input('dqirNo', sql.NVarChar(50), DQIRNo || null)
@@ -1073,7 +1087,7 @@ exports.saveJobCard = async (req, res) => {
                 const counter = counterRes.recordset[0].CurrentCounter;
                 const generatedRoNumber = `${cardCode}-${String(counter).padStart(4, '0')}`;
 
-                const receiptDt = ReceiptDate || new Date();
+                const receiptDt = parseWallDateTime(ReceiptDate) || new Date();
 
                 const insertRes = await transaction.request()
                     .input('no', sql.NVarChar(100), generatedRoNumber)
@@ -1094,7 +1108,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('km', sql.Decimal(18,2), KiloMeter || 0)
                     .input('millage', sql.Decimal(18,2), Millage || 0)
                     .input('receipt', sql.DateTime, receiptDt)
-                    .input('promised', sql.DateTime, PromisedDate || null)
+                    .input('promised', sql.DateTime, parseWallDateTime(PromisedDate))
                     .input('remarks', sql.NVarChar(sql.MAX), Remarks)
                     .input('payType', sql.NVarChar(50), PaymentType || 'Cash')
                     .input('payCO', sql.NVarChar(100), PaymentCO || null)
@@ -1113,7 +1127,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('isEst', sql.Bit, IsEstimatedRO ? 1 : 0)
                     .input('estRONo', sql.NVarChar(50), EstimatedRONo || null)
                     .input('approvedBy', sql.NVarChar(100), ApprovedBy || null)
-                    .input('revisedDel', sql.DateTime, RevisedDelivery || null)
+                    .input('revisedDel', sql.DateTime, parseWallDateTime(RevisedDelivery))
                     .input('jobResult', sql.NVarChar(20), JobResult || 'No Fixed')
                     .input('isFIR', sql.Bit, IsFIR ? 1 : 0)
                     .input('bringByType', sql.NVarChar(50), BringByType || 'Self')
@@ -1121,7 +1135,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('bringByMobile', sql.NVarChar(20), BringByMobile || null)
                     .input('deliveredTo', sql.NVarChar(100), DeliveredTo || null)
                     .input('delivMobile', sql.NVarChar(20), DeliveryMobile || null)
-                    .input('deliveredAt', sql.DateTime, DeliveredAt || null)
+                    .input('deliveredAt', sql.DateTime, parseWallDateTime(DeliveredAt))
                     .input('careOffId', sql.Int, CareOffID || null)
                     .input('careOffName', sql.NVarChar(100), CareOffName || null)
                     .input('dqirNo', sql.NVarChar(50), DQIRNo || null)
@@ -1294,7 +1308,7 @@ exports.saveSublet = async (req, res) => {
                 .input('remarks', sql.NVarChar(sql.MAX), Remarks)
                 .input('invoice', sql.Decimal(18,2), InvoiceAmount || 0)
                 .input('payable', sql.Decimal(18,2), PayableAmount || 0)
-                .input('date', sql.DateTime, SubletJobDate || new Date())
+                .input('date', sql.DateTime, parseWallDateTime(SubletJobDate) || new Date())
                 .input('taxRate', sql.Decimal(8,4), tax.taxRate)
                 .input('taxAmount', sql.Decimal(18,2), tax.taxAmount)
                 .input('payType', sql.NVarChar(20), payType)
@@ -1310,7 +1324,7 @@ exports.saveSublet = async (req, res) => {
                 .input('remarks', sql.NVarChar(sql.MAX), Remarks)
                 .input('invoice', sql.Decimal(18,2), InvoiceAmount || 0)
                 .input('payable', sql.Decimal(18,2), PayableAmount || 0)
-                .input('date', sql.DateTime, SubletJobDate || new Date())
+                .input('date', sql.DateTime, parseWallDateTime(SubletJobDate) || new Date())
                 .input('taxRate', sql.Decimal(8,4), tax.taxRate)
                 .input('taxAmount', sql.Decimal(18,2), tax.taxAmount)
                 .input('payType', sql.NVarChar(20), payType)
@@ -1754,8 +1768,8 @@ exports.updateLabourAssignment = async (req, res) => {
             .input('bay', sql.NVarChar(20), BayNo || null)
             .input('perfById', sql.Int, PerformedByID || null)
             .input('perfByName', sql.NVarChar(100), PerformedByName || null)
-            .input('startTime', sql.DateTime, JobStartTime ? new Date(JobStartTime) : null)
-            .input('endTime', sql.DateTime, JobEndTime ? new Date(JobEndTime) : null)
+            .input('startTime', sql.DateTime, parseWallDateTime(JobStartTime))
+            .input('endTime', sql.DateTime, parseWallDateTime(JobEndTime))
             .query(`UPDATE Addata_JobCardInfoDetail SET
                 BayNo=@bay, TechnicianId=@perfById, PerformedByName=@perfByName,
                 JobStartTime=@startTime, JobEndTime=@endTime
