@@ -6,21 +6,16 @@
 --   paint_GRN.Status = Posted
 --   paint_GRN.VoucherID = 2616 (PV-0193, already Reversed via
 --                               postReversalVoucher)
---   paint_Item.StockQty and paint_Item.AvgCost STILL inflated with
---                               each line's original LineTotal
---                               (gross − disc + gst + ait)
+--   paint_Item still carries the qty/value the finalize added
 --   paint_StockLedger has 7 positive GRN rows, no reversal rows
 --
--- What this does:
---   1. Reverses paint_Item.StockQty and paint_Item.AvgCost using the
---      original LineTotal on each paint_GRNDetail row (this is what
---      the OLD finalize added, so we must remove exactly that).
---   2. Inserts negative paint_StockLedger rows for the audit trail.
---   3. Flips paint_GRN.Status → Draft and clears VoucherID.
---
--- After this runs, owner clicks Finalize in the UI → new voucher
--- posts with the correct 5-leg journal AND the new stock ledger
--- with paint cost only (gross − disc, no GST/AIT in AvgCost).
+-- Approach: reverse using the LEDGER row's actual QuantityDelta /
+-- ValueDelta, not paint_GRNDetail × paint_ItemUOM.FactorToBase.
+-- The paint reconcile earlier today changed several items' base
+-- UoM and factor, so re-computing baseQty from current FactorToBase
+-- gives wildly wrong numbers (see previous dry-run: GALAXY BLUE
+-- went to -606). The ledger has the qty and value that were
+-- ACTUALLY added at finalize time — safe ground truth.
 --
 -- Dry-run by default. Flip ROLLBACK → COMMIT after review.
 -- ================================================================
@@ -34,26 +29,30 @@ DECLARE @whId  INT = (SELECT PaintWHID FROM paint_GRN WHERE PaintGRNID = @grnId)
 
 PRINT '--- BEFORE ---';
 SELECT g.PaintGRNID, g.GRNNo, g.Status, g.VoucherID FROM paint_GRN g WHERE g.PaintGRNID = @grnId;
-SELECT d.PaintGRNDetailID, pi.PaintName, pi.StockQty AS BeforeQty, pi.AvgCost AS BeforeAvg, d.LineTotal
-  FROM paint_GRNDetail d INNER JOIN paint_Item pi ON pi.PaintItemID = d.PaintItemID
- WHERE d.PaintGRNID = @grnId ORDER BY d.PaintGRNDetailID;
+SELECT sl.LedgerID, pi.PaintName,
+       sl.QuantityDelta AS AddedQty, sl.ValueDelta AS AddedValue,
+       pi.StockQty AS BeforeStockQty, pi.AvgCost AS BeforeAvgCost
+  FROM paint_StockLedger sl
+  INNER JOIN paint_Item pi ON pi.PaintItemID = sl.PaintItemID
+ WHERE sl.SourceType = 'GRN' AND sl.SourceDocID = @grnId
+ ORDER BY sl.LedgerID;
 
--- Reverse paint_Item stock + avg for each line
+-- Reverse paint_Item stock + avg using the ORIGINAL ledger values.
 ;WITH ln AS (
-    SELECT d.PaintGRNDetailID, d.PaintItemID, d.PaintUOMID, d.Quantity, d.LineTotal,
-           ISNULL(iu.FactorToBase, 1.0) AS Factor,
-           d.Quantity * ISNULL(iu.FactorToBase, 1.0) AS BaseQty
-      FROM paint_GRNDetail d
-      LEFT JOIN paint_ItemUOM iu ON iu.PaintItemID = d.PaintItemID AND iu.PaintUOMID = d.PaintUOMID
-     WHERE d.PaintGRNID = @grnId
+    SELECT sl.PaintItemID,
+           sl.QuantityDelta AS QAdd,
+           sl.ValueDelta    AS VAdd,
+           sl.SourceDetailID
+      FROM paint_StockLedger sl
+     WHERE sl.SourceType = 'GRN' AND sl.SourceDocID = @grnId
 )
 UPDATE pi
    SET pi.AvgCost = CASE
-                       WHEN pi.StockQty - ln.BaseQty > 0.0001 THEN
-                         ROUND((pi.StockQty * pi.AvgCost - ln.LineTotal) / (pi.StockQty - ln.BaseQty), 4)
+                       WHEN pi.StockQty - ln.QAdd > 0.0001 THEN
+                         ROUND((pi.StockQty * pi.AvgCost - ln.VAdd) / (pi.StockQty - ln.QAdd), 4)
                        ELSE 0
                     END,
-       pi.StockQty  = ROUND(pi.StockQty - ln.BaseQty, 4),
+       pi.StockQty  = ROUND(pi.StockQty - ln.QAdd, 4),
        pi.UpdatedAt = GETDATE()
   FROM paint_Item pi
   INNER JOIN ln ON ln.PaintItemID = pi.PaintItemID;
@@ -63,29 +62,29 @@ INSERT INTO paint_StockLedger
         (PaintItemID, PaintWHID, SourceType, SourceDocID, SourceDetailID,
          QuantityDelta, UnitCost, ValueDelta,
          RunningQty, RunningAvgCost, Note, CreatedByName)
-SELECT d.PaintItemID, @whId, 'GRN', @grnId, d.PaintGRNDetailID,
-       -d.Quantity * ISNULL(iu.FactorToBase, 1.0)                                                AS QDelta,
-       CASE WHEN d.Quantity * ISNULL(iu.FactorToBase, 1.0) > 0
-            THEN ROUND(d.LineTotal / (d.Quantity * ISNULL(iu.FactorToBase, 1.0)), 4)
-            ELSE 0 END                                                                            AS UC,
-       -d.LineTotal                                                                               AS VDelta,
-       pi.StockQty                                                                                AS RunQ,
-       pi.AvgCost                                                                                 AS RunAvg,
+SELECT sl.PaintItemID, @whId, 'GRN', @grnId, sl.SourceDetailID,
+       -sl.QuantityDelta,
+       sl.UnitCost,
+       -sl.ValueDelta,
+       pi.StockQty,                    -- freshly updated by UPDATE above
+       pi.AvgCost,
        'GRN PGRN-0057 stock rolled back — manual (unfinalize half-completed 2026-07-28)',
        'system'
-  FROM paint_GRNDetail d
-  INNER JOIN paint_Item pi ON pi.PaintItemID = d.PaintItemID
-  LEFT JOIN paint_ItemUOM iu ON iu.PaintItemID = d.PaintItemID AND iu.PaintUOMID = d.PaintUOMID
- WHERE d.PaintGRNID = @grnId;
+  FROM paint_StockLedger sl
+  INNER JOIN paint_Item pi ON pi.PaintItemID = sl.PaintItemID
+ WHERE sl.SourceType = 'GRN' AND sl.SourceDocID = @grnId;
 
 -- Flip GRN back to Draft so owner can re-Finalize normally
 UPDATE paint_GRN SET Status = 'Draft', VoucherID = NULL WHERE PaintGRNID = @grnId;
 
 PRINT '--- AFTER ---';
 SELECT g.PaintGRNID, g.GRNNo, g.Status, g.VoucherID FROM paint_GRN g WHERE g.PaintGRNID = @grnId;
-SELECT d.PaintGRNDetailID, pi.PaintName, pi.StockQty AS AfterQty, pi.AvgCost AS AfterAvg
-  FROM paint_GRNDetail d INNER JOIN paint_Item pi ON pi.PaintItemID = d.PaintItemID
- WHERE d.PaintGRNID = @grnId ORDER BY d.PaintGRNDetailID;
+SELECT pi.PaintItemID, pi.PaintName, pi.StockQty AS AfterQty, pi.AvgCost AS AfterAvg
+  FROM paint_Item pi
+ WHERE pi.PaintItemID IN (
+     SELECT DISTINCT PaintItemID FROM paint_StockLedger WHERE SourceType='GRN' AND SourceDocID=@grnId
+ )
+ ORDER BY pi.PaintItemID;
 
 ROLLBACK TRANSACTION;
 -- COMMIT TRANSACTION;
