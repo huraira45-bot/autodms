@@ -17,18 +17,21 @@
 const { sql, getPool } = require('../config/db');
 const { postPaintGRNVoucher } = require('../services/paintGRNPostingService');
 const { postReversalVoucher } = require('../services/voucherReversalService');
+const { _resolveBaseQty: resolveBaseQty } = require('./paintLabController');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
 
 // Compute one line's derived amounts. Kept server-side so a mischievous
 // client can't post a mismatched LineTotal.
+// Owner ask 2026-07-27: GST is charged on GROSS (pre-discount), same as
+// the regular GRN (see utils/grnJournalBuilder.js). AIT is a per-line
+// user input added on top; it Debits ADVANCE_TAX_236G_PARTS on posting.
 function computeLineAmounts(line) {
     const qty      = round4(line.Quantity);
     const rate     = round4(line.UnitRate);
     const gross    = round2(qty * rate);
     const discPct  = round4(line.DiscountPct);
-    // Prefer explicit DiscountAmt if the client sent one; else derive from %.
     const discAmt  = round2(
         line.DiscountAmt != null && line.DiscountAmt !== ''
             ? line.DiscountAmt
@@ -36,11 +39,11 @@ function computeLineAmounts(line) {
     );
     const gstOn    = !!line.GSTOn;
     const gstRate  = gstOn ? round4(line.GSTRate) : 0;
-    const gstBase  = Math.max(0, gross - discAmt);
-    const gstAmt   = gstOn ? round2(gstBase * (gstRate / 100)) : 0;
-    const total    = round2(gstBase + gstAmt);
+    const gstAmt   = gstOn ? round2(gross * (gstRate / 100)) : 0;
+    const aitAmt   = round2(line.AITAmount || 0);
+    const total    = round2(Math.max(0, gross - discAmt) + gstAmt + aitAmt);
     const landed   = qty > 0 ? round4(total / qty) : 0;
-    return { qty, rate, gross, discPct, discAmt, gstOn, gstRate, gstAmt, total, landed };
+    return { qty, rate, gross, discPct, discAmt, gstOn, gstRate, gstAmt, aitAmt, total, landed };
 }
 
 // ─── List (search + status + date range) ─────────────────────────
@@ -124,6 +127,7 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
     const subTotal      = round2(computed.reduce((a, x) => a + x.calc.gross, 0));
     const discountTotal = round2(computed.reduce((a, x) => a + x.calc.discAmt, 0));
     const gstTotal      = round2(computed.reduce((a, x) => a + x.calc.gstAmt, 0));
+    const aitTotal      = round2(computed.reduce((a, x) => a + x.calc.aitAmt, 0));
     const grandTotal    = round2(computed.reduce((a, x) => a + x.calc.total, 0));
 
     const tx = new sql.Transaction(pool);
@@ -146,10 +150,12 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('st',  sql.Decimal(18,2), subTotal)
                 .input('dc',  sql.Decimal(18,2), discountTotal)
                 .input('gt',  sql.Decimal(18,2), gstTotal)
+                .input('at',  sql.Decimal(18,2), aitTotal)
                 .input('gr',  sql.Decimal(18,2), grandTotal)
                 .query(`UPDATE paint_GRN SET
                             GRNDate=@dt, PartyID=@pid, SupplierBillNo=@bn, PaintWHID=@wh,
-                            Remarks=@rm, SubTotal=@st, DiscountTotal=@dc, GSTTotal=@gt, GrandTotal=@gr
+                            Remarks=@rm, SubTotal=@st, DiscountTotal=@dc, GSTTotal=@gt,
+                            AITTotal=@at, GrandTotal=@gr
                         WHERE PaintGRNID=@id`);
             await new sql.Request(tx).input('id', sql.Int, id)
                 .query('DELETE FROM paint_GRNDetail WHERE PaintGRNID=@id');
@@ -167,16 +173,17 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('st',  sql.Decimal(18,2), subTotal)
                 .input('dc',  sql.Decimal(18,2), discountTotal)
                 .input('gt',  sql.Decimal(18,2), gstTotal)
+                .input('at',  sql.Decimal(18,2), aitTotal)
                 .input('gr',  sql.Decimal(18,2), grandTotal)
                 .input('cby', sql.Int,           user?.userId || null)
                 .input('cbn', sql.NVarChar(100), user?.userName || null)
                 .query(`INSERT INTO paint_GRN
                             (GRNNo, GRNDate, PartyID, SupplierBillNo, PaintWHID, Remarks,
-                             Status, SubTotal, DiscountTotal, GSTTotal, GrandTotal,
+                             Status, SubTotal, DiscountTotal, GSTTotal, AITTotal, GrandTotal,
                              CreatedBy, CreatedByName)
                         OUTPUT INSERTED.PaintGRNID
                         VALUES (@no, @dt, @pid, @bn, @wh, @rm,
-                                'Draft', @st, @dc, @gt, @gr, @cby, @cbn)`);
+                                'Draft', @st, @dc, @gt, @at, @gr, @cby, @cbn)`);
             id = ins.recordset[0].PaintGRNID;
         }
 
@@ -195,13 +202,14 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('go',  sql.Bit,           calc.gstOn ? 1 : 0)
                 .input('gr',  sql.Decimal(9,4),  calc.gstRate)
                 .input('ga',  sql.Decimal(18,2), calc.gstAmt)
+                .input('at',  sql.Decimal(18,2), calc.aitAmt)
                 .input('lt',  sql.Decimal(18,2), calc.total)
                 .input('lu',  sql.Decimal(18,4), calc.landed)
                 .query(`INSERT INTO paint_GRNDetail
                             (PaintGRNID, PaintItemID, PaintUOMID, Quantity, UnitRate,
                              DiscountPct, DiscountAmt, GSTOn, GSTRate, GSTAmount,
-                             LineTotal, LandedUnitCost)
-                        VALUES (@h, @it, @u, @q, @r, @dp, @da, @go, @gr, @ga, @lt, @lu)`);
+                             AITAmount, LineTotal, LandedUnitCost)
+                        VALUES (@h, @it, @u, @q, @r, @dp, @da, @go, @gr, @ga, @at, @lt, @lu)`);
         }
 
         await tx.commit();
@@ -259,16 +267,19 @@ exports.finalize = async (req, res) => {
         if (!linesRes.recordset.length) throw new Error('Paint GRN has no lines.');
 
         // Stock + moving-avg update per line (rows locked for update).
+        // StockQty and AvgCost are in the item's BASE UoM. Each line's
+        // Quantity is in the line's chosen UoM (paint_GRNDetail.PaintUOMID),
+        // so we convert to base via paint_ItemUOM.FactorToBase before adding.
         for (const l of linesRes.recordset) {
             const itemRes = await new sql.Request(tx).input('i', sql.Int, l.PaintItemID)
                 .query('SELECT StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
             if (!itemRes.recordset.length) throw new Error(`Paint item ${l.PaintItemID} not found.`);
+            const { baseQty: inBaseQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, l.Quantity);
             const oldQty   = Number(itemRes.recordset[0].StockQty) || 0;
             const oldAvg   = Number(itemRes.recordset[0].AvgCost) || 0;
             const oldVal   = oldQty * oldAvg;
-            const inQty    = Number(l.Quantity);
-            const inValue  = Number(l.LineTotal);   // includes GST + net of discount
-            const newQty   = round4(oldQty + inQty);
+            const inValue  = Number(l.LineTotal);   // money — no UoM conversion
+            const newQty   = round4(oldQty + inBaseQty);
             const newVal   = round2(oldVal + inValue);
             const newAvg   = newQty > 0 ? round4(newVal / newQty) : 0;
 
@@ -280,14 +291,17 @@ exports.finalize = async (req, res) => {
                         SET StockQty=@q, AvgCost=@a, UpdatedAt=GETDATE()
                         WHERE PaintItemID=@i`);
 
+            // Ledger is in base units (must be, so running totals match StockQty).
+            // UnitCost stored is per-base-unit so ValueDelta = QuantityDelta * UnitCost.
+            const baseUnitCost = inBaseQty > 0 ? round4(inValue / inBaseQty) : 0;
             await new sql.Request(tx)
                 .input('it',  sql.Int,           l.PaintItemID)
                 .input('wh',  sql.Int,           g.PaintWHID)
                 .input('src', sql.NVarChar(20),  'GRN')
                 .input('sid', sql.Int,           id)
                 .input('did', sql.Int,           l.PaintGRNDetailID)
-                .input('dq',  sql.Decimal(18,4), inQty)
-                .input('uc',  sql.Decimal(18,4), l.LandedUnitCost)
+                .input('dq',  sql.Decimal(18,4), inBaseQty)
+                .input('uc',  sql.Decimal(18,4), baseUnitCost)
                 .input('dv',  sql.Decimal(18,2), inValue)
                 .input('rq',  sql.Decimal(18,4), newQty)
                 .input('ra',  sql.Decimal(18,4), newAvg)
@@ -352,13 +366,13 @@ exports.unfinalize = async (req, res) => {
             const oldQty = Number(itemRes.recordset[0].StockQty) || 0;
             const oldAvg = Number(itemRes.recordset[0].AvgCost) || 0;
             const oldVal = oldQty * oldAvg;
-            const outQty = Number(l.Quantity);
-            // Value removed uses the ORIGINAL landed cost from this GRN line
+            // Base-unit conversion — matches finalize() so unwind is exact.
+            const { baseQty: outBaseQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, l.Quantity);
+            // Value removed uses the ORIGINAL LineTotal from this GRN line
             // so the moving-avg cleanly rolls back regardless of what has
-            // happened at the item level since (subsequent GRNs still shift
-            // the avg — that's fine, we're just removing our contribution).
-            const outValue = round2(outQty * Number(l.LandedUnitCost));
-            const newQty   = round4(oldQty - outQty);
+            // happened at the item level since.
+            const outValue = round2(Number(l.LineTotal));
+            const newQty   = round4(oldQty - outBaseQty);
             if (newQty < 0) throw new Error(`Cannot unfinalize — item stock would go negative on paint item ${l.PaintItemID}.`);
             const newVal = round2(oldVal - outValue);
             const newAvg = newQty > 0 ? round4(Math.max(0, newVal) / newQty) : 0;
@@ -371,14 +385,15 @@ exports.unfinalize = async (req, res) => {
                         SET StockQty=@q, AvgCost=@a, UpdatedAt=GETDATE()
                         WHERE PaintItemID=@i`);
 
+            const baseUnitCost = outBaseQty > 0 ? round4(outValue / outBaseQty) : 0;
             await new sql.Request(tx)
                 .input('it',  sql.Int,           l.PaintItemID)
                 .input('wh',  sql.Int,           g.PaintWHID)
                 .input('src', sql.NVarChar(20),  'GRN')
                 .input('sid', sql.Int,           id)
                 .input('did', sql.Int,           l.PaintGRNDetailID)
-                .input('dq',  sql.Decimal(18,4), -outQty)
-                .input('uc',  sql.Decimal(18,4), l.LandedUnitCost)
+                .input('dq',  sql.Decimal(18,4), -outBaseQty)
+                .input('uc',  sql.Decimal(18,4), baseUnitCost)
                 .input('dv',  sql.Decimal(18,2), -outValue)
                 .input('rq',  sql.Decimal(18,4), newQty)
                 .input('ra',  sql.Decimal(18,4), newAvg)

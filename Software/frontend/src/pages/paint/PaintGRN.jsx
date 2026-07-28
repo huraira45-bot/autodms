@@ -28,7 +28,7 @@ const blankLine = (defaultUomId, defaultGstRate) => ({
     PaintItemID: '', PaintUOMID: defaultUomId || '',
     Quantity: 1, UnitRate: 0,
     DiscountPct: 0, DiscountAmt: 0,
-    GSTOn: true, GSTRate: defaultGstRate || 0,
+    GSTOn: true, GSTRate: defaultGstRate || 0, AITAmount: 0,
 });
 
 export default function PaintGRN() {
@@ -121,6 +121,7 @@ export default function PaintGRN() {
                     DiscountAmt: Number(l.DiscountAmt),
                     GSTOn:       !!l.GSTOn,
                     GSTRate:     Number(l.GSTRate),
+                    AITAmount:   Number(l.AITAmount) || 0,
                 })),
             });
             setDirty(false);
@@ -142,6 +143,9 @@ export default function PaintGRN() {
     const addLine    = () => { setForm(f => ({ ...f, Lines: [...f.Lines, blankLine(null, gstRate)] })); setDirty(true); };
     const removeLine = (idx) => { setForm(f => ({ ...f, Lines: f.Lines.filter((_, i) => i !== idx) })); setDirty(true); };
 
+    // Owner ask 2026-07-27: GST charged on GROSS (pre-discount), matching
+    // regular GRN. AIT is a per-line user entry added on top; on finalize
+    // it Debits ADVANCE_TAX_236G_PARTS (does NOT roll into paint cost).
     const linesWithCalc = useMemo(() => (form?.Lines || []).map((l) => {
         const qty = Number(l.Quantity) || 0;
         const rate = Number(l.UnitRate) || 0;
@@ -150,18 +154,19 @@ export default function PaintGRN() {
             ? round2(Number(l.DiscountAmt))
             : round2(gross * (Number(l.DiscountPct) || 0) / 100);
         const gstOn = !!l.GSTOn;
-        const gstBase = Math.max(0, gross - discAmt);
-        const gstAmt = gstOn ? round2(gstBase * (Number(l.GSTRate) || 0) / 100) : 0;
-        const total = round2(gstBase + gstAmt);
-        return { ...l, _gross: gross, _discAmt: discAmt, _gstAmt: gstAmt, _total: total };
+        const gstAmt = gstOn ? round2(gross * (Number(l.GSTRate) || 0) / 100) : 0;
+        const aitAmt = round2(Number(l.AITAmount) || 0);
+        const total = round2(Math.max(0, gross - discAmt) + gstAmt + aitAmt);
+        return { ...l, _gross: gross, _discAmt: discAmt, _gstAmt: gstAmt, _aitAmt: aitAmt, _total: total };
     }), [form]);
 
     const totals = useMemo(() => linesWithCalc.reduce((a, x) => ({
         SubTotal: a.SubTotal + x._gross,
         DiscountTotal: a.DiscountTotal + x._discAmt,
         GSTTotal: a.GSTTotal + x._gstAmt,
+        AITTotal: a.AITTotal + x._aitAmt,
         GrandTotal: a.GrandTotal + x._total,
-    }), { SubTotal: 0, DiscountTotal: 0, GSTTotal: 0, GrandTotal: 0 }), [linesWithCalc]);
+    }), { SubTotal: 0, DiscountTotal: 0, GSTTotal: 0, AITTotal: 0, GrandTotal: 0 }), [linesWithCalc]);
 
     const isReadOnly = form && form.Status !== 'Draft';
 
@@ -180,6 +185,7 @@ export default function PaintGRN() {
             DiscountAmt: l.DiscountAmt === '' ? null : Number(l.DiscountAmt) || 0,
             GSTOn: !!l.GSTOn,
             GSTRate: Number(l.GSTRate) || 0,
+            AITAmount: Number(l.AITAmount) || 0,
         })),
     });
 
@@ -441,6 +447,7 @@ export default function PaintGRN() {
                                         <th style={{ width: 40, textAlign: 'center' }}>GST</th>
                                         <th className="num" style={{ width: 60 }}>GST %</th>
                                         <th className="num" style={{ width: 80 }}>GST Amt</th>
+                                        <th className="num" style={{ width: 80 }}>AIT</th>
                                         <th className="num" style={{ width: 100 }}>Line Total</th>
                                         <th style={{ width: 30 }}></th>
                                     </tr>
@@ -496,6 +503,10 @@ export default function PaintGRN() {
                                                     onChange={e => patchLine(idx, { GSTRate: e.target.value })} />
                                             </td>
                                             <td className="num">{fmt(l._gstAmt)}</td>
+                                            <td className="num">
+                                                <input type="number" step="0.01" value={l.AITAmount ?? 0} min={0}
+                                                    onChange={e => patchLine(idx, { AITAmount: e.target.value })} />
+                                            </td>
                                             <td className="num"><strong>{fmt(l._total)}</strong></td>
                                             <td>
                                                 {!isReadOnly && (
@@ -507,7 +518,7 @@ export default function PaintGRN() {
                                         </tr>
                                     ))}
                                     {linesWithCalc.length === 0 && (
-                                        <tr><td colSpan={12} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
+                                        <tr><td colSpan={13} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
                                             No lines. Click Add Line to start.
                                         </td></tr>
                                     )}
@@ -520,6 +531,7 @@ export default function PaintGRN() {
                         <div className="t"><span className="lbl">Sub Total</span><span className="val">{fmt(totals.SubTotal)}</span></div>
                         <div className="t"><span className="lbl">Discount</span><span className="val">{fmt(totals.DiscountTotal)}</span></div>
                         <div className="t"><span className="lbl">GST</span><span className="val">{fmt(totals.GSTTotal)}</span></div>
+                        <div className="t"><span className="lbl">AIT</span><span className="val">{fmt(totals.AITTotal)}</span></div>
                         <div className="t emph"><span className="lbl">Grand Total</span><span className="val">{fmt(totals.GrandTotal)}</span></div>
                     </div>
                 </>

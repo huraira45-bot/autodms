@@ -3,12 +3,18 @@
  *
  * Owner ask 2026-07-04: paint costs (including GST) roll into Paint Inventory
  * so subsequent Paint Consumption reflects full landed cost. No Input GST
- * claim is booked — the paint team treats GST as part of item cost. This
- * is consistent with the "GST included in item cost" note the owner gave.
+ * claim is booked — the paint team treats GST as part of item cost.
+ *
+ * Owner ask 2026-07-27: AIT (Advance Income Tax 236G) is now captured per
+ * line on Paint GRN, mirroring the regular GRN. AIT does NOT roll into
+ * paint cost — it Debits the ADVANCE_TAX_236G_PARTS system account so the
+ * paint team can reclaim it against future income tax, same as the parts
+ * team does today (see utils/grnJournalBuilder.js).
  *
  * Journal on finalize:
- *   Dr  PAINT_INVENTORY   GrandTotal
- *   Cr  Supplier PartyGL  GrandTotal
+ *   Dr  PAINT_INVENTORY         GrandTotal − AITTotal
+ *   Dr  ADVANCE_TAX_236G_PARTS  AITTotal
+ *       Cr  Supplier PartyGL    GrandTotal
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
@@ -27,13 +33,17 @@ async function loadSupplierGL(partyId, transaction) {
 async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
     const hdrRes = await new sql.Request(transaction)
         .input('id', sql.Int, paintGRNID)
-        .query(`SELECT PaintGRNID, GRNNo, GRNDate, PartyID, SupplierBillNo, GrandTotal
+        .query(`SELECT PaintGRNID, GRNNo, GRNDate, PartyID, SupplierBillNo,
+                       GrandTotal, ISNULL(AITTotal, 0) AS AITTotal
                 FROM paint_GRN WHERE PaintGRNID=@id`);
     if (!hdrRes.recordset.length) throw new Error(`Paint GRN ${paintGRNID} not found.`);
     const grn = hdrRes.recordset[0];
     if (Number(grn.GrandTotal) <= 0) return null;
 
     const paintInventoryGLCAID = await resolveRole('PAINT_INVENTORY');
+    const aitTotal = Math.round(Number(grn.AITTotal || 0) * 100) / 100;
+    const paintDebit = Math.round((Number(grn.GrandTotal) - aitTotal) * 100) / 100;
+    const advanceTaxGLCAID = aitTotal > 0 ? await resolveRole('ADVANCE_TAX_236G_PARTS') : null;
     const supplier = await loadSupplierGL(grn.PartyID, transaction);
 
     const vt = await new sql.Request(transaction)
@@ -63,14 +73,27 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
                         'Draft', 0, @src, @srcId, @cby, @cbyN)`);
     const voucherId = newHdr.recordset[0].VoucherID;
 
-    // Dr Paint Inventory
-    await new sql.Request(transaction)
-        .input('vid', sql.Int,               voucherId)
-        .input('gl',  sql.Int,               paintInventoryGLCAID)
-        .input('nar', sql.NVarChar(sql.MAX), `Paint inventory received — GRN ${grn.GRNNo}`)
-        .input('dr',  sql.Decimal(18,2),     grn.GrandTotal)
-        .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
-                VALUES (@vid, @gl, @nar, @dr, 0)`);
+    // Dr Paint Inventory (GrandTotal − AIT, so AIT doesn't get capitalised)
+    if (paintDebit > 0) {
+        await new sql.Request(transaction)
+            .input('vid', sql.Int,               voucherId)
+            .input('gl',  sql.Int,               paintInventoryGLCAID)
+            .input('nar', sql.NVarChar(sql.MAX), `Paint inventory received — GRN ${grn.GRNNo}`)
+            .input('dr',  sql.Decimal(18,2),     paintDebit)
+            .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                    VALUES (@vid, @gl, @nar, @dr, 0)`);
+    }
+
+    // Dr Advance Tax 236G — claimable against future income tax
+    if (aitTotal > 0 && advanceTaxGLCAID) {
+        await new sql.Request(transaction)
+            .input('vid', sql.Int,               voucherId)
+            .input('gl',  sql.Int,               advanceTaxGLCAID)
+            .input('nar', sql.NVarChar(sql.MAX), `Advance tax 236G on paint purchase — GRN ${grn.GRNNo}`)
+            .input('dr',  sql.Decimal(18,2),     aitTotal)
+            .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                    VALUES (@vid, @gl, @nar, @dr, 0)`);
+    }
 
     // Cr Supplier
     await new sql.Request(transaction)
