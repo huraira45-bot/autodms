@@ -270,6 +270,10 @@ exports.finalize = async (req, res) => {
         // StockQty and AvgCost are in the item's BASE UoM. Each line's
         // Quantity is in the line's chosen UoM (paint_GRNDetail.PaintUOMID),
         // so we convert to base via paint_ItemUOM.FactorToBase before adding.
+        //
+        // Owner ask 2026-07-28: paint cost = qty*rate − discount. GST and
+        // AIT are NOT part of paint cost anymore (they Debit their own GLs
+        // in the voucher). So moving-avg uses paint cost, not LineTotal.
         for (const l of linesRes.recordset) {
             const itemRes = await new sql.Request(tx).input('i', sql.Int, l.PaintItemID)
                 .query('SELECT StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
@@ -278,7 +282,8 @@ exports.finalize = async (req, res) => {
             const oldQty   = Number(itemRes.recordset[0].StockQty) || 0;
             const oldAvg   = Number(itemRes.recordset[0].AvgCost) || 0;
             const oldVal   = oldQty * oldAvg;
-            const inValue  = Number(l.LineTotal);   // money — no UoM conversion
+            const paintCost = round2(Number(l.Quantity) * Number(l.UnitRate) - Number(l.DiscountAmt || 0));
+            const inValue  = paintCost;              // money — GST/AIT excluded
             const newQty   = round4(oldQty + inBaseQty);
             const newVal   = round2(oldVal + inValue);
             const newAvg   = newQty > 0 ? round4(newVal / newQty) : 0;
@@ -368,10 +373,9 @@ exports.unfinalize = async (req, res) => {
             const oldVal = oldQty * oldAvg;
             // Base-unit conversion — matches finalize() so unwind is exact.
             const { baseQty: outBaseQty } = await resolveBaseQty(tx, l.PaintItemID, l.PaintUOMID, l.Quantity);
-            // Value removed uses the ORIGINAL LineTotal from this GRN line
-            // so the moving-avg cleanly rolls back regardless of what has
-            // happened at the item level since.
-            const outValue = round2(Number(l.LineTotal));
+            // Paint cost only (qty*rate − disc). GST and AIT were NOT
+            // added to paint value on finalize, so we don't remove them here.
+            const outValue = round2(Number(l.Quantity) * Number(l.UnitRate) - Number(l.DiscountAmt || 0));
             const newQty   = round4(oldQty - outBaseQty);
             if (newQty < 0) throw new Error(`Cannot unfinalize — item stock would go negative on paint item ${l.PaintItemID}.`);
             const newVal = round2(oldVal - outValue);

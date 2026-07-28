@@ -1,24 +1,27 @@
 /**
  * Paint GRN finalize → ledger posting service.
  *
- * Owner ask 2026-07-04: paint costs (including GST) roll into Paint Inventory
- * so subsequent Paint Consumption reflects full landed cost. No Input GST
- * claim is booked — the paint team treats GST as part of item cost.
- *
- * Owner ask 2026-07-27: AIT (Advance Income Tax 236G) is now captured per
- * line on Paint GRN, mirroring the regular GRN. AIT does NOT roll into
- * paint cost — it Debits the ADVANCE_TAX_236G_PARTS system account so the
- * paint team can reclaim it against future income tax, same as the parts
- * team does today (see utils/grnJournalBuilder.js).
+ * Owner ask 2026-07-28: match the regular Parts GRN journal — Input GST is
+ * booked as CLAIMABLE (not rolled into paint cost), Discount Received hits
+ * its own income account, and the supplier is credited for the balancing
+ * amount. AIT already goes to Advance Tax 236G (added 2026-07-27).
  *
  * Journal on finalize:
- *   Dr  PAINT_INVENTORY         GrandTotal − AITTotal
+ *   Dr  PAINT_INVENTORY         SubTotal (gross)
+ *   Dr  INPUT_GST               GSTTotal
  *   Dr  ADVANCE_TAX_236G_PARTS  AITTotal
- *       Cr  Supplier PartyGL    GrandTotal
+ *       Cr  PARTS_DISCOUNT_RECEIVED   DiscountTotal
+ *       Cr  Supplier PartyGL          GrandTotal (balancing)
+ *
+ * Uses the same system accounts as parts GRN (INPUT_GST,
+ * PARTS_DISCOUNT_RECEIVED) so no extra COA mapping is needed. Owner can
+ * introduce paint-specific accounts later if they want to segregate.
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 async function loadSupplierGL(partyId, transaction) {
     const r = await new sql.Request(transaction)
@@ -34,17 +37,28 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
     const hdrRes = await new sql.Request(transaction)
         .input('id', sql.Int, paintGRNID)
         .query(`SELECT PaintGRNID, GRNNo, GRNDate, PartyID, SupplierBillNo,
-                       GrandTotal, ISNULL(AITTotal, 0) AS AITTotal
+                       ISNULL(SubTotal, 0)      AS SubTotal,
+                       ISNULL(DiscountTotal, 0) AS DiscountTotal,
+                       ISNULL(GSTTotal, 0)      AS GSTTotal,
+                       ISNULL(AITTotal, 0)      AS AITTotal,
+                       ISNULL(GrandTotal, 0)    AS GrandTotal
                 FROM paint_GRN WHERE PaintGRNID=@id`);
     if (!hdrRes.recordset.length) throw new Error(`Paint GRN ${paintGRNID} not found.`);
     const grn = hdrRes.recordset[0];
     if (Number(grn.GrandTotal) <= 0) return null;
 
+    const subTotal      = r2(grn.SubTotal);
+    const discountTotal = r2(grn.DiscountTotal);
+    const gstTotal      = r2(grn.GSTTotal);
+    const aitTotal      = r2(grn.AITTotal);
+    // Supplier payable balances the journal: gross + gst + ait − disc = GrandTotal.
+    const supplierCredit = r2(subTotal + gstTotal + aitTotal - discountTotal);
+
     const paintInventoryGLCAID = await resolveRole('PAINT_INVENTORY');
-    const aitTotal = Math.round(Number(grn.AITTotal || 0) * 100) / 100;
-    const paintDebit = Math.round((Number(grn.GrandTotal) - aitTotal) * 100) / 100;
-    const advanceTaxGLCAID = aitTotal > 0 ? await resolveRole('ADVANCE_TAX_236G_PARTS') : null;
-    const supplier = await loadSupplierGL(grn.PartyID, transaction);
+    const inputGSTGLCAID       = gstTotal > 0      ? await resolveRole('INPUT_GST') : null;
+    const advanceTaxGLCAID     = aitTotal > 0      ? await resolveRole('ADVANCE_TAX_236G_PARTS') : null;
+    const discountGLCAID       = discountTotal > 0 ? await resolveRole('PARTS_DISCOUNT_RECEIVED') : null;
+    const supplier             = await loadSupplierGL(grn.PartyID, transaction);
 
     const vt = await new sql.Request(transaction)
         .query("SELECT Voucherid FROM GLVoucherType WHERE Title='PV'");
@@ -55,12 +69,15 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
     const narration = `Paint GRN ${grn.GRNNo} — ${supplier.name}` +
                       (grn.SupplierBillNo ? ` (Bill: ${grn.SupplierBillNo})` : '');
 
+    // Voucher header — TotalAmount = total Dr side (subTotal + gst + ait), matches parts GRN
+    const totalDr = r2(subTotal + gstTotal + aitTotal);
+
     const newHdr = await new sql.Request(transaction)
         .input('vd',      sql.DateTime,          new Date())
         .input('vno',     sql.NVarChar(50),      voucherNo)
         .input('vtId',    sql.Int,               voucherTypeId)
         .input('remarks', sql.NVarChar(sql.MAX), narration)
-        .input('total',   sql.Decimal(18,2),     grn.GrandTotal)
+        .input('total',   sql.Decimal(18,2),     totalDr)
         .input('src',     sql.NVarChar(20),      'PAINT_GRN')
         .input('srcId',   sql.Int,               paintGRNID)
         .input('cby',     sql.Int,               userInfo?.userId || null)
@@ -73,44 +90,49 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
                         'Draft', 0, @src, @srcId, @cby, @cbyN)`);
     const voucherId = newHdr.recordset[0].VoucherID;
 
-    // Dr Paint Inventory (GrandTotal − AIT, so AIT doesn't get capitalised)
-    if (paintDebit > 0) {
+    async function insertLeg(glCAID, dr, cr, note, partyId = null) {
         await new sql.Request(transaction)
             .input('vid', sql.Int,               voucherId)
-            .input('gl',  sql.Int,               paintInventoryGLCAID)
-            .input('nar', sql.NVarChar(sql.MAX), `Paint inventory received — GRN ${grn.GRNNo}`)
-            .input('dr',  sql.Decimal(18,2),     paintDebit)
-            .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
-                    VALUES (@vid, @gl, @nar, @dr, 0)`);
+            .input('gl',  sql.Int,               glCAID)
+            .input('nar', sql.NVarChar(sql.MAX), note)
+            .input('dr',  sql.Decimal(18,2),     dr)
+            .input('cr',  sql.Decimal(18,2),     cr)
+            .input('pid', sql.Int,               partyId)
+            .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit, PartyID)
+                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid)`);
+    }
+
+    // Dr Paint Inventory (gross paint value — no GST, no AIT, no discount netting)
+    await insertLeg(paintInventoryGLCAID, subTotal, 0,
+        `Paint inventory received (gross) — GRN ${grn.GRNNo}`);
+
+    // Dr Input GST — claimable from FBR
+    if (gstTotal > 0 && inputGSTGLCAID) {
+        await insertLeg(inputGSTGLCAID, gstTotal, 0,
+            `Input GST on paint supplier invoice — GRN ${grn.GRNNo}`);
     }
 
     // Dr Advance Tax 236G — claimable against future income tax
     if (aitTotal > 0 && advanceTaxGLCAID) {
-        await new sql.Request(transaction)
-            .input('vid', sql.Int,               voucherId)
-            .input('gl',  sql.Int,               advanceTaxGLCAID)
-            .input('nar', sql.NVarChar(sql.MAX), `Advance tax 236G on paint purchase — GRN ${grn.GRNNo}`)
-            .input('dr',  sql.Decimal(18,2),     aitTotal)
-            .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
-                    VALUES (@vid, @gl, @nar, @dr, 0)`);
+        await insertLeg(advanceTaxGLCAID, aitTotal, 0,
+            `Advance tax 236G on paint purchase — GRN ${grn.GRNNo}`);
     }
 
-    // Cr Supplier
-    await new sql.Request(transaction)
-        .input('vid', sql.Int,               voucherId)
-        .input('gl',  sql.Int,               supplier.GLCAID)
-        .input('nar', sql.NVarChar(sql.MAX), narration)
-        .input('cr',  sql.Decimal(18,2),     grn.GrandTotal)
-        .input('pid', sql.Int,               grn.PartyID)
-        .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit, PartyID)
-                VALUES (@vid, @gl, @nar, 0, @cr, @pid)`);
+    // Cr Discount Received on Paint
+    if (discountTotal > 0 && discountGLCAID) {
+        await insertLeg(discountGLCAID, 0, discountTotal,
+            `Trade discount on paint — GRN ${grn.GRNNo}`);
+    }
+
+    // Cr Supplier — balancing leg
+    await insertLeg(supplier.GLCAID, 0, supplierCredit, narration, grn.PartyID);
 
     // Subsidiary ledger — supplier payable
     await new sql.Request(transaction)
         .input('pid', sql.Int,               grn.PartyID)
         .input('vid', sql.Int,               voucherId)
         .input('gl',  sql.Int,               supplier.GLCAID)
-        .input('cr',  sql.Decimal(18,2),     grn.GrandTotal)
+        .input('cr',  sql.Decimal(18,2),     supplierCredit)
         .input('nar', sql.NVarChar(500),     narration)
         .query(`INSERT INTO dms_PartyLedger (PartyID, VoucherID, GLCAID, Debit, Credit, Narration)
                 VALUES (@pid, @vid, @gl, 0, @cr, @nar)`);
