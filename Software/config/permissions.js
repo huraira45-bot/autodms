@@ -106,10 +106,13 @@ const SECTIONS = [
     {
         name: 'ADMIN & HR',
         items: [
-            { key: 'hr_employees',      label: 'Employees',         kind: 'document' },
-            { key: 'hr_settings',       label: 'HR Config',         kind: 'document' },
-            { key: 'admin_users',       label: 'User Management',   kind: 'document' },
-            { key: 'admin_permissions', label: 'Role Permissions',  kind: 'document' },
+            { key: 'hr_employees',      label: 'Employees',           kind: 'document' },
+            { key: 'hr_settings',       label: 'HR Config',           kind: 'document' },
+            { key: 'hr_attendance',     label: 'HR: Attendance',      kind: 'document' },
+            { key: 'hr_salary',         label: 'HR: Salary Sheet',    kind: 'document' },
+            { key: 'hr_salary_post',    label: 'HR: Post Salary Vouchers', kind: 'workflow' },
+            { key: 'admin_users',       label: 'User Management',     kind: 'document' },
+            { key: 'admin_permissions', label: 'Role Permissions',    kind: 'document' },
         ],
     },
     {

@@ -50,6 +50,7 @@ app.use('/api', authMiddleware);
 
 // Routes for Phase 1: Master Configurations
 app.use('/api/employees', require('./routes/employeeRoutes'));
+app.use('/api/hr',        require('./routes/hrSalaryRoutes'));
 app.use('/api/parties', require('./routes/partyRoutes'));
 app.use('/api/branches', require('./routes/branchRoutes'));
 app.use('/api/departments', require('./routes/departmentRoutes'));

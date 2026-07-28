@@ -39,8 +39,11 @@ const MODULES = [
     { key: 'sales_recovery',        label: 'Sales — Recovery Officer',                   section: 'NEW VEHICLE SALES' },
     { key: 'sales_reports',         label: 'Sales Reports',                              section: 'NEW VEHICLE SALES' },
     { key: 'sales_hierarchy',       label: 'Sales Hierarchy & Targets (HR-side)',        section: 'ADMIN & HR' },
-    { key: 'hr_employees',        label: 'Employees',            section: 'ADMIN & HR' },
-    { key: 'hr_settings',         label: 'HR Config',            section: 'ADMIN & HR' },
+    { key: 'hr_employees',        label: 'Employees',              section: 'ADMIN & HR' },
+    { key: 'hr_settings',         label: 'HR Config',              section: 'ADMIN & HR' },
+    { key: 'hr_attendance',       label: 'HR: Attendance',         section: 'ADMIN & HR' },
+    { key: 'hr_salary',           label: 'HR: Salary Sheet',       section: 'ADMIN & HR' },
+    { key: 'hr_salary_post',      label: 'HR: Post Salary Vouchers', section: 'ADMIN & HR' },
     { key: 'admin_users',         label: 'User Management',        section: 'ADMINISTRATION' },
     { key: 'admin_permissions',   label: 'Role Permissions',       section: 'ADMINISTRATION' },
     // Paint Lab — separate internal paint inventory + costing module (owner ask 2026-07-04)

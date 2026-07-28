@@ -55,6 +55,49 @@ exports.setActive = async (req, res) => {
   }
 };
 
+// @route   PATCH /api/employees/:id/salary-settings
+// Updates the HR/salary-specific columns added by migration 095.
+exports.setSalarySettings = async (req, res) => {
+  try {
+    const pool = await getPool();
+    const b = req.body || {};
+    await pool.request()
+      .input('id',  sql.Int,          parseInt(req.params.id))
+      .input('bs',  sql.Decimal(18,2), b.BasicSalary != null ? Number(b.BasicSalary) : null)
+      .input('eb',  sql.Bit,          b.HasEOBI ? 1 : 0)
+      .input('ea',  sql.Decimal(10,2), Number(b.EOBI) || 0)
+      .input('fa',  sql.Bit,          b.HasFuelAllowance ? 1 : 0)
+      .input('fv',  sql.Decimal(10,2), Number(b.FuelAllowance) || 0)
+      .input('ms',  sql.Bit,          b.HasMess ? 1 : 0)
+      .input('mv',  sql.Decimal(10,2), Number(b.MessAmount) || 0)
+      .input('cl',  sql.Bit,          b.HasCustomLateFine ? 1 : 0)
+      .input('cv',  sql.Decimal(10,4), Number(b.CustomLateFineAmount) || 0)
+      .input('bk',  sql.Bit,          b.IsPaidByBank ? 1 : 0)
+      .input('ba',  sql.NVarChar(100), b.BankAccountNumber || null)
+      .input('sn',  sql.NVarChar(50),  b.SrNo || null)
+      .input('gl',  sql.Int,          b.EmployeeGLID ? parseInt(b.EmployeeGLID) : null)
+      .query(`UPDATE gen_EmployeeInfo
+                 SET BasicSalary          = COALESCE(@bs, BasicSalary),
+                     HasEOBI              = @eb,
+                     EOBI                 = @ea,
+                     HasFuelAllowance     = @fa,
+                     FuelAllowance        = @fv,
+                     HasMess              = @ms,
+                     MessAmount           = @mv,
+                     HasCustomLateFine    = @cl,
+                     CustomLateFineAmount = @cv,
+                     IsPaidByBank         = @bk,
+                     BankAccountNumber    = @ba,
+                     SrNo                 = @sn,
+                     EmployeeGLID         = COALESCE(@gl, EmployeeGLID)
+               WHERE EmployeeID = @id`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('setSalarySettings:', err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
 // @route   PATCH /api/employees/:id/technician
 exports.toggleTechnician = async (req, res) => {
   try {

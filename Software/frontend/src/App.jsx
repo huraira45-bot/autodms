@@ -62,6 +62,14 @@ import { getVisibleModuleGroups } from './navigationConfig';
 import Login              from './pages/Login';
 import Employees          from './pages/Employees';
 import HRSettings         from './pages/HRSettings';
+import HrAttendance       from './pages/hr/HrAttendance';
+import HrSalarySheet      from './pages/hr/HrSalarySheet';
+import HrEmployeeSalary   from './pages/hr/HrEmployeeSalary';
+import HrFineSettings     from './pages/hr/HrFineSettings';
+import HrSalarySlipPrint  from './pages/hr/HrSalarySlipPrint';
+import HrSalarySheetPrint from './pages/hr/HrSalarySheetPrint';
+import HrBankLetterPrint  from './pages/hr/HrBankLetterPrint';
+import HrCashLetterPrint  from './pages/hr/HrCashLetterPrint';
 import Customers          from './pages/Customers';
 import PartyBusinessAccess from './pages/PartyBusinessAccess';
 import Vehicles           from './pages/Vehicles';
@@ -853,6 +861,11 @@ function AppShell() {
                         <Route path="/paint/grn/:id/print"     element={<PaintGRNPrint />} />
                         <Route path="/paint/grtn/:id/print"    element={<PaintGRTNPrint />} />
                         <Route path="/paint/issue/:id/print"   element={<PaintIssuePrint />} />
+                        {/* HR/Salary print routes */}
+                        <Route path="/hr/salary-slip/:monthId/:employeeId/print" element={<HrSalarySlipPrint />} />
+                        <Route path="/hr/salary/:monthId/print"                  element={<HrSalarySheetPrint />} />
+                        <Route path="/hr/bank-letter/:monthId/print"             element={<HrBankLetterPrint />} />
+                        <Route path="/hr/cash-letter/:monthId/print"             element={<HrCashLetterPrint />} />
                     </Routes>
                 </main>
             </FeedbackProvider>
@@ -1248,6 +1261,22 @@ function AppShell() {
                     <Route path="/hr-settings" element={
                         <ProtectedRoute moduleKey="hr_settings"><HRSettings /></ProtectedRoute>
                     } />
+                    <Route path="/hr/employees-salary" element={
+                        <ProtectedRoute moduleKey="hr_employees"><HrEmployeeSalary /></ProtectedRoute>
+                    } />
+                    <Route path="/hr/attendance" element={
+                        <ProtectedRoute moduleKey="hr_attendance"><HrAttendance /></ProtectedRoute>
+                    } />
+                    <Route path="/hr/salary-sheet" element={
+                        <ProtectedRoute moduleKey="hr_salary"><HrSalarySheet /></ProtectedRoute>
+                    } />
+                    <Route path="/hr/fine-settings" element={
+                        <ProtectedRoute moduleKey="hr_settings"><HrFineSettings /></ProtectedRoute>
+                    } />
+                    <Route path="/hr/salary-slip/:monthId/:employeeId/print" element={<HrSalarySlipPrint />} />
+                    <Route path="/hr/salary/:monthId/print"                  element={<HrSalarySheetPrint />} />
+                    <Route path="/hr/bank-letter/:monthId/print"             element={<HrBankLetterPrint />} />
+                    <Route path="/hr/cash-letter/:monthId/print"             element={<HrCashLetterPrint />} />
 
                     <Route path="/admin/users" element={
                         <ProtectedRoute moduleKey="admin_users"><UsersAdmin /></ProtectedRoute>

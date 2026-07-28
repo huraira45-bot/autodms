@@ -131,8 +131,12 @@ export const NAV_ITEMS = [
     { id: 's-cro-rep',   moduleGroup: 'sales', label: 'CRO Reports',           path: '/cro/reports',             icon: LineChart,    moduleKey: 'cro_admin',           description: 'Customer-relations reports.', keywords: 'cro' },
 
     // ── HR ───────────────────────────────────────────────────
-    { id: 'hr-emp',      moduleGroup: 'hr', label: 'Employees',                 path: '/employees',   icon: Users,        moduleKey: 'hr_employees', description: 'Employee master.', keywords: 'staff' },
-    { id: 'hr-cfg',      moduleGroup: 'hr', label: 'HR Settings',               path: '/hr-settings', icon: SettingsIcon, moduleKey: 'hr_settings',  description: 'Departments, designations.', keywords: 'setup' },
+    { id: 'hr-emp',      moduleGroup: 'hr', label: 'Employees',                 path: '/employees',              icon: Users,        moduleKey: 'hr_employees',  description: 'Employee master.', keywords: 'staff' },
+    { id: 'hr-esalary',  moduleGroup: 'hr', label: 'Employee Salary Settings',  path: '/hr/employees-salary',    icon: Users,        moduleKey: 'hr_employees',  description: 'Per-employee salary / allowances / bank.', keywords: 'salary employee' },
+    { id: 'hr-att',      moduleGroup: 'hr', label: 'Attendance',                path: '/hr/attendance',          icon: Users,        moduleKey: 'hr_attendance', description: 'Monthly absents / late / leave / working days.', keywords: 'attendance late absent' },
+    { id: 'hr-sheet',    moduleGroup: 'hr', label: 'Salary Sheet',              path: '/hr/salary-sheet',        icon: Users,        moduleKey: 'hr_salary',     description: 'Monthly salary sheet + voucher posting.', keywords: 'salary payroll' },
+    { id: 'hr-fine',     moduleGroup: 'hr', label: 'Fine Settings',             path: '/hr/fine-settings',       icon: SettingsIcon, moduleKey: 'hr_settings',   description: 'Late-fine and absent-fine rates (global + monthly).', keywords: 'fine' },
+    { id: 'hr-cfg',      moduleGroup: 'hr', label: 'HR Config',                 path: '/hr-settings',            icon: SettingsIcon, moduleKey: 'hr_settings',   description: 'Departments, designations.', keywords: 'setup' },
 
     // ── Admin ────────────────────────────────────────────────
     { id: 'a-users',     moduleGroup: 'admin', label: 'User Management',      path: '/admin/users',       icon: UserCog,     moduleKey: 'admin_users',       description: 'Create / edit users.', keywords: 'user' },

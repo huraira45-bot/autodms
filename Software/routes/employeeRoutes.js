@@ -14,5 +14,6 @@ router.post( '/',                  requirePerm('hr_employees', 'insert'), employ
 router.patch('/:id/technician',    requirePerm('hr_employees', 'edit'),   employeeController.toggleTechnician);
 router.patch('/:id/reports-to',    requirePerm('hr_employees', 'edit'),   employeeController.setReportsTo);
 router.patch('/:id/active',        requirePerm('hr_employees', 'edit'),   employeeController.setActive);
+router.patch('/:id/salary-settings', requirePerm('hr_employees', 'edit'), employeeController.setSalarySettings);
 
 module.exports = router;
