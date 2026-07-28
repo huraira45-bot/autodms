@@ -174,7 +174,7 @@ async function buildSheet(pool, monthId) {
     const [empRes, attRes, entRes, fsRes, msRes] = await Promise.all([
         pool.request().query(`
             SELECT e.EmployeeID, e.EmployeeName, e.SrNo, e.DesignationID, e.DepartmentID,
-                   d.DepartmentName, dg.DesignationTitle AS Designation,
+                   d.DepartmentName, dg.DesignationName AS Designation,
                    e.BasicSalary, e.EOBI, e.HasEOBI, e.MedicalAllowance, e.HouseRent,
                    e.HasFuelAllowance, e.FuelAllowance,
                    e.HasMess, e.MessAmount,
@@ -187,7 +187,7 @@ async function buildSheet(pool, monthId) {
               LEFT JOIN gen_DesignationInfo dg ON dg.DesignationID = e.DesignationID
               LEFT JOIN GLChartOFAccount gl   ON gl.GLCAID = e.EmployeeGLID
              WHERE e.IsActive = 1
-             ORDER BY e.SrNo, e.EmployeeName`),
+             ORDER BY ISNULL(d.DepartmentName, '~'), e.SrNo, e.EmployeeName`),
         pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_AttendanceRecords WHERE MonthID=@m'),
         pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_SalaryEntries WHERE MonthID=@m'),
         pool.request().query('SELECT * FROM hr_FineSettings WHERE SettingID = 1'),

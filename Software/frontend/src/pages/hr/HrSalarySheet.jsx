@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Save, FileText, Landmark, Wallet, Printer, RefreshCw } from 'lucide-react';
+import { Save, FileText, Landmark, Wallet, Printer, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import { useCan } from '../../context/AuthContext';
+import { ErpControlPanel } from '../../components/erp';
 
 const API = '/api/hr';
-const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt  = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt0 = (n) => Number(n || 0).toLocaleString('en-PK', { maximumFractionDigits: 0 });
 const currentMonth = () => new Date().toISOString().slice(0, 7);
+const monthLabel = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
+
+function shiftMonth(m, delta) {
+    const [y, mo] = m.split('-').map(Number);
+    const d = new Date(y, mo - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 
 export default function HrSalarySheet() {
     const { notify, confirm } = useFeedback();
@@ -14,9 +23,10 @@ export default function HrSalarySheet() {
     const canEdit = useCan('hr_salary').canEdit;
     const [monthId, setMonthId] = useState(currentMonth());
     const [sheet, setSheet] = useState(null);
-    const [drafts, setDrafts] = useState({});         // EmployeeID -> pending entry
+    const [drafts, setDrafts] = useState({});
     const [postings, setPostings] = useState([]);
     const [busy, setBusy] = useState(false);
+    const [collapsedDepts, setCollapsedDepts] = useState({});
 
     const load = async () => {
         try {
@@ -60,9 +70,9 @@ export default function HrSalarySheet() {
         try {
             await axios.post(`${API}/salary`, body);
             setDrafts(prev => { const p = { ...prev }; delete p[empId]; return p; });
-            await load();
         } catch (err) {
             notify({ type: 'error', title: 'Save failed', message: err.response?.data?.error || err.message });
+            throw err;
         }
     };
 
@@ -71,14 +81,15 @@ export default function HrSalarySheet() {
         if (!ids.length) return notify({ type: 'info', title: 'No changes', message: '' });
         try {
             for (const id of ids) await saveOne(id);
-            notify({ type: 'success', title: 'Saved', message: `${ids.length} rows` });
+            notify({ type: 'success', title: `${ids.length} rows saved`, message: '' });
+            await load();
         } catch {}
     };
 
     const runPost = async (endpoint, label) => {
         const ok = await confirm({
             title: `${label}?`,
-            message: `This will post a voucher for ${monthId}. Continue?`,
+            message: `This will post a voucher for ${monthLabel(monthId)}. Continue?`,
             confirmText: `Post ${label}`,
         });
         if (!ok) return;
@@ -91,6 +102,24 @@ export default function HrSalarySheet() {
             notify({ type: 'error', title: `${label} failed`, message: err.response?.data?.error || err.message });
         } finally { setBusy(false); }
     };
+
+    // Group rows by DepartmentName, preserving controller order.
+    const grouped = useMemo(() => {
+        if (!sheet) return [];
+        const groups = [];
+        const idx = new Map();
+        sheet.rows.forEach(r => {
+            const name = r.DepartmentName || 'Unassigned';
+            if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
+            groups[idx.get(name)].rows.push(r);
+        });
+        return groups.map(g => {
+            const additions  = g.rows.reduce((s, r) => s + r.Calc.additions, 0);
+            const deductions = g.rows.reduce((s, r) => s + r.Calc.deductions, 0);
+            const net        = g.rows.reduce((s, r) => s + r.Calc.net, 0);
+            return { ...g, additions, deductions, net };
+        });
+    }, [sheet]);
 
     const totals = useMemo(() => {
         if (!sheet) return null;
@@ -111,184 +140,282 @@ export default function HrSalarySheet() {
         return fallback;
     };
 
+    const toggleDept = (name) => setCollapsedDepts(p => ({ ...p, [name]: !p[name] }));
+
     return (
-        <div style={{ padding: '16px 20px' }}>
-            <div style={S.pageHead}>
-                <h2 style={{ margin: 0, fontSize: 18 }}>Salary Sheet</h2>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <label style={S.lbl}>Month</label>
-                    <input type="month" value={monthId} onChange={e => setMonthId(e.target.value)} style={S.inp} />
-                    <button style={S.btn} onClick={load} disabled={busy}><RefreshCw size={13} /> Reload</button>
-                </div>
-            </div>
+        <div className="erp-page hr-page">
+            <ErpControlPanel
+                title="Salary Sheet"
+                subtitle={monthLabel(monthId)}
+            >
+                <button className="erp-btn erp-btn-sm" onClick={() => setMonthId(shiftMonth(monthId, -1))} title="Previous month">
+                    <ChevronLeft size={13}/>
+                </button>
+                <input type="month" value={monthId} onChange={e => setMonthId(e.target.value)}
+                    style={{ height: 30, padding: '0 8px', border: '1px solid var(--erp-border-strong)',
+                             borderRadius: 'var(--erp-radius)', fontSize: 13, background: 'var(--erp-surface)' }}/>
+                <button className="erp-btn erp-btn-sm" onClick={() => setMonthId(shiftMonth(monthId, 1))} title="Next month">
+                    <ChevronRight size={13}/>
+                </button>
+                <button className="erp-btn erp-btn-sm" onClick={load} disabled={busy}>
+                    <RefreshCw size={13}/> Reload
+                </button>
+                <div className="spacer" style={{ flex: 1 }}/>
+                <button className="erp-btn erp-btn-primary" onClick={saveAll} disabled={!Object.keys(drafts).length}>
+                    <Save size={13}/> Save All {Object.keys(drafts).length > 0 && `(${Object.keys(drafts).length})`}
+                </button>
+            </ErpControlPanel>
 
             {sheet && (
                 <>
-                    <div style={S.kpiRow}>
-                        <div style={S.kpi}><div style={S.kpiL}>Employees</div><div style={S.kpiV}>{sheet.rows.length}</div></div>
-                        <div style={S.kpi}><div style={S.kpiL}>Additions</div><div style={S.kpiV}>{fmt(totals?.additions)}</div></div>
-                        <div style={S.kpi}><div style={S.kpiL}>Deductions</div><div style={S.kpiV}>{fmt(totals?.deductions)}</div></div>
-                        <div style={{ ...S.kpi, background: '#f0fdf4' }}><div style={S.kpiL}>Net Payable</div><div style={{ ...S.kpiV, color: '#166534' }}>{fmt(totals?.net)}</div></div>
-                        <div style={S.kpi}><div style={S.kpiL}>Bank Net</div><div style={S.kpiV}>{fmt(totals?.bankNet)}</div></div>
-                        <div style={S.kpi}><div style={S.kpiL}>Cash Net</div><div style={S.kpiV}>{fmt(totals?.cashNet)}</div></div>
-                        <div style={S.kpi}><div style={S.kpiL}>Late/min</div><div style={S.kpiV}>{fmt(sheet.effectiveLateRate)}</div></div>
-                        <div style={S.kpi}><div style={S.kpiL}>Absent/day</div><div style={S.kpiV}>{fmt(sheet.effectiveAbsentRate)}</div></div>
+                    <div className="hr-kpi-row">
+                        <Kpi label="Employees" value={fmt0(sheet.rows.length)} />
+                        <Kpi label="Additions" value={fmt(totals?.additions)} />
+                        <Kpi label="Deductions" value={fmt(totals?.deductions)} tone="down" />
+                        <Kpi label="Net Payable" value={fmt(totals?.net)} tone="net" />
+                        <Kpi label="Bank Payable" value={fmt(totals?.bankNet)} sub={`${sheet.rows.filter(r=>r.IsPaidByBank && r.Calc.net > 0).length} emp`} />
+                        <Kpi label="Cash Payable" value={fmt(totals?.cashNet)} sub={`${sheet.rows.filter(r=>!r.IsPaidByBank && r.Calc.net > 0).length} emp`} />
+                        <Kpi label="Late / min" value={fmt(sheet.effectiveLateRate)} />
+                        <Kpi label="Absent / day" value={fmt(sheet.effectiveAbsentRate)} />
                     </div>
 
-                    <div style={S.actionsBar}>
-                        <button style={S.btnPrimary} onClick={saveAll} disabled={!Object.keys(drafts).length}>
-                            <Save size={13}/> Save All Drafts ({Object.keys(drafts).length})
-                        </button>
+                    <div className="hr-actions">
                         {canPost && (
                             <>
-                                <button style={S.btn} onClick={() => runPost('accrual', 'Salary Accrual')}><FileText size={13}/> Post Accrual (JV)</button>
-                                <button style={S.btn} onClick={() => runPost('pay-bank', 'Bank Payment')}><Landmark size={13}/> Pay via Bank (BPV)</button>
-                                <button style={S.btn} onClick={() => runPost('pay-cash', 'Cash Payment')}><Wallet size={13}/> Pay via Cash (CPV)</button>
+                                <button className="erp-btn" onClick={() => runPost('accrual', 'Salary Accrual')}>
+                                    <FileText size={13}/> Post Accrual (JV)
+                                </button>
+                                <button className="erp-btn" onClick={() => runPost('pay-bank', 'Bank Payment')}>
+                                    <Landmark size={13}/> Pay via Bank (BPV)
+                                </button>
+                                <button className="erp-btn" onClick={() => runPost('pay-cash', 'Cash Payment')}>
+                                    <Wallet size={13}/> Pay via Cash (CPV)
+                                </button>
+                                <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
                         )}
-                        <a href={`/hr/salary/${monthId}/print`} target="_blank" rel="noreferrer" style={{ ...S.btn, textDecoration: 'none' }}>
+                        <a className="erp-btn" href={`/hr/salary/${monthId}/print`} target="_blank" rel="noreferrer">
                             <Printer size={13}/> Print Sheet
                         </a>
-                        <a href={`/hr/bank-letter/${monthId}/print`} target="_blank" rel="noreferrer" style={{ ...S.btn, textDecoration: 'none' }}>
+                        <a className="erp-btn" href={`/hr/bank-letter/${monthId}/print`} target="_blank" rel="noreferrer">
                             <Landmark size={13}/> Bank Letter
                         </a>
-                        <a href={`/hr/cash-letter/${monthId}/print`} target="_blank" rel="noreferrer" style={{ ...S.btn, textDecoration: 'none' }}>
+                        <a className="erp-btn" href={`/hr/cash-letter/${monthId}/print`} target="_blank" rel="noreferrer">
                             <Wallet size={13}/> Cash Letter
                         </a>
                     </div>
 
                     {postings.length > 0 && (
-                        <div style={S.postingsBox}>
-                            <b>Voucher postings this month:</b>
+                        <div className="erp-panel hr-postings">
+                            <div className="erp-panel-title">Voucher postings for {monthLabel(monthId)}
+                                <span className="count">{postings.length}</span></div>
                             {postings.map(p => (
-                                <div key={p.PostingID} style={S.postingRow}>
-                                    <span style={S.pill(p.PostingType)}>{p.PostingType.replace('_',' ')}</span>
-                                    · {p.VoucherNo || `#${p.VoucherID}`} · PKR {fmt(p.TotalAmount)} · {p.EmployeeCount} emp
-                                    · {new Date(p.PostedAt).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
-                                    {p.PostedByName ? ` · by ${p.PostedByName}` : ''}
+                                <div key={p.PostingID} className="hr-posting-row">
+                                    <span className={`hr-pill hr-pill-${p.PostingType.toLowerCase()}`}>
+                                        {p.PostingType.replace('_',' ')}
+                                    </span>
+                                    <span className="hr-posting-vno">{p.VoucherNo || `#${p.VoucherID}`}</span>
+                                    <span>PKR {fmt(p.TotalAmount)}</span>
+                                    <span className="hr-posting-meta">{p.EmployeeCount} emp · {new Date(p.PostedAt).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}{p.PostedByName ? ` · ${p.PostedByName}` : ''}</span>
                                 </div>
                             ))}
                         </div>
                     )}
 
-                    <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 6 }}>
-                        <table style={S.tbl}>
-                            <thead>
-                                <tr>
-                                    <th style={S.th}>#</th>
-                                    <th style={S.th}>Employee</th>
-                                    <th style={S.th}>Designation</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Basic</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Paid Days</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Prorated</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Fuel</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Absent Fine</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Late Fine</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Advance</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Fine</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Hold</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Mess Days</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>EOBI</th>
-                                    <th style={{ ...S.th, textAlign: 'right' }}>Adjust</th>
-                                    <th style={{ ...S.th, textAlign: 'right', background: '#fef3c7' }}>Net</th>
-                                    <th style={S.th}>Mode</th>
-                                    <th style={S.th}></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {sheet.rows.map((r, i) => {
-                                    const dirty = !!drafts[r.EmployeeID];
-                                    return (
-                                        <tr key={r.EmployeeID} style={dirty ? { background: '#fffbeb' } : undefined}>
-                                            <td style={S.td}>{r.SrNo || i + 1}</td>
-                                            <td style={S.td}>{r.Name}</td>
-                                            <td style={S.td}>{r.Designation || '—'}</td>
-                                            <td style={{ ...S.td, textAlign: 'right' }}>{fmt(r.Calc.basic)}</td>
-                                            <td style={S.td}>
-                                                <input type="number" step="0.5" min={0} disabled={!canEdit}
-                                                    value={draftedFor(r.EmployeeID, 'PaidDays', r.Entry?.PaidDays ?? '') ?? ''}
-                                                    onChange={e => patch(r.EmployeeID, 'PaidDays', e.target.value)}
-                                                    style={S.numIn} placeholder={String(r.Calc.monthDays)} />
-                                            </td>
-                                            <td style={{ ...S.td, textAlign: 'right' }}>{fmt(r.Calc.prorated)}</td>
-                                            <td style={{ ...S.td, textAlign: 'right' }}>{fmt(r.Calc.fuel)}</td>
-                                            <td style={{ ...S.td, textAlign: 'right', color: r.Calc.absentFine ? '#b91c1c' : '#666' }}>{fmt(r.Calc.absentFine)}</td>
-                                            <td style={{ ...S.td, textAlign: 'right', color: r.Calc.lateFine ? '#b91c1c' : '#666' }}>{fmt(r.Calc.lateFine)}</td>
-                                            <td style={S.td}>
-                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
-                                                    value={draftedFor(r.EmployeeID, 'Advance', r.Entry?.Advance ?? 0)}
-                                                    onChange={e => patch(r.EmployeeID, 'Advance', Number(e.target.value))}
-                                                    style={S.numIn}/>
-                                            </td>
-                                            <td style={S.td}>
-                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
-                                                    value={draftedFor(r.EmployeeID, 'Fine', r.Entry?.Fine ?? 0)}
-                                                    onChange={e => patch(r.EmployeeID, 'Fine', Number(e.target.value))}
-                                                    style={S.numIn}/>
-                                            </td>
-                                            <td style={S.td}>
-                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
-                                                    value={draftedFor(r.EmployeeID, 'Hold', r.Entry?.Hold ?? 0)}
-                                                    onChange={e => patch(r.EmployeeID, 'Hold', Number(e.target.value))}
-                                                    style={S.numIn}/>
-                                            </td>
-                                            <td style={S.td}>
-                                                <input type="number" step="0.5" min={0} disabled={!canEdit || !r.Employee.HasMess}
-                                                    value={draftedFor(r.EmployeeID, 'MessDays', r.Entry?.MessDays ?? 0)}
-                                                    onChange={e => patch(r.EmployeeID, 'MessDays', Number(e.target.value))}
-                                                    style={S.numIn}/>
-                                            </td>
-                                            <td style={{ ...S.td, textAlign: 'right', color: '#666' }}>{fmt(r.Calc.eobi)}</td>
-                                            <td style={S.td}>
-                                                <input type="number" step="0.01" disabled={!canEdit}
-                                                    value={draftedFor(r.EmployeeID, 'Adjustment', r.Entry?.Adjustment ?? 0)}
-                                                    onChange={e => patch(r.EmployeeID, 'Adjustment', Number(e.target.value))}
-                                                    style={S.numIn}/>
-                                            </td>
-                                            <td style={{ ...S.td, textAlign: 'right', background: '#fef3c7', fontWeight: 700 }}>{fmt(r.Calc.net)}</td>
-                                            <td style={S.td}>{r.IsPaidByBank ? <span style={S.pillBank}>Bank</span> : <span style={S.pillCash}>Cash</span>}</td>
-                                            <td style={S.td}>
-                                                {dirty && <button style={S.btnSm} onClick={() => saveOne(r.EmployeeID)}>Save</button>}
-                                                <a href={`/hr/salary-slip/${monthId}/${r.EmployeeID}/print`} target="_blank" rel="noreferrer" style={{ ...S.btnSm, textDecoration: 'none', marginLeft: 4 }}>
-                                                    Slip
-                                                </a>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                    <div className="hr-sheet-scroll">
+                        {grouped.map(g => (
+                            <section key={g.name} className="hr-dept-block">
+                                <header className="hr-dept-head" onClick={() => toggleDept(g.name)}>
+                                    <span className="hr-dept-caret">{collapsedDepts[g.name] ? '▶' : '▼'}</span>
+                                    <span className="hr-dept-name">{g.name}</span>
+                                    <span className="hr-dept-count">{g.rows.length} employees</span>
+                                    <span className="hr-dept-tot">
+                                        Net: <b>{fmt(g.net)}</b> · Add: {fmt(g.additions)} · Ded: {fmt(g.deductions)}
+                                    </span>
+                                </header>
+                                {!collapsedDepts[g.name] && (
+                                    <div className="hr-sheet-tbl-wrap">
+                                        <table className="hr-sheet-tbl">
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ width: 40 }}>#</th>
+                                                    <th style={{ width: 180 }}>Employee</th>
+                                                    <th style={{ width: 130 }}>Designation</th>
+                                                    <th className="num" style={{ width: 90 }}>Basic</th>
+                                                    <th className="num" style={{ width: 70 }}>Paid</th>
+                                                    <th className="num" style={{ width: 90 }}>Prorated</th>
+                                                    <th className="num" style={{ width: 75 }}>Fuel</th>
+                                                    <th className="num neg" style={{ width: 80 }}>Abs Fine</th>
+                                                    <th className="num neg" style={{ width: 80 }}>Late Fine</th>
+                                                    <th className="num" style={{ width: 80 }}>Advance</th>
+                                                    <th className="num" style={{ width: 70 }}>Fine</th>
+                                                    <th className="num" style={{ width: 70 }}>Hold</th>
+                                                    <th className="num" style={{ width: 70 }}>Mess Days</th>
+                                                    <th className="num" style={{ width: 70 }}>EOBI</th>
+                                                    <th className="num" style={{ width: 75 }}>Adjust</th>
+                                                    <th className="num net" style={{ width: 95 }}>Net</th>
+                                                    <th style={{ width: 60 }}>Mode</th>
+                                                    <th style={{ width: 90 }}></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {g.rows.map((r, i) => {
+                                                    const dirty = !!drafts[r.EmployeeID];
+                                                    return (
+                                                        <tr key={r.EmployeeID} className={dirty ? 'dirty' : ''}>
+                                                            <td>{r.SrNo || i+1}</td>
+                                                            <td className="emp"><b>{r.Name}</b></td>
+                                                            <td className="muted">{r.Designation || '—'}</td>
+                                                            <td className="num">{fmt(r.Calc.basic)}</td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.5" min={0} disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'PaidDays', r.Entry?.PaidDays ?? '') ?? ''}
+                                                                    onChange={e => patch(r.EmployeeID, 'PaidDays', e.target.value)}
+                                                                    className="hr-inp num" placeholder={String(r.Calc.monthDays)}/>
+                                                            </td>
+                                                            <td className="num">{fmt(r.Calc.prorated)}</td>
+                                                            <td className="num">{fmt(r.Calc.fuel)}</td>
+                                                            <td className={`num ${r.Calc.absentFine ? 'neg' : 'muted'}`}>{fmt(r.Calc.absentFine)}</td>
+                                                            <td className={`num ${r.Calc.lateFine ? 'neg' : 'muted'}`}>{fmt(r.Calc.lateFine)}</td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'Advance', r.Entry?.Advance ?? 0)}
+                                                                    onChange={e => patch(r.EmployeeID, 'Advance', Number(e.target.value))}
+                                                                    className="hr-inp num"/>
+                                                            </td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'Fine', r.Entry?.Fine ?? 0)}
+                                                                    onChange={e => patch(r.EmployeeID, 'Fine', Number(e.target.value))}
+                                                                    className="hr-inp num"/>
+                                                            </td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'Hold', r.Entry?.Hold ?? 0)}
+                                                                    onChange={e => patch(r.EmployeeID, 'Hold', Number(e.target.value))}
+                                                                    className="hr-inp num"/>
+                                                            </td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.5" min={0} disabled={!canEdit || !r.Employee.HasMess}
+                                                                    value={draftedFor(r.EmployeeID, 'MessDays', r.Entry?.MessDays ?? 0)}
+                                                                    onChange={e => patch(r.EmployeeID, 'MessDays', Number(e.target.value))}
+                                                                    className="hr-inp num" title={r.Employee.HasMess ? '' : 'Employee not enrolled in Mess'}/>
+                                                            </td>
+                                                            <td className="num muted">{fmt(r.Calc.eobi)}</td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.01" disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'Adjustment', r.Entry?.Adjustment ?? 0)}
+                                                                    onChange={e => patch(r.EmployeeID, 'Adjustment', Number(e.target.value))}
+                                                                    className="hr-inp num"/>
+                                                            </td>
+                                                            <td className="num net"><b>{fmt(r.Calc.net)}</b></td>
+                                                            <td>{r.IsPaidByBank ? <span className="hr-pill hr-pill-bank">Bank</span> : <span className="hr-pill hr-pill-cash">Cash</span>}</td>
+                                                            <td>
+                                                                {dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(r.EmployeeID).then(load)}>Save</button>}
+                                                                {!dirty && <a className="erp-btn erp-btn-sm erp-btn-ghost" href={`/hr/salary-slip/${monthId}/${r.EmployeeID}/print`} target="_blank" rel="noreferrer">Slip</a>}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </section>
+                        ))}
+                        {!grouped.length && (
+                            <div className="erp-panel" style={{ padding: 32, textAlign: 'center', color: 'var(--erp-text-muted)' }}>
+                                No active employees found.
+                            </div>
+                        )}
                     </div>
                 </>
             )}
+
+            <PageStyles/>
         </div>
     );
 }
 
-const S = {
-    pageHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-    lbl: { fontSize: 11, color: '#475569', fontWeight: 600 },
-    inp: { padding: '4px 8px', border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 12 },
-    btn: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', fontSize: 12,
-           background: '#fff', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', color: '#334155' },
-    btnPrimary: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', fontSize: 12,
-                  background: '#7c3aed', border: '1px solid #6d28d9', borderRadius: 4, cursor: 'pointer', color: '#fff' },
-    btnSm: { padding: '2px 8px', fontSize: 11, background: '#7c3aed', color: '#fff', border: 0, borderRadius: 3, cursor: 'pointer' },
-    kpiRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
-    kpi: { flex: '0 1 auto', minWidth: 100, padding: '8px 12px', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 },
-    kpiL: { fontSize: 10, textTransform: 'uppercase', color: '#64748b', letterSpacing: 0.5 },
-    kpiV: { fontSize: 15, fontWeight: 700, color: '#0f172a', marginTop: 2 },
-    actionsBar: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-    postingsBox: { padding: '8px 12px', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 6, marginBottom: 12, fontSize: 12 },
-    postingRow: { marginTop: 4 },
-    pill: (type) => ({ padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-                        background: type === 'ACCRUAL' ? '#dbeafe' : (type === 'PAY_BANK' ? '#dcfce7' : '#fef3c7'),
-                        color:      type === 'ACCRUAL' ? '#1e40af' : (type === 'PAY_BANK' ? '#166534' : '#92400e') }),
-    pillBank: { padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700, background: '#dcfce7', color: '#166534' },
-    pillCash: { padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e' },
-    tbl: { width: '100%', borderCollapse: 'collapse', fontSize: 11 },
-    th: { padding: '5px 6px', background: '#f1f5f9', textAlign: 'left', fontSize: 10, fontWeight: 700, color: '#334155',
-          borderBottom: '1px solid #cbd5e1', whiteSpace: 'nowrap' },
-    td: { padding: '3px 6px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' },
-    numIn: { width: 65, padding: '2px 4px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: 3, fontSize: 11 },
-};
+function Kpi({ label, value, sub, tone }) {
+    return (
+        <div className={`hr-kpi ${tone ? 'hr-kpi-' + tone : ''}`}>
+            <div className="hr-kpi-l">{label}</div>
+            <div className="hr-kpi-v">{value}</div>
+            {sub && <div className="hr-kpi-s">{sub}</div>}
+        </div>
+    );
+}
+
+function PageStyles() {
+    return (
+        <style>{`
+            .hr-page { padding: 12px 16px 20px; max-width: 1600px; margin: 0 auto; }
+            .hr-kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 10px 0; }
+            .hr-kpi { background: var(--erp-surface); border: 1px solid var(--erp-border); border-radius: var(--erp-radius);
+                      padding: 8px 12px; min-width: 0; }
+            .hr-kpi-l { font-size: 10px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--erp-text-muted); }
+            .hr-kpi-v { font-size: 15px; font-weight: 700; color: var(--erp-text); margin-top: 2px; letter-spacing: -0.2px; }
+            .hr-kpi-s { font-size: 10px; color: var(--erp-text-muted); margin-top: 2px; }
+            .hr-kpi-down .hr-kpi-v { color: var(--erp-red); }
+            .hr-kpi-net { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border-color: #bbf7d0; }
+            .hr-kpi-net .hr-kpi-v { color: #166534; }
+
+            .hr-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+            .hr-actions .erp-btn { text-decoration: none; }
+
+            .hr-postings { margin-bottom: 12px; padding: 8px 12px; }
+            .hr-posting-row { display: flex; gap: 10px; align-items: center; font-size: 12px; padding: 4px 0;
+                              border-top: 1px dashed var(--erp-border); }
+            .hr-posting-vno { font-weight: 600; color: var(--erp-text); }
+            .hr-posting-meta { color: var(--erp-text-muted); font-size: 11px; margin-left: auto; }
+
+            .hr-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; }
+            .hr-pill-bank { background: #dcfce7; color: #14532d; }
+            .hr-pill-cash { background: #fef3c7; color: #78350f; }
+            .hr-pill-accrual  { background: #dbeafe; color: #1e40af; }
+            .hr-pill-pay_bank { background: #dcfce7; color: #14532d; }
+            .hr-pill-pay_cash { background: #fef3c7; color: #78350f; }
+
+            .hr-sheet-scroll { display: flex; flex-direction: column; gap: 12px; }
+
+            .hr-dept-block { background: var(--erp-surface); border: 1px solid var(--erp-border);
+                             border-radius: var(--erp-radius); overflow: hidden; box-shadow: var(--erp-shadow-sm); }
+            .hr-dept-head { display: flex; gap: 12px; align-items: center; padding: 8px 12px;
+                            background: linear-gradient(180deg, #f7f7f9, #f0f0f2); border-bottom: 1px solid var(--erp-border);
+                            cursor: pointer; user-select: none; }
+            .hr-dept-caret { color: var(--erp-text-muted); font-size: 11px; width: 12px; }
+            .hr-dept-name  { font-weight: 700; font-size: 13px; color: var(--erp-text); text-transform: uppercase; letter-spacing: 0.3px; }
+            .hr-dept-count { font-size: 11px; color: var(--erp-text-muted); }
+            .hr-dept-tot   { margin-left: auto; font-size: 11.5px; color: var(--erp-text-muted); }
+            .hr-dept-tot b { color: #166534; font-weight: 700; }
+
+            .hr-sheet-tbl-wrap { overflow-x: auto; }
+            .hr-sheet-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+            .hr-sheet-tbl thead th { position: sticky; top: 0; background: #fafafb; padding: 6px 8px;
+                                     border-bottom: 1px solid var(--erp-border); text-align: left;
+                                     font-size: 10.5px; font-weight: 600; color: var(--erp-text-muted);
+                                     text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+            .hr-sheet-tbl thead th.num { text-align: right; }
+            .hr-sheet-tbl thead th.net { background: #fef3c7; color: #78350f; }
+            .hr-sheet-tbl thead th.neg { color: var(--erp-red); }
+            .hr-sheet-tbl tbody td { padding: 3px 8px; border-bottom: 1px solid #f4f4f6; white-space: nowrap; color: var(--erp-text); }
+            .hr-sheet-tbl tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+            .hr-sheet-tbl tbody td.emp { color: var(--erp-text); }
+            .hr-sheet-tbl tbody td.muted { color: var(--erp-text-muted); }
+            .hr-sheet-tbl tbody td.neg   { color: var(--erp-red); }
+            .hr-sheet-tbl tbody td.net   { background: #fffbeb; }
+            .hr-sheet-tbl tbody tr.dirty { background: #fffbea; }
+            .hr-sheet-tbl tbody tr:hover { background: var(--erp-surface-hover); }
+            .hr-sheet-tbl tbody tr.dirty:hover { background: #fef3c7; }
+
+            .hr-inp { width: 100%; height: 24px; padding: 0 6px; font-size: 11.5px;
+                      border: 1px solid var(--erp-border); border-radius: 3px;
+                      background: var(--erp-surface); color: var(--erp-text);
+                      font-variant-numeric: tabular-nums; }
+            .hr-inp.num { text-align: right; }
+            .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1); }
+            .hr-inp:disabled { background: #f7f7f9; color: var(--erp-text-muted); cursor: not-allowed; }
+        `}</style>
+    );
+}

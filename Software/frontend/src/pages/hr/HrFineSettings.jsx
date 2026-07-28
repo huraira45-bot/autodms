@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Save } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import { useCan } from '../../context/AuthContext';
+import { ErpControlPanel } from '../../components/erp';
 
 const API = '/api/hr';
 const currentMonth = () => new Date().toISOString().slice(0, 7);
@@ -55,107 +56,129 @@ export default function HrFineSettings() {
     };
 
     return (
-        <div style={{ padding: '16px 20px', maxWidth: 900 }}>
-            <h2 style={{ margin: '0 0 12px 0', fontSize: 18 }}>HR Fine Settings</h2>
+        <div className="erp-page hr-page" style={{ maxWidth: 1100 }}>
+            <ErpControlPanel title="HR Fine Settings" subtitle="Late & absent fine rates — global and per-month overrides"/>
 
-            <section style={S.card}>
-                <h3 style={S.h3}>Global Rates</h3>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-                    <div>
-                        <label style={S.lbl}>Late Fine per Minute</label>
-                        <input type="number" step="0.01" min={0} disabled={!canEdit}
-                            value={global.LateFinePerMinute}
-                            onChange={e => setGlobal({ ...global, LateFinePerMinute: Number(e.target.value) })}
-                            style={S.inp}/>
+            <section className="hr-card">
+                <div className="hr-card-head">Global Rates</div>
+                <div className="hr-card-body">
+                    <div className="hr-form-row">
+                        <label>
+                            <div className="hr-lbl">Late Fine per Minute</div>
+                            <input type="number" step="0.01" min={0} disabled={!canEdit}
+                                value={global.LateFinePerMinute}
+                                onChange={e => setGlobal({ ...global, LateFinePerMinute: Number(e.target.value) })}
+                                className="hr-inp" style={{ width: 160 }}/>
+                        </label>
+                        <label>
+                            <div className="hr-lbl">Absent Fine per Day</div>
+                            <input type="number" step="0.01" min={0} disabled={!canEdit}
+                                value={global.AbsentFinePerDay}
+                                onChange={e => setGlobal({ ...global, AbsentFinePerDay: Number(e.target.value) })}
+                                className="hr-inp" style={{ width: 160 }}/>
+                        </label>
+                        {canEdit && <button className="erp-btn erp-btn-primary" onClick={saveGlobal}><Save size={13}/> Save Global</button>}
                     </div>
-                    <div>
-                        <label style={S.lbl}>Absent Fine per Day</label>
-                        <input type="number" step="0.01" min={0} disabled={!canEdit}
-                            value={global.AbsentFinePerDay}
-                            onChange={e => setGlobal({ ...global, AbsentFinePerDay: Number(e.target.value) })}
-                            style={S.inp}/>
-                    </div>
-                    {canEdit && <button style={S.btnPrimary} onClick={saveGlobal}><Save size={13}/> Save</button>}
+                    <p className="hr-hint">
+                        Global rates apply to any month that doesn't have a per-month snapshot.
+                        Changes here retroactively affect any unposted month that hasn't been locked with a snapshot yet.
+                    </p>
                 </div>
-                <p style={S.hint}>
-                    Global rates apply to any month that doesn't have a per-month snapshot.
-                    Changing them retroactively affects unposted months only if no snapshot exists.
-                </p>
             </section>
 
-            <section style={S.card}>
-                <h3 style={S.h3}>Per-Month Snapshot</h3>
-                <p style={S.hint}>
-                    Lock rates for a specific month so future changes to global rates don't affect it.
-                    Also used when a specific month's late-fine rate should differ from global.
-                </p>
-                {canEdit && (
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
-                        <div>
-                            <label style={S.lbl}>Month</label>
-                            <input type="month" value={monthDraft.MonthID}
-                                onChange={e => setMonthDraft({ ...monthDraft, MonthID: e.target.value })}
-                                style={S.inp}/>
+            <section className="hr-card">
+                <div className="hr-card-head">Per-Month Snapshot</div>
+                <div className="hr-card-body">
+                    <p className="hr-hint" style={{ marginTop: 0 }}>
+                        Lock rates for a specific month so future global changes don't affect it, or set month-specific overrides.
+                    </p>
+                    {canEdit && (
+                        <div className="hr-form-row">
+                            <label>
+                                <div className="hr-lbl">Month</div>
+                                <input type="month" value={monthDraft.MonthID}
+                                    onChange={e => setMonthDraft({ ...monthDraft, MonthID: e.target.value })}
+                                    className="hr-inp" style={{ width: 140 }}/>
+                            </label>
+                            <label>
+                                <div className="hr-lbl">Late Fine/min</div>
+                                <input type="number" step="0.01" min={0}
+                                    placeholder={String(global.LateFinePerMinute)}
+                                    value={monthDraft.LateFinePerMinute}
+                                    onChange={e => setMonthDraft({ ...monthDraft, LateFinePerMinute: e.target.value })}
+                                    className="hr-inp" style={{ width: 140 }}/>
+                            </label>
+                            <label>
+                                <div className="hr-lbl">Absent Fine/day</div>
+                                <input type="number" step="0.01" min={0}
+                                    placeholder={String(global.AbsentFinePerDay)}
+                                    value={monthDraft.AbsentFinePerDay}
+                                    onChange={e => setMonthDraft({ ...monthDraft, AbsentFinePerDay: e.target.value })}
+                                    className="hr-inp" style={{ width: 140 }}/>
+                            </label>
+                            <button className="erp-btn erp-btn-primary" onClick={saveMonthly}><Save size={13}/> Save Snapshot</button>
                         </div>
-                        <div>
-                            <label style={S.lbl}>Late Fine/min</label>
-                            <input type="number" step="0.01" min={0}
-                                placeholder={String(global.LateFinePerMinute)}
-                                value={monthDraft.LateFinePerMinute}
-                                onChange={e => setMonthDraft({ ...monthDraft, LateFinePerMinute: e.target.value })}
-                                style={S.inp}/>
-                        </div>
-                        <div>
-                            <label style={S.lbl}>Absent Fine/day</label>
-                            <input type="number" step="0.01" min={0}
-                                placeholder={String(global.AbsentFinePerDay)}
-                                value={monthDraft.AbsentFinePerDay}
-                                onChange={e => setMonthDraft({ ...monthDraft, AbsentFinePerDay: e.target.value })}
-                                style={S.inp}/>
-                        </div>
-                        <button style={S.btnPrimary} onClick={saveMonthly}><Save size={13}/> Save Snapshot</button>
+                    )}
+
+                    <div className="hr-sheet-tbl-wrap" style={{ marginTop: 12 }}>
+                        <table className="hr-sheet-tbl">
+                            <thead>
+                                <tr>
+                                    <th style={{ width: 120 }}>Month</th>
+                                    <th className="num" style={{ width: 140 }}>Late Fine / min</th>
+                                    <th className="num" style={{ width: 140 }}>Absent Fine / day</th>
+                                    <th style={{ width: 130 }}>Updated</th>
+                                    <th>Updated By</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {monthlyList.map(m => (
+                                    <tr key={m.MonthID}>
+                                        <td><b>{m.MonthID}</b></td>
+                                        <td className="num">{Number(m.LateFinePerMinute).toFixed(2)}</td>
+                                        <td className="num">{Number(m.AbsentFinePerDay).toFixed(2)}</td>
+                                        <td className="muted">{new Date(m.UpdatedAt).toLocaleDateString('en-PK', { dateStyle: 'medium' })}</td>
+                                        <td className="muted">{m.UpdatedByName || '—'}</td>
+                                    </tr>
+                                ))}
+                                {!monthlyList.length && (
+                                    <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: 'var(--erp-text-muted)' }}>
+                                        No monthly snapshots yet.
+                                    </td></tr>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
-                )}
-
-                <table style={S.tbl}>
-                    <thead>
-                        <tr>
-                            <th style={S.th}>Month</th>
-                            <th style={{ ...S.th, textAlign: 'right' }}>Late/min</th>
-                            <th style={{ ...S.th, textAlign: 'right' }}>Absent/day</th>
-                            <th style={S.th}>Updated</th>
-                            <th style={S.th}>By</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {monthlyList.map(m => (
-                            <tr key={m.MonthID}>
-                                <td style={S.td}>{m.MonthID}</td>
-                                <td style={{ ...S.td, textAlign: 'right' }}>{Number(m.LateFinePerMinute).toFixed(2)}</td>
-                                <td style={{ ...S.td, textAlign: 'right' }}>{Number(m.AbsentFinePerDay).toFixed(2)}</td>
-                                <td style={S.td}>{new Date(m.UpdatedAt).toLocaleDateString('en-PK')}</td>
-                                <td style={S.td}>{m.UpdatedByName || '—'}</td>
-                            </tr>
-                        ))}
-                        {!monthlyList.length && (
-                            <tr><td colSpan={5} style={{ padding: 12, textAlign: 'center', color: '#94a3b8' }}>No monthly snapshots yet</td></tr>
-                        )}
-                    </tbody>
-                </table>
+                </div>
             </section>
+
+            <style>{`
+                .hr-page { padding: 12px 16px 20px; margin: 0 auto; }
+                .hr-card { background: var(--erp-surface); border: 1px solid var(--erp-border);
+                           border-radius: var(--erp-radius); overflow: hidden; box-shadow: var(--erp-shadow-sm); margin-top: 12px; }
+                .hr-card-head { padding: 8px 14px; background: linear-gradient(180deg, #f7f7f9, #f0f0f2);
+                                border-bottom: 1px solid var(--erp-border); font-weight: 700; font-size: 12.5px;
+                                text-transform: uppercase; letter-spacing: 0.4px; color: var(--erp-text); }
+                .hr-card-body { padding: 14px; }
+                .hr-form-row { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+                .hr-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.3px;
+                          color: var(--erp-text-muted); margin-bottom: 3px; font-weight: 600; }
+                .hr-inp { height: 30px; padding: 0 8px; font-size: 13px; border: 1px solid var(--erp-border);
+                          border-radius: var(--erp-radius); background: var(--erp-surface); color: var(--erp-text);
+                          font-variant-numeric: tabular-nums; }
+                .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1); }
+                .hr-hint { font-size: 12px; color: var(--erp-text-muted); margin: 12px 0 0; line-height: 1.5; }
+                .hr-sheet-tbl-wrap { overflow-x: auto; border: 1px solid var(--erp-border); border-radius: var(--erp-radius); }
+                .hr-sheet-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+                .hr-sheet-tbl thead th { padding: 6px 10px; background: #fafafb; border-bottom: 1px solid var(--erp-border);
+                                         text-align: left; font-size: 10.5px; font-weight: 600; color: var(--erp-text-muted);
+                                         text-transform: uppercase; letter-spacing: 0.3px; }
+                .hr-sheet-tbl thead th.num { text-align: right; }
+                .hr-sheet-tbl tbody td { padding: 5px 10px; border-bottom: 1px solid #f4f4f6; }
+                .hr-sheet-tbl tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+                .hr-sheet-tbl tbody td.muted { color: var(--erp-text-muted); }
+                .hr-sheet-tbl tbody tr:hover { background: var(--erp-surface-hover); }
+            `}</style>
         </div>
     );
 }
-
-const S = {
-    card: { padding: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 16 },
-    h3: { margin: '0 0 10px 0', fontSize: 14, color: '#0f172a' },
-    lbl: { display: 'block', fontSize: 11, color: '#475569', fontWeight: 600, marginBottom: 3 },
-    inp: { padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13, width: 160 },
-    hint: { fontSize: 11, color: '#64748b', margin: '8px 0 0 0' },
-    btnPrimary: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: 12,
-                  background: '#7c3aed', border: '1px solid #6d28d9', borderRadius: 4, cursor: 'pointer', color: '#fff' },
-    tbl: { width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 },
-    th: { padding: '6px 8px', background: '#f1f5f9', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#334155', borderBottom: '1px solid #cbd5e1' },
-    td: { padding: '5px 8px', borderBottom: '1px solid #f1f5f9' },
-};
