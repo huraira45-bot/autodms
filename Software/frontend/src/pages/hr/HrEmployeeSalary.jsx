@@ -226,7 +226,10 @@ export default function HrEmployeeSalary() {
                                                             placeholder="Pick GL…"
                                                         />
                                                     </td>
-                                                    <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(id).then(load).catch(()=>{})}>Save</button>}</td>
+                                                    <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={async () => {
+                                                        try { await saveOne(id); await load(); notify({ type: 'success', title: 'Saved', message: e.EmployeeName }); }
+                                                        catch (err) { console.error('saveOne failed:', err); }
+                                                    }}>Save</button>}</td>
                                                 </tr>
                                             );
                                         })}
