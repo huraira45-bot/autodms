@@ -126,6 +126,7 @@ export default function HrDeptSalaryAccounts() {
                                             onChange={v => patch(r.DepartmentID, slot.key, v)}
                                             placeholder="Pick GL…"
                                             disabled={!canEdit}
+                                            modal
                                         />
                                         <div className="hr-slot-hint">{slot.hint}</div>
                                     </div>

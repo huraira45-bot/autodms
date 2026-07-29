@@ -224,6 +224,7 @@ export default function HrEmployeeSalary() {
                                                             value={val(id, 'EmployeeGLID', e.EmployeeGLID || '')}
                                                             onChange={v => patch(id, 'EmployeeGLID', v)}
                                                             placeholder="Pick GL…"
+                                                            modal
                                                         />
                                                     </td>
                                                     <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={async () => {
