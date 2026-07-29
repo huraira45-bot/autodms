@@ -293,7 +293,12 @@ async function recordPosting(tx, { monthId, postingType, voucherId, totalAmount,
                 VALUES (@m, @pt, @vid, @ta, @ec, @un)`);
 }
 
-// (1) Accrual JV — new dept-based model (owner ask 2026-07-29).
+// (1) Accrual — new dept-based model (owner ask 2026-07-29).
+//
+// Owner ask 2026-07-30: post EOBI and Non-EOBI payrolls as SEPARATE
+// vouchers under one Post Accrual click. Each voucher's TotalAmount
+// equals that category's Employee GL Cr sum (= net payable for that
+// category). The two totals together equal total salary payable.
 //
 // For each employee:
 //   Dr {Dept.SalaryExpense EOBI or Non-EOBI}   prorated basic
@@ -320,7 +325,7 @@ exports.postAccrual = async (req, res) => {
     await tx.begin();
     try {
         const sheet = await buildSheet(pool, MonthID);
-        const payable = sheet.rows.filter(r => r.Calc.additions > 0);   // include employees whose basic > 0
+        const payable = sheet.rows.filter(r => r.Calc.additions > 0);
         if (!payable.length) throw new Error('No employees with positive earnings for this month.');
 
         // Load per-dept GL map
@@ -359,72 +364,92 @@ exports.postAccrual = async (req, res) => {
             throw new Error(`Department salary accounts not mapped: ${uniq.slice(0, 6).join('; ')}${uniq.length > 6 ? `; +${uniq.length - 6} more` : ''}. Go to HR → Dept Salary Accounts.`);
         }
 
-        // Build aggregated leg map. Key = `${glCAID}|${employeeGLID or ''}`
-        // employeeGLID as second key lets each Employee GL Cr stay as its own line
-        // (one Cr line per employee), while dept-level Drs/Crs collapse to one per (GL, dept-implicit).
-        const legs = new Map();
-        const push = (glCAID, dr, cr, narration, partyId = null) => {
-            if (!glCAID) return;
-            const key = `${glCAID}|${partyId || ''}|${dr > 0 ? 'D' : 'C'}`;
-            const existing = legs.get(key);
-            if (existing) {
-                existing.dr += dr; existing.cr += cr;
-            } else {
-                legs.set(key, { glCAID, dr, cr, narration, partyId });
+        // Helper: build & post one JV for a given filter/category
+        const buildAndPost = async (categoryLabel, rows) => {
+            if (!rows.length) return null;
+
+            const legs = new Map();
+            const push = (glCAID, dr, cr, narration) => {
+                if (!glCAID) return;
+                const key = `${glCAID}|${dr > 0 ? 'D' : 'C'}`;
+                const ex = legs.get(key);
+                if (ex) { ex.dr += dr; ex.cr += cr; }
+                else    { legs.set(key, { glCAID, dr, cr, narration }); }
+            };
+            // Per-employee Employee GL Cr — kept as its own line, not aggregated,
+            // so the subsidiary trail per employee stays clear.
+            const empLegs = [];
+
+            let payableTotal = 0;
+            for (const r of rows) {
+                const c = r.Calc;
+                const acct = deptMap.get(r.Employee.DepartmentID);
+                const deptNar = `${r.DepartmentName || ''} salary ${MonthID}`;
+
+                const salaryGL = r.Employee.HasEOBI ? acct.SalaryExpenseEobiGLID : acct.SalaryExpenseNonEobiGLID;
+                if (c.prorated > 0)       push(salaryGL,               c.prorated,     0, `${deptNar} — basic (${r.Employee.HasEOBI ? 'EOBI' : 'Non-EOBI'})`);
+                if (c.fuel > 0)           push(acct.FuelExpenseGLID,   c.fuel,         0, `${deptNar} — fuel`);
+                if (c.absentFine > 0)     push(acct.AbsentFineGLID,    0, c.absentFine,   `${deptNar} — absent fine`);
+                if (c.lateFine > 0)       push(acct.LateFineGLID,      0, c.lateFine,     `${deptNar} — late fine`);
+                if (c.manualFine > 0)     push(acct.ManualFineGLID,    0, c.manualFine,   `${deptNar} — manual fine`);
+                if (c.messDeduction > 0)  push(acct.MessRecoveryGLID,  0, c.messDeduction,`${deptNar} — mess`);
+                if (c.eobi > 0)           push(acct.EobiPayableGLID,   0, c.eobi,         `${deptNar} — EOBI payable`);
+
+                const empCr = r2(c.additions - c.absentFine - c.lateFine - c.manualFine - c.messDeduction - c.eobi);
+                if (empCr !== 0) {
+                    empLegs.push({ glCAID: r.Employee.EmployeeGLID, dr: 0, cr: empCr, narration: `Salary ${MonthID} — ${r.Name}` });
+                    payableTotal = r2(payableTotal + empCr);
+                }
             }
+
+            const dedupedLegs = Array.from(legs.values())
+                .map(l => ({ ...l, dr: r2(l.dr), cr: r2(l.cr) }))
+                .filter(l => l.dr > 0 || l.cr > 0)
+                .concat(empLegs);
+
+            const totalDr = r2(dedupedLegs.reduce((s, l) => s + l.dr, 0));
+            const totalCr = r2(dedupedLegs.reduce((s, l) => s + l.cr, 0));
+            if (Math.abs(totalDr - totalCr) > 0.01) {
+                throw new Error(`${categoryLabel} JV unbalanced: Dr ${totalDr} vs Cr ${totalCr}`);
+            }
+
+            const voucherNo = await nextVoucherNo(tx, 'JV');
+            const narration = `Salary accrual ${MonthID} — ${categoryLabel}`;
+            const voucherId = await insertVoucherHeader(tx, {
+                voucherNo, voucherTypeCode: 'JV',
+                date: new Date(PostDate),
+                narration,
+                // TotalAmount = net payable for this category (= sum of Employee GL Crs).
+                // Sum of both vouchers' TotalAmount == total salary payable on the sheet.
+                totalAmount: payableTotal,
+                srcType: 'HR_SALARY_ACCRUAL', srcId: null, user: req.user
+            });
+            for (const l of dedupedLegs) {
+                await insertLeg(tx, { voucherId, glCAID: l.glCAID, dr: l.dr, cr: l.cr, narration: l.narration });
+            }
+            await postDraftToPosted(tx, voucherId, req.user);
+            await recordPosting(tx, {
+                monthId: MonthID, postingType: 'ACCRUAL', voucherId,
+                totalAmount: payableTotal, employeeCount: rows.length, user: req.user
+            });
+            return { voucherNo, voucherId, totalAmount: payableTotal, employees: rows.length, legs: dedupedLegs.length, category: categoryLabel };
         };
 
-        for (const r of payable) {
-            const c = r.Calc;
-            const acct = deptMap.get(r.Employee.DepartmentID);
-            const empGL = r.Employee.EmployeeGLID;
-            const empNar = `Salary ${MonthID} — ${r.Name}`;
-            const deptNar = `${r.DepartmentName || ''} salary ${MonthID}`;
-
-            const salaryGL = r.Employee.HasEOBI ? acct.SalaryExpenseEobiGLID : acct.SalaryExpenseNonEobiGLID;
-            if (c.prorated > 0)       push(salaryGL,               c.prorated,     0, `${deptNar} — basic (${r.Employee.HasEOBI ? 'EOBI' : 'Non-EOBI'})`);
-            if (c.fuel > 0)           push(acct.FuelExpenseGLID,   c.fuel,         0, `${deptNar} — fuel`);
-            if (c.absentFine > 0)     push(acct.AbsentFineGLID,    0, c.absentFine,   `${deptNar} — absent fine`);
-            if (c.lateFine > 0)       push(acct.LateFineGLID,      0, c.lateFine,     `${deptNar} — late fine`);
-            if (c.manualFine > 0)     push(acct.ManualFineGLID,    0, c.manualFine,   `${deptNar} — manual fine`);
-            if (c.messDeduction > 0)  push(acct.MessRecoveryGLID,  0, c.messDeduction,`${deptNar} — mess`);
-            if (c.eobi > 0)           push(acct.EobiPayableGLID,   0, c.eobi,         `${deptNar} — EOBI payable`);
-
-            // Balancing Cr on Employee GL = additions − (fine legs + mess + eobi)
-            const empCr = r2(c.additions - c.absentFine - c.lateFine - c.manualFine - c.messDeduction - c.eobi);
-            if (empCr !== 0) push(empGL, 0, empCr, empNar);
-        }
-
-        // Round every leg
-        const finalLegs = Array.from(legs.values()).map(l => ({
-            ...l, dr: r2(l.dr), cr: r2(l.cr),
-        })).filter(l => l.dr > 0 || l.cr > 0);
-
-        const totalDr = r2(finalLegs.reduce((s, l) => s + l.dr, 0));
-        const totalCr = r2(finalLegs.reduce((s, l) => s + l.cr, 0));
-        if (Math.abs(totalDr - totalCr) > 0.01) {
-            throw new Error(`Salary JV unbalanced: Dr ${totalDr} vs Cr ${totalCr}`);
-        }
-
-        const voucherNo = await nextVoucherNo(tx, 'JV');
-        const narration = `Salary accrual for ${MonthID}`;
-        const voucherId = await insertVoucherHeader(tx, {
-            voucherNo, voucherTypeCode: 'JV',
-            date: new Date(PostDate),
-            narration, totalAmount: totalDr,
-            srcType: 'HR_SALARY_ACCRUAL', srcId: null, user: req.user
-        });
-        for (const l of finalLegs) {
-            await insertLeg(tx, { voucherId, glCAID: l.glCAID, dr: l.dr, cr: l.cr, narration: l.narration, partyId: null });
-        }
-        await postDraftToPosted(tx, voucherId, req.user);
-        await recordPosting(tx, {
-            monthId: MonthID, postingType: 'ACCRUAL', voucherId,
-            totalAmount: totalDr, employeeCount: payable.length, user: req.user
-        });
+        const eobiRows    = payable.filter(r => r.Employee.HasEOBI);
+        const nonEobiRows = payable.filter(r => !r.Employee.HasEOBI);
+        const results = [];
+        const eobiRes    = await buildAndPost('EOBI',     eobiRows);      if (eobiRes)    results.push(eobiRes);
+        const nonEobiRes = await buildAndPost('Non-EOBI', nonEobiRows);   if (nonEobiRes) results.push(nonEobiRes);
+        if (!results.length) throw new Error('No accrual to post.');
 
         await tx.commit();
-        res.json({ ok: true, voucherNo, voucherId, totalAmount: totalDr, employees: payable.length, legs: finalLegs.length });
+        const totalPayable = r2(results.reduce((s, r) => s + r.totalAmount, 0));
+        res.json({
+            ok: true,
+            vouchers: results,
+            totalPayable,
+            totalEmployees: results.reduce((s, r) => s + r.employees, 0),
+        });
     } catch (err) {
         try { await tx.rollback(); } catch {}
         res.status(400).json({ error: err.message });

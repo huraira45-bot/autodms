@@ -92,7 +92,13 @@ export default function HrSalarySheet() {
         try {
             setBusy(true);
             const res = await axios.post(`${API}/post/accrual`, { MonthID: monthId, PostDate: postDate });
-            notify({ type: 'success', title: `Salary accrual posted`, message: `${res.data.voucherNo} · PKR ${fmt(res.data.totalAmount)} · ${res.data.employees} emp · ${res.data.legs} lines` });
+            const summary = (res.data.vouchers || []).map(v =>
+                `${v.category}: ${v.voucherNo} · PKR ${fmt(v.totalAmount)} · ${v.employees} emp`).join(' · ');
+            notify({
+                type: 'success',
+                title: `Accrual posted — ${res.data.vouchers?.length || 0} vouchers`,
+                message: `Total payable: PKR ${fmt(res.data.totalPayable)} across ${res.data.totalEmployees} employees. ${summary}`,
+            });
             setPostModalOpen(false);
             await load();
         } catch (err) {
