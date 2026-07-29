@@ -87,7 +87,6 @@ export default function HrSalarySheetPrint() {
                                 <th className="num">Fine</th>
                                 <th className="num">EOBI</th>
                                 <th className="num">Hold</th>
-                                <th className="num">Adjust</th>
                                 <th className="num net">Net</th>
                                 <th>Mode</th>
                             </tr>
@@ -108,13 +107,12 @@ export default function HrSalarySheetPrint() {
                                     <td className="num">{fmt(r.Calc.manualFine)}</td>
                                     <td className="num">{fmt(r.Calc.eobi)}</td>
                                     <td className="num">{fmt(r.Calc.hold)}</td>
-                                    <td className="num">{fmt(r.Calc.adjustment)}</td>
                                     <td className="num net">{fmt(r.Calc.net)}</td>
                                     <td>{r.IsPaidByBank ? 'Bank' : 'Cash'}</td>
                                 </tr>
                             ))}
                             <tr className="subtot">
-                                <td colSpan={14} className="right">Department Subtotal — {g.name}</td>
+                                <td colSpan={13} className="right">Department Subtotal — {g.name}</td>
                                 <td className="num net">{fmt(g.subtotal)}</td>
                                 <td></td>
                             </tr>

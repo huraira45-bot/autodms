@@ -60,7 +60,9 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const prorated  = r2((basic / monthDays) * paidDays);
 
     const fuel      = emp.HasFuelAllowance ? Number(emp.FuelAllowance || 0) : 0;
-    const adjustment = Number(ent.Adjustment || 0);
+    // Adjustment column removed 2026-07-29 per owner. Kept in DB with default 0 for
+    // existing rows; no longer surfaced in UI or included in the calc.
+    const adjustment = 0;
 
     const additions = r2(prorated + fuel + adjustment);
 

@@ -27,6 +27,8 @@ export default function HrSalarySheet() {
     const [postings, setPostings] = useState([]);
     const [busy, setBusy] = useState(false);
     const [collapsedDepts, setCollapsedDepts] = useState({});
+    const [postModalOpen, setPostModalOpen] = useState(false);
+    const [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10));
 
     const load = async () => {
         try {
@@ -86,20 +88,15 @@ export default function HrSalarySheet() {
         } catch {}
     };
 
-    const runPost = async (endpoint, label) => {
-        const ok = await confirm({
-            title: `${label}?`,
-            message: `This will post a voucher for ${monthLabel(monthId)}. Continue?`,
-            confirmText: `Post ${label}`,
-        });
-        if (!ok) return;
+    const runAccrual = async () => {
         try {
             setBusy(true);
-            const res = await axios.post(`${API}/post/${endpoint}`, { MonthID: monthId });
-            notify({ type: 'success', title: `${label} posted`, message: `${res.data.voucherNo} · PKR ${fmt(res.data.totalAmount)} · ${res.data.employees} emp` });
+            const res = await axios.post(`${API}/post/accrual`, { MonthID: monthId, PostDate: postDate });
+            notify({ type: 'success', title: `Salary accrual posted`, message: `${res.data.voucherNo} · PKR ${fmt(res.data.totalAmount)} · ${res.data.employees} emp · ${res.data.legs} lines` });
+            setPostModalOpen(false);
             await load();
         } catch (err) {
-            notify({ type: 'error', title: `${label} failed`, message: err.response?.data?.error || err.message });
+            notify({ type: 'error', title: `Accrual failed`, message: err.response?.data?.error || err.message });
         } finally { setBusy(false); }
     };
 
@@ -203,17 +200,8 @@ export default function HrSalarySheet() {
                     <div className="hr-actions">
                         {canPost && (
                             <>
-                                <button className="erp-btn" onClick={() => runPost('accrual', 'Salary Accrual')}>
+                                <button className="erp-btn erp-btn-primary" onClick={() => setPostModalOpen(true)}>
                                     <FileText size={13}/> Post Accrual (JV)
-                                </button>
-                                <button className="erp-btn" onClick={() => runPost('pay-bank', 'Bank Payment (EOBI)')}>
-                                    <Landmark size={13}/> Pay Bank — EOBI (BPV)
-                                </button>
-                                <button className="erp-btn" onClick={() => runPost('pay-cash-eobi', 'Cash Payment (EOBI)')}>
-                                    <Wallet size={13}/> Pay Cash — EOBI (CPV)
-                                </button>
-                                <button className="erp-btn" onClick={() => runPost('pay-cash-noneobi', 'Cash Payment (Non-EOBI)')}>
-                                    <Wallet size={13}/> Pay Cash — Non-EOBI (CPV)
                                 </button>
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
@@ -296,7 +284,6 @@ export default function HrSalarySheet() {
                                                     <th className="num" style={{ width: 70 }}>Hold</th>
                                                     <th className="num" style={{ width: 70 }}>Mess Days</th>
                                                     <th className="num" style={{ width: 70 }}>EOBI</th>
-                                                    <th className="num" style={{ width: 75 }}>Adjust</th>
                                                     <th className="num net" style={{ width: 95 }}>Net</th>
                                                     <th style={{ width: 60 }}>Mode</th>
                                                     <th style={{ width: 90 }}></th>
@@ -346,12 +333,6 @@ export default function HrSalarySheet() {
                                                                     className="hr-inp num" title={r.Employee.HasMess ? '' : 'Employee not enrolled in Mess'}/>
                                                             </td>
                                                             <td className="num muted">{fmt(r.Calc.eobi)}</td>
-                                                            <td className="num">
-                                                                <input type="number" step="0.01" disabled={!canEdit}
-                                                                    value={draftedFor(r.EmployeeID, 'Adjustment', r.Entry?.Adjustment ?? 0)}
-                                                                    onChange={e => patch(r.EmployeeID, 'Adjustment', Number(e.target.value))}
-                                                                    className="hr-inp num"/>
-                                                            </td>
                                                             <td className="num net"><b>{fmt(r.Calc.net)}</b></td>
                                                             <td>
                                                                 {r.Employee.HasEOBI
@@ -384,6 +365,33 @@ export default function HrSalarySheet() {
                 </>
             )}
 
+            {postModalOpen && (
+                <div className="hr-modal-bg" onClick={() => setPostModalOpen(false)}>
+                    <div className="hr-modal" onClick={e => e.stopPropagation()}>
+                        <div className="hr-modal-head">Post Salary Accrual (JV)</div>
+                        <div className="hr-modal-body">
+                            <p>Post the salary accrual JV for <b>{monthLabel(monthId)}</b>.</p>
+                            <label style={{ display: 'block', marginTop: 12 }}>
+                                <div className="hr-lbl">Voucher Date</div>
+                                <input type="date" value={postDate}
+                                    onChange={e => setPostDate(e.target.value)}
+                                    className="hr-inp" style={{ width: '100%', height: 34 }}/>
+                            </label>
+                            <p className="hr-hint" style={{ marginTop: 10 }}>
+                                Journal is built from Employee GLs + per-department salary accounts.
+                                Any employee missing a Salary GL, or any department missing a required
+                                account, will block the post with a specific message.
+                            </p>
+                        </div>
+                        <div className="hr-modal-foot">
+                            <button className="erp-btn" onClick={() => setPostModalOpen(false)}>Cancel</button>
+                            <button className="erp-btn erp-btn-primary" disabled={busy || !postDate} onClick={runAccrual}>
+                                {busy ? 'Posting…' : 'Post JV'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <PageStyles/>
         </div>
     );
@@ -484,6 +492,21 @@ function PageStyles() {
             .hr-inp.num { text-align: right; }
             .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1); }
             .hr-inp:disabled { background: #f7f7f9; color: var(--erp-text-muted); cursor: not-allowed; }
+            .hr-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;
+                      color: var(--erp-text-muted); font-weight: 600; margin-bottom: 4px; }
+            .hr-hint { font-size: 11.5px; color: var(--erp-text-muted); line-height: 1.5; margin: 0; }
+
+            .hr-modal-bg { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+                           display: flex; align-items: center; justify-content: center; z-index: 100; }
+            .hr-modal { background: var(--erp-surface); border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+                        width: 420px; max-width: calc(100vw - 40px); overflow: hidden; }
+            .hr-modal-head { padding: 12px 16px; font-weight: 700; font-size: 14px;
+                             background: linear-gradient(180deg, #f7f7f9, #f0f0f2);
+                             border-bottom: 1px solid var(--erp-border); }
+            .hr-modal-body { padding: 16px; font-size: 13px; color: var(--erp-text); }
+            .hr-modal-body p { margin: 0 0 10px; line-height: 1.5; }
+            .hr-modal-foot { padding: 10px 16px; display: flex; gap: 8px; justify-content: flex-end;
+                             background: #fafafb; border-top: 1px solid var(--erp-border); }
         `}</style>
     );
 }

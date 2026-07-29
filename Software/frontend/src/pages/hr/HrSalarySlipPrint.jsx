@@ -53,7 +53,6 @@ export default function HrSalarySlipPrint() {
                     <tbody>
                         <tr><td>Basic (× {c.paidDays}/{c.monthDays})</td><td>{fmt(c.prorated)}</td></tr>
                         <tr><td>Fuel Allowance</td><td>{fmt(c.fuel)}</td></tr>
-                        {c.adjustment ? <tr><td>Manual Adjustment</td><td>{fmt(c.adjustment)}</td></tr> : null}
                         <tr className="total"><td>Total Additions</td><td>{fmt(c.additions)}</td></tr>
                     </tbody>
                 </table>

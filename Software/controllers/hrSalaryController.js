@@ -290,127 +290,149 @@ async function recordPosting(tx, { monthId, postingType, voucherId, totalAmount,
                 VALUES (@m, @pt, @vid, @ta, @ec, @un)`);
 }
 
-// (1) Accrual: Dr Salary Expense (per employee, gross-of-deductions "additions"),
-//              Dr each deduction routes to specific liability if wired, else pooled.
-// For MVP we do the salary system's original simple model:
-//   Dr SALARY_EXPENSE       Σ net
-//   Cr SALARY_PAYABLE       Σ net
-// (Owner can extend later to split EOBI etc. into separate legs.)
+// (1) Accrual JV — new dept-based model (owner ask 2026-07-29).
+//
+// For each employee:
+//   Dr {Dept.SalaryExpense EOBI or Non-EOBI}   prorated basic
+//   Dr {Dept.Fuel Expense}                     fuel allowance
+//     Cr {Dept.Absent Fine}                    absent fine
+//     Cr {Dept.Late Fine}                      late fine
+//     Cr {Dept.Manual Fine}                    manual fine
+//     Cr {Dept.Mess Recovery}                  mess deduction
+//     Cr {Dept.EOBI Payable}                   EOBI amount
+//     Cr Employee GL (EmployeeGLID)            balancing = additions − above credits
+//
+// Advance & Hold flow naturally through Employee GL (no separate legs).
+//
+// Body: { MonthID, PostDate (YYYY-MM-DD) }
+// Validates every employee has EmployeeGLID and every dept has the
+// required GLs mapped, else refuses with a specific error.
 exports.postAccrual = async (req, res) => {
-    const { MonthID } = req.body || {};
-    if (!MonthID) return res.status(400).json({ error: 'MonthID required' });
+    const { MonthID, PostDate } = req.body || {};
+    if (!MonthID)  return res.status(400).json({ error: 'MonthID required' });
+    if (!PostDate) return res.status(400).json({ error: 'PostDate required' });
+
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {
-        const salaryExpGL = await loadRoleOrThrow('SALARY_EXPENSE');
-        const salaryPayGL = await loadRoleOrThrow('SALARY_PAYABLE');
-
         const sheet = await buildSheet(pool, MonthID);
-        const payable = sheet.rows.filter(r => r.Calc.net > 0);
-        if (!payable.length) throw new Error('No payable employees for this month.');
-        const total = r2(payable.reduce((s, r) => s + r.Calc.net, 0));
+        const payable = sheet.rows.filter(r => r.Calc.additions > 0);   // include employees whose basic > 0
+        if (!payable.length) throw new Error('No employees with positive earnings for this month.');
+
+        // Load per-dept GL map
+        const deptRes = await new sql.Request(tx).query(`
+            SELECT DepartmentID, SalaryExpenseEobiGLID, SalaryExpenseNonEobiGLID, FuelExpenseGLID,
+                   AbsentFineGLID, LateFineGLID, ManualFineGLID, MessRecoveryGLID, EobiPayableGLID
+              FROM hr_DepartmentSalaryAccounts`);
+        const deptMap = new Map(deptRes.recordset.map(d => [d.DepartmentID, d]));
+
+        // Validate every employee has EmployeeGLID + every dept used has all required GLs
+        const missingEmp = payable.filter(r => !r.Employee.EmployeeGLID);
+        if (missingEmp.length) {
+            throw new Error(`No Employee GL mapped for: ${missingEmp.slice(0, 5).map(r => r.Name).join(', ')}${missingEmp.length > 5 ? ` + ${missingEmp.length - 5} more` : ''}. Set 'Salary GL' in Employee Salary Settings.`);
+        }
+        const missingDept = [];
+        const check = (r, key, label) => {
+            const acct = deptMap.get(r.Employee.DepartmentID);
+            if (!acct || !acct[key]) {
+                const deptName = r.DepartmentName || `Dept #${r.Employee.DepartmentID}`;
+                missingDept.push(`${deptName}: ${label}`);
+            }
+        };
+        payable.forEach(r => {
+            const c = r.Calc;
+            if (c.prorated > 0) check(r, r.Employee.HasEOBI ? 'SalaryExpenseEobiGLID' : 'SalaryExpenseNonEobiGLID',
+                                       r.Employee.HasEOBI ? 'Salary Expense (EOBI)' : 'Salary Expense (Non-EOBI)');
+            if (c.fuel > 0)         check(r, 'FuelExpenseGLID',   'Fuel Expense');
+            if (c.absentFine > 0)   check(r, 'AbsentFineGLID',    'Absent Fine');
+            if (c.lateFine > 0)     check(r, 'LateFineGLID',      'Late Fine');
+            if (c.manualFine > 0)   check(r, 'ManualFineGLID',    'Manual Fine');
+            if (c.messDeduction > 0)check(r, 'MessRecoveryGLID',  'Mess Recovery');
+            if (c.eobi > 0)         check(r, 'EobiPayableGLID',   'EOBI Payable');
+        });
+        if (missingDept.length) {
+            const uniq = Array.from(new Set(missingDept));
+            throw new Error(`Department salary accounts not mapped: ${uniq.slice(0, 6).join('; ')}${uniq.length > 6 ? `; +${uniq.length - 6} more` : ''}. Go to HR → Dept Salary Accounts.`);
+        }
+
+        // Build aggregated leg map. Key = `${glCAID}|${employeeGLID or ''}`
+        // employeeGLID as second key lets each Employee GL Cr stay as its own line
+        // (one Cr line per employee), while dept-level Drs/Crs collapse to one per (GL, dept-implicit).
+        const legs = new Map();
+        const push = (glCAID, dr, cr, narration, partyId = null) => {
+            if (!glCAID) return;
+            const key = `${glCAID}|${partyId || ''}|${dr > 0 ? 'D' : 'C'}`;
+            const existing = legs.get(key);
+            if (existing) {
+                existing.dr += dr; existing.cr += cr;
+            } else {
+                legs.set(key, { glCAID, dr, cr, narration, partyId });
+            }
+        };
+
+        for (const r of payable) {
+            const c = r.Calc;
+            const acct = deptMap.get(r.Employee.DepartmentID);
+            const empGL = r.Employee.EmployeeGLID;
+            const empNar = `Salary ${MonthID} — ${r.Name}`;
+            const deptNar = `${r.DepartmentName || ''} salary ${MonthID}`;
+
+            const salaryGL = r.Employee.HasEOBI ? acct.SalaryExpenseEobiGLID : acct.SalaryExpenseNonEobiGLID;
+            if (c.prorated > 0)       push(salaryGL,               c.prorated,     0, `${deptNar} — basic (${r.Employee.HasEOBI ? 'EOBI' : 'Non-EOBI'})`);
+            if (c.fuel > 0)           push(acct.FuelExpenseGLID,   c.fuel,         0, `${deptNar} — fuel`);
+            if (c.absentFine > 0)     push(acct.AbsentFineGLID,    0, c.absentFine,   `${deptNar} — absent fine`);
+            if (c.lateFine > 0)       push(acct.LateFineGLID,      0, c.lateFine,     `${deptNar} — late fine`);
+            if (c.manualFine > 0)     push(acct.ManualFineGLID,    0, c.manualFine,   `${deptNar} — manual fine`);
+            if (c.messDeduction > 0)  push(acct.MessRecoveryGLID,  0, c.messDeduction,`${deptNar} — mess`);
+            if (c.eobi > 0)           push(acct.EobiPayableGLID,   0, c.eobi,         `${deptNar} — EOBI payable`);
+
+            // Balancing Cr on Employee GL = additions − (fine legs + mess + eobi)
+            const empCr = r2(c.additions - c.absentFine - c.lateFine - c.manualFine - c.messDeduction - c.eobi);
+            if (empCr !== 0) push(empGL, 0, empCr, empNar);
+        }
+
+        // Round every leg
+        const finalLegs = Array.from(legs.values()).map(l => ({
+            ...l, dr: r2(l.dr), cr: r2(l.cr),
+        })).filter(l => l.dr > 0 || l.cr > 0);
+
+        const totalDr = r2(finalLegs.reduce((s, l) => s + l.dr, 0));
+        const totalCr = r2(finalLegs.reduce((s, l) => s + l.cr, 0));
+        if (Math.abs(totalDr - totalCr) > 0.01) {
+            throw new Error(`Salary JV unbalanced: Dr ${totalDr} vs Cr ${totalCr}`);
+        }
 
         const voucherNo = await nextVoucherNo(tx, 'JV');
         const narration = `Salary accrual for ${MonthID}`;
         const voucherId = await insertVoucherHeader(tx, {
-            voucherNo, voucherTypeCode: 'JV', date: new Date(),
-            narration, totalAmount: total,
+            voucherNo, voucherTypeCode: 'JV',
+            date: new Date(PostDate),
+            narration, totalAmount: totalDr,
             srcType: 'HR_SALARY_ACCRUAL', srcId: null, user: req.user
         });
-        await insertLeg(tx, { voucherId, glCAID: salaryExpGL, dr: total, cr: 0, narration });
-        await insertLeg(tx, { voucherId, glCAID: salaryPayGL, dr: 0, cr: total, narration });
+        for (const l of finalLegs) {
+            await insertLeg(tx, { voucherId, glCAID: l.glCAID, dr: l.dr, cr: l.cr, narration: l.narration, partyId: null });
+        }
         await postDraftToPosted(tx, voucherId, req.user);
-        await recordPosting(tx, { monthId: MonthID, postingType: 'ACCRUAL', voucherId, totalAmount: total, employeeCount: payable.length, user: req.user });
-
-        await tx.commit();
-        res.json({ ok: true, voucherNo, voucherId, totalAmount: total, employees: payable.length });
-    } catch (err) {
-        try { await tx.rollback(); } catch {}
-        res.status(400).json({ error: err.message });
-    }
-};
-
-// Payroll categorisation (owner ask 2026-07-29):
-//   Non-EOBI employees are ALWAYS paid in cash (never bank).
-//   EOBI employees may be paid via bank OR cash.
-// So there are three payment vouchers:
-//   (2) Pay Bank         — EOBI + IsPaidByBank employees
-//   (3) Pay Cash EOBI    — EOBI + !IsPaidByBank employees
-//   (4) Pay Cash Non-EOBI — !EOBI + !IsPaidByBank employees
-// Each posts its own voucher so accounts can keep the two payrolls
-// (EOBI / non-EOBI) on separate ledger trails if wanted.
-
-async function postPayment(pool, req, res, { category, filter, voucherTypeCode, postingType, glRoleName }) {
-    const { MonthID, BankGLCAID } = req.body || {};
-    if (!MonthID) return res.status(400).json({ error: 'MonthID required' });
-    const tx = new sql.Transaction(pool);
-    await tx.begin();
-    try {
-        const salaryPayGL = await loadRoleOrThrow('SALARY_PAYABLE');
-        const bankGL      = BankGLCAID ? Number(BankGLCAID) : null;
-        const contraGL    = bankGL || await loadRoleOrThrow(glRoleName);
-
-        const sheet = await buildSheet(pool, MonthID);
-        const emp = sheet.rows.filter(r => filter(r) && r.Calc.net > 0);
-        if (!emp.length) throw new Error(`No payable employees for "${category}" this month.`);
-        const total = r2(emp.reduce((s, r) => s + r.Calc.net, 0));
-
-        const voucherNo = await nextVoucherNo(tx, voucherTypeCode);
-        const narration = `${category} salary payment for ${MonthID}`;
-        const voucherId = await insertVoucherHeader(tx, {
-            voucherNo, voucherTypeCode, date: new Date(),
-            narration, totalAmount: total,
-            srcType: `HR_SALARY_${postingType}`, srcId: null, user: req.user
+        await recordPosting(tx, {
+            monthId: MonthID, postingType: 'ACCRUAL', voucherId,
+            totalAmount: totalDr, employeeCount: payable.length, user: req.user
         });
-        await insertLeg(tx, { voucherId, glCAID: salaryPayGL, dr: total, cr: 0, narration });
-        await insertLeg(tx, { voucherId, glCAID: contraGL,    dr: 0, cr: total, narration });
-        await postDraftToPosted(tx, voucherId, req.user);
-        await recordPosting(tx, { monthId: MonthID, postingType, voucherId, totalAmount: total, employeeCount: emp.length, user: req.user });
 
         await tx.commit();
-        res.json({ ok: true, voucherNo, voucherId, totalAmount: total, employees: emp.length, category });
+        res.json({ ok: true, voucherNo, voucherId, totalAmount: totalDr, employees: payable.length, legs: finalLegs.length });
     } catch (err) {
         try { await tx.rollback(); } catch {}
         res.status(400).json({ error: err.message });
     }
-}
-
-// (2) Pay via bank — EOBI employees with IsPaidByBank = 1
-exports.postPayBank = async (req, res) => {
-    const pool = await getPool();
-    return postPayment(pool, req, res, {
-        category:        'Bank (EOBI)',
-        filter:          r => r.IsPaidByBank && r.Employee.HasEOBI,
-        voucherTypeCode: 'BPV',
-        postingType:     'PAY_BANK',
-        glRoleName:      'CASH_BOOK',   // bank clearing fallback
-    });
 };
 
-// (3) Pay via cash — EOBI employees with IsPaidByBank = 0
-exports.postPayCashEobi = async (req, res) => {
-    const pool = await getPool();
-    return postPayment(pool, req, res, {
-        category:        'Cash — EOBI',
-        filter:          r => !r.IsPaidByBank && r.Employee.HasEOBI,
-        voucherTypeCode: 'CPV',
-        postingType:     'PAY_CASH_EOBI',
-        glRoleName:      'CASH_BOOK',
-    });
-};
-
-// (4) Pay via cash — non-EOBI employees (always cash)
-exports.postPayCashNonEobi = async (req, res) => {
-    const pool = await getPool();
-    return postPayment(pool, req, res, {
-        category:        'Cash — Non-EOBI',
-        filter:          r => !r.IsPaidByBank && !r.Employee.HasEOBI,
-        voucherTypeCode: 'CPV',
-        postingType:     'PAY_CASH_NONEOBI',
-        glRoleName:      'CASH_BOOK',
-    });
-};
+// Payment vouchers (bank / cash) — REMOVED per owner ask 2026-07-29.
+// The new model uses ONE accrual JV (see postAccrual above rewrite) that
+// posts per-department expense Drs and per-employee GL Crs. Actual cash
+// disbursement is done via existing CPV/BPV screens transferring from
+// Employee GL to Cash/Bank when payment happens.
 
 exports.listPostings = async (req, res) => {
     try {

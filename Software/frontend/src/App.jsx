@@ -66,6 +66,7 @@ import HrAttendance       from './pages/hr/HrAttendance';
 import HrSalarySheet      from './pages/hr/HrSalarySheet';
 import HrEmployeeSalary   from './pages/hr/HrEmployeeSalary';
 import HrFineSettings     from './pages/hr/HrFineSettings';
+import HrDeptSalaryAccounts from './pages/hr/HrDeptSalaryAccounts';
 import HrSalarySlipPrint  from './pages/hr/HrSalarySlipPrint';
 import HrSalarySheetPrint from './pages/hr/HrSalarySheetPrint';
 import HrBankLetterPrint  from './pages/hr/HrBankLetterPrint';
@@ -1272,6 +1273,9 @@ function AppShell() {
                     } />
                     <Route path="/hr/fine-settings" element={
                         <ProtectedRoute moduleKey="hr_settings"><HrFineSettings /></ProtectedRoute>
+                    } />
+                    <Route path="/hr/dept-accounts" element={
+                        <ProtectedRoute moduleKey="hr_settings"><HrDeptSalaryAccounts /></ProtectedRoute>
                     } />
                     <Route path="/hr/salary-slip/:monthId/:employeeId/print" element={<HrSalarySlipPrint />} />
                     <Route path="/hr/salary/:monthId/print"                  element={<HrSalarySheetPrint />} />
