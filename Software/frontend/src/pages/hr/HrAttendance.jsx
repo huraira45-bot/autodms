@@ -184,7 +184,7 @@ export default function HrAttendance() {
                                                             onChange={ev => patch(e.EmployeeID, 'WorkingDays', Number(ev.target.value))}
                                                             className="hr-inp num"/>
                                                     </td>
-                                                    <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(e.EmployeeID)}>Save</button>}</td>
+                                                    <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(e.EmployeeID).then(load).catch(()=>{})}>Save</button>}</td>
                                                 </tr>
                                             );
                                         })}

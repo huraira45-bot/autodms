@@ -226,7 +226,7 @@ export default function HrEmployeeSalary() {
                                                             placeholder="Pick GL…"
                                                         />
                                                     </td>
-                                                    <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(id)}>Save</button>}</td>
+                                                    <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(id).then(load).catch(()=>{})}>Save</button>}</td>
                                                 </tr>
                                             );
                                         })}
