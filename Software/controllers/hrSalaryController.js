@@ -30,6 +30,17 @@ const { resolveRole } = require('./systemAccountsController');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// Parse a "YYYY-MM-DD" (or "YYYY-MM-DDTHH:MM") into a Date whose UTC
+// face matches the picked wall-clock, so mssql stores the literal
+// date without a timezone shift. Same pattern as the JobCard fix.
+const parseWallDate = (v) => {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(String(v));
+    if (!m) return new Date(v);
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)));
+};
+
 // ─── Attendance ────────────────────────────────────────────────
 exports.listAttendance = async (req, res) => {
     try {
@@ -417,7 +428,7 @@ exports.postAccrual = async (req, res) => {
             const narration = `Salary accrual ${MonthID} — ${categoryLabel}`;
             const voucherId = await insertVoucherHeader(tx, {
                 voucherNo, voucherTypeCode: 'JV',
-                date: new Date(PostDate),
+                date: parseWallDate(PostDate),
                 narration,
                 // TotalAmount = net payable for this category (= sum of Employee GL Crs).
                 // Sum of both vouchers' TotalAmount == total salary payable on the sheet.
