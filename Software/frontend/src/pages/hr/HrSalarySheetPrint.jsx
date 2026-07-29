@@ -17,25 +17,37 @@ export default function HrSalarySheetPrint() {
             .catch(e => setErr(e.response?.data?.error || e.message));
     }, [monthId]);
 
-    const grouped = useMemo(() => {
+    // Two payroll categories (EOBI / Non-EOBI), each grouped by department.
+    const categories = useMemo(() => {
         if (!sheet) return [];
-        const groups = [];
-        const idx = new Map();
-        sheet.rows.forEach(r => {
-            const name = r.DepartmentName || 'Unassigned';
-            if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
-            groups[idx.get(name)].rows.push(r);
-        });
-        return groups.map(g => ({
-            ...g,
-            subtotal: g.rows.reduce((s, r) => s + r.Calc.net, 0),
-        }));
+        const cats = [
+            { key: 'eobi',    label: 'EOBI Payroll',      match: r => r.Employee.HasEOBI },
+            { key: 'noneobi', label: 'Non-EOBI Payroll',  match: r => !r.Employee.HasEOBI },
+        ];
+        return cats.map(cat => {
+            const rows = sheet.rows.filter(cat.match);
+            const groups = [];
+            const idx = new Map();
+            rows.forEach(r => {
+                const name = r.DepartmentName || 'Unassigned';
+                if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
+                groups[idx.get(name)].rows.push(r);
+            });
+            return {
+                ...cat,
+                rows,
+                groups: groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + r.Calc.net, 0) })),
+                subtotal: rows.reduce((s, r) => s + r.Calc.net, 0),
+                empCount: rows.length,
+            };
+        }).filter(cat => cat.empCount > 0);
     }, [sheet]);
 
     if (err)    return <div style={{ padding: 40, color: '#b91c1c' }}>Cannot print: {err}</div>;
     if (!sheet) return <div style={{ padding: 40 }}>Loading…</div>;
 
-    const totalNet = grouped.reduce((s, g) => s + g.subtotal, 0);
+    const totalNet = categories.reduce((s, c) => s + c.subtotal, 0);
+    const totalDepts = categories.reduce((s, c) => s + c.groups.length, 0);
 
     return (
         <div className="sheet">
@@ -44,11 +56,18 @@ export default function HrSalarySheetPrint() {
             <div className="meta">
                 <span><b>Late Fine/min:</b> {fmt(sheet.effectiveLateRate)}</span>
                 <span><b>Absent Fine/day:</b> {fmt(sheet.effectiveAbsentRate)}</span>
-                <span><b>Departments:</b> {grouped.length}</span>
+                <span><b>Categories:</b> {categories.length}</span>
+                <span><b>Departments:</b> {totalDepts}</span>
                 <span><b>Employees:</b> {sheet.rows.length}</span>
             </div>
 
-            {grouped.map(g => (
+            {categories.map(cat => (
+                <div key={cat.key} className={`cat cat-${cat.key}`}>
+                    <div className="cat-head">
+                        <span>{cat.label}</span>
+                        <span className="cat-meta">{cat.empCount} employees · Net Rs. {fmt(cat.subtotal)}</span>
+                    </div>
+                    {cat.groups.map(g => (
                 <section key={g.name} className="dept">
                     <div className="dept-head">
                         <span className="dept-name">{g.name}</span>
@@ -102,10 +121,16 @@ export default function HrSalarySheetPrint() {
                         </tbody>
                     </table>
                 </section>
+                    ))}
+                    <div className="cat-total">
+                        <span>{cat.label} — {cat.empCount} employees</span>
+                        <span className="cat-total-amt">Rs. {fmt(cat.subtotal)}</span>
+                    </div>
+                </div>
             ))}
 
             <div className="grand">
-                <span>GRAND TOTAL ({grouped.length} departments · {sheet.rows.length} employees)</span>
+                <span>GRAND TOTAL ({totalDepts} departments · {sheet.rows.length} employees)</span>
                 <span className="grand-amt">Rs. {fmt(totalNet)}</span>
             </div>
 
@@ -120,7 +145,21 @@ export default function HrSalarySheetPrint() {
                 html, body { margin: 0; background: white !important; }
                 .sheet { font-family: Arial, sans-serif; font-size: 10px; color: #000; padding: 6mm; }
                 .meta { display: flex; gap: 20px; margin: 6px 0 12px; font-size: 10px; color: #333; }
-                .dept { margin-bottom: 12px; page-break-inside: avoid; }
+                .cat { margin-bottom: 14px; }
+                .cat-head { display: flex; justify-content: space-between; align-items: center;
+                            padding: 6px 12px; color: #fff; font-weight: 700; font-size: 11px;
+                            text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+                .cat-eobi    .cat-head { background: #7c3aed; }
+                .cat-noneobi .cat-head { background: #b91c1c; }
+                .cat-meta { font-size: 10px; opacity: 0.95; text-transform: none; letter-spacing: 0.3px; }
+                .cat-total { display: flex; justify-content: space-between; align-items: center;
+                             padding: 6px 12px; background: #f8fafc; border: 1px solid #cbd5e1;
+                             font-weight: 700; font-size: 10.5px; text-transform: uppercase;
+                             letter-spacing: 0.3px; margin-top: 4px; }
+                .cat-total-amt { font-size: 12px; }
+                .cat-eobi    .cat-total-amt { color: #7c3aed; }
+                .cat-noneobi .cat-total-amt { color: #b91c1c; }
+                .dept { margin-bottom: 8px; page-break-inside: avoid; }
                 .dept-head { background: #1f2937; color: #fff; padding: 4px 10px; display: flex; justify-content: space-between; align-items: center; }
                 .dept-name { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
                 .dept-count { font-size: 10px; opacity: 0.85; }

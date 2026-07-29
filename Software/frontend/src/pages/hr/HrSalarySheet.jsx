@@ -103,22 +103,34 @@ export default function HrSalarySheet() {
         } finally { setBusy(false); }
     };
 
-    // Group rows by DepartmentName, preserving controller order.
-    const grouped = useMemo(() => {
+    // Two payroll categories: EOBI (bank + cash) and Non-EOBI (cash only).
+    // Within each, group by DepartmentName.
+    const categories = useMemo(() => {
         if (!sheet) return [];
-        const groups = [];
-        const idx = new Map();
-        sheet.rows.forEach(r => {
-            const name = r.DepartmentName || 'Unassigned';
-            if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
-            groups[idx.get(name)].rows.push(r);
+        const cats = [
+            { key: 'eobi',    label: 'EOBI Payroll',      match: r => r.Employee.HasEOBI,  groups: [] },
+            { key: 'noneobi', label: 'Non-EOBI Payroll',  match: r => !r.Employee.HasEOBI, groups: [] },
+        ];
+        cats.forEach(cat => {
+            const rows = sheet.rows.filter(cat.match);
+            const idx = new Map();
+            rows.forEach(r => {
+                const name = r.DepartmentName || 'Unassigned';
+                if (!idx.has(name)) { idx.set(name, cat.groups.length); cat.groups.push({ name, rows: [] }); }
+                cat.groups[idx.get(name)].rows.push(r);
+            });
+            cat.groups = cat.groups.map(g => ({
+                ...g,
+                additions:  g.rows.reduce((s, r) => s + r.Calc.additions, 0),
+                deductions: g.rows.reduce((s, r) => s + r.Calc.deductions, 0),
+                net:        g.rows.reduce((s, r) => s + r.Calc.net, 0),
+            }));
+            cat.count      = rows.length;
+            cat.additions  = rows.reduce((s, r) => s + r.Calc.additions, 0);
+            cat.deductions = rows.reduce((s, r) => s + r.Calc.deductions, 0);
+            cat.net        = rows.reduce((s, r) => s + r.Calc.net, 0);
         });
-        return groups.map(g => {
-            const additions  = g.rows.reduce((s, r) => s + r.Calc.additions, 0);
-            const deductions = g.rows.reduce((s, r) => s + r.Calc.deductions, 0);
-            const net        = g.rows.reduce((s, r) => s + r.Calc.net, 0);
-            return { ...g, additions, deductions, net };
-        });
+        return cats;
     }, [sheet]);
 
     const totals = useMemo(() => {
@@ -241,17 +253,25 @@ export default function HrSalarySheet() {
                     )}
 
                     <div className="hr-sheet-scroll">
-                        {grouped.map(g => (
+                        {categories.map(cat => cat.count > 0 && (
+                            <div key={cat.key} className={`hr-cat hr-cat-${cat.key}`}>
+                                <div className="hr-cat-head">
+                                    <span className="hr-cat-name">{cat.label}</span>
+                                    <span className="hr-cat-meta">
+                                        {cat.count} employees · Net <b>{fmt(cat.net)}</b> · Add {fmt(cat.additions)} · Ded {fmt(cat.deductions)}
+                                    </span>
+                                </div>
+                                {cat.groups.map(g => (
                             <section key={g.name} className="hr-dept-block">
-                                <header className="hr-dept-head" onClick={() => toggleDept(g.name)}>
-                                    <span className="hr-dept-caret">{collapsedDepts[g.name] ? '▶' : '▼'}</span>
+                                <header className="hr-dept-head" onClick={() => toggleDept(`${cat.key}:${g.name}`)}>
+                                    <span className="hr-dept-caret">{collapsedDepts[`${cat.key}:${g.name}`] ? '▶' : '▼'}</span>
                                     <span className="hr-dept-name">{g.name}</span>
                                     <span className="hr-dept-count">{g.rows.length} employees</span>
                                     <span className="hr-dept-tot">
                                         Net: <b>{fmt(g.net)}</b> · Add: {fmt(g.additions)} · Ded: {fmt(g.deductions)}
                                     </span>
                                 </header>
-                                {!collapsedDepts[g.name] && (
+                                {!collapsedDepts[`${cat.key}:${g.name}`] && (
                                     <div className="hr-sheet-tbl-wrap">
                                         <table className="hr-sheet-tbl">
                                             <thead>
@@ -347,7 +367,9 @@ export default function HrSalarySheet() {
                                 )}
                             </section>
                         ))}
-                        {!grouped.length && (
+                            </div>
+                        ))}
+                        {!sheet.rows.length && (
                             <div className="erp-panel" style={{ padding: 32, textAlign: 'center', color: 'var(--erp-text-muted)' }}>
                                 No active employees found.
                             </div>
@@ -404,7 +426,20 @@ function PageStyles() {
             .hr-pill-pay_cash_eobi   { background: #fef3c7; color: #78350f; }
             .hr-pill-pay_cash_noneobi { background: #fde2e2; color: #7f1d1d; }
 
-            .hr-sheet-scroll { display: flex; flex-direction: column; gap: 12px; }
+            .hr-sheet-scroll { display: flex; flex-direction: column; gap: 18px; }
+
+            .hr-cat { display: flex; flex-direction: column; gap: 8px; padding-bottom: 4px;
+                      border-left: 4px solid transparent; padding-left: 8px; }
+            .hr-cat-eobi    { border-left-color: #7c3aed; }
+            .hr-cat-noneobi { border-left-color: #b91c1c; }
+            .hr-cat-head { display: flex; justify-content: space-between; align-items: center;
+                           padding: 8px 14px; color: #fff; border-radius: var(--erp-radius);
+                           font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; font-size: 12px; }
+            .hr-cat-eobi    .hr-cat-head { background: #7c3aed; }
+            .hr-cat-noneobi .hr-cat-head { background: #b91c1c; }
+            .hr-cat-name { font-size: 13px; }
+            .hr-cat-meta { font-size: 11px; opacity: 0.95; font-weight: 500; letter-spacing: 0.3px; text-transform: none; }
+            .hr-cat-meta b { font-weight: 700; }
 
             .hr-dept-block { background: var(--erp-surface); border: 1px solid var(--erp-border);
                              border-radius: var(--erp-radius); overflow: hidden; box-shadow: var(--erp-shadow-sm); }
