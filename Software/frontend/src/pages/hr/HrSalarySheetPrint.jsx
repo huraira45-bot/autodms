@@ -6,9 +6,12 @@ import PrintBusinessHeader from '../../components/PrintBusinessHeader';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const monthLabel = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
 
-// ?type=eobi     → print employees whose HasEOBI = 1
-// ?type=noneobi  → print employees whose HasEOBI = 0
-// missing        → print all (no EOBI label rendered either way, per owner ask)
+// ?type=eobi-bank → EOBI employees paid via bank
+// ?type=eobi-cash → EOBI employees paid via cash
+// ?type=noneobi   → non-EOBI employees (always cash)
+// ?type=eobi      → all EOBI (bank + cash)
+// missing         → print all employees
+// No EOBI / Non-EOBI labels appear on the printed sheet (owner ask 2026-07-29).
 export default function HrSalarySheetPrint() {
     const { monthId } = useParams();
     const [qs] = useSearchParams();
@@ -27,9 +30,15 @@ export default function HrSalarySheetPrint() {
     const grouped = useMemo(() => {
         if (!sheet) return [];
         const rows = sheet.rows.filter(r => {
-            if (type === 'eobi')    return !!r.Employee.HasEOBI;
-            if (type === 'noneobi') return !r.Employee.HasEOBI;
-            return true;
+            const eobi = !!r.Employee.HasEOBI;
+            const bank = !!r.IsPaidByBank;
+            switch (type) {
+                case 'eobi-bank': return eobi && bank;
+                case 'eobi-cash': return eobi && !bank;
+                case 'noneobi':   return !eobi;
+                case 'eobi':      return eobi;
+                default:          return true;
+            }
         });
         const groups = [];
         const idx = new Map();
