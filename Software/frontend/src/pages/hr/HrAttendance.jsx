@@ -20,13 +20,18 @@ export default function HrAttendance() {
     const [drafts, setDrafts] = useState({});
     const [busy, setBusy] = useState(false);
     const [collapsed, setCollapsed] = useState({});
+    // Month-level working days — same for every employee that month.
+    const [monthSettings, setMonthSettings] = useState({ WorkingDays: '', LateFinePerMinute: 0, AbsentFinePerDay: 0 });
+    const [monthDirty, setMonthDirty] = useState(false);
 
     const load = async () => {
         try {
             setBusy(true);
-            const [empRes, attRes] = await Promise.all([
+            const [empRes, attRes, msRes, gsRes] = await Promise.all([
                 axios.get('/api/employees'),
                 axios.get(`${API}/attendance?monthId=${monthId}`),
+                axios.get(`${API}/monthly-settings`),
+                axios.get(`${API}/fine-settings`),
             ]);
             const emps = (empRes.data || []).filter(e => e.IsActive);
             emps.sort((a, b) => (a.DepartmentName || '~').localeCompare(b.DepartmentName || '~')
@@ -37,6 +42,14 @@ export default function HrAttendance() {
             (attRes.data || []).forEach(r => { map[r.EmployeeID] = r; });
             setRecords(map);
             setDrafts({});
+            const g = gsRes.data || { LateFinePerMinute: 0, AbsentFinePerDay: 0 };
+            const snap = (msRes.data || []).find(s => s.MonthID === monthId);
+            setMonthSettings({
+                WorkingDays:       snap?.WorkingDays ?? '',
+                LateFinePerMinute: snap?.LateFinePerMinute ?? g.LateFinePerMinute,
+                AbsentFinePerDay:  snap?.AbsentFinePerDay  ?? g.AbsentFinePerDay,
+            });
+            setMonthDirty(false);
         } catch (err) {
             notify({ type: 'error', title: 'Load failed', message: err.response?.data?.error || err.message });
         } finally { setBusy(false); }
@@ -83,6 +96,21 @@ export default function HrAttendance() {
         return records[empId]?.[key] ?? fallback;
     };
 
+    const saveMonthSettings = async () => {
+        try {
+            await axios.post(`${API}/monthly-settings`, {
+                MonthID: monthId,
+                WorkingDays:       monthSettings.WorkingDays === '' ? null : Number(monthSettings.WorkingDays),
+                LateFinePerMinute: monthSettings.LateFinePerMinute,
+                AbsentFinePerDay:  monthSettings.AbsentFinePerDay,
+            });
+            setMonthDirty(false);
+            notify({ type: 'success', title: 'Month settings saved', message: '' });
+        } catch (err) {
+            notify({ type: 'error', title: 'Save failed', message: err.response?.data?.error || err.message });
+        }
+    };
+
     const grouped = useMemo(() => {
         const groups = [];
         const idx = new Map();
@@ -95,12 +123,11 @@ export default function HrAttendance() {
     }, [employees]);
 
     const totals = useMemo(() => {
-        const t = { absents: 0, late: 0, leave: 0, working: 0 };
+        const t = { absents: 0, late: 0, leave: 0 };
         employees.forEach(e => {
             t.absents += Number(val(e.EmployeeID, 'Absents',    0)) || 0;
             t.late    += Number(val(e.EmployeeID, 'LateMinutes', 0)) || 0;
             t.leave   += Number(val(e.EmployeeID, 'LeaveDays',   0)) || 0;
-            t.working += Number(val(e.EmployeeID, 'WorkingDays', 0)) || 0;
         });
         return t;
     }, [employees, records, drafts]);
@@ -120,13 +147,32 @@ export default function HrAttendance() {
                 </button>
             </ErpControlPanel>
 
+            <section className="hr-monthset">
+                <div className="hr-monthset-left">
+                    <div className="hr-lbl">Working Days for {monthLabel(monthId)}</div>
+                    <input type="number" step="0.5" min={0} max={31}
+                        value={monthSettings.WorkingDays ?? ''}
+                        placeholder="e.g. 26"
+                        onChange={e => { setMonthSettings(s => ({ ...s, WorkingDays: e.target.value })); setMonthDirty(true); }}
+                        className="hr-inp" style={{ width: 90, height: 32 }}/>
+                    <span className="hr-hint" style={{ marginLeft: 10 }}>
+                        Same for all employees this month. Leave blank to use calendar days.
+                        Salary calc: <b>basic × (WorkingDays − Absents) ÷ WorkingDays</b>.
+                    </span>
+                    {monthDirty && (
+                        <button className="erp-btn erp-btn-primary" style={{ marginLeft: 'auto' }} onClick={saveMonthSettings}>
+                            <Save size={13}/> Save Month
+                        </button>
+                    )}
+                </div>
+            </section>
+
             <div className="hr-kpi-row">
                 <Kpi label="Employees" value={employees.length}/>
                 <Kpi label="Departments" value={grouped.length}/>
                 <Kpi label="Total Absents" value={fmt(totals.absents)} tone="down"/>
                 <Kpi label="Total Late (min)" value={fmt(totals.late)} tone="down"/>
                 <Kpi label="Total Leave" value={fmt(totals.leave)}/>
-                <Kpi label="Total Working" value={fmt(totals.working)} tone="net"/>
             </div>
 
             <div className="hr-sheet-scroll">
@@ -148,7 +194,6 @@ export default function HrAttendance() {
                                             <th className="num" style={{ width: 110 }}>Absents</th>
                                             <th className="num" style={{ width: 110 }}>Late (min)</th>
                                             <th className="num" style={{ width: 110 }}>Leave Days</th>
-                                            <th className="num" style={{ width: 110 }}>Working Days</th>
                                             <th style={{ width: 70 }}></th>
                                         </tr>
                                     </thead>
@@ -176,12 +221,6 @@ export default function HrAttendance() {
                                                         <input type="number" step="0.5" min={0} disabled={!canEdit}
                                                             value={val(e.EmployeeID, 'LeaveDays', 0)}
                                                             onChange={ev => patch(e.EmployeeID, 'LeaveDays', Number(ev.target.value))}
-                                                            className="hr-inp num"/>
-                                                    </td>
-                                                    <td className="num">
-                                                        <input type="number" step="0.5" min={0} disabled={!canEdit}
-                                                            value={val(e.EmployeeID, 'WorkingDays', 0)}
-                                                            onChange={ev => patch(e.EmployeeID, 'WorkingDays', Number(ev.target.value))}
                                                             className="hr-inp num"/>
                                                     </td>
                                                     <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(e.EmployeeID).then(load).catch(()=>{})}>Save</button>}</td>
@@ -221,6 +260,13 @@ function SharedStyles() {
     return (
         <style>{`
             .hr-page { padding: 12px 16px 20px; max-width: 1600px; margin: 0 auto; }
+            .hr-monthset { padding: 10px 14px; background: linear-gradient(180deg, #fef3c7, #fef9c3);
+                           border: 1px solid #fde68a; border-radius: var(--erp-radius); margin: 10px 0; }
+            .hr-monthset-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+            .hr-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;
+                      color: var(--erp-text-muted); font-weight: 600; }
+            .hr-hint { font-size: 11.5px; color: #78350f; line-height: 1.4; margin: 0; }
+            .hr-hint b { font-weight: 700; }
             .hr-kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
             .hr-kpi { background: var(--erp-surface); border: 1px solid var(--erp-border); border-radius: var(--erp-radius); padding: 8px 12px; }
             .hr-kpi-l { font-size: 10px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--erp-text-muted); }

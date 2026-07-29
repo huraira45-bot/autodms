@@ -148,22 +148,25 @@ exports.listMonthlySettings = async (_req, res) => {
 };
 
 exports.saveMonthlySettings = async (req, res) => {
-    const { MonthID, LateFinePerMinute, AbsentFinePerDay } = req.body || {};
+    const { MonthID, LateFinePerMinute, AbsentFinePerDay, WorkingDays } = req.body || {};
     if (!MonthID) return res.status(400).json({ error: 'MonthID required' });
     try {
         const pool = await getPool();
+        const wd = (WorkingDays === '' || WorkingDays == null) ? null : Number(WorkingDays);
         await pool.request()
             .input('m',  sql.Char(7),      MonthID)
             .input('l',  sql.Decimal(10,4), Number(LateFinePerMinute) || 0)
             .input('a',  sql.Decimal(10,2), Number(AbsentFinePerDay) || 0)
+            .input('wd', sql.Decimal(6,2),  wd)
             .input('un', sql.NVarChar(100), req.user?.userName || null)
             .query(`
                 MERGE hr_MonthlySettings AS tgt
                 USING (SELECT @m AS MonthID) AS src ON tgt.MonthID = src.MonthID
                 WHEN MATCHED THEN UPDATE SET LateFinePerMinute=@l, AbsentFinePerDay=@a,
+                                             WorkingDays=@wd,
                                              UpdatedAt=GETDATE(), UpdatedByName=@un
-                WHEN NOT MATCHED THEN INSERT (MonthID, LateFinePerMinute, AbsentFinePerDay, UpdatedByName)
-                                      VALUES (@m, @l, @a, @un);
+                WHEN NOT MATCHED THEN INSERT (MonthID, LateFinePerMinute, AbsentFinePerDay, WorkingDays, UpdatedByName)
+                                      VALUES (@m, @l, @a, @wd, @un);
             `);
         res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }

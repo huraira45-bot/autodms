@@ -52,12 +52,25 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const g    = global || { LateFinePerMinute: 0, AbsentFinePerDay: 0 };
     const m    = monthly || null;
 
-    const monthDays = daysInMonth(monthId);
-    const basic     = Number(emp.BasicSalary) || 0;
-    const paidDays  = (ent.PaidDays !== undefined && ent.PaidDays !== null && ent.PaidDays !== '')
-        ? Number(ent.PaidDays)
-        : monthDays;
-    const prorated  = r2((basic / monthDays) * paidDays);
+    const monthDays  = daysInMonth(monthId);
+    const basic      = Number(emp.BasicSalary) || 0;
+
+    // If the month has a WorkingDays override (set on the Attendance page),
+    // pro-ration uses it: paidDays = WorkingDays − Absents (unless entry has
+    // an explicit PaidDays override). Else fall back to calendar days.
+    const monthWorkingDays = m && Number.isFinite(Number(m.WorkingDays)) && Number(m.WorkingDays) > 0
+        ? Number(m.WorkingDays) : null;
+    const baseDays = monthWorkingDays ?? monthDays;
+
+    let paidDays;
+    if (ent.PaidDays !== undefined && ent.PaidDays !== null && ent.PaidDays !== '') {
+        paidDays = Number(ent.PaidDays);
+    } else if (monthWorkingDays !== null) {
+        paidDays = Math.max(0, monthWorkingDays - Number(att.Absents || 0));
+    } else {
+        paidDays = monthDays;
+    }
+    const prorated = r2((basic / baseDays) * paidDays);
 
     const fuel      = emp.HasFuelAllowance ? Number(emp.FuelAllowance || 0) : 0;
     // Adjustment column removed 2026-07-29 per owner. Kept in DB with default 0 for
