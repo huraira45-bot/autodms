@@ -123,13 +123,22 @@ export default function HrSalarySheet() {
 
     const totals = useMemo(() => {
         if (!sheet) return null;
-        const t = { additions: 0, deductions: 0, net: 0, bankNet: 0, cashNet: 0, empCount: 0 };
+        const t = { additions: 0, deductions: 0, net: 0,
+                    bankEobi: 0, bankEobiCount: 0,
+                    cashEobi: 0, cashEobiCount: 0,
+                    cashNon:  0, cashNonCount:  0,
+                    empCount: 0 };
         sheet.rows.forEach(r => {
             t.additions  += r.Calc.additions;
             t.deductions += r.Calc.deductions;
             t.net        += r.Calc.net;
-            if (r.Calc.net > 0) t.empCount++;
-            if (r.IsPaidByBank) t.bankNet += r.Calc.net; else t.cashNet += r.Calc.net;
+            if (r.Calc.net <= 0) return;
+            t.empCount++;
+            const eobi = !!r.Employee.HasEOBI;
+            if (r.IsPaidByBank && eobi)  { t.bankEobi += r.Calc.net; t.bankEobiCount++; }
+            else if (!r.IsPaidByBank && eobi) { t.cashEobi += r.Calc.net; t.cashEobiCount++; }
+            else if (!r.IsPaidByBank && !eobi) { t.cashNon += r.Calc.net; t.cashNonCount++; }
+            // (bank + non-EOBI is disallowed — see Employee Salary Settings)
         });
         return t;
     }, [sheet]);
@@ -173,10 +182,10 @@ export default function HrSalarySheet() {
                         <Kpi label="Additions" value={fmt(totals?.additions)} />
                         <Kpi label="Deductions" value={fmt(totals?.deductions)} tone="down" />
                         <Kpi label="Net Payable" value={fmt(totals?.net)} tone="net" />
-                        <Kpi label="Bank Payable" value={fmt(totals?.bankNet)} sub={`${sheet.rows.filter(r=>r.IsPaidByBank && r.Calc.net > 0).length} emp`} />
-                        <Kpi label="Cash Payable" value={fmt(totals?.cashNet)} sub={`${sheet.rows.filter(r=>!r.IsPaidByBank && r.Calc.net > 0).length} emp`} />
+                        <Kpi label="Bank — EOBI"     value={fmt(totals?.bankEobi)}     sub={`${totals?.bankEobiCount} emp`} />
+                        <Kpi label="Cash — EOBI"     value={fmt(totals?.cashEobi)}     sub={`${totals?.cashEobiCount} emp`} />
+                        <Kpi label="Cash — Non-EOBI" value={fmt(totals?.cashNon)}      sub={`${totals?.cashNonCount} emp`} />
                         <Kpi label="Late / min" value={fmt(sheet.effectiveLateRate)} />
-                        <Kpi label="Absent / day" value={fmt(sheet.effectiveAbsentRate)} />
                     </div>
 
                     <div className="hr-actions">
@@ -185,11 +194,14 @@ export default function HrSalarySheet() {
                                 <button className="erp-btn" onClick={() => runPost('accrual', 'Salary Accrual')}>
                                     <FileText size={13}/> Post Accrual (JV)
                                 </button>
-                                <button className="erp-btn" onClick={() => runPost('pay-bank', 'Bank Payment')}>
-                                    <Landmark size={13}/> Pay via Bank (BPV)
+                                <button className="erp-btn" onClick={() => runPost('pay-bank', 'Bank Payment (EOBI)')}>
+                                    <Landmark size={13}/> Pay Bank — EOBI (BPV)
                                 </button>
-                                <button className="erp-btn" onClick={() => runPost('pay-cash', 'Cash Payment')}>
-                                    <Wallet size={13}/> Pay via Cash (CPV)
+                                <button className="erp-btn" onClick={() => runPost('pay-cash-eobi', 'Cash Payment (EOBI)')}>
+                                    <Wallet size={13}/> Pay Cash — EOBI (CPV)
+                                </button>
+                                <button className="erp-btn" onClick={() => runPost('pay-cash-noneobi', 'Cash Payment (Non-EOBI)')}>
+                                    <Wallet size={13}/> Pay Cash — Non-EOBI (CPV)
                                 </button>
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
@@ -201,7 +213,13 @@ export default function HrSalarySheet() {
                             <Landmark size={13}/> Bank Letter
                         </a>
                         <a className="erp-btn" href={`/hr/cash-letter/${monthId}/print`} target="_blank" rel="noreferrer">
-                            <Wallet size={13}/> Cash Letter
+                            <Wallet size={13}/> Cash Letter (Both)
+                        </a>
+                        <a className="erp-btn" href={`/hr/cash-letter/${monthId}/print?type=eobi`} target="_blank" rel="noreferrer">
+                            <Wallet size={13}/> Cash EOBI
+                        </a>
+                        <a className="erp-btn" href={`/hr/cash-letter/${monthId}/print?type=noneobi`} target="_blank" rel="noreferrer">
+                            <Wallet size={13}/> Cash Non-EOBI
                         </a>
                     </div>
 
@@ -309,7 +327,13 @@ export default function HrSalarySheet() {
                                                                     className="hr-inp num"/>
                                                             </td>
                                                             <td className="num net"><b>{fmt(r.Calc.net)}</b></td>
-                                                            <td>{r.IsPaidByBank ? <span className="hr-pill hr-pill-bank">Bank</span> : <span className="hr-pill hr-pill-cash">Cash</span>}</td>
+                                                            <td>
+                                                                {r.Employee.HasEOBI
+                                                                    ? (r.IsPaidByBank
+                                                                        ? <span className="hr-pill hr-pill-bank">Bank · EOBI</span>
+                                                                        : <span className="hr-pill hr-pill-cash">Cash · EOBI</span>)
+                                                                    : <span className="hr-pill hr-pill-cash-non">Cash · Non-EOBI</span>}
+                                                            </td>
                                                             <td>
                                                                 {dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(r.EmployeeID).then(load)}>Save</button>}
                                                                 {!dirty && <a className="erp-btn erp-btn-sm erp-btn-ghost" href={`/hr/salary-slip/${monthId}/${r.EmployeeID}/print`} target="_blank" rel="noreferrer">Slip</a>}
@@ -371,11 +395,14 @@ function PageStyles() {
             .hr-posting-meta { color: var(--erp-text-muted); font-size: 11px; margin-left: auto; }
 
             .hr-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; }
-            .hr-pill-bank { background: #dcfce7; color: #14532d; }
-            .hr-pill-cash { background: #fef3c7; color: #78350f; }
-            .hr-pill-accrual  { background: #dbeafe; color: #1e40af; }
-            .hr-pill-pay_bank { background: #dcfce7; color: #14532d; }
-            .hr-pill-pay_cash { background: #fef3c7; color: #78350f; }
+            .hr-pill-bank     { background: #dcfce7; color: #14532d; }
+            .hr-pill-cash     { background: #fef3c7; color: #78350f; }
+            .hr-pill-cash-non { background: #fde2e2; color: #7f1d1d; }
+            .hr-pill-accrual         { background: #dbeafe; color: #1e40af; }
+            .hr-pill-pay_bank        { background: #dcfce7; color: #14532d; }
+            .hr-pill-pay_cash        { background: #fef3c7; color: #78350f; }
+            .hr-pill-pay_cash_eobi   { background: #fef3c7; color: #78350f; }
+            .hr-pill-pay_cash_noneobi { background: #fde2e2; color: #7f1d1d; }
 
             .hr-sheet-scroll { display: flex; flex-direction: column; gap: 12px; }
 

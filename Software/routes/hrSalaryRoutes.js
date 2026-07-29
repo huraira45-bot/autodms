@@ -24,7 +24,8 @@ router.get( '/salary-slip/:monthId/:employeeId', requirePerm('hr_salary', 'view'
 // Voucher postings (guarded by hr_salary_post)
 router.post('/post/accrual',            requirePerm('hr_salary_post'),          c.postAccrual);
 router.post('/post/pay-bank',           requirePerm('hr_salary_post'),          c.postPayBank);
-router.post('/post/pay-cash',           requirePerm('hr_salary_post'),          c.postPayCash);
+router.post('/post/pay-cash-eobi',      requirePerm('hr_salary_post'),          c.postPayCashEobi);
+router.post('/post/pay-cash-noneobi',   requirePerm('hr_salary_post'),          c.postPayCashNonEobi);
 router.get( '/postings',                requirePerm('hr_salary', 'view'),       c.listPostings);
 
 module.exports = router;

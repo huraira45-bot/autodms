@@ -57,14 +57,18 @@ exports.setActive = async (req, res) => {
 
 // @route   PATCH /api/employees/:id/salary-settings
 // Updates the HR/salary-specific columns added by migration 095.
+// Owner rule 2026-07-29: non-EOBI employees are always paid in cash, so
+// IsPaidByBank is force-cleared server-side whenever HasEOBI is off.
 exports.setSalarySettings = async (req, res) => {
   try {
     const pool = await getPool();
     const b = req.body || {};
+    const hasEobi = !!b.HasEOBI;
+    const isBank  = hasEobi && !!b.IsPaidByBank;   // never bank without EOBI
     await pool.request()
       .input('id',  sql.Int,          parseInt(req.params.id))
       .input('bs',  sql.Decimal(18,2), b.BasicSalary != null ? Number(b.BasicSalary) : null)
-      .input('eb',  sql.Bit,          b.HasEOBI ? 1 : 0)
+      .input('eb',  sql.Bit,          hasEobi ? 1 : 0)
       .input('ea',  sql.Decimal(10,2), Number(b.EOBI) || 0)
       .input('fa',  sql.Bit,          b.HasFuelAllowance ? 1 : 0)
       .input('fv',  sql.Decimal(10,2), Number(b.FuelAllowance) || 0)
@@ -72,8 +76,8 @@ exports.setSalarySettings = async (req, res) => {
       .input('mv',  sql.Decimal(10,2), Number(b.MessAmount) || 0)
       .input('cl',  sql.Bit,          b.HasCustomLateFine ? 1 : 0)
       .input('cv',  sql.Decimal(10,4), Number(b.CustomLateFineAmount) || 0)
-      .input('bk',  sql.Bit,          b.IsPaidByBank ? 1 : 0)
-      .input('ba',  sql.NVarChar(100), b.BankAccountNumber || null)
+      .input('bk',  sql.Bit,          isBank ? 1 : 0)
+      .input('ba',  sql.NVarChar(100), isBank ? (b.BankAccountNumber || null) : null)
       .input('sn',  sql.NVarChar(50),  b.SrNo || null)
       .input('gl',  sql.Int,          b.EmployeeGLID ? parseInt(b.EmployeeGLID) : null)
       .query(`UPDATE gen_EmployeeInfo

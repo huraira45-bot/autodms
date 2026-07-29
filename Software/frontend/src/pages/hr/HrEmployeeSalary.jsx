@@ -30,7 +30,14 @@ export default function HrEmployeeSalary() {
     };
     useEffect(() => { load(); }, []);
 
-    const patch = (id, field, value) => setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }));
+    const patch = (id, field, value) => setDrafts(prev => {
+        const next = { ...(prev[id] || {}), [field]: value };
+        // Owner rule 2026-07-29: non-EOBI employees are ALWAYS paid in cash.
+        // Unchecking EOBI must force pay-mode back to Cash automatically so
+        // the UI can't send an invalid combination to the backend.
+        if (field === 'HasEOBI' && !value) next.IsPaidByBank = false;
+        return { ...prev, [id]: next };
+    });
     const val = (id, key, fallback) => (drafts[id] && key in drafts[id]) ? drafts[id][key] : (employees.find(e => e.EmployeeID === id)?.[key] ?? fallback);
 
     const saveOne = async (id) => {
@@ -191,13 +198,20 @@ export default function HrEmployeeSalary() {
                                                             className="hr-inp num"/>
                                                     </td>
                                                     <td>
-                                                        <select disabled={!canEdit}
-                                                            value={val(id, 'IsPaidByBank', e.IsPaidByBank) ? '1' : '0'}
-                                                            onChange={ev => patch(id, 'IsPaidByBank', ev.target.value === '1')}
-                                                            className="hr-inp">
-                                                            <option value="0">Cash</option>
-                                                            <option value="1">Bank</option>
-                                                        </select>
+                                                        {(() => {
+                                                            const eobiOn = !!val(id, 'HasEOBI', e.HasEOBI);
+                                                            const bankOn = !!val(id, 'IsPaidByBank', e.IsPaidByBank);
+                                                            return (
+                                                                <select disabled={!canEdit || !eobiOn}
+                                                                    value={bankOn ? '1' : '0'}
+                                                                    onChange={ev => patch(id, 'IsPaidByBank', ev.target.value === '1')}
+                                                                    className="hr-inp"
+                                                                    title={eobiOn ? '' : 'Non-EOBI employees are always paid in cash'}>
+                                                                    <option value="0">Cash</option>
+                                                                    <option value="1">Bank</option>
+                                                                </select>
+                                                            );
+                                                        })()}
                                                     </td>
                                                     <td>
                                                         <input type="text" disabled={!canEdit || !val(id, 'IsPaidByBank', e.IsPaidByBank)}

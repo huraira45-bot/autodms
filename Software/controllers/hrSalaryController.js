@@ -331,78 +331,85 @@ exports.postAccrual = async (req, res) => {
     }
 };
 
-// (2) Pay via bank: only employees where IsPaidByBank = 1
-//   Dr SALARY_PAYABLE   Σ bankEmp.net
-//   Cr Bank clearing GL Σ bankEmp.net    -- uses CASH_BOOK role fallback
-exports.postPayBank = async (req, res) => {
+// Payroll categorisation (owner ask 2026-07-29):
+//   Non-EOBI employees are ALWAYS paid in cash (never bank).
+//   EOBI employees may be paid via bank OR cash.
+// So there are three payment vouchers:
+//   (2) Pay Bank         — EOBI + IsPaidByBank employees
+//   (3) Pay Cash EOBI    — EOBI + !IsPaidByBank employees
+//   (4) Pay Cash Non-EOBI — !EOBI + !IsPaidByBank employees
+// Each posts its own voucher so accounts can keep the two payrolls
+// (EOBI / non-EOBI) on separate ledger trails if wanted.
+
+async function postPayment(pool, req, res, { category, filter, voucherTypeCode, postingType, glRoleName }) {
     const { MonthID, BankGLCAID } = req.body || {};
     if (!MonthID) return res.status(400).json({ error: 'MonthID required' });
-    const pool = await getPool();
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {
         const salaryPayGL = await loadRoleOrThrow('SALARY_PAYABLE');
-        const bankGL      = BankGLCAID ? Number(BankGLCAID) : await loadRoleOrThrow('CASH_BOOK');
+        const bankGL      = BankGLCAID ? Number(BankGLCAID) : null;
+        const contraGL    = bankGL || await loadRoleOrThrow(glRoleName);
 
         const sheet = await buildSheet(pool, MonthID);
-        const bankEmp = sheet.rows.filter(r => r.IsPaidByBank && r.Calc.net > 0);
-        if (!bankEmp.length) throw new Error('No bank-payable employees with positive net for this month.');
-        const total = r2(bankEmp.reduce((s, r) => s + r.Calc.net, 0));
+        const emp = sheet.rows.filter(r => filter(r) && r.Calc.net > 0);
+        if (!emp.length) throw new Error(`No payable employees for "${category}" this month.`);
+        const total = r2(emp.reduce((s, r) => s + r.Calc.net, 0));
 
-        const voucherNo = await nextVoucherNo(tx, 'BPV');
-        const narration = `Salary bank payment for ${MonthID}`;
+        const voucherNo = await nextVoucherNo(tx, voucherTypeCode);
+        const narration = `${category} salary payment for ${MonthID}`;
         const voucherId = await insertVoucherHeader(tx, {
-            voucherNo, voucherTypeCode: 'BPV', date: new Date(),
+            voucherNo, voucherTypeCode, date: new Date(),
             narration, totalAmount: total,
-            srcType: 'HR_SALARY_PAY_BANK', srcId: null, user: req.user
+            srcType: `HR_SALARY_${postingType}`, srcId: null, user: req.user
         });
         await insertLeg(tx, { voucherId, glCAID: salaryPayGL, dr: total, cr: 0, narration });
-        await insertLeg(tx, { voucherId, glCAID: bankGL,      dr: 0, cr: total, narration });
+        await insertLeg(tx, { voucherId, glCAID: contraGL,    dr: 0, cr: total, narration });
         await postDraftToPosted(tx, voucherId, req.user);
-        await recordPosting(tx, { monthId: MonthID, postingType: 'PAY_BANK', voucherId, totalAmount: total, employeeCount: bankEmp.length, user: req.user });
+        await recordPosting(tx, { monthId: MonthID, postingType, voucherId, totalAmount: total, employeeCount: emp.length, user: req.user });
 
         await tx.commit();
-        res.json({ ok: true, voucherNo, voucherId, totalAmount: total, employees: bankEmp.length });
+        res.json({ ok: true, voucherNo, voucherId, totalAmount: total, employees: emp.length, category });
     } catch (err) {
         try { await tx.rollback(); } catch {}
         res.status(400).json({ error: err.message });
     }
+}
+
+// (2) Pay via bank — EOBI employees with IsPaidByBank = 1
+exports.postPayBank = async (req, res) => {
+    const pool = await getPool();
+    return postPayment(pool, req, res, {
+        category:        'Bank (EOBI)',
+        filter:          r => r.IsPaidByBank && r.Employee.HasEOBI,
+        voucherTypeCode: 'BPV',
+        postingType:     'PAY_BANK',
+        glRoleName:      'CASH_BOOK',   // bank clearing fallback
+    });
 };
 
-// (3) Pay via cash: only employees where IsPaidByBank = 0
-exports.postPayCash = async (req, res) => {
-    const { MonthID } = req.body || {};
-    if (!MonthID) return res.status(400).json({ error: 'MonthID required' });
+// (3) Pay via cash — EOBI employees with IsPaidByBank = 0
+exports.postPayCashEobi = async (req, res) => {
     const pool = await getPool();
-    const tx = new sql.Transaction(pool);
-    await tx.begin();
-    try {
-        const salaryPayGL = await loadRoleOrThrow('SALARY_PAYABLE');
-        const cashGL      = await loadRoleOrThrow('CASH_BOOK');
+    return postPayment(pool, req, res, {
+        category:        'Cash — EOBI',
+        filter:          r => !r.IsPaidByBank && r.Employee.HasEOBI,
+        voucherTypeCode: 'CPV',
+        postingType:     'PAY_CASH_EOBI',
+        glRoleName:      'CASH_BOOK',
+    });
+};
 
-        const sheet = await buildSheet(pool, MonthID);
-        const cashEmp = sheet.rows.filter(r => !r.IsPaidByBank && r.Calc.net > 0);
-        if (!cashEmp.length) throw new Error('No cash-payable employees with positive net for this month.');
-        const total = r2(cashEmp.reduce((s, r) => s + r.Calc.net, 0));
-
-        const voucherNo = await nextVoucherNo(tx, 'CPV');
-        const narration = `Salary cash payment for ${MonthID}`;
-        const voucherId = await insertVoucherHeader(tx, {
-            voucherNo, voucherTypeCode: 'CPV', date: new Date(),
-            narration, totalAmount: total,
-            srcType: 'HR_SALARY_PAY_CASH', srcId: null, user: req.user
-        });
-        await insertLeg(tx, { voucherId, glCAID: salaryPayGL, dr: total, cr: 0, narration });
-        await insertLeg(tx, { voucherId, glCAID: cashGL,      dr: 0, cr: total, narration });
-        await postDraftToPosted(tx, voucherId, req.user);
-        await recordPosting(tx, { monthId: MonthID, postingType: 'PAY_CASH', voucherId, totalAmount: total, employeeCount: cashEmp.length, user: req.user });
-
-        await tx.commit();
-        res.json({ ok: true, voucherNo, voucherId, totalAmount: total, employees: cashEmp.length });
-    } catch (err) {
-        try { await tx.rollback(); } catch {}
-        res.status(400).json({ error: err.message });
-    }
+// (4) Pay via cash — non-EOBI employees (always cash)
+exports.postPayCashNonEobi = async (req, res) => {
+    const pool = await getPool();
+    return postPayment(pool, req, res, {
+        category:        'Cash — Non-EOBI',
+        filter:          r => !r.IsPaidByBank && !r.Employee.HasEOBI,
+        voucherTypeCode: 'CPV',
+        postingType:     'PAY_CASH_NONEOBI',
+        glRoleName:      'CASH_BOOK',
+    });
 };
 
 exports.listPostings = async (req, res) => {
