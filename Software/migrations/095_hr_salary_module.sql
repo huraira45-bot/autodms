@@ -142,12 +142,16 @@ BEGIN
 END
 GO
 
--- ---------- System-account roles (extend CHECK constraint if needed) ----------
-IF NOT EXISTS (
+-- ---------- System-account roles ----------
+-- If a CHECK constraint on RoleKey exists that doesn't already permit
+-- SALARY_EXPENSE, drop it — the app validates role keys at write time,
+-- so a DB-level whitelist just adds friction whenever a new module
+-- introduces a new role. NOT re-added.
+IF EXISTS (
     SELECT 1 FROM sys.check_constraints cc
     INNER JOIN sys.columns c ON c.object_id = cc.parent_object_id AND c.column_id = cc.parent_column_id
     WHERE c.name = 'RoleKey' AND OBJECT_NAME(cc.parent_object_id) = 'dms_SystemAccounts'
-      AND cc.definition LIKE '%SALARY_EXPENSE%'
+      AND cc.definition NOT LIKE '%SALARY_EXPENSE%'
 )
 BEGIN
     DECLARE @ccName SYSNAME = (
@@ -156,30 +160,43 @@ BEGIN
         WHERE c.name = 'RoleKey' AND OBJECT_NAME(cc.parent_object_id) = 'dms_SystemAccounts'
     );
     IF @ccName IS NOT NULL
+    BEGIN
         EXEC('ALTER TABLE dms_SystemAccounts DROP CONSTRAINT ' + @ccName);
-
-    ALTER TABLE dms_SystemAccounts ADD CONSTRAINT CK_dms_SystemAccounts_RoleKey
-        CHECK (RoleKey IN (
-            'CASH_BOOK','POS_CLEARING','CHEQUES_ON_HAND','GENERAL_CUSTOMER','GENERAL_PARTS_CUSTOMER',
-            'INVENTORY_PARTS','COGS_PARTS','PARTS_DISCOUNT_RECEIVED','ADVANCE_TAX_236G_PARTS',
-            'INPUT_GST','OUTPUT_GST','LABOUR_INCOME','SUBLET_INCOME','SALES_INCOME','PARTS_INCOME',
-            'ROUNDING_ADJUSTMENT','PURCHASE_RETURN_VARIANCE','SALES_RETURN_VARIANCE',
-            'DEFAULT_DISCOUNT_GIVEN','PAINT_INVENTORY','ADVANCE_INCOME_TAX_ON_SALES',
-            'BILLING_CHARITY_1PCT','CHARITY_1PCT_PAYABLE','BUDDY_SEED',
-            'SALARY_EXPENSE','SALARY_PAYABLE','EOBI_PAYABLE'
-        ));
-    PRINT '  dms_SystemAccounts CHECK extended for salary roles.';
+        PRINT '  Dropped restrictive RoleKey CHECK constraint (not re-added).';
+    END
 END
 GO
 
--- Insert placeholder rows so admin can map GLs in Accounting Setup UI.
-IF NOT EXISTS (SELECT 1 FROM dms_SystemAccounts WHERE RoleKey = 'SALARY_EXPENSE')
-    INSERT INTO dms_SystemAccounts (RoleKey, GLCAID, AssignedByName) VALUES ('SALARY_EXPENSE', NULL, 'migration_095');
-IF NOT EXISTS (SELECT 1 FROM dms_SystemAccounts WHERE RoleKey = 'SALARY_PAYABLE')
-    INSERT INTO dms_SystemAccounts (RoleKey, GLCAID, AssignedByName) VALUES ('SALARY_PAYABLE', NULL, 'migration_095');
-IF NOT EXISTS (SELECT 1 FROM dms_SystemAccounts WHERE RoleKey = 'EOBI_PAYABLE')
-    INSERT INTO dms_SystemAccounts (RoleKey, GLCAID, AssignedByName) VALUES ('EOBI_PAYABLE', NULL, 'migration_095');
-PRINT '  Salary role rows present in dms_SystemAccounts.';
+-- No placeholder rows inserted: dms_SystemAccounts.GLCAID is NOT NULL, and
+-- the correct GL for salary accounts is site-specific. Admin adds the three
+-- roles (SALARY_EXPENSE / SALARY_PAYABLE / EOBI_PAYABLE) via the Accounting
+-- Setup → System Accounts UI. The finalize buttons in the Salary Sheet page
+-- raise a clear error message if a required role isn't mapped.
+GO
+
+-- ---------- vw_ActiveEmployees — expose the new HR columns -------
+-- The existing view was created in migration 012 with an explicit column
+-- list that doesn't include the HR salary fields added above. GET /api/employees
+-- reads from this view via `SELECT e.* FROM vw_ActiveEmployees e`, so unless
+-- we recreate the view here, the Employee Salary Settings page would save
+-- values correctly but never render them back on reload.
+IF OBJECT_ID('vw_ActiveEmployees', 'V') IS NOT NULL
+    DROP VIEW vw_ActiveEmployees;
+GO
+CREATE VIEW vw_ActiveEmployees AS
+SELECT
+    EmployeeID, EmployeeNo, EmployeeName, FatherName, CNICno, MobileNo,
+    EmployeeGender, PermanentAddress, DOB, EmailAddress, JoiningDate,
+    DepartmentID, DesignationID, MachineId, BasicSalary, EmployeeGLID,
+    IsTechnician, ReportsToID, IsActive,
+    -- HR / salary fields added by this migration
+    SrNo, HasEOBI, EOBI, HasFuelAllowance, FuelAllowance,
+    HasMess, MessAmount, HasCustomLateFine, CustomLateFineAmount,
+    IsPaidByBank, BankAccountNumber
+FROM gen_EmployeeInfo
+WHERE IsActive = 1;
+GO
+PRINT '  vw_ActiveEmployees recreated with HR columns.';
 GO
 
 -- Permissions live in Software/config/permissions.js — the app seeds them at
