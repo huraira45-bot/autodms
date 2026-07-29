@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../../components/PrintBusinessHeader';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const monthLabel = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
 
+// ?type=eobi     → print employees whose HasEOBI = 1
+// ?type=noneobi  → print employees whose HasEOBI = 0
+// missing        → print all (no EOBI label rendered either way, per owner ask)
 export default function HrSalarySheetPrint() {
     const { monthId } = useParams();
+    const [qs] = useSearchParams();
+    const type = qs.get('type');
     const [sheet, setSheet] = useState(null);
     const [err, setErr] = useState(null);
 
@@ -17,37 +22,30 @@ export default function HrSalarySheetPrint() {
             .catch(e => setErr(e.response?.data?.error || e.message));
     }, [monthId]);
 
-    // Two payroll categories (EOBI / Non-EOBI), each grouped by department.
-    const categories = useMemo(() => {
+    // Filter rows by the requested payroll category, then group by department.
+    // Owner ask 2026-07-29: don't render EOBI / Non-EOBI labels on the sheet.
+    const grouped = useMemo(() => {
         if (!sheet) return [];
-        const cats = [
-            { key: 'eobi',    label: 'EOBI Payroll',      match: r => r.Employee.HasEOBI },
-            { key: 'noneobi', label: 'Non-EOBI Payroll',  match: r => !r.Employee.HasEOBI },
-        ];
-        return cats.map(cat => {
-            const rows = sheet.rows.filter(cat.match);
-            const groups = [];
-            const idx = new Map();
-            rows.forEach(r => {
-                const name = r.DepartmentName || 'Unassigned';
-                if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
-                groups[idx.get(name)].rows.push(r);
-            });
-            return {
-                ...cat,
-                rows,
-                groups: groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + r.Calc.net, 0) })),
-                subtotal: rows.reduce((s, r) => s + r.Calc.net, 0),
-                empCount: rows.length,
-            };
-        }).filter(cat => cat.empCount > 0);
-    }, [sheet]);
+        const rows = sheet.rows.filter(r => {
+            if (type === 'eobi')    return !!r.Employee.HasEOBI;
+            if (type === 'noneobi') return !r.Employee.HasEOBI;
+            return true;
+        });
+        const groups = [];
+        const idx = new Map();
+        rows.forEach(r => {
+            const name = r.DepartmentName || 'Unassigned';
+            if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
+            groups[idx.get(name)].rows.push(r);
+        });
+        return groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + r.Calc.net, 0) }));
+    }, [sheet, type]);
 
     if (err)    return <div style={{ padding: 40, color: '#b91c1c' }}>Cannot print: {err}</div>;
     if (!sheet) return <div style={{ padding: 40 }}>Loading…</div>;
 
-    const totalNet = categories.reduce((s, c) => s + c.subtotal, 0);
-    const totalDepts = categories.reduce((s, c) => s + c.groups.length, 0);
+    const empCount = grouped.reduce((s, g) => s + g.rows.length, 0);
+    const totalNet = grouped.reduce((s, g) => s + g.subtotal, 0);
 
     return (
         <div className="sheet">
@@ -56,18 +54,11 @@ export default function HrSalarySheetPrint() {
             <div className="meta">
                 <span><b>Late Fine/min:</b> {fmt(sheet.effectiveLateRate)}</span>
                 <span><b>Absent Fine/day:</b> {fmt(sheet.effectiveAbsentRate)}</span>
-                <span><b>Categories:</b> {categories.length}</span>
-                <span><b>Departments:</b> {totalDepts}</span>
-                <span><b>Employees:</b> {sheet.rows.length}</span>
+                <span><b>Departments:</b> {grouped.length}</span>
+                <span><b>Employees:</b> {empCount}</span>
             </div>
 
-            {categories.map(cat => (
-                <div key={cat.key} className={`cat cat-${cat.key}`}>
-                    <div className="cat-head">
-                        <span>{cat.label}</span>
-                        <span className="cat-meta">{cat.empCount} employees · Net Rs. {fmt(cat.subtotal)}</span>
-                    </div>
-                    {cat.groups.map(g => (
+            {grouped.map(g => (
                 <section key={g.name} className="dept">
                     <div className="dept-head">
                         <span className="dept-name">{g.name}</span>
@@ -121,16 +112,16 @@ export default function HrSalarySheetPrint() {
                         </tbody>
                     </table>
                 </section>
-                    ))}
-                    <div className="cat-total">
-                        <span>{cat.label} — {cat.empCount} employees</span>
-                        <span className="cat-total-amt">Rs. {fmt(cat.subtotal)}</span>
-                    </div>
-                </div>
             ))}
 
+            {!grouped.length && (
+                <div style={{ padding: 20, background: '#fef3c7', border: '1px solid #fcd34d' }}>
+                    No employees in this payroll for {monthLabel(monthId)}.
+                </div>
+            )}
+
             <div className="grand">
-                <span>GRAND TOTAL ({totalDepts} departments · {sheet.rows.length} employees)</span>
+                <span>GRAND TOTAL ({grouped.length} departments · {empCount} employees)</span>
                 <span className="grand-amt">Rs. {fmt(totalNet)}</span>
             </div>
 

@@ -218,8 +218,11 @@ export default function HrSalarySheet() {
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
                         )}
-                        <a className="erp-btn" href={`/hr/salary/${monthId}/print`} target="_blank" rel="noreferrer">
-                            <Printer size={13}/> Print Sheet
+                        <a className="erp-btn" href={`/hr/salary/${monthId}/print?type=eobi`} target="_blank" rel="noreferrer">
+                            <Printer size={13}/> Print Sheet (EOBI)
+                        </a>
+                        <a className="erp-btn" href={`/hr/salary/${monthId}/print?type=noneobi`} target="_blank" rel="noreferrer">
+                            <Printer size={13}/> Print Sheet (Non-EOBI)
                         </a>
                         <a className="erp-btn" href={`/hr/bank-letter/${monthId}/print`} target="_blank" rel="noreferrer">
                             <Landmark size={13}/> Bank Letter
