@@ -339,7 +339,7 @@ async function resolveBaseQty(tx, paintItemID, paintUomID, qty) {
     const r = await new sql.Request(tx)
         .input('i', sql.Int, paintItemID)
         .input('u', sql.Int, paintUomID)
-        .query(`SELECT i.PaintCode, i.PaintName,
+        .query(`SELECT i.PaintCode, i.PaintName, i.GramsPerUnit,
                        ib.UOMName AS BaseUOMName, ISNULL(ib.Scale, 0) AS BaseScale,
                        lu.UOMName AS LineUOMName, ISNULL(lu.Scale, 0) AS LineScale
                 FROM   paint_Item i
@@ -353,6 +353,7 @@ async function resolveBaseQty(tx, paintItemID, paintUomID, qty) {
 
     const baseScale = Number(row.BaseScale);
     const lineScale = Number(row.LineScale);
+    const gramsPerUnit = row.GramsPerUnit != null ? Number(row.GramsPerUnit) : 0;
 
     // Piece family — both sides must have Scale = 0 (counting units).
     if (baseScale <= 0) {
@@ -364,11 +365,23 @@ async function resolveBaseQty(tx, paintItemID, paintUomID, qty) {
         }
         return { factor: 1, baseQty: Math.round((Number(qty) || 0) * 10000) / 10000 };
     }
-    // Mass/volume family — line must also have Scale > 0.
+    // Mass/volume family — line must also have Scale > 0, UNLESS the item
+    // has a per-item GramsPerUnit factor set (owner ask 2026-07-30): that's
+    // the "1 box/can = X grams" case, letting a Piece-UoM line (received or
+    // issued by the box) convert into the item's gram-equivalent base unit.
+    // Without this, a box entered against the Gram UoM directly gets
+    // recorded as qty=1 "gram", pricing AvgCost at the full box cost.
     if (lineScale <= 0) {
+        if (gramsPerUnit > 0) {
+            const factor = gramsPerUnit / baseScale;
+            return {
+                factor,
+                baseQty: Math.round((Number(qty) || 0) * factor * 10000) / 10000,
+            };
+        }
         throw new Error(
             `"${row.PaintCode} ${row.PaintName}" is stocked in ${row.BaseUOMName} (a weight/volume unit). ` +
-            `Cannot receive/issue in ${row.LineUOMName} which is a counting unit.`
+            `Cannot receive/issue in ${row.LineUOMName} which is a counting unit — set "Grams Per Unit" on the item master first.`
         );
     }
     const factor = lineScale / baseScale;

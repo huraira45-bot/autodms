@@ -202,7 +202,9 @@ export default function PaintIssue() {
     const whOpts = useMemo(() => warehouses.map(w => ({ id: w.PaintWHID, label: w.WHDesc, sub: w.WHCode })), [warehouses]);
     const uomOpts = useMemo(() => uoms.map(u => ({ id: u.PaintUOMID, label: u.UOMName })), [uoms]);
     // Filter picker to the same family (weight/volume vs Piece) as the
-    // item's base UoM (paint_UOM.Scale > 0 = mass, Scale = 0 = counting).
+    // item's base UoM (paint_UOM.Scale > 0 = mass, Scale = 0 = counting) —
+    // UNLESS the item has a per-item GramsPerUnit factor set, in which case
+    // Piece is also offered (issue "1 box = 700g" etc. — owner ask 2026-07-30).
     const uomOptsForItem = React.useCallback((paintItemID) => {
         if (!paintItemID) return uomOpts;
         const it = items.find(x => Number(x.PaintItemID) === Number(paintItemID));
@@ -210,11 +212,18 @@ export default function PaintIssue() {
         const baseUom = uoms.find(u => Number(u.PaintUOMID) === Number(it.PaintUOMID));
         if (!baseUom) return uomOpts;
         const baseIsCounting = !(Number(baseUom.Scale) > 0);
+        const gramsPerUnit = Number(it.GramsPerUnit) || 0;
         return uoms
-            .filter(u => (!(Number(u.Scale) > 0)) === baseIsCounting)
+            .filter(u => {
+                const uIsCounting = !(Number(u.Scale) > 0);
+                if (uIsCounting === baseIsCounting) return true;
+                return !baseIsCounting && uIsCounting && gramsPerUnit > 0;
+            })
             .map(u => ({
                 id: u.PaintUOMID,
-                label: Number(u.PaintUOMID) === Number(it.PaintUOMID) ? `${u.UOMName} (base)` : u.UOMName,
+                label: Number(u.PaintUOMID) === Number(it.PaintUOMID) ? `${u.UOMName} (base)`
+                     : (!(Number(u.Scale) > 0) && !baseIsCounting) ? `${u.UOMName} (via ${gramsPerUnit}g/unit)`
+                     : u.UOMName,
             }));
     }, [items, uoms, uomOpts]);
 
