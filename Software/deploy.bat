@@ -35,8 +35,14 @@ if errorlevel 1 (
 )
 
 REM ── 2. Backend deps (only re-installs if package.json changed) ──
+REM     `npm ci` always wipes node_modules first. If PM2 still has the
+REM     backend running, native addons (msnodesqlv8's sqlserver.node) are
+REM     mmap'd into that process and Windows refuses to delete the file
+REM     (EPERM). Stop the app first so the handle is released.
 echo.
 echo [2/5] Installing backend npm packages...
+where pm2 >nul 2>&1
+if not errorlevel 1 pm2 stop autodms >nul 2>&1
 call npm ci --omit=dev
 if errorlevel 1 (
     echo.
@@ -45,12 +51,17 @@ if errorlevel 1 (
 )
 
 REM ── 3. Frontend build ──────────────────────────────────────────
+REM     Plain `npm install` here, not `npm ci` — this server's npm version
+REM     can resolve a slightly different optional-dependency set (e.g. the
+REM     @emnapi/* WASM shims under rolldown) than whatever npm generated
+REM     the committed lock file, which makes `npm ci`'s exact-match check
+REM     fail even though nothing is actually broken.
 echo.
 echo [3/5] Building frontend...
 cd frontend
-call npm ci
+call npm install
 if errorlevel 1 (
-    echo ERROR: frontend npm ci failed.
+    echo ERROR: frontend npm install failed.
     pause & exit /b 1
 )
 set "NODE_OPTIONS=--max-old-space-size=2048"
@@ -71,17 +82,20 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
-REM ── 5. Reload Node backend through PM2 ─────────────────────────
+REM ── 5. Restart Node backend through PM2 ─────────────────────────
+REM     Step 2 stopped the app (to release the native-addon file lock), so
+REM     use `restart` here, not `reload` — `reload` expects an already-
+REM     running process for its zero-downtime handoff.
 echo.
-echo [5/5] Reloading backend (PM2)...
+echo [5/5] Restarting backend (PM2)...
 where pm2 >nul 2>&1
 if errorlevel 1 (
     echo WARNING: PM2 not found in PATH. Install with: npm install -g pm2
-    echo Skipping PM2 reload — the backend may be running directly via nodemon.
+    echo Skipping PM2 restart — the backend may be running directly via nodemon.
 ) else (
-    pm2 reload ecosystem.config.js --update-env
+    pm2 restart ecosystem.config.js --update-env
     if errorlevel 1 (
-        echo ERROR: PM2 reload failed.
+        echo ERROR: PM2 restart failed.
         exit /b 1
     )
 )
