@@ -951,6 +951,9 @@ exports.saveJobCard = async (req, res) => {
                     .input('regNo', sql.NVarChar(150), VehicleRegNo)
                     .input('chassis', sql.NVarChar(150), ChasisNo)
                     .input('engine', sql.NVarChar(150), EngineNo)
+                    .input('brand', sql.Int, BrandCode || null)
+                    .input('version', sql.NVarChar(150), VersionCode || null)
+                    .input('vehicle', sql.NVarChar(150), VehicleCode || null)
                     .input('km', sql.Decimal(18,2), KiloMeter || 0)
                     .input('millage', sql.Decimal(18,2), Millage || 0)
                     .input('promised', sql.DateTime, parseWallDateTime(PromisedDate))
@@ -990,6 +993,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('wacResults', sql.NVarChar(sql.MAX), WACResults || null)
                     .query(`UPDATE Addata_JobCardInfo SET
                         jobCode=@jobCode, DMSJobCardNo=@dmsJobCardNo, EndUserID=@endUserId, JobTypeId=@jobTypeId, OrderTypeId=@orderTypeId, VehicleRegNo=@regNo, ChasisNo=@chassis, EngineNo=@engine,
+                        BrandCode=@brand, VersionCode=@version, VehicleCode=@vehicle,
                         KiloMeter=@km, Millage=@millage, PromisedDate=@promised, Remarks=@remarks, Status=@payType, PaymentCO=@payCO, PaymentBankID=@payBankId,
                         FuelLevel=@fuel, VOCRemarks=@voc, CustomerType=@custType, PartyID=@partyId,
                         PMType=@pmType, ServiceAdvisor=@advisor, ServiceAdvisorID=@advisorId, RepeatROID=@repeatROID, BatteryNo=@batteryNo, VehicleColor=@color,
