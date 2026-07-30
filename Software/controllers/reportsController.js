@@ -1325,7 +1325,11 @@ exports.getInventoryValuation = async (req, res) => {
         // into 3 simple queries — items master, inflow agg, outflow agg — and
         // merging in JS runs in <100ms.
         const itemsReq = pool.request();
-        const conds = [];
+        // InventItems also carries the labour/service catalog (ItemType='Service')
+        // alongside real stocked parts — exclude it so job/labour entries like
+        // "FUEL PUMP ASSY REPLACE IN (WARRANTY)" don't show up in a parts stock
+        // valuation. NULL-safe: legacy rows with no ItemType set are still parts.
+        const conds = [`ISNULL(i.ItemType, 'Part') = 'Part'`];
         if (whId)       { itemsReq.input('wh',  sql.Int, whId);  conds.push('i.WHID = @wh'); }
         if (categoryId) { itemsReq.input('cat', sql.Int, categoryId); conds.push('i.CategoryID = @cat'); }
         if (search)     { itemsReq.input('q', sql.NVarChar(200), `%${search}%`);
