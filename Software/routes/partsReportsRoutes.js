@@ -11,5 +11,8 @@ router.get('/issued-to-jc',      requireAccess('report:parts_issued_to_jc'),   c
 router.get('/sold-finalized',    requireAccess('report:parts_sold_finalized'), c.partsSoldFinalized);
 router.get('/item-search',       requireAccess('report:item_ledger'),          c.itemSearch);
 router.get('/item-ledger',       requireAccess('report:item_ledger'),          c.itemLedger);
+router.get('/tax-invoice-tracker',   requireAccess('report:store_sale_tax_invoice_tracker'), c.taxInvoiceTracker);
+router.get('/tax-invoice-tracker/:saleId/lines', requireAccess('report:store_sale_tax_invoice_tracker'), c.taxInvoiceLines);
+router.patch('/tax-invoice-tracker/:saleId', requireAccess('report:store_sale_tax_invoice_tracker'), c.saveTaxInvoice);
 
 module.exports = router;

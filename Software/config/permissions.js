@@ -180,6 +180,7 @@ const SECTIONS = [
             { key: 'report:parts_issued_to_jc',    label: 'Parts Issued to JC',    kind: 'report' },
             { key: 'report:parts_sold_finalized',  label: 'Parts Sold (Finalized)', kind: 'report' },
             { key: 'report:item_ledger',           label: 'Item Ledger',           kind: 'report' },
+            { key: 'report:store_sale_tax_invoice_tracker', label: 'Store Sale Tax Invoice Tracker', kind: 'report' },
         ],
     },
     {

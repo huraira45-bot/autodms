@@ -1020,3 +1020,159 @@ exports.itemLedger = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+/**
+ * GET /reports/parts/tax-invoice-tracker
+ *
+ * Store Sale equivalent of the Job Card Tax Invoice Tracker (migration 081 /
+ * serviceReportsController.taxInvoiceTracker). Store Sale has no PST/labour
+ * concept, so this is GST-only — one invoice number + paid flag per sale,
+ * backed by dms_SSTaxInvoice (migration 100). LEFT JOIN so sales without a
+ * tracker row still appear; GSTInvoiceNo falls back to the sale's own
+ * FBRInvoiceNo (set at entry time on the Store Sale form) as long as it's
+ * not still the '0000000000' placeholder, purely as a starting point —
+ * saving via this report writes to dms_SSTaxInvoice, not FBRInvoiceNo.
+ *
+ * Owner ask 2026-07-30.
+ */
+exports.taxInvoiceTracker = async (req, res) => {
+    try {
+        const { from, to } = parseRange(req);
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+
+        const dateCol = 'COALESCE(s.FinalizedAt, s.SaleDate)';
+        const conds = [`${dateCol} BETWEEN @from AND @to`];
+
+        if (req.query.paymentMode === 'cash') {
+            conds.push("s.PaymentMode IN ('Cash','POS','Cheque','Bank Transfer')");
+        } else if (req.query.paymentMode === 'credit') {
+            conds.push("s.PaymentMode = 'Credit'");
+        }
+        const finalized = req.query.finalized || 'finalized';
+        if (finalized === 'finalized')  conds.push('s.IsFinalized = 1');
+        else if (finalized === 'draft') conds.push('(s.IsFinalized IS NULL OR s.IsFinalized = 0)');
+
+        const r = await rq.query(`
+            SELECT s.SaleID, s.InvoiceNo, s.SaleDate, s.FinalizedAt, s.PaymentMode,
+                   ISNULL(p.PartyName, s.CustomerName) AS Customer,
+                   ISNULL(s.TotalBillAmount, 0) - ISNULL(s.TotalDiscount, 0) AS PartsAmount,
+                   ISNULL(s.TotalTaxAmount, 0) AS GSTAmount,
+                   ISNULL(s.NetPayable, 0) AS NetPayable,
+                   ISNULL(tx.GSTInvoiceNo, NULLIF(s.FBRInvoiceNo, '0000000000')) AS GSTInvoiceNo,
+                   ISNULL(tx.GSTPaid, 0) AS GSTPaid,
+                   tx.UpdatedByName AS TaxUpdatedByName, tx.UpdatedAt AS TaxUpdatedAt
+            FROM data_StoreSaleInfo s
+            LEFT JOIN gen_PartiesInfo p    ON p.PartyID = s.PartyID
+            LEFT JOIN dms_SSTaxInvoice tx  ON tx.SaleID = s.SaleID
+            WHERE ${conds.join(' AND ')}
+            ORDER BY ${dateCol} DESC, s.SaleID DESC`);
+
+        const rows = r.recordset.map(x => ({
+            SaleID:       x.SaleID,
+            InvoiceNo:    x.InvoiceNo,
+            FinalizedAt:  x.FinalizedAt?.toISOString().slice(0,10) || null,
+            SaleDate:     x.SaleDate?.toISOString().slice(0,10) || null,
+            PaymentMode:  x.PaymentMode || '',
+            Customer:     x.Customer || '',
+            PartsAmount:  +Number(x.PartsAmount || 0).toFixed(2),
+            GSTAmount:    +Number(x.GSTAmount || 0).toFixed(2),
+            NetPayable:   +Number(x.NetPayable || 0).toFixed(2),
+            GSTInvoiceNo: x.GSTInvoiceNo || '',
+            GSTPaid:      !!x.GSTPaid,
+            TaxUpdatedByName: x.TaxUpdatedByName || null,
+            TaxUpdatedAt: x.TaxUpdatedAt?.toISOString().slice(0,16).replace('T',' ') || null,
+        }));
+
+        const totals = {
+            count:        rows.length,
+            partsAmount:  +rows.reduce((s, x) => s + x.PartsAmount, 0).toFixed(2),
+            gstAmount:    +rows.reduce((s, x) => s + x.GSTAmount, 0).toFixed(2),
+            netPayable:   +rows.reduce((s, x) => s + x.NetPayable, 0).toFixed(2),
+            gstPaidCount: rows.filter(x => x.GSTPaid).length,
+        };
+
+        res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
+    } catch (err) { console.error('taxInvoiceTracker (store sale):', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
+ * PATCH /reports/parts/tax-invoice-tracker/:saleId
+ * Body: { GSTInvoiceNo?, GSTPaid? }
+ *
+ * Upserts into dms_SSTaxInvoice. Rows are created lazily on first PATCH.
+ * Owner ask 2026-07-30.
+ */
+exports.saveTaxInvoice = async (req, res) => {
+    try {
+        const saleId = parseInt(req.params.saleId);
+        if (!Number.isFinite(saleId)) return res.status(400).json({ error: 'Invalid saleId' });
+
+        const { GSTInvoiceNo, GSTPaid } = req.body || {};
+        const clean = (v) => (v == null ? null : String(v).trim().slice(0, 50) || null);
+
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('id',   sql.Int,           saleId)
+            .input('gst',  sql.NVarChar(50),  clean(GSTInvoiceNo))
+            .input('gp',   sql.Bit,           GSTPaid ? 1 : 0)
+            .input('by',   sql.Int,           req.user?.userId || null)
+            .input('byN',  sql.NVarChar(100), req.user?.userName || null)
+            .query(`
+                MERGE dbo.dms_SSTaxInvoice AS tgt
+                USING (SELECT @id AS SaleID) AS src
+                ON tgt.SaleID = src.SaleID
+                WHEN MATCHED THEN UPDATE SET
+                    GSTInvoiceNo  = @gst,
+                    GSTPaid       = @gp,
+                    UpdatedBy     = @by,
+                    UpdatedByName = @byN,
+                    UpdatedAt     = GETDATE()
+                WHEN NOT MATCHED THEN INSERT
+                    (SaleID, GSTInvoiceNo, GSTPaid, UpdatedBy, UpdatedByName, UpdatedAt)
+                    VALUES (@id, @gst, @gp, @by, @byN, GETDATE())
+                OUTPUT INSERTED.SaleID, INSERTED.GSTInvoiceNo, INSERTED.GSTPaid,
+                       INSERTED.UpdatedByName, INSERTED.UpdatedAt;
+            `);
+
+        const row = r.recordset[0];
+        res.json({
+            SaleID:       row.SaleID,
+            GSTInvoiceNo: row.GSTInvoiceNo || '',
+            GSTPaid:      !!row.GSTPaid,
+            TaxUpdatedByName: row.UpdatedByName || null,
+            TaxUpdatedAt: row.UpdatedAt?.toISOString().slice(0,16).replace('T',' ') || null,
+        });
+    } catch (err) { console.error('saveTaxInvoice (store sale):', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
+ * GET /reports/parts/tax-invoice-tracker/:saleId/lines
+ *
+ * Line-level drill-down for a Tax Invoice Tracker row (all lines are the
+ * GST base — Store Sale has no PST/labour split like Job Card does).
+ * Owner ask 2026-07-30.
+ */
+exports.taxInvoiceLines = async (req, res) => {
+    try {
+        const saleId = parseInt(req.params.saleId);
+        if (!Number.isFinite(saleId)) return res.status(400).json({ error: 'Invalid saleId' });
+
+        const pool = await getPool();
+        const parts = await pool.request().input('id', sql.Int, saleId).query(`
+            SELECT i.ItemNumber, i.ManualNumber, i.ItenName AS ItemName,
+                   d.Quantity, d.SaleRate AS Rate,
+                   ISNULL(d.DiscountAmount, 0) AS Discount,
+                   ISNULL(d.TaxAmount, 0)      AS TaxAmount,
+                   d.IsGST,
+                   ISNULL(d.NetAmount, 0) AS LineTotal
+            FROM   data_StoreSaleDetail d
+            LEFT   JOIN InventItems i ON i.ItemId = d.ItemID
+            WHERE  d.SaleID = @id
+            ORDER  BY d.SaleDetailID`);
+
+        res.json({ parts: parts.recordset });
+    } catch (err) { console.error('taxInvoiceLines (store sale):', err); res.status(500).json({ error: err.message }); }
+};

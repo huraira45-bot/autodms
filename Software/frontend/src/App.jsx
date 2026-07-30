@@ -173,6 +173,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 // Module-scoped reports
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
+import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
@@ -429,6 +430,11 @@ function LegacySidebar() {
                 {canReport('item_ledger') && (
                     <NavLink to="/reports/parts/item-ledger" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Item Ledger
+                    </NavLink>
+                )}
+                {canReport('store_sale_tax_invoice_tracker') && (
+                    <NavLink to="/reports/parts/tax-invoice-tracker" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Store Sale Tax Invoice Tracker
                     </NavLink>
                 )}
                 {hasModule('procurement_grn') && (
@@ -1031,6 +1037,7 @@ function AppShell() {
                     <Route path="/reports/parts/issued-to-jc"     element={<ProtectedRoute><PartsIssuedToJc /></ProtectedRoute>} />
                     <Route path="/reports/parts/sold-finalized"   element={<ProtectedRoute><PartsSoldFinalized /></ProtectedRoute>} />
                     <Route path="/reports/parts/item-ledger"      element={<ProtectedRoute><ItemLedger /></ProtectedRoute>} />
+                    <Route path="/reports/parts/tax-invoice-tracker" element={<ProtectedRoute><StoreSaleTaxInvoiceTracker /></ProtectedRoute>} />
 
                     {/* Sales (vehicle) reports */}
                     <Route path="/reports/sales/booking-register"        element={<ProtectedRoute><BookingRegister /></ProtectedRoute>} />
