@@ -78,7 +78,7 @@ async function loadStoreSale(tx, saleId) {
 // legs so a reversal pair nets to zero instead of double-counting on Dr side.
 // Owner case 2026-07-10 (JC GR-3110): a mistaken BRV was reversed, plus an
 // unfinalize/re-finalize cascade, left 3 stranded Posted-reversal Dr legs.
-async function loadJobCardWalkOutBalance(tx, genCustGL, jcId) {
+async function loadJobCardWalkOutBalance(tx, genCustGL, jcId, advGL) {
     const sumQ = await new sql.Request(tx)
         .input('gl', sql.Int, genCustGL)
         .input('jc', sql.Int, jcId)
@@ -93,7 +93,24 @@ async function loadJobCardWalkOutBalance(tx, genCustGL, jcId) {
                   AND d.PartyID IS NULL
                   AND d.JobCardID=@jc`);
     const { Dr, Cr } = sumQ.recordset[0] || { Dr: 0, Cr: 0 };
-    return { invoiced: Number(Dr || 0), received: Number(Cr || 0) };
+
+    // Walk-in advances (Customer Advance Received, tagged to this JC) never
+    // touch the Gen-Cust GL directly, so the Dr/Cr sum above misses them —
+    // same reason the JC balance widget (paymentController.getJobCardBalance)
+    // sums this account separately. Owner report 2026-07-31 (JC GR-3329): a
+    // Rs 10,000 advance taken before finalize left the gate-pass check
+    // blocked even though the money was already in hand.
+    const advQ = await new sql.Request(tx)
+        .input('jc', sql.Int, jcId)
+        .input('gl', sql.Int, advGL)
+        .query(`SELECT ISNULL(SUM(Credit) - SUM(Debit), 0) AS AdvanceCredit
+                FROM dms_PartyLedger
+                WHERE JobCardID=@jc AND GLCAID=@gl`);
+    const advance = Math.max(0, Number(advQ.recordset[0]?.AdvanceCredit) || 0);
+
+    const invoiced = Number(Dr || 0);
+    const received = Math.min(Number(Cr || 0) + advance, invoiced);
+    return { invoiced, received };
 }
 
 // Which payment-mode accounts were touched on receipts against this JC?
@@ -136,7 +153,7 @@ async function loadStoreSalePaymentModes(tx, saleId) {
 // blocking list (B&P / CT). "Open" = not finalized OR has unpaid walk-out
 // balance. Other business types are ignored entirely per owner ask
 // 2026-07-05 — the gate opens for them regardless of their state.
-async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCustGL) {
+async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCustGL, advGL) {
     if (!regNo && !chasisNo) return [];
     // sql.NVarChar parameters can't hold a list, so build the IN() literal
     // from a compile-time whitelist. Safe: no user input reaches this SQL.
@@ -147,10 +164,11 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
         .input('reg',     sql.NVarChar(100),regNo || null)
         .input('chassis', sql.NVarChar(100),chasisNo || null)
         .input('gl',      sql.Int,          genCustGL)
+        .input('advGl',   sql.Int,          advGL)
         .query(`
             SELECT jc.JobCardId, jc.JobCardNo, jc.IsFinalized,
                    jct.CardCode AS JobCardTypeCode, jct.Title AS JobCardTypeTitle,
-                   bal.OutstandingDr - bal.OutstandingCr AS Outstanding
+                   bal.OutstandingDr - bal.OutstandingCr - adv.AdvanceCredit AS Outstanding
             FROM Addata_JobCardInfo jc
             LEFT JOIN gen_JobCardType jct ON jct.JobCardTypeId = jc.JobCardType
             OUTER APPLY (
@@ -163,12 +181,20 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
                   AND v.ReversesVoucherID IS NULL
                   AND d.GLCAID=@gl AND d.PartyID IS NULL AND d.JobCardID=jc.JobCardId
             ) bal
+            OUTER APPLY (
+                -- Walk-in advances tagged to this JC never touch the Gen-Cust GL
+                -- above, so they'd otherwise wrongly look unpaid here too — same
+                -- fix as loadJobCardWalkOutBalance (owner report 2026-07-31, JC GR-3329).
+                SELECT ISNULL(SUM(pl.Credit) - SUM(pl.Debit), 0) AS AdvanceCredit
+                FROM dms_PartyLedger pl
+                WHERE pl.JobCardID = jc.JobCardId AND pl.GLCAID = @advGl
+            ) adv
             WHERE jc.JobCardId <> @jcId
               AND ISNULL(jct.CardCode, '') IN (${codeList})
               AND ((@reg     IS NOT NULL AND jc.VehicleRegNo = @reg)
                 OR (@chassis IS NOT NULL AND jc.ChasisNo     = @chassis))
               AND (jc.IsFinalized = 0
-                  OR (bal.OutstandingDr - bal.OutstandingCr) > 0.01)`);
+                  OR (bal.OutstandingDr - bal.OutstandingCr - adv.AdvanceCredit) > 0.01)`);
     return q.recordset;
 }
 
@@ -181,6 +207,7 @@ async function checkEligibility({ docType, docId }) {
     const pool = await getPool();
     const tx = pool;  // read-only — no transaction needed
     const genCustGL = await resolveRole('GENERAL_CUSTOMER');
+    const advGL = await resolveRole('CUSTOMER_ADVANCE_RECEIVED');
 
     const blockers = [];
     const warnings = [];
@@ -231,7 +258,7 @@ async function checkEligibility({ docType, docId }) {
 
     let invoiced, received, modesTouched;
     if (docType === 'JOBCARD') {
-        ({ invoiced, received } = await loadJobCardWalkOutBalance(tx, genCustGL, doc.docId));
+        ({ invoiced, received } = await loadJobCardWalkOutBalance(tx, genCustGL, doc.docId, advGL));
         modesTouched = await loadJobCardPaymentModes(tx, genCustGL, doc.docId);
     } else {
         // Store sales bundle the receipt into the finalize voucher. If finalized
@@ -270,7 +297,7 @@ async function checkEligibility({ docType, docId }) {
     // Rule 4 — multi-RO check (JOBCARD only; store sales aren't vehicle-bound)
     if (docType === 'JOBCARD' && (doc.vehicleRegNo || doc.vehicleChassis)) {
         const others = await findOtherOpenROsOnVehicle(
-            tx, doc.docId, doc.vehicleRegNo, doc.vehicleChassis, genCustGL
+            tx, doc.docId, doc.vehicleRegNo, doc.vehicleChassis, genCustGL, advGL
         );
         for (const o of others) {
             const reason = !o.IsFinalized ? 'not finalized'
