@@ -2222,32 +2222,42 @@ exports.getCashCreditExpense = async (req, res) => {
 
         const pool = await getPool();
         const request = pool.request().input('gc', sql.Int, generalCustGL);
-        const where = [
+        const voucherWhere = [
             `v.Status='Posted'`,
             `v.ReversesVoucherID IS NULL`,
             `v.SourceDocType IN ('JOBCARD','STORE_SALE')`,
-            `LEFT(g.GLCode,1) IN ('4','5')`,
         ];
-        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(v.VoucherDate AS DATE) >= @from'); }
-        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(v.VoucherDate AS DATE) <= @to'); }
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); voucherWhere.push('CAST(v.VoucherDate AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   voucherWhere.push('CAST(v.VoucherDate AS DATE) <= @to'); }
 
+        // Mode is a property of the WHOLE VOUCHER (did its own Dr AR leg hit
+        // GENERAL_CUSTOMER?), not of a GL code — a CASE/EXISTS keyed off
+        // v.VoucherID inside the aggregated SELECT list fails in SQL Server
+        // because different vouchers sharing the same GLCode can have
+        // different modes. Resolve Mode once per voucher in a CTE, then
+        // aggregate detail lines by SourceDocType + GLCode + Mode.
         const rows = (await request.query(`
-            SELECT v.SourceDocType,
+            WITH VoucherMode AS (
+                SELECT v.VoucherID, v.SourceDocType,
+                       CASE
+                           WHEN EXISTS (
+                               SELECT 1 FROM data_FinanceVoucherDetail d2
+                               WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gc AND d2.Debit > 0
+                           ) THEN 'CASH' ELSE 'CREDIT'
+                       END AS Mode
+                FROM data_FinanceVoucherInfo v
+                WHERE ${voucherWhere.join(' AND ')}
+            )
+            SELECT vm.SourceDocType,
                    LEFT(g.GLCode,1) AS ClassRoot,
-                   g.GLCode, g.GLTitle,
-                   CASE
-                       WHEN EXISTS (
-                           SELECT 1 FROM data_FinanceVoucherDetail d2
-                           WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gc AND d2.Debit > 0
-                       ) THEN 'CASH' ELSE 'CREDIT'
-                   END AS Mode,
+                   g.GLCode, g.GLTitle, vm.Mode,
                    SUM(d.Debit) AS TotalDr,
                    SUM(d.Credit) AS TotalCr
             FROM   data_FinanceVoucherDetail d
-            JOIN   data_FinanceVoucherInfo   v ON v.VoucherID = d.VoucherID
-            JOIN   GLChartOFAccount          g ON g.GLCAID    = d.GLCAID
-            WHERE  ${where.join(' AND ')}
-            GROUP  BY v.SourceDocType, g.GLCode, g.GLTitle
+            JOIN   VoucherMode               vm ON vm.VoucherID = d.VoucherID
+            JOIN   GLChartOFAccount          g  ON g.GLCAID     = d.GLCAID
+            WHERE  LEFT(g.GLCode,1) IN ('4','5')
+            GROUP  BY vm.SourceDocType, g.GLCode, g.GLTitle, vm.Mode
             HAVING SUM(d.Debit) + SUM(d.Credit) <> 0
         `)).recordset;
 
