@@ -56,6 +56,7 @@ import JobKiosk           from './pages/JobKiosk';
 import Charity            from './pages/reports/Charity';
 import UnfinalizeLog      from './pages/reports/UnfinalizeLog';
 import RevenueSplit       from './pages/reports/RevenueSplit';
+import CashCreditExpense  from './pages/reports/CashCreditExpense';
 import BuPnL              from './pages/reports/BuPnL';
 import StoreSalePnL       from './pages/reports/StoreSalePnL';
 import { getVisibleModuleGroups } from './navigationConfig';
@@ -985,6 +986,9 @@ function AppShell() {
                     } />
                     <Route path="/reports/revenue-split" element={
                         <ProtectedRoute moduleKey="report:revenue_split"><RevenueSplit /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/cash-credit-expense" element={
+                        <ProtectedRoute moduleKey="report:cash_credit_expense"><CashCreditExpense /></ProtectedRoute>
                     } />
                     <Route path="/reports/bu-pnl" element={
                         <ProtectedRoute moduleKey="report:bu_pnl"><BuPnL /></ProtectedRoute>

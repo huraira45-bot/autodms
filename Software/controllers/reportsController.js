@@ -2201,3 +2201,93 @@ exports.getRevenueSplit = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+// ============================================================================
+// GET /api/reports/cash-credit-expense?from=&to=
+//
+// Store Sale vs Job Card: Cash vs Credit revenue (same Mode test as
+// getRevenueSplit — Dr leg hit GENERAL_CUSTOMER = Cash; named-party GL =
+// Credit), each matched against the DIRECT cost posted on that SAME
+// finalize voucher (COGS_PARTS / SUBLET_COST for Job Card, item COGS for
+// Store Sale — whatever class-5 lines the finalize voucher itself carries).
+// This is narrower than department overhead (no Service/Parts Expenses
+// bucket) — it's the direct cost of what was actually sold/serviced,
+// split by how it was paid. Owner ask 2026-07-31.
+// ============================================================================
+exports.getCashCreditExpense = async (req, res) => {
+    try {
+        const { from, to } = req.query;
+        const generalCustGL = await resolveRole('GENERAL_CUSTOMER');
+        if (!generalCustGL) return res.status(500).json({ error: 'GENERAL_CUSTOMER role is not mapped.' });
+
+        const pool = await getPool();
+        const request = pool.request().input('gc', sql.Int, generalCustGL);
+        const where = [
+            `v.Status='Posted'`,
+            `v.ReversesVoucherID IS NULL`,
+            `v.SourceDocType IN ('JOBCARD','STORE_SALE')`,
+            `LEFT(g.GLCode,1) IN ('4','5')`,
+        ];
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(v.VoucherDate AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(v.VoucherDate AS DATE) <= @to'); }
+
+        const rows = (await request.query(`
+            SELECT v.SourceDocType,
+                   LEFT(g.GLCode,1) AS ClassRoot,
+                   g.GLCode, g.GLTitle,
+                   CASE
+                       WHEN EXISTS (
+                           SELECT 1 FROM data_FinanceVoucherDetail d2
+                           WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gc AND d2.Debit > 0
+                       ) THEN 'CASH' ELSE 'CREDIT'
+                   END AS Mode,
+                   SUM(d.Debit) AS TotalDr,
+                   SUM(d.Credit) AS TotalCr
+            FROM   data_FinanceVoucherDetail d
+            JOIN   data_FinanceVoucherInfo   v ON v.VoucherID = d.VoucherID
+            JOIN   GLChartOFAccount          g ON g.GLCAID    = d.GLCAID
+            WHERE  ${where.join(' AND ')}
+            GROUP  BY v.SourceDocType, g.GLCode, g.GLTitle
+            HAVING SUM(d.Debit) + SUM(d.Credit) <> 0
+        `)).recordset;
+
+        const blank = () => ({ cashRevenue: 0, creditRevenue: 0, cashExpense: 0, creditExpense: 0 });
+        const buckets = { JOBCARD: blank(), STORE_SALE: blank() };
+        for (const r of rows) {
+            const b = buckets[r.SourceDocType];
+            if (!b) continue;
+            const isCash = r.Mode === 'CASH';
+            if (r.ClassRoot === '4') {
+                const amt = Number(r.TotalCr || 0) - Number(r.TotalDr || 0);
+                if (isCash) b.cashRevenue += amt; else b.creditRevenue += amt;
+            } else {
+                const amt = Number(r.TotalDr || 0) - Number(r.TotalCr || 0);
+                if (isCash) b.cashExpense += amt; else b.creditExpense += amt;
+            }
+        }
+
+        const shape = (label, b) => {
+            const cashRevenue = +b.cashRevenue.toFixed(2);
+            const creditRevenue = +b.creditRevenue.toFixed(2);
+            const cashExpense = +b.cashExpense.toFixed(2);
+            const creditExpense = +b.creditExpense.toFixed(2);
+            return {
+                label, cashRevenue, creditRevenue, cashExpense, creditExpense,
+                totalRevenue: +(cashRevenue + creditRevenue).toFixed(2),
+                totalExpense: +(cashExpense + creditExpense).toFixed(2),
+                cashNet: +(cashRevenue - cashExpense).toFixed(2),
+                creditNet: +(creditRevenue - creditExpense).toFixed(2),
+                totalNet: +(cashRevenue + creditRevenue - cashExpense - creditExpense).toFixed(2),
+            };
+        };
+
+        res.json({
+            from: from || null, to: to || null,
+            storeSale: shape('Store Sale', buckets.STORE_SALE),
+            jobCard:   shape('Job Card', buckets.JOBCARD),
+        });
+    } catch (err) {
+        console.error('getCashCreditExpense:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

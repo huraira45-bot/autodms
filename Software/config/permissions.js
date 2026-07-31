@@ -156,6 +156,7 @@ const SECTIONS = [
             { key: 'report:party_open_invoices',    label: 'Party Open Invoices',   kind: 'report' },
             { key: 'report:store_sale_receivables', label: 'Store Sale Receivables', kind: 'report' },
             { key: 'report:revenue_split',         label: 'Revenue Split (Cash/Credit)', kind: 'report' },
+            { key: 'report:cash_credit_expense',   label: 'Cash/Credit vs Expense (Store Sale & Job Card)', kind: 'report' },
             { key: 'report:bu_pnl',                label: 'Business Unit P&L (Rev vs Cost)', kind: 'report' },
             { key: 'report:store_sale_pnl',        label: 'Store Sale P&L (per Party)',      kind: 'report' },
         ],

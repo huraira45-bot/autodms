@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TrendingUp, Scale, BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfControl, SingleDateControl } from './ReportShell';
+import { GroupedBarChart, CHART_COLORS } from './charts';
 
 // Row drill-down helper — opens GL Detail for the clicked account, passing
 // through the current date range so the linked page auto-loads matching data.
@@ -88,6 +89,28 @@ export function PnLByDepartment() {
                         <div style={{ fontSize: '0.85rem', color: '#475569' }}>
                             {data.from} → {data.to}
                         </div>
+                    </div>
+
+                    <div className="card">
+                        <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 12 }}>Revenue vs Expense by Department</div>
+                        <GroupedBarChart
+                            data={(data.departments || []).map(d => ({ label: d.label, revenue: d.revenue, expense: d.expense }))}
+                            series={[
+                                { key: 'revenue', label: 'Revenue', color: CHART_COLORS.blue },
+                                { key: 'expense', label: 'Expense', color: CHART_COLORS.orange },
+                            ]}
+                            formatValue={(v) => 'PKR ' + fmt(v)}
+                        />
+                    </div>
+
+                    <div className="card">
+                        <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 12 }}>Net by Department</div>
+                        <GroupedBarChart
+                            data={(data.departments || []).map(d => ({ label: d.label, net: d.net }))}
+                            series={[{ key: 'net', label: 'Net' }]}
+                            diverging
+                            formatValue={(v) => 'PKR ' + fmt(v)}
+                        />
                     </div>
 
                     {(data.departments || []).map(d => (
