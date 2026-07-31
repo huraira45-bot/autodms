@@ -992,9 +992,7 @@ function AppShell() {
                         <ProtectedRoute moduleKey="report:cash_credit_expense"><CashCreditExpense /></ProtectedRoute>
                     } />
                     <Route path="/reports/financial-dashboard" element={
-                        <ProtectedRoute anyModules={['report:pnl_department', 'report:cash_credit_expense']}>
-                            <FinancialDashboard />
-                        </ProtectedRoute>
+                        <ProtectedRoute moduleKey="reports"><FinancialDashboard /></ProtectedRoute>
                     } />
                     <Route path="/reports/bu-pnl" element={
                         <ProtectedRoute moduleKey="report:bu_pnl"><BuPnL /></ProtectedRoute>
