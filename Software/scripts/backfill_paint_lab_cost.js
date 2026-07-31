@@ -14,8 +14,9 @@
  *      shadow import, migration 091) — several dated June/July 2026,
  *      concurrent with DMS go-live, meaning they were simply never
  *      entered as DMS job cards at all. No JobCardId to link to.
- *   3. B&P-100131 / B&P-110011 — not found anywhere (DMS or legacy).
- *      Owner decision 2026-08-01: skip these two.
+ *   3. B&P-100131 / B&P-110011 / B&P-12084 — not found anywhere (DMS or
+ *      legacy). Owner decision 2026-08-01: post these as ONE lump-sum
+ *      entry instead of chasing down each RO individually.
  *
  * Posting shape:
  *   Group 1 — one JV per RO, same shape the automatic flow posts at JC
@@ -26,6 +27,12 @@
  *     SourceDocID (there's no real JobCardId to reference) — RO number is
  *     carried only in the Narration text. Owner decision 2026-08-01: post
  *     these too.
+ *   Group 3 — ONE JV for all unresolved ROs combined, Dr PAINT_CONSUMPTION
+ *     for the summed cost (no JobCardID, no SourceDoc tag — nothing to
+ *     link to), Narration lists every unresolved RO + its individual
+ *     amount so the breakdown isn't lost even though it's one line in
+ *     the GL. Owner decision 2026-08-01: lump-sum these instead of
+ *     skipping.
  *
  * Nothing in paint_Item / InventItems / any stock-quantity table is
  * touched anywhere in this script — owner ask: "don't disturb our
@@ -36,12 +43,15 @@
  * posting, not the JC's date), so no previously-reported historical P&L
  * period is silently rewritten.
  *
- * Duplicate guards (both run before every --commit, and are what makes a
+ * Duplicate guards (all run before every --commit, and are what makes a
  * re-run safe):
  *   - Group 1: skips if that JobCardID already has a posted PAINT_CONSUMPTION
  *     line.
  *   - Group 2: skips if a posted PAINT_CONSUMPTION line's Narration already
  *     mentions that RO number.
+ *   - Group 3: skipped entirely (with a loud warning) if a posted
+ *     PAINT_CONSUMPTION line's Narration already contains the lump-sum
+ *     marker text — re-running --commit won't double-post it.
  *
  * DRY RUN:  node scripts\backfill_paint_lab_cost.js
  * COMMIT:   node scripts\backfill_paint_lab_cost.js --commit
@@ -57,8 +67,9 @@ const COMMIT         = process.argv.includes('--commit');
 const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // RO -> Cost, exactly as given by the owner (prefix corrected BRP -> B&P).
-// B&P-100131 / B&P-110011 excluded — owner decision 2026-08-01, not found
-// in the DMS or the legacy shadow table.
+// B&P-100131 / B&P-110011 / B&P-12084 are not found in the DMS or the
+// legacy shadow table -- they fall through to the Group 3 lump sum below.
+const LUMP_SUM_MARKER = 'lump sum for unresolved paint-lab-cost ROs';
 const ENTRIES = [
     ['B&P-11919', 6615],
     ['B&P-1206', 3161],
@@ -73,6 +84,8 @@ const ENTRIES = [
     ['B&P-12084', 46891],
     ['B&P-12076', 5528],
     ['B&P-12081', 1496],
+    ['B&P-100131', 5328],
+    ['B&P-110011', 2128],
     ['B&P-0022', 750],
     ['B&P-1007', 2816],
     ['B&P-1014', 10611],
@@ -164,21 +177,39 @@ const ENTRIES = [
             continue;
         }
 
-        missing.push(ro);
+        missing.push([ro, cost]);
     }
 
-    console.log(`\n  ${dmsRows.length} DMS-linked + ${legacyRows.length} legacy-only = ${dmsRows.length + legacyRows.length} of ${ENTRIES.length} ROs ready to post.`);
+    // Group 3: lump sum for everything unresolved. Guard against re-posting
+    // on a re-run by checking for the marker text already on a posted line.
+    let lumpSumAlreadyPosted = null;
+    if (missing.length && paintGL) {
+        const dup = await pool.request()
+            .input('gl', sql.Int, paintGL)
+            .input('mk', sql.NVarChar(200), `%${LUMP_SUM_MARKER}%`)
+            .query(`SELECT TOP 1 vi.VoucherNo
+                    FROM data_FinanceVoucherDetail vd
+                    JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = vd.VoucherID
+                    WHERE vd.GLCAID=@gl AND vi.Status='Posted' AND vd.Narration LIKE @mk`);
+        if (dup.recordset.length) lumpSumAlreadyPosted = dup.recordset[0].VoucherNo;
+    }
+
+    console.log(`\n  ${dmsRows.length} DMS-linked + ${legacyRows.length} legacy-only = ${dmsRows.length + legacyRows.length} of ${ENTRIES.length} ROs ready to post individually.`);
     if (missing.length) {
-        console.log(`\n  NOT FOUND anywhere (skipped):`);
-        missing.forEach(ro => console.log(`      ${ro}`));
+        console.log(`\n  NOT FOUND anywhere (${lumpSumAlreadyPosted ? 'already lump-summed, see below' : 'will post as ONE lump sum, see below'}):`);
+        missing.forEach(([ro, cost]) => console.log(`      ${ro}  (${fmt(cost)})`));
     }
     if (alreadyPosted.length) {
         console.log(`\n  ALREADY HAS A PAINT COST ENTRY (skipped — would double-count):`);
         alreadyPosted.forEach(x => console.log(`      ${x.ro}  (${x.ref}, existing voucher ${x.existingVoucherNo})`));
     }
+    if (lumpSumAlreadyPosted) {
+        console.log(`\n  LUMP SUM ALREADY POSTED (skipped — would double-count): existing voucher ${lumpSumAlreadyPosted}`);
+    }
 
     const dmsTotal = dmsRows.reduce((s, r) => s + r.cost, 0);
     const legacyTotal = legacyRows.reduce((s, r) => s + r.cost, 0);
+    const lumpSumTotal = lumpSumAlreadyPosted ? 0 : missing.reduce((s, [, cost]) => s + cost, 0);
 
     console.log(`\n  DMS-linked (tagged to a real JobCardID), dated ${BACKFILL_DATE}:`);
     console.log(`  ${'RO'.padEnd(14)} ${'JobCardId'.padStart(10)} ${'Finalized'.padStart(10)} ${'Cost'.padStart(12)}`);
@@ -194,7 +225,15 @@ const ENTRIES = [
     }
     console.log(`  Subtotal: PKR ${fmt(legacyTotal)} across ${legacyRows.length} JVs.`);
 
-    console.log(`\n  GRAND TOTAL to post: PKR ${fmt(dmsTotal + legacyTotal)} across ${dmsRows.length + legacyRows.length} JVs.\n`);
+    if (missing.length) {
+        console.log(`\n  Lump sum for unresolved ROs (no JobCardID, one JV), dated ${BACKFILL_DATE}:`);
+        missing.forEach(([ro, cost]) => console.log(`  ${ro.padEnd(14)} ${fmt(cost).padStart(12)}`));
+        console.log(`  Subtotal: PKR ${fmt(lumpSumTotal)} in 1 JV.${lumpSumAlreadyPosted ? '  (SKIPPED -- already posted as ' + lumpSumAlreadyPosted + ')' : ''}`);
+    }
+
+    const grandTotal = dmsTotal + legacyTotal + lumpSumTotal;
+    const grandCount = dmsRows.length + legacyRows.length + (lumpSumTotal > 0 ? 1 : 0);
+    console.log(`\n  GRAND TOTAL to post: PKR ${fmt(grandTotal)} across ${grandCount} JVs.\n`);
 
     if (!COMMIT) {
         console.log(`DRY RUN complete. Review the lists above before committing.`);
@@ -202,7 +241,7 @@ const ENTRIES = [
         console.log(`  node scripts\\backfill_paint_lab_cost.js --commit\n`);
         process.exit(0);
     }
-    if (!dmsRows.length && !legacyRows.length) {
+    if (!dmsRows.length && !legacyRows.length && lumpSumTotal <= 0) {
         console.error(`\n  Nothing to post.\n`);
         process.exit(0);
     }
@@ -302,8 +341,53 @@ const ENTRIES = [
             console.log(`  + Posted ${voucherNo} — ${r.ro} (legacy, LegacyID=${r.legacyId}) — PKR ${fmt(r.cost)}`);
         }
 
+        // ── Group 3: lump sum for everything unresolved ─────
+        if (missing.length && !lumpSumAlreadyPosted) {
+            const voucherNo = await nextVoucherNo(tx, 'JV');
+            const breakdown = missing.map(([ro, cost]) => `${ro}=${fmt(cost)}`).join(', ');
+            const narration = `Paint Lab cost backfill — ${LUMP_SUM_MARKER}, posted ${BACKFILL_DATE}. Breakdown: ${breakdown}`;
+
+            const hdr = await new sql.Request(tx)
+                .input('vd',   sql.DateTime,          new Date(BACKFILL_DATE + 'T12:00:00'))
+                .input('vno',  sql.NVarChar(50),      voucherNo)
+                .input('vtId', sql.Int,               vtId)
+                .input('rem',  sql.NVarChar(sql.MAX), narration)
+                .input('tot',  sql.Decimal(18,2),     lumpSumTotal)
+                .input('cbn',  sql.NVarChar(100),     'system-paintlab-cost-backfill')
+                .query(`INSERT INTO data_FinanceVoucherInfo
+                            (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
+                             Status, Posted, CreatedByName)
+                        OUTPUT INSERTED.VoucherID
+                        VALUES (@vd, @vno, @vtId, @rem, @tot,
+                                'Draft', 0, @cbn)`);
+            const vid = hdr.recordset[0].VoucherID;
+
+            await new sql.Request(tx)
+                .input('vid', sql.Int, vid)
+                .input('gl',  sql.Int, paintGL)
+                .input('nar', sql.NVarChar(sql.MAX), narration)
+                .input('dr',  sql.Decimal(18,2), lumpSumTotal)
+                .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                        VALUES (@vid, @gl, @nar, @dr, 0)`);
+
+            await new sql.Request(tx)
+                .input('vid', sql.Int, vid)
+                .input('gl',  sql.Int, capital.GLCAID)
+                .input('nar', sql.NVarChar(sql.MAX), narration + ' — Cr Capital')
+                .input('cr',  sql.Decimal(18,2), lumpSumTotal)
+                .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                        VALUES (@vid, @gl, @nar, 0, @cr)`);
+
+            await new sql.Request(tx)
+                .input('vid', sql.Int, vid)
+                .query(`UPDATE data_FinanceVoucherInfo SET Status='Posted', Posted=1, PostedAt=GETDATE() WHERE VoucherID=@vid`);
+
+            console.log(`  + Posted ${voucherNo} — lump sum (${missing.length} unresolved ROs) — PKR ${fmt(lumpSumTotal)}`);
+        }
+
         await tx.commit();
-        console.log(`\nDone. Posted ${dmsRows.length + legacyRows.length} JVs totalling PKR ${fmt(dmsTotal + legacyTotal)}.\n`);
+        const postedCount = dmsRows.length + legacyRows.length + ((missing.length && !lumpSumAlreadyPosted) ? 1 : 0);
+        console.log(`\nDone. Posted ${postedCount} JVs totalling PKR ${fmt(dmsTotal + legacyTotal + (lumpSumAlreadyPosted ? 0 : lumpSumTotal))}.\n`);
         process.exit(0);
     } catch (e) {
         try { await tx.rollback(); } catch {}
