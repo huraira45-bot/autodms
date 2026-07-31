@@ -333,6 +333,126 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
     return voucherId;
 }
 
+// Applies any unapplied walk-in advance (Customer Advance Received, tagged
+// to this JC with no PartyID — see paymentJournalBuilder's walkInJobCardID
+// path) against the JC's own Gen-Cust balance, right after the SI voucher
+// posts. Owner report 2026-07-31 (JC GR-3329): a Rs 10,000 advance taken
+// before finalize sat unapplied forever — the Advance account kept showing
+// it as a liability and Gen-Cust kept showing the same money as receivable,
+// even though the gate-pass check (fixed separately) already treated it as
+// settled. This posts the real clearing entry so the books agree:
+//   Dr Customer Advance Received   (clears the liability)
+//   Cr General Customer            (reduces the receivable)
+// tagged PartyID=NULL, JobCardID=<jc> on both the voucher detail and the
+// dms_PartyLedger subsidiary row — identical shape to a manual "Advance"
+// mode + allocation via Receive Payment, so audit tooling (e.g.
+// scripts/diagnose_advance_source.js) sees a normal settlement, not an
+// anomaly. Best-effort: returns null if there's nothing to apply. Walk-in
+// only (PartyID IS NULL) — named credit-party JCs settle via the party's
+// own statement, not this path.
+async function applyWalkInAdvanceForJC(jobCardId, userInfo, transaction) {
+    const jcRes = await new sql.Request(transaction)
+        .input('id', sql.Int, jobCardId)
+        .query(`SELECT JobCardNo, PartyID FROM Addata_JobCardInfo WHERE JobCardId=@id`);
+    const jc = jcRes.recordset[0];
+    if (!jc || jc.PartyID) return null; // no JC, or a named credit party — not this path
+
+    const genCustGL = await resolveRole('GENERAL_CUSTOMER');
+    const advGL = await resolveRole('CUSTOMER_ADVANCE_RECEIVED');
+
+    const advRes = await new sql.Request(transaction)
+        .input('jc', sql.Int, jobCardId)
+        .input('gl', sql.Int, advGL)
+        .query(`SELECT ISNULL(SUM(Credit) - SUM(Debit), 0) AS AdvanceCredit
+                FROM dms_PartyLedger
+                WHERE JobCardID=@jc AND GLCAID=@gl`);
+    const advance = Math.max(0, Number(advRes.recordset[0]?.AdvanceCredit) || 0);
+    if (advance <= 0.01) return null;
+
+    const balRes = await new sql.Request(transaction)
+        .input('jc', sql.Int, jobCardId)
+        .input('gl', sql.Int, genCustGL)
+        .query(`SELECT
+                    ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0) AS Dr,
+                    ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Cr
+                FROM data_FinanceVoucherDetail d
+                INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                WHERE v.Status='Posted'
+                  AND v.ReversesVoucherID IS NULL
+                  AND d.GLCAID=@gl
+                  AND d.PartyID IS NULL
+                  AND d.JobCardID=@jc`);
+    const { Dr, Cr } = balRes.recordset[0] || { Dr: 0, Cr: 0 };
+    const outstanding = Math.max(0, Number(Dr || 0) - Number(Cr || 0));
+    const applyAmount = Math.round(Math.min(advance, outstanding) * 100) / 100;
+    if (applyAmount <= 0.01) return null;
+
+    const jcNo = jc.JobCardNo || `JC#${jobCardId}`;
+    const vt = await new sql.Request(transaction)
+        .query("SELECT Voucherid FROM GLVoucherType WHERE Title='JV'");
+    if (!vt.recordset.length) throw new Error('JV voucher type missing.');
+    const voucherTypeId = vt.recordset[0].Voucherid;
+
+    const voucherNo = await nextVoucherNo(transaction, 'JV');
+    const narration = `Apply walk-in advance to invoice — Job Card ${jcNo}`;
+
+    const hdrRes = await new sql.Request(transaction)
+        .input('vd',      sql.DateTime,          new Date())
+        .input('vno',     sql.NVarChar(50),      voucherNo)
+        .input('vtId',    sql.Int,               voucherTypeId)
+        .input('remarks', sql.NVarChar(sql.MAX), narration)
+        .input('total',   sql.Decimal(18,2),     applyAmount)
+        .input('src',     sql.NVarChar(20),      'JC_ADV_APPLY')
+        .input('srcId',   sql.Int,               jobCardId)
+        .input('cby',     sql.Int,               userInfo?.userId || null)
+        .input('cbyN',    sql.NVarChar(100),     userInfo?.userName || null)
+        .query(`INSERT INTO data_FinanceVoucherInfo
+                    (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
+                     Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
+                OUTPUT INSERTED.VoucherID
+                VALUES (@vd, @vno, @vtId, @remarks, @total,
+                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+    const voucherId = hdrRes.recordset[0].VoucherID;
+
+    await new sql.Request(transaction)
+        .input('vid',  sql.Int,               voucherId)
+        .input('gl',   sql.Int,               advGL)
+        .input('nar',  sql.NVarChar(sql.MAX), narration)
+        .input('dr',   sql.Decimal(18,2),     applyAmount)
+        .input('jcid', sql.Int,               jobCardId)
+        .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit, JobCardID)
+                VALUES (@vid, @gl, @nar, @dr, 0, @jcid)`);
+
+    await new sql.Request(transaction)
+        .input('vid',  sql.Int,               voucherId)
+        .input('gl',   sql.Int,               genCustGL)
+        .input('nar',  sql.NVarChar(sql.MAX), narration)
+        .input('cr',   sql.Decimal(18,2),     applyAmount)
+        .input('jcid', sql.Int,               jobCardId)
+        .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit, JobCardID)
+                VALUES (@vid, @gl, @nar, 0, @cr, @jcid)`);
+
+    // Subsidiary ledger Dr so the advance balance query above nets down
+    // correctly (mirrors paymentJournalBuilder's drawdown write).
+    await new sql.Request(transaction)
+        .input('jcid', sql.Int,               jobCardId)
+        .input('vid',  sql.Int,               voucherId)
+        .input('gl',   sql.Int,               advGL)
+        .input('dr',   sql.Decimal(18,2),     applyAmount)
+        .input('nar',  sql.NVarChar(500),     narration)
+        .query(`INSERT INTO dms_PartyLedger (JobCardID, VoucherID, GLCAID, Debit, Credit, Narration)
+                VALUES (@jcid, @vid, @gl, @dr, 0, @nar)`);
+
+    await new sql.Request(transaction)
+        .input('vid', sql.Int, voucherId)
+        .input('pby', sql.Int, userInfo?.userId || null)
+        .query(`UPDATE data_FinanceVoucherInfo
+                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
+                WHERE VoucherID=@vid`);
+
+    return voucherId;
+}
+
 // Posts the POS receipt CRV that auto-settles a POS-paid JC's customer A/R.
 // Inserts header + Dr POS_CLEARING + Cr customer-subsidiary (with AllocatedToVoucherID
 // pointing at the SI voucher), writes a subsidiary-ledger Cr row, then flips to Posted.
@@ -413,4 +533,4 @@ async function postPOSAutoSettleForJobCard({ transaction, siVoucherId, jobCard, 
                 WHERE VoucherID=@vid`);
 }
 
-module.exports = { postJobCardVoucher, resolveAllAccounts };
+module.exports = { postJobCardVoucher, resolveAllAccounts, applyWalkInAdvanceForJC };

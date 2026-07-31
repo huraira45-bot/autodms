@@ -1,5 +1,5 @@
 const { sql, getPool } = require('../config/db');
-const { postJobCardVoucher } = require('../services/jobCardPostingService');
+const { postJobCardVoucher, applyWalkInAdvanceForJC } = require('../services/jobCardPostingService');
 const { postGRNVoucher } = require('../services/grnPostingService');
 const { postGRTNVoucher } = require('../services/grtnPostingService');
 const { postStoreSaleVoucher } = require('../services/storeSalePostingService');
@@ -55,6 +55,10 @@ async function postJobCardVoucherWithPaint(id, userInfo, tx) {
     // Paint consumption is best-effort inside the tx: if the JC didn't
     // consume any paint, the service returns null and no voucher is posted.
     await postPaintConsumptionForJC(id, userInfo, tx);
+    // Clear any walk-in advance taken before finalize against this JC's
+    // own Gen-Cust balance (Dr Customer Advance / Cr General Customer).
+    // Best-effort: returns null if there's nothing to apply.
+    await applyWalkInAdvanceForJC(id, userInfo, tx);
     return mainVoucherId;
 }
 
@@ -451,7 +455,7 @@ exports.adminUnfinalize = async (req, res) => {
                 // posts JC_PAINT_CONS) means a JC can have two open vouchers,
                 // both of which must be reversed to keep the GL flat.
                 const srcTypes = r.EntityType === 'JOBCARD'
-                    ? [r.EntityType, 'JC_PAINT_CONS']
+                    ? [r.EntityType, 'JC_PAINT_CONS', 'JC_ADV_APPLY']
                     : [r.EntityType];
                 const openVouchers = await new sql.Request(transaction)
                     .input('srcId', sql.Int, r.EntityID)
