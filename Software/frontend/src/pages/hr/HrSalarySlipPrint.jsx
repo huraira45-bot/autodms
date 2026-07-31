@@ -66,6 +66,7 @@ export default function HrSalarySlipPrint() {
                         <tr><td>Mess ({fmt(row.Entry?.MessDays || 0)} × {fmt(row.Employee.MessAmount)})</td><td>{fmt(c.messDeduction)}</td></tr>
                         <tr><td>Manual Fine</td><td>{fmt(c.manualFine)}</td></tr>
                         <tr><td>EOBI</td><td>{fmt(c.eobi)}</td></tr>
+                        <tr><td>Tax</td><td>{fmt(c.tax)}</td></tr>
                         <tr><td>Hold</td><td>{fmt(c.hold)}</td></tr>
                         <tr className="total"><td>Total Deductions</td><td>{fmt(c.deductions)}</td></tr>
                     </tbody>

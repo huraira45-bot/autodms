@@ -15,6 +15,7 @@
  *        - manualFine
  *        - eobi
  *        - hold
+ *        - tax (entry.Tax — per-month manual, credited to dept Tax Payable at accrual)
  *       )
  *
  * "Effective" late rate resolution (first non-null wins):
@@ -95,8 +96,9 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const manualFine = Number(ent.Fine || 0);
     const eobi       = emp.HasEOBI ? Number(emp.EOBI || 0) : 0;
     const hold       = Number(ent.Hold || 0);
+    const tax        = Number(ent.Tax || 0);
 
-    const deductions = r2(absentFine + lateFine + advance + messDeduc + manualFine + eobi + hold);
+    const deductions = r2(absentFine + lateFine + advance + messDeduc + manualFine + eobi + hold + tax);
 
     const net = Math.max(0, r2(additions - deductions));
 
@@ -105,7 +107,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
         basic, prorated, fuel, adjustment,
         additions,
         lateRate, absentRate,
-        absentFine, lateFine, advance, messDeduction: messDeduc, manualFine, eobi, hold,
+        absentFine, lateFine, advance, messDeduction: messDeduc, manualFine, eobi, hold, tax,
         deductions,
         net,
     };

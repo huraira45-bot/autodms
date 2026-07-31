@@ -18,6 +18,7 @@ const SLOTS = [
     { key: 'ManualFineGLID',           label: 'Manual Fine',             hint: 'Cr for manual/extra fine deduction (income)' },
     { key: 'MessRecoveryGLID',         label: 'Mess Recovery',           hint: 'Cr for mess deduction (income)' },
     { key: 'EobiPayableGLID',          label: 'EOBI Payable',            hint: 'Cr for EOBI liability to remit' },
+    { key: 'TaxPayableGLID',           label: 'Tax Payable',             hint: 'Cr for income-tax liability withheld from salary' },
 ];
 
 export default function HrDeptSalaryAccounts() {
@@ -95,11 +96,11 @@ export default function HrDeptSalaryAccounts() {
             </ErpControlPanel>
 
             <p className="hr-hint" style={{ margin: '10px 4px 12px' }}>
-                Every department needs 8 GL accounts before its salary accrual JV can be posted.
+                Every department needs {SLOTS.length} GL accounts before its salary accrual JV can be posted.
                 The accrual Debits Salary Exp (EOBI or Non-EOBI variant per employee) + Fuel Expense,
-                and Credits each of the fine + mess + EOBI-payable accounts. Employee GL takes the
-                balancing Cr. If any slot is unmapped, posting for that department is blocked with
-                a specific message.
+                and Credits each of the fine + mess + EOBI-payable + tax-payable accounts. Employee GL
+                takes the balancing Cr. If any slot is unmapped, posting for that department is blocked
+                with a specific message.
             </p>
 
             <div className="hr-scroll">

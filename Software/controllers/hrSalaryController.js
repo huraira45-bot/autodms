@@ -107,6 +107,7 @@ exports.saveSalaryEntry = async (req, res) => {
             .input('pd',  sql.Decimal(6,2),  b.PaidDays == null || b.PaidDays === '' ? null : Number(b.PaidDays))
             .input('lfr', sql.Decimal(10,4), b.LateFineRate == null || b.LateFineRate === '' ? null : Number(b.LateFineRate))
             .input('aj',  sql.Decimal(18,2), Number(b.Adjustment) || 0)
+            .input('tx',  sql.Decimal(18,2), Number(b.Tax) || 0)
             .input('rm',  sql.NVarChar(sql.MAX), b.Remarks || null)
             .input('un',  sql.NVarChar(100), req.user?.userName || null)
             .query(`
@@ -115,12 +116,12 @@ exports.saveSalaryEntry = async (req, res) => {
                    ON tgt.EmployeeID = src.EmployeeID AND tgt.MonthID = src.MonthID
                 WHEN MATCHED THEN UPDATE SET Advance=@ad, Fine=@fi, ManualFineRemarks=@mfr,
                                              Hold=@ho, MessDays=@md, PaidDays=@pd, LateFineRate=@lfr,
-                                             Adjustment=@aj, Remarks=@rm,
+                                             Adjustment=@aj, Tax=@tx, Remarks=@rm,
                                              UpdatedAt=GETDATE(), UpdatedByName=@un
                 WHEN NOT MATCHED THEN INSERT (EmployeeID, MonthID, Advance, Fine, ManualFineRemarks,
-                                              Hold, MessDays, PaidDays, LateFineRate, Adjustment,
+                                              Hold, MessDays, PaidDays, LateFineRate, Adjustment, Tax,
                                               Remarks, UpdatedByName)
-                                      VALUES (@e, @m, @ad, @fi, @mfr, @ho, @md, @pd, @lfr, @aj, @rm, @un);
+                                      VALUES (@e, @m, @ad, @fi, @mfr, @ho, @md, @pd, @lfr, @aj, @tx, @rm, @un);
             `);
         res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -319,6 +320,7 @@ async function recordPosting(tx, { monthId, postingType, voucherId, totalAmount,
 //     Cr {Dept.Manual Fine}                    manual fine
 //     Cr {Dept.Mess Recovery}                  mess deduction
 //     Cr {Dept.EOBI Payable}                   EOBI amount
+//     Cr {Dept.Tax Payable}                    tax withheld (owner ask 2026-07-31)
 //     Cr Employee GL (EmployeeGLID)            balancing = additions − above credits
 //
 // Advance & Hold flow naturally through Employee GL (no separate legs).
@@ -342,7 +344,8 @@ exports.postAccrual = async (req, res) => {
         // Load per-dept GL map
         const deptRes = await new sql.Request(tx).query(`
             SELECT DepartmentID, SalaryExpenseEobiGLID, SalaryExpenseNonEobiGLID, FuelExpenseGLID,
-                   AbsentFineGLID, LateFineGLID, ManualFineGLID, MessRecoveryGLID, EobiPayableGLID
+                   AbsentFineGLID, LateFineGLID, ManualFineGLID, MessRecoveryGLID, EobiPayableGLID,
+                   TaxPayableGLID
               FROM hr_DepartmentSalaryAccounts`);
         const deptMap = new Map(deptRes.recordset.map(d => [d.DepartmentID, d]));
 
@@ -369,6 +372,7 @@ exports.postAccrual = async (req, res) => {
             if (c.manualFine > 0)   check(r, 'ManualFineGLID',    'Manual Fine');
             if (c.messDeduction > 0)check(r, 'MessRecoveryGLID',  'Mess Recovery');
             if (c.eobi > 0)         check(r, 'EobiPayableGLID',   'EOBI Payable');
+            if (c.tax > 0)          check(r, 'TaxPayableGLID',    'Tax Payable');
         });
         if (missingDept.length) {
             const uniq = Array.from(new Set(missingDept));
@@ -405,8 +409,9 @@ exports.postAccrual = async (req, res) => {
                 if (c.manualFine > 0)     push(acct.ManualFineGLID,    0, c.manualFine,   `${deptNar} — manual fine`);
                 if (c.messDeduction > 0)  push(acct.MessRecoveryGLID,  0, c.messDeduction,`${deptNar} — mess`);
                 if (c.eobi > 0)           push(acct.EobiPayableGLID,   0, c.eobi,         `${deptNar} — EOBI payable`);
+                if (c.tax > 0)            push(acct.TaxPayableGLID,    0, c.tax,          `${deptNar} — tax payable`);
 
-                const empCr = r2(c.additions - c.absentFine - c.lateFine - c.manualFine - c.messDeduction - c.eobi);
+                const empCr = r2(c.additions - c.absentFine - c.lateFine - c.manualFine - c.messDeduction - c.eobi - c.tax);
                 if (empCr !== 0) {
                     empLegs.push({ glCAID: r.Employee.EmployeeGLID, dr: 0, cr: empCr, narration: `Salary ${MonthID} — ${r.Name}` });
                     payableTotal = r2(payableTotal + empCr);

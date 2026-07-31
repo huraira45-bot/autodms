@@ -66,6 +66,7 @@ export default function HrSalarySheet() {
             PaidDays: cur.PaidDays  === '' ? null : (cur.PaidDays ?? row.Entry?.PaidDays ?? null),
             LateFineRate: cur.LateFineRate === '' ? null : (cur.LateFineRate ?? row.Entry?.LateFineRate ?? null),
             Adjustment: cur.Adjustment ?? row.Entry?.Adjustment ?? 0,
+            Tax:      cur.Tax        ?? row.Entry?.Tax        ?? 0,
             ManualFineRemarks: cur.ManualFineRemarks ?? row.Entry?.ManualFineRemarks ?? '',
             Remarks:  cur.Remarks    ?? row.Entry?.Remarks    ?? '',
         };
@@ -288,6 +289,7 @@ export default function HrSalarySheet() {
                                                     <th className="num" style={{ width: 80 }}>Advance</th>
                                                     <th className="num" style={{ width: 70 }}>Fine</th>
                                                     <th className="num" style={{ width: 70 }}>Hold</th>
+                                                    <th className="num" style={{ width: 70 }}>Tax</th>
                                                     <th className="num" style={{ width: 70 }}>Mess Days</th>
                                                     <th className="num" style={{ width: 70 }}>EOBI</th>
                                                     <th className="num net" style={{ width: 95 }}>Net</th>
@@ -330,6 +332,12 @@ export default function HrSalarySheet() {
                                                                 <input type="number" step="0.01" min={0} disabled={!canEdit}
                                                                     value={draftedFor(r.EmployeeID, 'Hold', r.Entry?.Hold ?? 0)}
                                                                     onChange={e => patch(r.EmployeeID, 'Hold', Number(e.target.value))}
+                                                                    className="hr-inp num"/>
+                                                            </td>
+                                                            <td className="num">
+                                                                <input type="number" step="0.01" min={0} disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'Tax', r.Entry?.Tax ?? 0)}
+                                                                    onChange={e => patch(r.EmployeeID, 'Tax', Number(e.target.value))}
                                                                     className="hr-inp num"/>
                                                             </td>
                                                             <td className="num">

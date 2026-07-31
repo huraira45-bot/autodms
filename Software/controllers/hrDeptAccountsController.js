@@ -17,6 +17,7 @@ const GL_FIELDS = [
     'ManualFineGLID',
     'MessRecoveryGLID',
     'EobiPayableGLID',
+    'TaxPayableGLID',
 ];
 
 exports.list = async (_req, res) => {
@@ -32,6 +33,7 @@ exports.list = async (_req, res) => {
                    a.ManualFineGLID,            glMF.GLCode  AS ManualFineCode,            glMF.GLTitle  AS ManualFineTitle,
                    a.MessRecoveryGLID,          glME.GLCode  AS MessRecoveryCode,          glME.GLTitle  AS MessRecoveryTitle,
                    a.EobiPayableGLID,           glEP.GLCode  AS EobiPayableCode,           glEP.GLTitle  AS EobiPayableTitle,
+                   a.TaxPayableGLID,            glTP.GLCode  AS TaxPayableCode,            glTP.GLTitle  AS TaxPayableTitle,
                    a.UpdatedAt, a.UpdatedByName,
                    (SELECT COUNT(*) FROM gen_EmployeeInfo e WHERE e.DepartmentID = d.DepartmentID AND e.IsActive = 1) AS ActiveEmployees
               FROM gen_DepartmentInfo d
@@ -44,6 +46,7 @@ exports.list = async (_req, res) => {
               LEFT JOIN GLChartOFAccount glMF ON glMF.GLCAID = a.ManualFineGLID
               LEFT JOIN GLChartOFAccount glME ON glME.GLCAID = a.MessRecoveryGLID
               LEFT JOIN GLChartOFAccount glEP ON glEP.GLCAID = a.EobiPayableGLID
+              LEFT JOIN GLChartOFAccount glTP ON glTP.GLCAID = a.TaxPayableGLID
              ORDER BY d.DepartmentName`);
         res.json(r.recordset);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -74,16 +77,17 @@ exports.upsert = async (req, res) => {
                 ManualFineGLID = @ManualFineGLID,
                 MessRecoveryGLID = @MessRecoveryGLID,
                 EobiPayableGLID = @EobiPayableGLID,
+                TaxPayableGLID = @TaxPayableGLID,
                 UpdatedAt = GETDATE(),
                 UpdatedByName = @un
             WHEN NOT MATCHED THEN INSERT
                 (DepartmentID, SalaryExpenseEobiGLID, SalaryExpenseNonEobiGLID,
                  FuelExpenseGLID, AbsentFineGLID, LateFineGLID, ManualFineGLID,
-                 MessRecoveryGLID, EobiPayableGLID, UpdatedByName)
+                 MessRecoveryGLID, EobiPayableGLID, TaxPayableGLID, UpdatedByName)
             VALUES
                 (@d, @SalaryExpenseEobiGLID, @SalaryExpenseNonEobiGLID,
                  @FuelExpenseGLID, @AbsentFineGLID, @LateFineGLID, @ManualFineGLID,
-                 @MessRecoveryGLID, @EobiPayableGLID, @un);
+                 @MessRecoveryGLID, @EobiPayableGLID, @TaxPayableGLID, @un);
         `);
         res.json({ ok: true });
     } catch (err) { res.status(400).json({ error: err.message }); }
