@@ -633,6 +633,123 @@ exports.getPnL = async (req, res) => {
     }
 };
 
+// Department mapping for getPnLByDepartment — built straight off the
+// existing chart of accounts, no schema changes. Checked most-specific
+// prefix first (9-digit COGS leaves before the 6-digit Cost of Sales
+// parent). Owner ask 2026-07-31: Paint COGS counts under Service (Body &
+// Paint is a Service sub-type); Other Revenues (fines etc.) folds into
+// Admin since it's administrative in nature, not real operating revenue.
+// Admin has no matching revenue account, so it's flagged non-revenue-
+// generating and always sorts last.
+const PNL_DEPARTMENTS = [
+    { key: 'sales',   label: 'Sales',   revenuePrefixes: ['401001'], expensePrefixes: ['502004'],           revenueGenerating: true },
+    { key: 'service', label: 'Service', revenuePrefixes: ['401002'], expensePrefixes: ['502002', '501001002'], revenueGenerating: true },
+    { key: 'parts',   label: 'Parts',   revenuePrefixes: ['401003'], expensePrefixes: ['502003', '501001001'], revenueGenerating: true },
+    { key: 'admin',   label: 'Admin',   revenuePrefixes: ['401004'], expensePrefixes: ['502001'],           revenueGenerating: false },
+];
+
+function classifyDept(glCode, prefixKey) {
+    const code = String(glCode || '');
+    // Longest/most-specific prefix wins (501001002 before a hypothetical 501001).
+    let best = null;
+    for (const dept of PNL_DEPARTMENTS) {
+        for (const p of dept[prefixKey]) {
+            if (code.startsWith(p) && (!best || p.length > best.prefixLen)) {
+                best = { dept, prefixLen: p.length };
+            }
+        }
+    }
+    return best?.dept || null;
+}
+
+/**
+ * GET /reports/pnl-department?from=&to=
+ * Same period-activity math as getPnL, but grouped into Sales / Service /
+ * Parts / Admin using the existing chart of accounts (no DepartmentID
+ * tagging, no new posting hooks — see PNL_DEPARTMENTS above). Admin has no
+ * matching revenue and always sorts last. Owner ask 2026-07-31.
+ */
+exports.getPnLByDepartment = async (req, res) => {
+    try {
+        const fromRaw = req.query.from ? new Date(req.query.from) : new Date(new Date().getFullYear(), 0, 1);
+        const toRaw   = req.query.to   ? new Date(req.query.to)   : new Date();
+        const from = new Date(fromRaw); from.setHours(0,0,0,0);
+        const to   = endOfDay(toRaw);
+
+        const pool = await getPool();
+        const fromMinus = new Date(from); fromMinus.setSeconds(fromMinus.getSeconds() - 1);
+
+        const atTo   = await getClassBalances(pool, to, ['4','5']);
+        const atFrom = await getClassBalances(pool, fromMinus, ['4','5']);
+
+        const periodLeaves = (cls) => {
+            const t = atTo[cls]?.rows || [];
+            const f = atFrom[cls]?.rows || [];
+            const map = new Map(f.map(r => [r.GLCAID, Number(r.Balance)]));
+            const rows = t.map(r => ({ ...r, PeriodAmount: +(Number(r.Balance) - (map.get(r.GLCAID) || 0)).toFixed(2) }))
+                .filter(r => Math.abs(r.PeriodAmount) > 0.005);
+            for (const r of f) {
+                if (!t.find(x => x.GLCAID === r.GLCAID)) rows.push({ ...r, PeriodAmount: -Number(r.Balance) });
+            }
+            return rows;
+        };
+
+        const revenueLeaves  = periodLeaves('4');
+        const expenseLeaves  = periodLeaves('5');
+        const unmapped = { revenue: [], expense: [] };
+
+        const byDept = new Map(PNL_DEPARTMENTS.map(d => [d.key, {
+            key: d.key, label: d.label, revenueGenerating: d.revenueGenerating,
+            revenue: 0, expense: 0, revenueLines: [], expenseLines: [],
+        }]));
+
+        for (const r of revenueLeaves) {
+            const dept = classifyDept(r.GLCode, 'revenuePrefixes');
+            if (!dept) { unmapped.revenue.push(r); continue; }
+            const d = byDept.get(dept.key);
+            d.revenue += r.PeriodAmount;
+            d.revenueLines.push({ GLCAID: r.GLCAID, GLCode: r.GLCode, GLTitle: r.GLTitle, amount: r.PeriodAmount });
+        }
+        for (const r of expenseLeaves) {
+            const dept = classifyDept(r.GLCode, 'expensePrefixes');
+            if (!dept) { unmapped.expense.push(r); continue; }
+            const d = byDept.get(dept.key);
+            d.expense += r.PeriodAmount;
+            d.expenseLines.push({ GLCAID: r.GLCAID, GLCode: r.GLCode, GLTitle: r.GLTitle, amount: r.PeriodAmount });
+        }
+
+        // Fixed order: revenue-generating depts first (as declared above),
+        // Admin (non-revenue-generating) always last.
+        const departments = PNL_DEPARTMENTS.map(d => {
+            const row = byDept.get(d.key);
+            row.revenue = +row.revenue.toFixed(2);
+            row.expense = +row.expense.toFixed(2);
+            row.net = +(row.revenue - row.expense).toFixed(2);
+            return row;
+        });
+
+        const totalRevenue = +departments.reduce((s, d) => s + d.revenue, 0).toFixed(2);
+        const totalExpense = +departments.reduce((s, d) => s + d.expense, 0).toFixed(2);
+        const netProfit = +(totalRevenue - totalExpense).toFixed(2);
+
+        res.json({
+            from: fromRaw.toISOString().slice(0, 10),
+            to:   toRaw.toISOString().slice(0, 10),
+            departments,
+            totalRevenue, totalExpense, netProfit,
+            // Accounts that don't match any known prefix — surfaced so a COA
+            // change doesn't silently vanish from the report.
+            unmapped: {
+                revenue: unmapped.revenue.map(r => ({ GLCode: r.GLCode, GLTitle: r.GLTitle, amount: +r.PeriodAmount.toFixed(2) })),
+                expense: unmapped.expense.map(r => ({ GLCode: r.GLCode, GLTitle: r.GLTitle, amount: +r.PeriodAmount.toFixed(2) })),
+            },
+        });
+    } catch (err) {
+        console.error('P&L by department error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 /**
  * GET /reports/balance-sheet?asOf=
  * Assets (1) = Liabilities (2) + Equity (3) + Retained Earnings (Revenue − Expenses up to date).

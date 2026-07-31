@@ -155,6 +155,7 @@ export const NAV_ITEMS = [
     { id: 'r-tbx',       moduleGroup: 'reports', section: 'Financial Statements',  label: 'TB Extract',          path: '/reports/trial-balance-extract',icon: FileBarChart, permission: 'report:trial_balance_extract' },
     { id: 'r-gl',        moduleGroup: 'reports', section: 'Financial Statements',  label: 'GL Detail',           path: '/reports/gl-detail',           icon: ListChecks,   permission: 'report:gl_detail' },
     { id: 'r-pnl',       moduleGroup: 'reports', section: 'Financial Statements',  label: 'Profit & Loss',       path: '/reports/pnl',                 icon: ListChecks,   permission: 'report:pnl' },
+    { id: 'r-pnl-dept',  moduleGroup: 'reports', section: 'Financial Statements',  label: 'P&L by Department',   path: '/reports/pnl-department',      icon: ListChecks,   permission: 'report:pnl_department', description: 'Sales / Service / Parts revenue vs cost, Admin (non-revenue) last.' },
     { id: 'r-bs',        moduleGroup: 'reports', section: 'Financial Statements',  label: 'Balance Sheet',       path: '/reports/balance-sheet',       icon: ListChecks,   permission: 'report:balance_sheet' },
     { id: 'r-daybook',   moduleGroup: 'reports', section: 'Financial Statements',  label: 'Day Book',            path: '/reports/day-book',            icon: ListChecks,   permission: 'report:day_book' },
     { id: 'r-cust-stmt', moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Customer Statement',  path: '/reports/customer-statement',  icon: UserCog,      permission: 'report:customer_statement' },

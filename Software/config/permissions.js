@@ -134,6 +134,7 @@ const SECTIONS = [
             { key: 'report:daily_cash_book',       label: 'Daily Cash Book',       kind: 'report' },
             { key: 'report:tax_summary',           label: 'Tax Summary',           kind: 'report' },
             { key: 'report:pnl',                   label: 'Profit & Loss',         kind: 'report' },
+            { key: 'report:pnl_department',        label: 'P&L by Department',     kind: 'report' },
             { key: 'report:balance_sheet',         label: 'Balance Sheet',         kind: 'report' },
             { key: 'report:day_book',              label: 'Day Book',              kind: 'report' },
             { key: 'report:receivables_aging',     label: 'Receivables Aging',     kind: 'report' },

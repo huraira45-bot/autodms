@@ -55,6 +55,120 @@ export function PnL() {
     );
 }
 
+// ---- P&L by Department ----
+// Reuses the existing chart of accounts (401001 Sales, 401002 Service,
+// 401003 Parts, 401004 Other Revenues → Admin; matching 502xxx expense
+// groups + the two Cost-of-Sold leaves) — no DepartmentID tagging needed.
+// Admin has no matching revenue account so it's always last. Owner ask
+// 2026-07-31.
+export function PnLByDepartment() {
+    const drillTo = useDrillToGL();
+    return (
+        <ReportShell
+            title="P&L by Department"
+            subtitle="Sales / Service / Parts revenue vs. direct cost, from the existing chart of accounts. Admin (no matching revenue) is shown last."
+            icon={TrendingUp}
+            endpoint="pnl-department"
+            defaultParams={{ from: yearStartISO(), to: todayISO() }}
+            controls={PeriodControls}
+        >
+            {(data, ctx) => (
+                <>
+                    <div className="card" style={{
+                        background: data.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
+                        border: '1px solid ' + (data.netProfit >= 0 ? '#bbf7d0' : '#fecaca'),
+                        padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                    }}>
+                        <div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase' }}>Net Profit</div>
+                            <div style={{ fontWeight: 800, fontSize: '1.6rem', color: data.netProfit >= 0 ? '#15803d' : '#b91c1c' }}>
+                                PKR {fmt(data.netProfit)}
+                            </div>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: '#475569' }}>
+                            {data.from} → {data.to}
+                        </div>
+                    </div>
+
+                    {(data.departments || []).map(d => (
+                        <DeptCard key={d.key} dept={d} drillTo={drillTo(ctx?.params)} />
+                    ))}
+
+                    {(data.unmapped?.revenue?.length > 0 || data.unmapped?.expense?.length > 0) && (
+                        <div className="card" style={{ borderLeft: '3px solid #f59e0b' }}>
+                            <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 8 }}>Unmapped accounts</div>
+                            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: 8 }}>
+                                Had activity this period but don't match a known department account — likely a chart-of-accounts
+                                change since this report was built. Excluded from the totals above; worth a look.
+                            </div>
+                            {[...(data.unmapped.revenue || []), ...(data.unmapped.expense || [])].map(r => (
+                                <div key={r.GLCode} style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                                    <span>{r.GLCode} — {r.GLTitle}</span>
+                                    <span>PKR {fmt(r.amount)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </>
+            )}
+        </ReportShell>
+    );
+}
+
+function DeptCard({ dept, drillTo }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="card" style={{ borderLeft: '3px solid ' + (dept.revenueGenerating ? '#1d4ed8' : '#94a3b8') }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                 onClick={() => setOpen(o => !o)}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <span style={{ fontWeight: 700, color: '#1e293b' }}>{dept.label}</span>
+                    {!dept.revenueGenerating && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
+                            Non-revenue-generating
+                        </span>
+                    )}
+                </div>
+                <div style={{ display: 'flex', gap: 24, fontSize: '0.85rem' }}>
+                    <span>Revenue <strong style={{ color: '#0f172a' }}>{fmt(dept.revenue)}</strong></span>
+                    <span>Expense <strong style={{ color: '#0f172a' }}>{fmt(dept.expense)}</strong></span>
+                    <span>Net <strong style={{ color: dept.net >= 0 ? '#15803d' : '#b91c1c' }}>{fmt(dept.net)}</strong></span>
+                </div>
+            </div>
+            {open && (
+                <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <PnLDeptLineList title="Revenue" lines={dept.revenueLines} drillTo={drillTo} color="#0284c7" />
+                    <PnLDeptLineList title="Expense" lines={dept.expenseLines} drillTo={drillTo} color="#b45309" />
+                </div>
+            )}
+        </div>
+    );
+}
+
+function PnLDeptLineList({ title, lines, drillTo, color }) {
+    if (!lines || !lines.length) {
+        return <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic' }}>No {title.toLowerCase()} activity.</div>;
+    }
+    return (
+        <div>
+            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 4 }}>{title}</div>
+            {lines.map(l => {
+                const canDrill = drillTo && typeof l.GLCAID === 'number';
+                return (
+                    <div key={l.GLCode}
+                         onClick={canDrill ? () => drillTo(l.GLCAID) : undefined}
+                         title={canDrill ? 'Open GL Detail for this account' : undefined}
+                         style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', padding: '3px 0', cursor: canDrill ? 'pointer' : 'default' }}>
+                        <span style={{ color: '#475569' }}>{l.GLCode} {l.GLTitle}</span>
+                        <span style={{ color, fontFamily: 'monospace' }}>{fmt(l.amount)}</span>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 function PnLSection({ title, groups, total, drillTo }) {
     const [expanded, setExpanded] = useState(new Set());
     const toggle = (code) => {

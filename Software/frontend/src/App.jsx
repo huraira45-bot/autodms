@@ -131,7 +131,7 @@ import GLDetail           from './pages/GLDetail';
 import PartyStatement     from './pages/PartyStatement';
 import DailyCashBook      from './pages/DailyCashBook';
 import TaxSummary         from './pages/TaxSummary';
-import { PnL, BalanceSheet, DayBook }                       from './pages/reports/Financials';
+import { PnL, PnLByDepartment, BalanceSheet, DayBook }      from './pages/reports/Financials';
 import { ReceivablesAging, PayablesAging, InsuranceAging, WalkInOutstanding }  from './pages/reports/Aging';
 import { PartyOpenInvoices, StoreSaleReceivables } from './pages/reports/PartyReports';
 import { POSPending, ChequesOnHand, BankBalances, TaxRateHistory } from './pages/reports/Operational';
@@ -585,6 +585,7 @@ function LegacySidebar() {
                 {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
                 {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
                 {canReport('pnl')                   && <NavLink to="/reports/pnl"                className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Profit &amp; Loss</NavLink>}
+                {canReport('pnl_department')        && <NavLink to="/reports/pnl-department"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> P&amp;L by Department</NavLink>}
                 {canReport('balance_sheet')         && <NavLink to="/reports/balance-sheet"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Balance Sheet</NavLink>}
                 {canReport('day_book')              && <NavLink to="/reports/day-book"           className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Day Book</NavLink>}
                 </NavSection>
@@ -1004,6 +1005,7 @@ function AppShell() {
                         <ProtectedRoute moduleKey="reports"><TaxSummary /></ProtectedRoute>
                     } />
                     <Route path="/reports/pnl"                  element={<ProtectedRoute moduleKey="reports"><PnL /></ProtectedRoute>} />
+                    <Route path="/reports/pnl-department"       element={<ProtectedRoute moduleKey="reports"><PnLByDepartment /></ProtectedRoute>} />
                     <Route path="/reports/balance-sheet"        element={<ProtectedRoute moduleKey="reports"><BalanceSheet /></ProtectedRoute>} />
                     <Route path="/reports/day-book"             element={<ProtectedRoute moduleKey="reports"><DayBook /></ProtectedRoute>} />
                     <Route path="/reports/receivables-aging"    element={<ProtectedRoute moduleKey="reports"><ReceivablesAging /></ProtectedRoute>} />
