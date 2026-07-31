@@ -150,6 +150,18 @@ function PnLByDepartmentSection({ data }) {
                     { key: 'cogs',   label: 'Cost of Sold (COGS)', color: FINANCE_COLORS.cogs },
                 ]}
             />
+
+            <PremiumDivergingBarChart
+                title="Margin % by Department"
+                subtitle="Net profit as a share of revenue, highest first. Admin (no revenue) is excluded — margin isn't meaningful without a revenue base."
+                unit=""
+                formatValue={(n) => n.toFixed(1) + '%'}
+                formatExact={(n) => n.toFixed(2) + '%'}
+                data={[...revenueGen]
+                    .sort((a, b) => b.net / (b.revenue || 1) - a.net / (a.revenue || 1))
+                    .map(d => ({ label: d.label, margin: d.revenue > 0 ? (d.net / d.revenue) * 100 : 0 }))}
+                series={[{ key: 'margin', label: 'Margin %' }]}
+            />
         </>
     );
 }
@@ -214,6 +226,17 @@ function CashCreditSection({ data }) {
                         { key: 'cash',   label: 'Cash',   color: FINANCE_COLORS.cash },
                         { key: 'credit', label: 'Credit', color: FINANCE_COLORS.credit },
                     ]}
+                />
+            )}
+
+            {data.jobCardByBU && data.jobCardByBU.length > 0 && (
+                <PremiumDivergingBarChart
+                    title="Net by Business Unit"
+                    subtitle="Job Card revenue less its direct cost, per business unit. Blue = profitable, red = loss — highest first."
+                    data={[...data.jobCardByBU]
+                        .sort((a, b) => b.totalNet - a.totalNet)
+                        .map(bu => ({ label: bu.label, net: bu.totalNet }))}
+                    series={[{ key: 'net', label: 'Net' }]}
                 />
             )}
         </>

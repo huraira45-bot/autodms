@@ -119,10 +119,11 @@ export function ChartLegend({ items }) {
 }
 
 // ---------------------------------------------------------------------------
-// ChartTooltip — label, series name, exact PKR amount, compact amount,
-// optional share-of-total.
+// ChartTooltip — label, series name, exact amount, compact amount, optional
+// share-of-total. `unit` prefixes the exact value (default 'PKR'); pass ''
+// for non-currency series (e.g. a margin % chart).
 // ---------------------------------------------------------------------------
-export function ChartTooltip({ x, y, groupLabel, seriesLabel, color, exact, compact, share }) {
+export function ChartTooltip({ x, y, groupLabel, seriesLabel, color, exact, compact, share, unit = 'PKR' }) {
     return (
         <div style={{
             position: 'fixed', left: x, top: y - 14, transform: 'translate(-50%, -100%)', zIndex: 50,
@@ -135,7 +136,7 @@ export function ChartTooltip({ x, y, groupLabel, seriesLabel, color, exact, comp
                 {color && <span style={{ width: 8, height: 8, borderRadius: 2, background: color, display: 'inline-block' }} />}
                 <span style={{ color: '#cbd5e1' }}>{seriesLabel}</span>
             </div>
-            <div style={{ fontWeight: 700 }}>PKR {exact}{compact ? ` (${compact})` : ''}</div>
+            <div style={{ fontWeight: 700 }}>{unit ? unit + ' ' : ''}{exact}{compact && compact !== exact ? ` (${compact})` : ''}</div>
             {share != null && <div style={{ color: '#94a3b8' }}>{share.toFixed(1)}% of shown total</div>}
         </div>
     );
@@ -176,7 +177,7 @@ export function FinanceKpiStrip({ items }) {
 // + round-number ticks), X-axis category labels. `diverging` mode colors a
 // single series by sign (positive/negative) and grows from a zero baseline.
 // ---------------------------------------------------------------------------
-export function PremiumGroupedBarChart({ data, series, title, subtitle, formatValue = fmtCompact, height = 240, diverging = false, showValueLabels = 'auto' }) {
+export function PremiumGroupedBarChart({ data, series, title, subtitle, formatValue = fmtCompact, formatExact = fmtFull, unit = 'PKR', height = 240, diverging = false, showValueLabels = 'auto' }) {
     const [hover, setHover] = useState(null);
     const legend = series.length >= 2 ? series : null;
     if (!data || !data.length) return <FinanceChartPanel title={title} subtitle={subtitle}><Empty /></FinanceChartPanel>;
@@ -238,7 +239,7 @@ export function PremiumGroupedBarChart({ data, series, title, subtitle, formatVa
                                     const share = total > 0 ? (Math.abs(raw) / total) * 100 : null;
                                     return (
                                         <g key={s.key}
-                                           onMouseEnter={(e) => setHover({ x: e.clientX, y: e.clientY, groupLabel: d.label, seriesLabel: s.label, color, exact: fmtFull(raw), compact: formatValue(raw), share })}
+                                           onMouseEnter={(e) => setHover({ x: e.clientX, y: e.clientY, groupLabel: d.label, seriesLabel: s.label, color, exact: formatExact(raw), compact: formatValue(raw), share, unit })}
                                            onMouseMove={(e) => setHover(h2 => h2 && { ...h2, x: e.clientX, y: e.clientY })}
                                            onMouseLeave={() => setHover(null)}
                                            style={{ cursor: 'pointer' }}>
