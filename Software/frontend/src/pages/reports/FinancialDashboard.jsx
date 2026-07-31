@@ -94,6 +94,17 @@ function SectionHeading({ children }) {
     );
 }
 
+// GLCode 501001 = Cost of Sold (parts/paint COGS) leaves; everything else
+// under an expense group is department overhead (Direct Expense).
+function splitExpense(dept) {
+    const lines = dept.expenseLines || [];
+    const cogs = lines.filter(l => String(l.GLCode || '').startsWith('501001'))
+        .reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    const direct = lines.filter(l => !String(l.GLCode || '').startsWith('501001'))
+        .reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    return { direct, cogs };
+}
+
 function PnLByDepartmentSection({ data }) {
     const depts = data.departments || [];
     const revenueGen = depts.filter(d => d.revenueGenerating);
@@ -114,11 +125,12 @@ function PnLByDepartmentSection({ data }) {
 
             <PremiumGroupedBarChart
                 title="Revenue vs Expense by Department"
-                subtitle="Direct cost only — Admin overhead sits in its own bar, not netted against the others."
-                data={depts.map(d => ({ label: d.label, revenue: d.revenue, expense: d.expense }))}
+                subtitle="Expense split into Direct Expense (department overhead) and Cost of Sold (COGS)."
+                data={depts.map(d => ({ label: d.label, revenue: d.revenue, ...splitExpense(d) }))}
                 series={[
                     { key: 'revenue', label: 'Revenue', color: FINANCE_COLORS.revenue },
-                    { key: 'expense', label: 'Expense', color: FINANCE_COLORS.expense },
+                    { key: 'direct',  label: 'Direct Expense', color: FINANCE_COLORS.direct },
+                    { key: 'cogs',    label: 'Cost of Sold (COGS)', color: FINANCE_COLORS.cogs },
                 ]}
             />
 
@@ -131,15 +143,8 @@ function PnLByDepartmentSection({ data }) {
 
             <PremiumStackedBarChart
                 title="Expense Segregation by Department"
-                subtitle="Direct Expense (department overhead) vs Cost of Sold (parts/paint COGS)."
-                data={depts.map(d => {
-                    const lines = d.expenseLines || [];
-                    const cogs = lines.filter(l => String(l.GLCode || '').startsWith('501001'))
-                        .reduce((s, l) => s + (Number(l.amount) || 0), 0);
-                    const direct = lines.filter(l => !String(l.GLCode || '').startsWith('501001'))
-                        .reduce((s, l) => s + (Number(l.amount) || 0), 0);
-                    return { label: d.label, direct, cogs };
-                })}
+                subtitle="Same split as above, stacked to show each department's expense mix."
+                data={depts.map(d => ({ label: d.label, ...splitExpense(d) }))}
                 series={[
                     { key: 'direct', label: 'Direct Expense', color: FINANCE_COLORS.direct },
                     { key: 'cogs',   label: 'Cost of Sold (COGS)', color: FINANCE_COLORS.cogs },
