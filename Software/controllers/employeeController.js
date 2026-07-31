@@ -1,15 +1,19 @@
 const { sql, dbConfig, getPool } = require('../config/db');
 
 // @route   GET /api/employees
+// @query   includeInactive=1 — also return employees who have left (IsActive=0).
+// vw_ActiveEmployees already filters IsActive=1, so the includeInactive path
+// reads gen_EmployeeInfo directly instead.
 exports.getEmployees = async (req, res) => {
   try {
     const pool = await getPool();
+    const source = req.query.includeInactive === '1' ? 'gen_EmployeeInfo' : 'vw_ActiveEmployees';
     const result = await pool.request().query(`
       SELECT e.*,
              d.DepartmentName,
              des.DesignationName,
              r.EmployeeName AS ReportsToName
-      FROM vw_ActiveEmployees e
+      FROM ${source} e
       LEFT JOIN gen_DepartmentInfo d ON e.DepartmentID = d.DepartmentID
       LEFT JOIN gen_DesignationInfo des ON e.DesignationID = des.DesignationID
       LEFT JOIN gen_EmployeeInfo r ON e.ReportsToID = r.EmployeeID
@@ -19,6 +23,67 @@ exports.getEmployees = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server Error', details: err.message });
+  }
+};
+
+// @route   PUT /api/employees/:id
+// Full edit of an existing employee's core details (everything createEmployee
+// captures at registration). Owner ask 2026-07-31.
+exports.updateEmployee = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const {
+      EmployeeName, EmployeeNo, FatherName, CNICno, MobileNo,
+      EmployeeGender, PermanentAddress, DOB, EmailAddress,
+      DepartmentID, DesignationID, MachineId, BasicSalary, EmployeeGLID,
+    } = req.body || {};
+    if (!EmployeeName) return res.status(400).json({ error: 'Full Name is required.' });
+
+    const pool = await getPool();
+    await pool.request()
+      .input('id',   sql.Int,          id)
+      .input('name', sql.VarChar(100), EmployeeName)
+      .input('no',   sql.VarChar(50),  EmployeeNo || null)
+      .input('fn',   sql.VarChar(100), FatherName || null)
+      .input('cnic', sql.VarChar(50),  CNICno || null)
+      .input('mob',  sql.VarChar(50),  MobileNo || null)
+      .input('gen',  sql.VarChar(20),  EmployeeGender || null)
+      .input('addr', sql.VarChar(sql.MAX), PermanentAddress || null)
+      .input('dob',  sql.Date,         DOB ? new Date(DOB) : null)
+      .input('email',sql.VarChar(100), EmailAddress || null)
+      .input('dept', sql.Int,          DepartmentID || null)
+      .input('desig',sql.Int,          DesignationID || null)
+      .input('mach', sql.Int,          MachineId || null)
+      .input('bs',   sql.Decimal(18,2),BasicSalary != null && BasicSalary !== '' ? Number(BasicSalary) : null)
+      .input('gl',   sql.Int,          EmployeeGLID || null)
+      .query(`UPDATE gen_EmployeeInfo SET
+                EmployeeName=@name, EmployeeNo=@no, FatherName=@fn, CNICno=@cnic,
+                MobileNo=@mob, EmployeeGender=@gen, PermanentAddress=@addr, DOB=@dob,
+                EmailAddress=@email, DepartmentID=@dept, DesignationID=@desig,
+                MachineId=@mach, BasicSalary=@bs, EmployeeGLID=@gl,
+                ModifyUserDateTime=GETDATE()
+              WHERE EmployeeID=@id`);
+    res.json({ message: 'Employee updated' });
+  } catch (err) {
+    console.error('updateEmployee:', err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// @route   PATCH /api/employees/:id/payroll-inclusion
+// Owner ask 2026-07-31: some active employees (e.g. the owner/CEO) draw no
+// salary and shouldn't appear on the HR Salary Sheet, even though they're
+// still active staff. Separate from IsActive — see migration 101.
+exports.setPayrollInclusion = async (req, res) => {
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('id',  sql.Int, parseInt(req.params.id))
+      .input('val', sql.Bit, req.body.IsOnPayroll ? 1 : 0)
+      .query('UPDATE gen_EmployeeInfo SET IsOnPayroll=@val WHERE EmployeeID=@id');
+    res.json({ message: 'Payroll inclusion updated' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 };
 
@@ -42,13 +107,21 @@ exports.setReportsTo = async (req, res) => {
 };
 
 // @route   PATCH /api/employees/:id/active
+// Body: { IsActive, ResignDate? }. Deactivating without a ResignDate stamps
+// today's date; reactivating clears it. Owner ask 2026-07-31 — employees who
+// leave should stop appearing anywhere active (incl. the salary sheet) with
+// a recorded leave date, not just silently vanish.
 exports.setActive = async (req, res) => {
   try {
+    const isActive = !!req.body.IsActive;
     const pool = await getPool();
     await pool.request()
       .input('id', sql.Int, parseInt(req.params.id))
-      .input('val', sql.Bit, req.body.IsActive ? 1 : 0)
-      .query('UPDATE gen_EmployeeInfo SET IsActive=@val WHERE EmployeeID=@id');
+      .input('val', sql.Bit, isActive ? 1 : 0)
+      .input('rd', sql.Date, isActive ? null : (req.body.ResignDate ? new Date(req.body.ResignDate) : new Date()))
+      .query(`UPDATE gen_EmployeeInfo
+                SET IsActive=@val, ResignDate=@rd
+              WHERE EmployeeID=@id`);
     res.json({ message: 'Active status updated' });
   } catch (err) {
     res.status(400).json({ error: err.message });

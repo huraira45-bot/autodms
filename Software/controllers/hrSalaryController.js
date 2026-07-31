@@ -200,7 +200,7 @@ async function buildSheet(pool, monthId) {
               LEFT JOIN gen_DepartmentInfo d  ON d.DepartmentID  = e.DepartmentID
               LEFT JOIN gen_DesignationInfo dg ON dg.DesignationID = e.DesignationID
               LEFT JOIN GLChartOFAccount gl   ON gl.GLCAID = e.EmployeeGLID
-             WHERE e.IsActive = 1
+             WHERE e.IsActive = 1 AND ISNULL(e.IsOnPayroll, 1) = 1
              ORDER BY ISNULL(d.DepartmentName, '~'), e.SrNo, e.EmployeeName`),
         pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_AttendanceRecords WHERE MonthID=@m'),
         pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_SalaryEntries WHERE MonthID=@m'),
