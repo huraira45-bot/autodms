@@ -40,35 +40,29 @@ export default function CashCreditExpense() {
                             </div>
                         </div>
 
-                        <div className="card">
-                            <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 12 }}>Revenue — Cash vs Credit</div>
-                            <StackedBarChart
-                                data={[
-                                    { label: 'Store Sale', cash: data.storeSale.cashRevenue, credit: data.storeSale.creditRevenue },
-                                    { label: 'Job Card',   cash: data.jobCard.cashRevenue,   credit: data.jobCard.creditRevenue },
-                                ]}
-                                series={[
-                                    { key: 'cash',   label: 'Cash',   color: CHART_COLORS.blue },
-                                    { key: 'credit', label: 'Credit', color: CHART_COLORS.orange },
-                                ]}
-                                formatValue={(v) => 'PKR ' + fmt(v)}
-                            />
-                        </div>
+                        <StackedBarChart
+                            title="Revenue — Cash vs Credit"
+                            data={[
+                                { label: 'Store Sale', cash: data.storeSale.cashRevenue, credit: data.storeSale.creditRevenue },
+                                { label: 'Job Card',   cash: data.jobCard.cashRevenue,   credit: data.jobCard.creditRevenue },
+                            ]}
+                            series={[
+                                { key: 'cash',   label: 'Cash',   color: CHART_COLORS.blue },
+                                { key: 'credit', label: 'Credit', color: CHART_COLORS.orange },
+                            ]}
+                        />
 
-                        <div className="card">
-                            <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 12 }}>Revenue vs Expense</div>
-                            <GroupedBarChart
-                                data={[
-                                    { label: 'Store Sale', revenue: data.storeSale.totalRevenue, expense: data.storeSale.totalExpense },
-                                    { label: 'Job Card',   revenue: data.jobCard.totalRevenue,   expense: data.jobCard.totalExpense },
-                                ]}
-                                series={[
-                                    { key: 'revenue', label: 'Revenue', color: CHART_COLORS.blue },
-                                    { key: 'expense', label: 'Expense', color: CHART_COLORS.aqua },
-                                ]}
-                                formatValue={(v) => 'PKR ' + fmt(v)}
-                            />
-                        </div>
+                        <GroupedBarChart
+                            title="Revenue vs Expense"
+                            data={[
+                                { label: 'Store Sale', revenue: data.storeSale.totalRevenue, expense: data.storeSale.totalExpense },
+                                { label: 'Job Card',   revenue: data.jobCard.totalRevenue,   expense: data.jobCard.totalExpense },
+                            ]}
+                            series={[
+                                { key: 'revenue', label: 'Revenue', color: CHART_COLORS.blue },
+                                { key: 'expense', label: 'Expense', color: CHART_COLORS.aqua },
+                            ]}
+                        />
 
                         <div className="card" style={{ overflowX: 'auto' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
