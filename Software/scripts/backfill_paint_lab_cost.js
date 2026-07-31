@@ -1,41 +1,47 @@
 /**
- * One-off backfill: 31 historical Paint Lab job-card costs the owner
- * flagged as never recorded (owner ask 2026-08-01, list attached as an
- * image — RO prefix confirmed "B&P", not "BRP"; the '&' was lost when the
- * list was made).
+ * One-off backfill: historical Paint Lab job-card costs the owner flagged
+ * as never recorded (owner ask 2026-08-01, list attached as an image — RO
+ * prefix confirmed "B&P", not "BRP"; the '&' was lost when the list was
+ * made).
  *
- * Root cause: Paint Issue refuses to post once a JC is finalized
- * (paintIssueController.assertJCEligible). These are all old, already-
- * finalized ROs, so the normal Paint Issue -> finalize -> auto-JV flow
- * (services/paintIssueConsumptionService.postPaintConsumptionForJC) could
- * never run for them.
+ * Investigation (see check_ro_prefix.js / check_legacy_ro.js) found three
+ * groups among the original 31 ROs:
+ *   1. Real DMS job cards (Addata_JobCardInfo) with no paint cost posted
+ *      yet — root cause: Paint Issue refuses to post once a JC is
+ *      finalized (paintIssueController.assertJCEligible), and these are
+ *      all already-finalized.
+ *   2. ROs that only exist in Legacy_JobCards (the pre-DMS FIS-system
+ *      shadow import, migration 091) — several dated June/July 2026,
+ *      concurrent with DMS go-live, meaning they were simply never
+ *      entered as DMS job cards at all. No JobCardId to link to.
+ *   3. B&P-100131 / B&P-110011 — not found anywhere (DMS or legacy).
+ *      Owner decision 2026-08-01: skip these two.
  *
- * This script posts the SAME SHAPE of voucher that flow posts automatically
- * — one JV per RO:
- *      Dr  PAINT_CONSUMPTION            <cost>   (tagged JobCardID)
- *      Cr  Capital (301001001)          <cost>   (owner's explicit choice,
- *                                                  this posting only)
- *   SourceDocType='JC_PAINT_CONS', SourceDocID=<JobCardId>  — identical
- *   tag the automatic flow uses, so these show up correctly wherever the
- *   app already knows how to find paint-consumption vouchers.
+ * Posting shape:
+ *   Group 1 — one JV per RO, same shape the automatic flow posts at JC
+ *     finalize (services/paintIssueConsumptionService):
+ *       Dr PAINT_CONSUMPTION (tagged JobCardID), SourceDocType='JC_PAINT_CONS'
+ *       Cr Capital (301001001) — owner's explicit choice, this posting only
+ *   Group 2 — same Dr/Cr pair, but NO JobCardID tag and NO SourceDocType/
+ *     SourceDocID (there's no real JobCardId to reference) — RO number is
+ *     carried only in the Narration text. Owner decision 2026-08-01: post
+ *     these too.
  *
- * Deliberately different from the automatic flow: normally it credits
- * PAINT_INVENTORY (stock value) because paint_Item stock was actually
- * decremented by a real Paint Issue. Here NOTHING in paint_Item /
- * InventItems / any stock-quantity table is touched — owner ask: "don't
- * disturb our inventory on anything." Credit goes to Capital instead,
- * exactly as the owner specified for this posting only.
+ * Nothing in paint_Item / InventItems / any stock-quantity table is
+ * touched anywhere in this script — owner ask: "don't disturb our
+ * inventory on anything."
  *
  * Dated TODAY (not backdated into each RO's original month) — same
  * convention the automatic flow itself uses (VoucherDate = time of
  * posting, not the JC's date), so no previously-reported historical P&L
  * period is silently rewritten.
  *
- * Before touching anything it checks whether a JC already has a
- * JC_PAINT_CONS voucher tagged to it and SKIPS those (would otherwise
- * double-cost that job card) — review the dry-run output for any
- * "ALREADY HAS A PAINT COST ENTRY" lines before deciding whether to force
- * them through by hand.
+ * Duplicate guards (both run before every --commit, and are what makes a
+ * re-run safe):
+ *   - Group 1: skips if that JobCardID already has a posted PAINT_CONSUMPTION
+ *     line.
+ *   - Group 2: skips if a posted PAINT_CONSUMPTION line's Narration already
+ *     mentions that RO number.
  *
  * DRY RUN:  node scripts\backfill_paint_lab_cost.js
  * COMMIT:   node scripts\backfill_paint_lab_cost.js --commit
@@ -51,6 +57,8 @@ const COMMIT         = process.argv.includes('--commit');
 const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // RO -> Cost, exactly as given by the owner (prefix corrected BRP -> B&P).
+// B&P-100131 / B&P-110011 excluded — owner decision 2026-08-01, not found
+// in the DMS or the legacy shadow table.
 const ENTRIES = [
     ['B&P-11919', 6615],
     ['B&P-1206', 3161],
@@ -65,8 +73,6 @@ const ENTRIES = [
     ['B&P-12084', 46891],
     ['B&P-12076', 5528],
     ['B&P-12081', 1496],
-    ['B&P-100131', 5328],
-    ['B&P-110011', 2128],
     ['B&P-0022', 750],
     ['B&P-1007', 2816],
     ['B&P-1014', 10611],
@@ -107,59 +113,96 @@ const ENTRIES = [
         console.log(`  Capital: ${capital.GLTitle} (GLCAID=${capital.GLCAID})`);
     }
 
-    // ── Resolve each RO -> JobCardId, and check for an existing entry ──
-    const resolved = [];
+    // ── Resolve each RO: DMS job card, legacy-only, or not found ──
+    const dmsRows = [];      // {ro, cost, jobCardId, finalized}
+    const legacyRows = [];   // {ro, cost, legacyId}
     const missing = [];
     const alreadyPosted = [];
     for (const [ro, cost] of ENTRIES) {
-        const r = await pool.request()
+        const jc = await pool.request()
             .input('no', sql.NVarChar(100), ro)
             .query(`SELECT JobCardId, IsFinalized FROM Addata_JobCardInfo WHERE JobCardNo=@no`);
-        if (!r.recordset.length) { missing.push(ro); continue; }
-        const jobCardId = r.recordset[0].JobCardId;
-        const finalized = !!r.recordset[0].IsFinalized;
-
-        if (paintGL) {
-            const dup = await pool.request()
-                .input('jc', sql.Int, jobCardId)
-                .input('gl', sql.Int, paintGL)
-                .query(`SELECT TOP 1 vd.VoucherID, vi.VoucherNo
-                        FROM data_FinanceVoucherDetail vd
-                        JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = vd.VoucherID
-                        WHERE vd.JobCardID=@jc AND vd.GLCAID=@gl AND vi.Status='Posted'`);
-            if (dup.recordset.length) {
-                alreadyPosted.push({ ro, cost, jobCardId, existingVoucherNo: dup.recordset[0].VoucherNo });
-                continue;
+        if (jc.recordset.length) {
+            const jobCardId = jc.recordset[0].JobCardId;
+            const finalized = !!jc.recordset[0].IsFinalized;
+            if (paintGL) {
+                const dup = await pool.request()
+                    .input('jc', sql.Int, jobCardId)
+                    .input('gl', sql.Int, paintGL)
+                    .query(`SELECT TOP 1 vi.VoucherNo
+                            FROM data_FinanceVoucherDetail vd
+                            JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = vd.VoucherID
+                            WHERE vd.JobCardID=@jc AND vd.GLCAID=@gl AND vi.Status='Posted'`);
+                if (dup.recordset.length) {
+                    alreadyPosted.push({ ro, cost, ref: `JobCardId=${jobCardId}`, existingVoucherNo: dup.recordset[0].VoucherNo });
+                    continue;
+                }
             }
+            dmsRows.push({ ro, cost, jobCardId, finalized });
+            continue;
         }
-        resolved.push({ ro, cost, jobCardId, finalized });
+
+        const leg = await pool.request()
+            .input('no', sql.NVarChar(100), ro)
+            .query(`SELECT LegacyID FROM Legacy_JobCards WHERE WorkOrderNo=@no`);
+        if (leg.recordset.length) {
+            const legacyId = leg.recordset[0].LegacyID;
+            if (paintGL) {
+                const dup = await pool.request()
+                    .input('ro', sql.NVarChar(100), `%${ro}%`)
+                    .input('gl', sql.Int, paintGL)
+                    .query(`SELECT TOP 1 vi.VoucherNo
+                            FROM data_FinanceVoucherDetail vd
+                            JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = vd.VoucherID
+                            WHERE vd.GLCAID=@gl AND vi.Status='Posted' AND vd.Narration LIKE @ro`);
+                if (dup.recordset.length) {
+                    alreadyPosted.push({ ro, cost, ref: `LegacyID=${legacyId}`, existingVoucherNo: dup.recordset[0].VoucherNo });
+                    continue;
+                }
+            }
+            legacyRows.push({ ro, cost, legacyId });
+            continue;
+        }
+
+        missing.push(ro);
     }
 
-    console.log(`\n  ${resolved.length} of ${ENTRIES.length} ROs ready to post.`);
+    console.log(`\n  ${dmsRows.length} DMS-linked + ${legacyRows.length} legacy-only = ${dmsRows.length + legacyRows.length} of ${ENTRIES.length} ROs ready to post.`);
     if (missing.length) {
-        console.log(`\n  NOT FOUND in Addata_JobCardInfo (skipped):`);
+        console.log(`\n  NOT FOUND anywhere (skipped):`);
         missing.forEach(ro => console.log(`      ${ro}`));
     }
     if (alreadyPosted.length) {
         console.log(`\n  ALREADY HAS A PAINT COST ENTRY (skipped — would double-count):`);
-        alreadyPosted.forEach(x => console.log(`      ${x.ro}  (JobCardId=${x.jobCardId}, existing voucher ${x.existingVoucherNo})`));
+        alreadyPosted.forEach(x => console.log(`      ${x.ro}  (${x.ref}, existing voucher ${x.existingVoucherNo})`));
     }
 
-    const total = resolved.reduce((s, r) => s + r.cost, 0);
-    console.log(`\n  Preview (${resolved.length} JVs, one per RO, dated ${BACKFILL_DATE}):`);
+    const dmsTotal = dmsRows.reduce((s, r) => s + r.cost, 0);
+    const legacyTotal = legacyRows.reduce((s, r) => s + r.cost, 0);
+
+    console.log(`\n  DMS-linked (tagged to a real JobCardID), dated ${BACKFILL_DATE}:`);
     console.log(`  ${'RO'.padEnd(14)} ${'JobCardId'.padStart(10)} ${'Finalized'.padStart(10)} ${'Cost'.padStart(12)}`);
-    for (const r of resolved) {
+    for (const r of dmsRows) {
         console.log(`  ${r.ro.padEnd(14)} ${String(r.jobCardId).padStart(10)} ${(r.finalized ? 'yes' : 'no').padStart(10)} ${fmt(r.cost).padStart(12)}`);
     }
-    console.log(`\n  Total to post: PKR ${fmt(total)} across ${resolved.length} JVs.\n`);
+    console.log(`  Subtotal: PKR ${fmt(dmsTotal)} across ${dmsRows.length} JVs.`);
+
+    console.log(`\n  Legacy-only (no JobCardID, RO number in narration only), dated ${BACKFILL_DATE}:`);
+    console.log(`  ${'RO'.padEnd(14)} ${'LegacyID'.padStart(10)} ${'Cost'.padStart(12)}`);
+    for (const r of legacyRows) {
+        console.log(`  ${r.ro.padEnd(14)} ${String(r.legacyId).padStart(10)} ${fmt(r.cost).padStart(12)}`);
+    }
+    console.log(`  Subtotal: PKR ${fmt(legacyTotal)} across ${legacyRows.length} JVs.`);
+
+    console.log(`\n  GRAND TOTAL to post: PKR ${fmt(dmsTotal + legacyTotal)} across ${dmsRows.length + legacyRows.length} JVs.\n`);
 
     if (!COMMIT) {
-        console.log(`DRY RUN complete. Review the lists above (NOT FOUND / ALREADY HAS AN ENTRY) before committing.`);
+        console.log(`DRY RUN complete. Review the lists above before committing.`);
         console.log(`To actually post, re-run with --commit:`);
         console.log(`  node scripts\\backfill_paint_lab_cost.js --commit\n`);
         process.exit(0);
     }
-    if (!resolved.length) {
+    if (!dmsRows.length && !legacyRows.length) {
         console.error(`\n  Nothing to post.\n`);
         process.exit(0);
     }
@@ -170,7 +213,8 @@ const ENTRIES = [
         const vt = await new sql.Request(tx).query(`SELECT TOP 1 Voucherid FROM GLVoucherType WHERE Title='JV' ORDER BY Voucherid`);
         const vtId = vt.recordset[0].Voucherid;
 
-        for (const r of resolved) {
+        // ── Group 1: DMS-linked ─────────────────────────────
+        for (const r of dmsRows) {
             const voucherNo = await nextVoucherNo(tx, 'JV');
             const narration = `Paint Lab cost backfill — RO ${r.ro} — recorded late (Paint Issue blocked once JC finalized), posted ${BACKFILL_DATE}`;
 
@@ -191,7 +235,6 @@ const ENTRIES = [
                                 'Draft', 0, @src, @srcId, @cbn)`);
             const vid = hdr.recordset[0].VoucherID;
 
-            // Dr Paint Consumption — tagged JobCardID, same as the automatic flow
             await new sql.Request(tx)
                 .input('vid', sql.Int, vid)
                 .input('gl',  sql.Int, paintGL)
@@ -201,7 +244,6 @@ const ENTRIES = [
                 .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, JobCardID, Narration, Debit, Credit)
                         VALUES (@vid, @gl, @jc, @nar, @dr, 0)`);
 
-            // Cr Capital — owner's explicit choice for this posting only
             await new sql.Request(tx)
                 .input('vid', sql.Int, vid)
                 .input('gl',  sql.Int, capital.GLCAID)
@@ -212,15 +254,56 @@ const ENTRIES = [
 
             await new sql.Request(tx)
                 .input('vid', sql.Int, vid)
-                .query(`UPDATE data_FinanceVoucherInfo
-                        SET Status='Posted', Posted=1, PostedAt=GETDATE()
-                        WHERE VoucherID=@vid`);
+                .query(`UPDATE data_FinanceVoucherInfo SET Status='Posted', Posted=1, PostedAt=GETDATE() WHERE VoucherID=@vid`);
 
-            console.log(`  + Posted ${voucherNo} — ${r.ro} — PKR ${fmt(r.cost)}`);
+            console.log(`  + Posted ${voucherNo} — ${r.ro} (JobCardId=${r.jobCardId}) — PKR ${fmt(r.cost)}`);
+        }
+
+        // ── Group 2: legacy-only, no JobCardID / SourceDoc tag ──
+        for (const r of legacyRows) {
+            const voucherNo = await nextVoucherNo(tx, 'JV');
+            const narration = `Paint Lab cost backfill — RO ${r.ro} — legacy RO (LegacyID=${r.legacyId}), never entered as a DMS job card, posted ${BACKFILL_DATE}`;
+
+            const hdr = await new sql.Request(tx)
+                .input('vd',   sql.DateTime,          new Date(BACKFILL_DATE + 'T12:00:00'))
+                .input('vno',  sql.NVarChar(50),      voucherNo)
+                .input('vtId', sql.Int,               vtId)
+                .input('rem',  sql.NVarChar(sql.MAX), narration)
+                .input('tot',  sql.Decimal(18,2),     r.cost)
+                .input('cbn',  sql.NVarChar(100),     'system-paintlab-cost-backfill')
+                .query(`INSERT INTO data_FinanceVoucherInfo
+                            (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
+                             Status, Posted, CreatedByName)
+                        OUTPUT INSERTED.VoucherID
+                        VALUES (@vd, @vno, @vtId, @rem, @tot,
+                                'Draft', 0, @cbn)`);
+            const vid = hdr.recordset[0].VoucherID;
+
+            await new sql.Request(tx)
+                .input('vid', sql.Int, vid)
+                .input('gl',  sql.Int, paintGL)
+                .input('nar', sql.NVarChar(sql.MAX), narration)
+                .input('dr',  sql.Decimal(18,2), r.cost)
+                .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                        VALUES (@vid, @gl, @nar, @dr, 0)`);
+
+            await new sql.Request(tx)
+                .input('vid', sql.Int, vid)
+                .input('gl',  sql.Int, capital.GLCAID)
+                .input('nar', sql.NVarChar(sql.MAX), narration + ' — Cr Capital')
+                .input('cr',  sql.Decimal(18,2), r.cost)
+                .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
+                        VALUES (@vid, @gl, @nar, 0, @cr)`);
+
+            await new sql.Request(tx)
+                .input('vid', sql.Int, vid)
+                .query(`UPDATE data_FinanceVoucherInfo SET Status='Posted', Posted=1, PostedAt=GETDATE() WHERE VoucherID=@vid`);
+
+            console.log(`  + Posted ${voucherNo} — ${r.ro} (legacy, LegacyID=${r.legacyId}) — PKR ${fmt(r.cost)}`);
         }
 
         await tx.commit();
-        console.log(`\nDone. Posted ${resolved.length} JVs totalling PKR ${fmt(total)}.\n`);
+        console.log(`\nDone. Posted ${dmsRows.length + legacyRows.length} JVs totalling PKR ${fmt(dmsTotal + legacyTotal)}.\n`);
         process.exit(0);
     } catch (e) {
         try { await tx.rollback(); } catch {}
