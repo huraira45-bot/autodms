@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TrendingUp, Scale, BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfControl, SingleDateControl } from './ReportShell';
-import { GroupedBarChart, StackedBarChart, CHART_COLORS } from './charts';
+import { PremiumGroupedBarChart, PremiumDivergingBarChart, PremiumStackedBarChart, FinanceKpiStrip, FINANCE_COLORS } from './charts';
 
 // Row drill-down helper — opens GL Detail for the clicked account, passing
 // through the current date range so the linked page auto-loads matching data.
@@ -73,43 +73,42 @@ export function PnLByDepartment() {
             defaultParams={{ from: yearStartISO(), to: todayISO() }}
             controls={PeriodControls}
         >
-            {(data, ctx) => (
+            {(data, ctx) => {
+                const depts = data.departments || [];
+                const revenueGen = depts.filter(d => d.revenueGenerating);
+                const best = revenueGen.length ? revenueGen.reduce((a, b) => (b.net > a.net ? b : a)) : null;
+                const worst = revenueGen.length ? revenueGen.reduce((a, b) => (b.net < a.net ? b : a)) : null;
+                return (
                 <>
-                    <div className="card" style={{
-                        background: data.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
-                        border: '1px solid ' + (data.netProfit >= 0 ? '#bbf7d0' : '#fecaca'),
-                        padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                    }}>
-                        <div>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase' }}>Net Profit</div>
-                            <div style={{ fontWeight: 800, fontSize: '1.6rem', color: data.netProfit >= 0 ? '#15803d' : '#b91c1c' }}>
-                                PKR {fmt(data.netProfit)}
-                            </div>
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: '#475569' }}>
-                            {data.from} → {data.to}
-                        </div>
-                    </div>
+                    <FinanceKpiStrip items={[
+                        { label: 'Total Revenue', value: 'PKR ' + fmt(data.totalRevenue) },
+                        { label: 'Total Expense', value: 'PKR ' + fmt(data.totalExpense) },
+                        { label: 'Net Profit', value: 'PKR ' + fmt(data.netProfit), tone: data.netProfit >= 0 ? 'good' : 'bad' },
+                        { label: 'Best Department', value: best ? best.label : '—', sub: best ? 'PKR ' + fmt(best.net) : '', tone: 'good' },
+                        { label: 'Worst Department', value: worst ? worst.label : '—', sub: worst ? 'PKR ' + fmt(worst.net) : '', tone: worst && worst.net < 0 ? 'bad' : 'default' },
+                    ]} />
 
-                    <GroupedBarChart
+                    <PremiumGroupedBarChart
                         title="Revenue vs Expense by Department"
-                        data={(data.departments || []).map(d => ({ label: d.label, revenue: d.revenue, expense: d.expense }))}
+                        subtitle="Direct cost only — Admin overhead sits in its own bar, not netted against the others."
+                        data={depts.map(d => ({ label: d.label, revenue: d.revenue, expense: d.expense }))}
                         series={[
-                            { key: 'revenue', label: 'Revenue', color: CHART_COLORS.blue },
-                            { key: 'expense', label: 'Expense', color: CHART_COLORS.orange },
+                            { key: 'revenue', label: 'Revenue', color: FINANCE_COLORS.revenue },
+                            { key: 'expense', label: 'Expense', color: FINANCE_COLORS.expense },
                         ]}
                     />
 
-                    <GroupedBarChart
+                    <PremiumDivergingBarChart
                         title="Net by Department"
-                        data={(data.departments || []).map(d => ({ label: d.label, net: d.net }))}
+                        subtitle="Blue = profitable, red = loss. Admin (non-revenue-generating) sorts last."
+                        data={depts.map(d => ({ label: d.label, net: d.net }))}
                         series={[{ key: 'net', label: 'Net' }]}
-                        diverging
                     />
 
-                    <StackedBarChart
+                    <PremiumStackedBarChart
                         title="Expense Segregation by Department"
-                        data={(data.departments || []).map(d => {
+                        subtitle="Direct Expense (department overhead) vs Cost of Sold (parts/paint COGS)."
+                        data={depts.map(d => {
                             const lines = d.expenseLines || [];
                             const cogs = lines.filter(l => String(l.GLCode || '').startsWith('501001'))
                                 .reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -118,12 +117,12 @@ export function PnLByDepartment() {
                             return { label: d.label, direct, cogs };
                         })}
                         series={[
-                            { key: 'direct', label: 'Direct Expense', color: CHART_COLORS.orange },
-                            { key: 'cogs',   label: 'Cost of Sold (COGS)', color: CHART_COLORS.violet },
+                            { key: 'direct', label: 'Direct Expense', color: FINANCE_COLORS.direct },
+                            { key: 'cogs',   label: 'Cost of Sold (COGS)', color: FINANCE_COLORS.cogs },
                         ]}
                     />
 
-                    {(data.departments || []).map(d => (
+                    {depts.map(d => (
                         <DeptCard key={d.key} dept={d} drillTo={drillTo(ctx?.params)} />
                     ))}
 
@@ -143,7 +142,8 @@ export function PnLByDepartment() {
                         </div>
                     )}
                 </>
-            )}
+                );
+            }}
         </ReportShell>
     );
 }
@@ -151,7 +151,7 @@ export function PnLByDepartment() {
 function DeptCard({ dept, drillTo }) {
     const [open, setOpen] = useState(false);
     return (
-        <div className="card" style={{ borderLeft: '3px solid ' + (dept.revenueGenerating ? '#1d4ed8' : '#94a3b8') }}>
+        <div className="card" style={{ borderLeft: '3px solid ' + (dept.revenueGenerating ? FINANCE_COLORS.revenue : '#94a3b8') }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
                  onClick={() => setOpen(o => !o)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -167,6 +167,9 @@ function DeptCard({ dept, drillTo }) {
                     <span>Revenue <strong style={{ color: '#0f172a' }}>{fmt(dept.revenue)}</strong></span>
                     <span>Expense <strong style={{ color: '#0f172a' }}>{fmt(dept.expense)}</strong></span>
                     <span>Net <strong style={{ color: dept.net >= 0 ? '#15803d' : '#b91c1c' }}>{fmt(dept.net)}</strong></span>
+                    {dept.revenue > 0 && (
+                        <span>Margin <strong style={{ color: dept.net >= 0 ? '#15803d' : '#b91c1c' }}>{((dept.net / dept.revenue) * 100).toFixed(1)}%</strong></span>
+                    )}
                 </div>
             </div>
             {open && (

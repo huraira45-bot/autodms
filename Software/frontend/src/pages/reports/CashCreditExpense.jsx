@@ -4,7 +4,7 @@
 import React from 'react';
 import { Wallet } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
-import { StackedBarChart, GroupedBarChart, CHART_COLORS } from './charts';
+import { PremiumGroupedBarChart, PremiumStackedBarChart, FinanceKpiStrip, FINANCE_COLORS } from './charts';
 
 export default function CashCreditExpense() {
     return (
@@ -21,46 +21,43 @@ export default function CashCreditExpense() {
                 const combinedRevenue = cats.reduce((s, c) => s + c.totalRevenue, 0);
                 const combinedExpense = cats.reduce((s, c) => s + c.totalExpense, 0);
                 const combinedNet = combinedRevenue - combinedExpense;
+                const combinedCash = cats.reduce((s, c) => s + c.cashRevenue, 0);
+                const combinedCredit = cats.reduce((s, c) => s + c.creditRevenue, 0);
+                const creditRatio = combinedRevenue > 0 ? (combinedCredit / combinedRevenue) * 100 : 0;
                 return (
                     <>
-                        <div className="card" style={{
-                            background: combinedNet >= 0 ? '#f0fdf4' : '#fef2f2',
-                            border: '1px solid ' + (combinedNet >= 0 ? '#bbf7d0' : '#fecaca'),
-                            padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                        }}>
-                            <div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase' }}>Combined Net</div>
-                                <div style={{ fontWeight: 800, fontSize: '1.6rem', color: combinedNet >= 0 ? '#15803d' : '#b91c1c' }}>
-                                    PKR {fmt(combinedNet)}
-                                </div>
-                            </div>
-                            <div style={{ fontSize: '0.85rem', color: '#475569', textAlign: 'right' }}>
-                                <div>Revenue: PKR {fmt(combinedRevenue)}</div>
-                                <div>Expense: PKR {fmt(combinedExpense)}</div>
-                            </div>
-                        </div>
+                        <FinanceKpiStrip items={[
+                            { label: 'Cash Revenue', value: 'PKR ' + fmt(combinedCash) },
+                            { label: 'Credit Revenue', value: 'PKR ' + fmt(combinedCredit) },
+                            { label: 'Total Revenue', value: 'PKR ' + fmt(combinedRevenue) },
+                            { label: 'Total Expense', value: 'PKR ' + fmt(combinedExpense) },
+                            { label: 'Net', value: 'PKR ' + fmt(combinedNet), tone: combinedNet >= 0 ? 'good' : 'bad' },
+                            { label: 'Credit Ratio', value: creditRatio.toFixed(1) + '%', sub: 'of total revenue' },
+                        ]} />
 
-                        <StackedBarChart
+                        <PremiumStackedBarChart
                             title="Revenue — Cash vs Credit"
+                            subtitle="Store Sale and Job Card revenue split by how it was collected."
                             data={[
                                 { label: 'Store Sale', cash: data.storeSale.cashRevenue, credit: data.storeSale.creditRevenue },
                                 { label: 'Job Card',   cash: data.jobCard.cashRevenue,   credit: data.jobCard.creditRevenue },
                             ]}
                             series={[
-                                { key: 'cash',   label: 'Cash',   color: CHART_COLORS.blue },
-                                { key: 'credit', label: 'Credit', color: CHART_COLORS.orange },
+                                { key: 'cash',   label: 'Cash',   color: FINANCE_COLORS.cash },
+                                { key: 'credit', label: 'Credit', color: FINANCE_COLORS.credit },
                             ]}
                         />
 
-                        <GroupedBarChart
+                        <PremiumGroupedBarChart
                             title="Revenue vs Expense"
+                            subtitle="Total revenue against the direct cost (parts COGS / sublet) posted on the same finalize voucher."
                             data={[
                                 { label: 'Store Sale', revenue: data.storeSale.totalRevenue, expense: data.storeSale.totalExpense },
                                 { label: 'Job Card',   revenue: data.jobCard.totalRevenue,   expense: data.jobCard.totalExpense },
                             ]}
                             series={[
-                                { key: 'revenue', label: 'Revenue', color: CHART_COLORS.blue },
-                                { key: 'expense', label: 'Expense', color: CHART_COLORS.aqua },
+                                { key: 'revenue', label: 'Revenue', color: FINANCE_COLORS.revenue },
+                                { key: 'expense', label: 'Expense', color: FINANCE_COLORS.expense },
                             ]}
                         />
 
@@ -109,12 +106,16 @@ export default function CashCreditExpense() {
 
                         {data.jobCardByBU && data.jobCardByBU.length > 0 && (
                             <>
-                                <StackedBarChart
+                                <PremiumStackedBarChart
                                     title="Job Card — Cash vs Credit by Business Unit"
-                                    data={data.jobCardByBU.map(bu => ({ label: bu.label, cash: bu.cashRevenue, credit: bu.creditRevenue }))}
+                                    subtitle="Sorted by total revenue, highest first."
+                                    horizontal
+                                    data={[...data.jobCardByBU]
+                                        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+                                        .map(bu => ({ label: bu.label, cash: bu.cashRevenue, credit: bu.creditRevenue }))}
                                     series={[
-                                        { key: 'cash',   label: 'Cash',   color: CHART_COLORS.blue },
-                                        { key: 'credit', label: 'Credit', color: CHART_COLORS.orange },
+                                        { key: 'cash',   label: 'Cash',   color: FINANCE_COLORS.cash },
+                                        { key: 'credit', label: 'Credit', color: FINANCE_COLORS.credit },
                                     ]}
                                 />
 
