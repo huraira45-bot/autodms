@@ -106,6 +106,46 @@ export default function CashCreditExpense() {
                                 </tfoot>
                             </table>
                         </div>
+
+                        {data.jobCardByBU && data.jobCardByBU.length > 0 && (
+                            <>
+                                <StackedBarChart
+                                    title="Job Card — Cash vs Credit by Business Unit"
+                                    data={data.jobCardByBU.map(bu => ({ label: bu.label, cash: bu.cashRevenue, credit: bu.creditRevenue }))}
+                                    series={[
+                                        { key: 'cash',   label: 'Cash',   color: CHART_COLORS.blue },
+                                        { key: 'credit', label: 'Credit', color: CHART_COLORS.orange },
+                                    ]}
+                                />
+
+                                <div className="card" style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                                        <thead>
+                                            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                                                <TH>Business Unit</TH>
+                                                <TH align="right">Cash Revenue</TH>
+                                                <TH align="right">Credit Revenue</TH>
+                                                <TH align="right">Total Revenue</TH>
+                                                <TH align="right">Expense</TH>
+                                                <TH align="right">Net</TH>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.jobCardByBU.map(bu => (
+                                                <tr key={bu.label} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                    <TD bold>{bu.label}</TD>
+                                                    <TD align="right" mono>{fmt(bu.cashRevenue)}</TD>
+                                                    <TD align="right" mono>{fmt(bu.creditRevenue)}</TD>
+                                                    <TD align="right" bold>{fmt(bu.totalRevenue)}</TD>
+                                                    <TD align="right" mono>{fmt(bu.totalExpense)}</TD>
+                                                    <TD align="right" bold color={bu.totalNet >= 0 ? '#15803d' : '#b91c1c'}>{fmt(bu.totalNet)}</TD>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </>
+                        )}
                     </>
                 );
             }}

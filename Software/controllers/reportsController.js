@@ -2235,7 +2235,10 @@ exports.getCashCreditExpense = async (req, res) => {
         // v.VoucherID inside the aggregated SELECT list fails in SQL Server
         // because different vouchers sharing the same GLCode can have
         // different modes. Resolve Mode once per voucher in a CTE, then
-        // aggregate detail lines by SourceDocType + GLCode + Mode.
+        // aggregate detail lines by SourceDocType + GLCode + Mode. Also
+        // resolves each Job Card voucher's business unit (GR/B&P/CT/WR/...)
+        // via Addata_JobCardInfo so Job Card can be split the same way the
+        // Job Card Register already splits it — owner ask 2026-07-31.
         const rows = (await request.query(`
             WITH VoucherMode AS (
                 SELECT v.VoucherID, v.SourceDocType,
@@ -2244,11 +2247,14 @@ exports.getCashCreditExpense = async (req, res) => {
                                SELECT 1 FROM data_FinanceVoucherDetail d2
                                WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gc AND d2.Debit > 0
                            ) THEN 'CASH' ELSE 'CREDIT'
-                       END AS Mode
+                       END AS Mode,
+                       jct.CardCode AS BusinessUnit
                 FROM data_FinanceVoucherInfo v
+                LEFT JOIN Addata_JobCardInfo jc ON v.SourceDocType = 'JOBCARD' AND jc.JobCardId = v.SourceDocID
+                LEFT JOIN gen_JobCardType   jct ON jct.JobCardTypeId = jc.JobTypeId
                 WHERE ${voucherWhere.join(' AND ')}
             )
-            SELECT vm.SourceDocType,
+            SELECT vm.SourceDocType, vm.BusinessUnit,
                    LEFT(g.GLCode,1) AS ClassRoot,
                    g.GLCode, g.GLTitle, vm.Mode,
                    SUM(d.Debit) AS TotalDr,
@@ -2257,22 +2263,30 @@ exports.getCashCreditExpense = async (req, res) => {
             JOIN   VoucherMode               vm ON vm.VoucherID = d.VoucherID
             JOIN   GLChartOFAccount          g  ON g.GLCAID     = d.GLCAID
             WHERE  LEFT(g.GLCode,1) IN ('4','5')
-            GROUP  BY vm.SourceDocType, g.GLCode, g.GLTitle, vm.Mode
+            GROUP  BY vm.SourceDocType, vm.BusinessUnit, g.GLCode, g.GLTitle, vm.Mode
             HAVING SUM(d.Debit) + SUM(d.Credit) <> 0
         `)).recordset;
 
         const blank = () => ({ cashRevenue: 0, creditRevenue: 0, cashExpense: 0, creditExpense: 0 });
         const buckets = { JOBCARD: blank(), STORE_SALE: blank() };
+        const buMap = new Map(); // BusinessUnit -> blank()
         for (const r of rows) {
             const b = buckets[r.SourceDocType];
             if (!b) continue;
             const isCash = r.Mode === 'CASH';
-            if (r.ClassRoot === '4') {
-                const amt = Number(r.TotalCr || 0) - Number(r.TotalDr || 0);
-                if (isCash) b.cashRevenue += amt; else b.creditRevenue += amt;
-            } else {
-                const amt = Number(r.TotalDr || 0) - Number(r.TotalCr || 0);
-                if (isCash) b.cashExpense += amt; else b.creditExpense += amt;
+            const isRevenue = r.ClassRoot === '4';
+            const amt = isRevenue
+                ? Number(r.TotalCr || 0) - Number(r.TotalDr || 0)
+                : Number(r.TotalDr || 0) - Number(r.TotalCr || 0);
+            if (isRevenue) { if (isCash) b.cashRevenue += amt; else b.creditRevenue += amt; }
+            else            { if (isCash) b.cashExpense += amt; else b.creditExpense += amt; }
+
+            if (r.SourceDocType === 'JOBCARD') {
+                const buKey = r.BusinessUnit || 'Unassigned';
+                if (!buMap.has(buKey)) buMap.set(buKey, blank());
+                const bu = buMap.get(buKey);
+                if (isRevenue) { if (isCash) bu.cashRevenue += amt; else bu.creditRevenue += amt; }
+                else            { if (isCash) bu.cashExpense += amt; else bu.creditExpense += amt; }
             }
         }
 
@@ -2291,10 +2305,15 @@ exports.getCashCreditExpense = async (req, res) => {
             };
         };
 
+        const jobCardByBU = Array.from(buMap.entries())
+            .map(([bu, b]) => shape(bu, b))
+            .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
         res.json({
             from: from || null, to: to || null,
             storeSale: shape('Store Sale', buckets.STORE_SALE),
             jobCard:   shape('Job Card', buckets.JOBCARD),
+            jobCardByBU,
         });
     } catch (err) {
         console.error('getCashCreditExpense:', err);

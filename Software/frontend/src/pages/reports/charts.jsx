@@ -32,8 +32,7 @@ const MONO = 'ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace
 const fmtCompact = (n) => {
     const v = Number(n) || 0;
     const abs = Math.abs(v);
-    if (abs >= 1e7) return (v / 1e7).toFixed(2) + 'Cr';
-    if (abs >= 1e5) return (v / 1e5).toFixed(2) + 'L';
+    if (abs >= 1e6) return (v / 1e6).toFixed(2) + 'M';
     if (abs >= 1e3) return (v / 1e3).toFixed(1) + 'K';
     return v.toFixed(0);
 };

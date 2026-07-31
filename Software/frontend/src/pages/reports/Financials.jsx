@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TrendingUp, Scale, BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfControl, SingleDateControl } from './ReportShell';
-import { GroupedBarChart, CHART_COLORS } from './charts';
+import { GroupedBarChart, StackedBarChart, CHART_COLORS } from './charts';
 
 // Row drill-down helper — opens GL Detail for the clicked account, passing
 // through the current date range so the linked page auto-loads matching data.
@@ -105,6 +105,22 @@ export function PnLByDepartment() {
                         data={(data.departments || []).map(d => ({ label: d.label, net: d.net }))}
                         series={[{ key: 'net', label: 'Net' }]}
                         diverging
+                    />
+
+                    <StackedBarChart
+                        title="Expense Segregation by Department"
+                        data={(data.departments || []).map(d => {
+                            const lines = d.expenseLines || [];
+                            const cogs = lines.filter(l => String(l.GLCode || '').startsWith('501001'))
+                                .reduce((s, l) => s + (Number(l.amount) || 0), 0);
+                            const direct = lines.filter(l => !String(l.GLCode || '').startsWith('501001'))
+                                .reduce((s, l) => s + (Number(l.amount) || 0), 0);
+                            return { label: d.label, direct, cogs };
+                        })}
+                        series={[
+                            { key: 'direct', label: 'Direct Expense', color: CHART_COLORS.orange },
+                            { key: 'cogs',   label: 'Cost of Sold (COGS)', color: CHART_COLORS.violet },
+                        ]}
                     />
 
                     {(data.departments || []).map(d => (
