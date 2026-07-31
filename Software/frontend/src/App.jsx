@@ -57,6 +57,7 @@ import Charity            from './pages/reports/Charity';
 import UnfinalizeLog      from './pages/reports/UnfinalizeLog';
 import RevenueSplit       from './pages/reports/RevenueSplit';
 import CashCreditExpense  from './pages/reports/CashCreditExpense';
+import FinancialDashboard from './pages/reports/FinancialDashboard';
 import BuPnL              from './pages/reports/BuPnL';
 import StoreSalePnL       from './pages/reports/StoreSalePnL';
 import { getVisibleModuleGroups } from './navigationConfig';
@@ -989,6 +990,11 @@ function AppShell() {
                     } />
                     <Route path="/reports/cash-credit-expense" element={
                         <ProtectedRoute moduleKey="report:cash_credit_expense"><CashCreditExpense /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/financial-dashboard" element={
+                        <ProtectedRoute anyModules={['report:pnl_department', 'report:cash_credit_expense']}>
+                            <FinancialDashboard />
+                        </ProtectedRoute>
                     } />
                     <Route path="/reports/bu-pnl" element={
                         <ProtectedRoute moduleKey="report:bu_pnl"><BuPnL /></ProtectedRoute>

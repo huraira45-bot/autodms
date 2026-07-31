@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { TrendingUp, Scale, BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls, AsOfControl, SingleDateControl } from './ReportShell';
-import { PremiumGroupedBarChart, PremiumDivergingBarChart, PremiumStackedBarChart, FinanceKpiStrip, FINANCE_COLORS } from './charts';
+import { FinanceKpiStrip, FINANCE_COLORS } from './charts';
 
 // Row drill-down helper — opens GL Detail for the clicked account, passing
 // through the current date range so the linked page auto-loads matching data.
@@ -88,39 +88,9 @@ export function PnLByDepartment() {
                         { label: 'Worst Department', value: worst ? worst.label : '—', sub: worst ? 'PKR ' + fmt(worst.net) : '', tone: worst && worst.net < 0 ? 'bad' : 'default' },
                     ]} />
 
-                    <PremiumGroupedBarChart
-                        title="Revenue vs Expense by Department"
-                        subtitle="Direct cost only — Admin overhead sits in its own bar, not netted against the others."
-                        data={depts.map(d => ({ label: d.label, revenue: d.revenue, expense: d.expense }))}
-                        series={[
-                            { key: 'revenue', label: 'Revenue', color: FINANCE_COLORS.revenue },
-                            { key: 'expense', label: 'Expense', color: FINANCE_COLORS.expense },
-                        ]}
-                    />
-
-                    <PremiumDivergingBarChart
-                        title="Net by Department"
-                        subtitle="Blue = profitable, red = loss. Admin (non-revenue-generating) sorts last."
-                        data={depts.map(d => ({ label: d.label, net: d.net }))}
-                        series={[{ key: 'net', label: 'Net' }]}
-                    />
-
-                    <PremiumStackedBarChart
-                        title="Expense Segregation by Department"
-                        subtitle="Direct Expense (department overhead) vs Cost of Sold (parts/paint COGS)."
-                        data={depts.map(d => {
-                            const lines = d.expenseLines || [];
-                            const cogs = lines.filter(l => String(l.GLCode || '').startsWith('501001'))
-                                .reduce((s, l) => s + (Number(l.amount) || 0), 0);
-                            const direct = lines.filter(l => !String(l.GLCode || '').startsWith('501001'))
-                                .reduce((s, l) => s + (Number(l.amount) || 0), 0);
-                            return { label: d.label, direct, cogs };
-                        })}
-                        series={[
-                            { key: 'direct', label: 'Direct Expense', color: FINANCE_COLORS.direct },
-                            { key: 'cogs',   label: 'Cost of Sold (COGS)', color: FINANCE_COLORS.cogs },
-                        ]}
-                    />
+                    <div className="card no-print" style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                        Charts for this report now live on the <Link to="/reports/financial-dashboard">Financial Dashboard</Link>.
+                    </div>
 
                     {depts.map(d => (
                         <DeptCard key={d.key} dept={d} drillTo={drillTo(ctx?.params)} />

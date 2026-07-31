@@ -73,12 +73,13 @@ function niceTicks(maxAbs, count = 5) {
 // ---------------------------------------------------------------------------
 // FinanceChartPanel — the light "premium" card every chart renders inside.
 // White surface, thin neutral border, subtle header band, compact title +
-// optional subtitle, legend riding the header. Excluded from print via
-// .no-print (tables carry the printed record instead).
+// optional subtitle, legend riding the header. Prints (these charts now
+// live only on the chart-first Financial Dashboard report, which has no
+// table to carry the printed record instead).
 // ---------------------------------------------------------------------------
 export function FinanceChartPanel({ title, subtitle, legend, actions, children }) {
     return (
-        <div className="card no-print" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12,
                 padding: '14px 18px', background: SURFACE_HEADER, borderBottom: '1px solid ' + BORDER,
@@ -161,7 +162,7 @@ export function FinanceKpiTile({ label, value, sub, tone = 'default' }) {
 export function FinanceKpiStrip({ items }) {
     if (!items || !items.length) return null;
     return (
-        <div className="card no-print" style={{
+        <div className="card" style={{
             display: 'flex', flexWrap: 'wrap', gap: 20, padding: '16px 20px',
             borderLeft: '3px solid ' + FINANCE_COLORS.revenue,
         }}>

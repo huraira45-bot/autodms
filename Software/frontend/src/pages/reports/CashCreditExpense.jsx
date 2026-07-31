@@ -2,9 +2,10 @@
 // how much of each is paid Cash vs Credit, weighed against the direct
 // cost (COGS / sublet) posted on that same finalize voucher.
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Wallet } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
-import { PremiumGroupedBarChart, PremiumStackedBarChart, FinanceKpiStrip, FINANCE_COLORS } from './charts';
+import { FinanceKpiStrip } from './charts';
 
 export default function CashCreditExpense() {
     return (
@@ -35,31 +36,9 @@ export default function CashCreditExpense() {
                             { label: 'Credit Ratio', value: creditRatio.toFixed(1) + '%', sub: 'of total revenue' },
                         ]} />
 
-                        <PremiumStackedBarChart
-                            title="Revenue — Cash vs Credit"
-                            subtitle="Store Sale and Job Card revenue split by how it was collected."
-                            data={[
-                                { label: 'Store Sale', cash: data.storeSale.cashRevenue, credit: data.storeSale.creditRevenue },
-                                { label: 'Job Card',   cash: data.jobCard.cashRevenue,   credit: data.jobCard.creditRevenue },
-                            ]}
-                            series={[
-                                { key: 'cash',   label: 'Cash',   color: FINANCE_COLORS.cash },
-                                { key: 'credit', label: 'Credit', color: FINANCE_COLORS.credit },
-                            ]}
-                        />
-
-                        <PremiumGroupedBarChart
-                            title="Revenue vs Expense"
-                            subtitle="Total revenue against the direct cost (parts COGS / sublet) posted on the same finalize voucher."
-                            data={[
-                                { label: 'Store Sale', revenue: data.storeSale.totalRevenue, expense: data.storeSale.totalExpense },
-                                { label: 'Job Card',   revenue: data.jobCard.totalRevenue,   expense: data.jobCard.totalExpense },
-                            ]}
-                            series={[
-                                { key: 'revenue', label: 'Revenue', color: FINANCE_COLORS.revenue },
-                                { key: 'expense', label: 'Expense', color: FINANCE_COLORS.expense },
-                            ]}
-                        />
+                        <div className="card no-print" style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                            Charts for this report now live on the <Link to="/reports/financial-dashboard">Financial Dashboard</Link>.
+                        </div>
 
                         <div className="card" style={{ overflowX: 'auto' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
@@ -106,19 +85,6 @@ export default function CashCreditExpense() {
 
                         {data.jobCardByBU && data.jobCardByBU.length > 0 && (
                             <>
-                                <PremiumStackedBarChart
-                                    title="Job Card — Cash vs Credit by Business Unit"
-                                    subtitle="Sorted by total revenue, highest first."
-                                    horizontal
-                                    data={[...data.jobCardByBU]
-                                        .sort((a, b) => b.totalRevenue - a.totalRevenue)
-                                        .map(bu => ({ label: bu.label, cash: bu.cashRevenue, credit: bu.creditRevenue }))}
-                                    series={[
-                                        { key: 'cash',   label: 'Cash',   color: FINANCE_COLORS.cash },
-                                        { key: 'credit', label: 'Credit', color: FINANCE_COLORS.credit },
-                                    ]}
-                                />
-
                                 <div className="card" style={{ overflowX: 'auto' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                                         <thead>
