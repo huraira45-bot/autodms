@@ -227,11 +227,34 @@ function BucketBadge({ b }) {
 //           store sales. Grouped by party; expand to see each open SS invoice.
 // ─────────────────────────────────────────────────────────────────────────────
 export function StoreSaleReceivables() {
+    return (
+        <StoreSaleReceivablesReport
+            title="Store Sale Receivables"
+            subtitle="Money owed FROM parties on credit store sales. One row per party — expand to see each open SS invoice with aging."
+            endpoint="store-sale-receivables"
+        />
+    );
+}
+
+// Same report, same working, minus whichever parties are hidden via the
+// separate settings form (Reports → Store Sale Receivables (Custom View) →
+// Manage Hidden Parties). Owner ask 2026-08-01.
+export function StoreSaleReceivablesCustom() {
+    return (
+        <StoreSaleReceivablesReport
+            title="Store Sale Receivables (Custom View)"
+            subtitle="Same as Store Sale Receivables, with hidden parties left out. Manage the hidden list from its settings page."
+            endpoint="store-sale-receivables-custom"
+        />
+    );
+}
+
+function StoreSaleReceivablesReport({ title, subtitle, endpoint }) {
     const [expanded, setExpanded] = useState({});
     const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
 
     const excelExport = (data, params) => ({
-        filename: `store-sale-receivables-as-of-${params.asOf || 'today'}.csv`,
+        filename: `${endpoint}-as-of-${params.asOf || 'today'}.csv`,
         headers: ['Party', 'Party Type', 'Sale Invoice #', 'Voucher #', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket', 'Saher Auto Balance'],
         rows: (data.rows || []).flatMap(g =>
             g.Invoices.map((inv, idx) => [
@@ -248,10 +271,10 @@ export function StoreSaleReceivables() {
 
     return (
         <ReportShell
-            title="Store Sale Receivables"
-            subtitle="Money owed FROM parties on credit store sales. One row per party — expand to see each open SS invoice with aging."
+            title={title}
+            subtitle={subtitle}
             icon={Wallet}
-            endpoint="store-sale-receivables"
+            endpoint={endpoint}
             defaultParams={{ asOf: todayISO(), partyId: '' }}
             excelExport={excelExport}
             controls={({ params, updateParam }) => (

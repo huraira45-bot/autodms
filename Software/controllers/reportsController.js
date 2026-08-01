@@ -1916,25 +1916,22 @@ exports.getPartyOpenInvoices = async (req, res) => {
 };
 
 /**
- * GET /reports/store-sale-receivables?asOf=&partyId=(optional)
+ * Shared core of the Store Sale Receivables report. Extracted (behavior-
+ * preserving — no logic changes) so a second endpoint can reuse the exact
+ * same computation with an added party-exclusion filter, instead of
+ * duplicating ~175 lines of query + aggregation. Owner ask 2026-08-01.
  *
- * Money owed TO us BY parties on credit store sales. Every SS invoice with
- * outstanding balance as of `asOf`, grouped by party with drill-down to each
- * open invoice. Optional partyId narrows to one party. Owner ask 2026-07-17.
- *
- * Uses dms_PartyLedger — Dr rows on party GL from SourceDocType='STORE_SALE'
- * vouchers, net of Cr rows allocated back via AllocatedToVoucherID.
+ * `excludePartyIds` — optional array/Set of PartyIDs to leave out entirely
+ * (both from the invoice list and the "Saher Auto Balance" pass). Empty/
+ * omitted means "everyone", i.e. identical to the original report.
  */
-exports.getStoreSaleReceivables = async (req, res) => {
-    try {
-        const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
-        const asOf = endOfDay(asOfRaw);
-        const partyId = req.query.partyId ? parseInt(req.query.partyId) : null;
+async function computeStoreSaleReceivables(pool, { asOfRaw, asOf, partyId, excludePartyIds }) {
+        const excludeList = excludePartyIds ? Array.from(excludePartyIds).map(n => parseInt(n)).filter(Number.isFinite) : [];
 
-        const pool = await getPool();
         const rq = pool.request().input('asOf', sql.DateTime, asOf);
         const partyFilter = partyId ? 'AND l.PartyID = @pid' : '';
         if (partyId) rq.input('pid', sql.Int, partyId);
+        const excludeFilter = excludeList.length ? `AND l.PartyID NOT IN (${excludeList.join(',')})` : '';
 
         const r = await rq.query(`
             WITH InvoiceDrs AS (
@@ -1950,6 +1947,7 @@ exports.getStoreSaleReceivables = async (req, res) => {
                   AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
                   AND  v.VoucherDate <= @asOf
                   AND  v.SourceDocType = 'STORE_SALE'
+                  ${excludeFilter}
                 GROUP BY l.PartyID, v.VoucherID, v.VoucherNo, v.VoucherDate, v.SourceDocID
             ),
             Allocations AS (
@@ -2091,13 +2089,113 @@ exports.getStoreSaleReceivables = async (req, res) => {
             b90plus:      +rows.reduce((s, x) => s + x.Buckets.b90plus, 0).toFixed(2),
         };
 
-        res.json({
+        return {
             asOf: asOfRaw.toISOString().slice(0,10),
             rows, totals,
-        });
+        };
+}
+
+/**
+ * GET /reports/store-sale-receivables?asOf=&partyId=(optional)
+ *
+ * Money owed TO us BY parties on credit store sales. Every SS invoice with
+ * outstanding balance as of `asOf`, grouped by party with drill-down to each
+ * open invoice. Optional partyId narrows to one party. Owner ask 2026-07-17.
+ *
+ * Uses dms_PartyLedger — Dr rows on party GL from SourceDocType='STORE_SALE'
+ * vouchers, net of Cr rows allocated back via AllocatedToVoucherID.
+ */
+exports.getStoreSaleReceivables = async (req, res) => {
+    try {
+        const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
+        const asOf = endOfDay(asOfRaw);
+        const partyId = req.query.partyId ? parseInt(req.query.partyId) : null;
+        const pool = await getPool();
+        const result = await computeStoreSaleReceivables(pool, { asOfRaw, asOf, partyId });
+        res.json(result);
     } catch (err) {
         console.error('Store sale receivables error:', err);
         res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /reports/store-sale-receivables-custom?asOf=&partyId=(optional)
+ *
+ * Identical report/working to getStoreSaleReceivables (same query, same
+ * aggregation, same response shape) except parties on
+ * dms_SSReceivablesHiddenParties are left out entirely. Which parties are
+ * hidden is managed separately — see get/putSSReceivablesHiddenParties
+ * below. Owner ask 2026-08-01.
+ */
+exports.getStoreSaleReceivablesCustom = async (req, res) => {
+    try {
+        const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
+        const asOf = endOfDay(asOfRaw);
+        const partyId = req.query.partyId ? parseInt(req.query.partyId) : null;
+        const pool = await getPool();
+        const hidden = await pool.request().query(`SELECT PartyID FROM dms_SSReceivablesHiddenParties`);
+        const excludePartyIds = hidden.recordset.map(r => r.PartyID);
+        const result = await computeStoreSaleReceivables(pool, { asOfRaw, asOf, partyId, excludePartyIds });
+        res.json(result);
+    } catch (err) {
+        console.error('Store sale receivables (custom) error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /reports/store-sale-receivables-custom/hidden-parties
+ *
+ * Returns every party plus which ones are currently hidden from the custom
+ * report, for the settings form.
+ */
+exports.getSSReceivablesHiddenParties = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const [all, hidden] = await Promise.all([
+            pool.request().query(`SELECT PartyID, PartyName, PartyType FROM gen_PartiesInfo ORDER BY PartyName`),
+            pool.request().query(`SELECT PartyID FROM dms_SSReceivablesHiddenParties`),
+        ]);
+        const hiddenSet = new Set(hidden.recordset.map(r => r.PartyID));
+        res.json({
+            parties: all.recordset.map(p => ({ ...p, Hidden: hiddenSet.has(p.PartyID) })),
+        });
+    } catch (err) {
+        console.error('getSSReceivablesHiddenParties:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * PUT /reports/store-sale-receivables-custom/hidden-parties
+ *   body: { HiddenPartyIds: [1, 2, 3] }
+ *
+ * Replaces the hidden-party list wholesale (simpler and safer than
+ * incremental add/remove for a small admin checklist form).
+ */
+exports.putSSReceivablesHiddenParties = async (req, res) => {
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        const ids = Array.isArray(req.body.HiddenPartyIds)
+            ? req.body.HiddenPartyIds.map(n => parseInt(n)).filter(Number.isFinite)
+            : [];
+        await new sql.Request(tx).query(`DELETE FROM dms_SSReceivablesHiddenParties`);
+        for (const id of ids) {
+            await new sql.Request(tx)
+                .input('pid', sql.Int, id)
+                .input('uid', sql.Int, req.user?.employeeId || null)
+                .input('uname', sql.NVarChar(100), req.user?.userName || null)
+                .query(`INSERT INTO dms_SSReceivablesHiddenParties (PartyID, HiddenBy, HiddenByName) VALUES (@pid, @uid, @uname)`);
+        }
+        await tx.commit();
+        res.json({ message: `${ids.length} part${ids.length === 1 ? 'y' : 'ies'} hidden from the custom report.` });
+    } catch (err) {
+        if (tx._aborted !== true) await tx.rollback().catch(() => {});
+        console.error('putSSReceivablesHiddenParties:', err);
+        res.status(400).json({ error: err.message });
     }
 };
 

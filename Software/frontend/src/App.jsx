@@ -135,7 +135,8 @@ import DailyCashBook      from './pages/DailyCashBook';
 import TaxSummary         from './pages/TaxSummary';
 import { PnL, PnLByDepartment, BalanceSheet, DayBook }      from './pages/reports/Financials';
 import { ReceivablesAging, PayablesAging, InsuranceAging, WalkInOutstanding }  from './pages/reports/Aging';
-import { PartyOpenInvoices, StoreSaleReceivables } from './pages/reports/PartyReports';
+import { PartyOpenInvoices, StoreSaleReceivables, StoreSaleReceivablesCustom } from './pages/reports/PartyReports';
+import SSReceivablesHiddenPartiesAdmin from './pages/reports/SSReceivablesHiddenPartiesAdmin';
 import { POSPending, ChequesOnHand, BankBalances, TaxRateHistory } from './pages/reports/Operational';
 import { DiscountGiven, SalesRegister, GrossMargin, GenCustReconciliation } from './pages/reports/Workshop';
 import { InventoryValuation } from './pages/reports/Inventory';
@@ -1019,6 +1020,12 @@ function AppShell() {
                     <Route path="/reports/receivables-aging"    element={<ProtectedRoute moduleKey="reports"><ReceivablesAging /></ProtectedRoute>} />
                     <Route path="/reports/party-open-invoices"  element={<ProtectedRoute moduleKey="reports"><PartyOpenInvoices /></ProtectedRoute>} />
                     <Route path="/reports/store-sale-receivables" element={<ProtectedRoute moduleKey="reports"><StoreSaleReceivables /></ProtectedRoute>} />
+                    <Route path="/reports/store-sale-receivables-custom" element={
+                        <ProtectedRoute moduleKey="report:store_sale_receivables_custom"><StoreSaleReceivablesCustom /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/store-sale-receivables-custom/settings" element={
+                        <ProtectedRoute moduleKey="report:store_sale_receivables_custom"><SSReceivablesHiddenPartiesAdmin /></ProtectedRoute>
+                    } />
                     <Route path="/reports/payables-aging"       element={<ProtectedRoute moduleKey="reports"><PayablesAging /></ProtectedRoute>} />
                     <Route path="/reports/insurance-aging"      element={<ProtectedRoute moduleKey="reports"><InsuranceAging /></ProtectedRoute>} />
                     <Route path="/reports/walkin-outstanding"   element={<ProtectedRoute moduleKey="reports"><WalkInOutstanding /></ProtectedRoute>} />

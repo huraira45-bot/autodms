@@ -51,6 +51,10 @@ router.get('/voucher-audit',          requireAccess('report:voucher_audit'),    
 router.get('/system-account-audit',   requireAccess('report:system_account_audit'),   reports.getSystemAccountAudit);
 router.get('/party-open-invoices',    requireAccess('report:party_open_invoices'),    reports.getPartyOpenInvoices);
 router.get('/store-sale-receivables', requireAccess('report:store_sale_receivables'), reports.getStoreSaleReceivables);
+// Same report/working as above, minus whichever parties are hidden via the settings form below.
+router.get('/store-sale-receivables-custom',                requireAccess('report:store_sale_receivables_custom'), reports.getStoreSaleReceivablesCustom);
+router.get('/store-sale-receivables-custom/hidden-parties',  requireAccess('report:store_sale_receivables_custom'), reports.getSSReceivablesHiddenParties);
+router.put('/store-sale-receivables-custom/hidden-parties',  requireAccess('report:store_sale_receivables_custom'), reports.putSSReceivablesHiddenParties);
 router.get('/revenue-split',          requireAccess('report:revenue_split'),          reports.getRevenueSplit);
 router.get('/cash-credit-expense',    requireAccess('report:cash_credit_expense'),    reports.getCashCreditExpense);
 router.get('/bu-pnl',                 requireAccess('report:bu_pnl'),                 buPnL.getBuPnL);
