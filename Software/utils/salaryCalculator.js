@@ -23,6 +23,14 @@
  *   2. employee.CustomLateFineAmount (per-employee override, if HasCustomLateFine)
  *   3. monthlySetting.LateFinePerMinute (per-month snapshot)
  *   4. global.LateFinePerMinute
+ *
+ * "Effective" working-days resolution (owner ask 2026-08-01 — per-employee
+ * override reinstated on top of the 2026-07-29 month-level default; first
+ * non-null/non-zero wins):
+ *   1. attendance.WorkingDays (per-employee-per-month override, set on the
+ *      Attendance page)
+ *   2. monthlySetting.WorkingDays (same for every employee that month)
+ *   3. calendar days in the month
  */
 
 function daysInMonth(monthId) {
@@ -56,18 +64,22 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const monthDays  = daysInMonth(monthId);
     const basic      = Number(emp.BasicSalary) || 0;
 
-    // If the month has a WorkingDays override (set on the Attendance page),
-    // pro-ration uses it: paidDays = WorkingDays − Absents (unless entry has
-    // an explicit PaidDays override). Else fall back to calendar days.
+    // Working days: per-employee override (attendance.WorkingDays) beats the
+    // month-level default (monthly.WorkingDays), which beats calendar days.
+    // Pro-ration: paidDays = workingDays − Absents (unless entry has an
+    // explicit PaidDays override).
+    const empWorkingDays = Number.isFinite(Number(att.WorkingDays)) && Number(att.WorkingDays) > 0
+        ? Number(att.WorkingDays) : null;
     const monthWorkingDays = m && Number.isFinite(Number(m.WorkingDays)) && Number(m.WorkingDays) > 0
         ? Number(m.WorkingDays) : null;
-    const baseDays = monthWorkingDays ?? monthDays;
+    const effectiveWorkingDays = empWorkingDays ?? monthWorkingDays;
+    const baseDays = effectiveWorkingDays ?? monthDays;
 
     let paidDays;
     if (ent.PaidDays !== undefined && ent.PaidDays !== null && ent.PaidDays !== '') {
         paidDays = Number(ent.PaidDays);
-    } else if (monthWorkingDays !== null) {
-        paidDays = Math.max(0, monthWorkingDays - Number(att.Absents || 0));
+    } else if (effectiveWorkingDays !== null) {
+        paidDays = Math.max(0, effectiveWorkingDays - Number(att.Absents || 0));
     } else {
         paidDays = monthDays;
     }
@@ -103,7 +115,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const net = Math.max(0, r2(additions - deductions));
 
     return {
-        monthDays, paidDays,
+        monthDays, paidDays, effectiveWorkingDays, empWorkingDays, monthWorkingDays,
         basic, prorated, fuel, adjustment,
         additions,
         lateRate, absentRate,

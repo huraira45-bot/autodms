@@ -156,7 +156,8 @@ export default function HrAttendance() {
                         onChange={e => { setMonthSettings(s => ({ ...s, WorkingDays: e.target.value })); setMonthDirty(true); }}
                         className="hr-inp" style={{ width: 90, height: 32 }}/>
                     <span className="hr-hint" style={{ marginLeft: 10 }}>
-                        Same for all employees this month. Leave blank to use calendar days.
+                        Default for all employees this month — leave blank to use calendar days.
+                        Override per employee in the "Working Days" column below if needed.
                         Salary calc: <b>basic × (WorkingDays − Absents) ÷ WorkingDays</b>.
                     </span>
                     {monthDirty && (
@@ -194,6 +195,7 @@ export default function HrAttendance() {
                                             <th className="num" style={{ width: 110 }}>Absents</th>
                                             <th className="num" style={{ width: 110 }}>Late (min)</th>
                                             <th className="num" style={{ width: 110 }}>Leave Days</th>
+                                            <th className="num" style={{ width: 120 }} title="Overrides the month default above for this employee only. Leave blank to use the default.">Working Days</th>
                                             <th style={{ width: 70 }}></th>
                                         </tr>
                                     </thead>
@@ -221,6 +223,14 @@ export default function HrAttendance() {
                                                         <input type="number" step="0.5" min={0} disabled={!canEdit}
                                                             value={val(e.EmployeeID, 'LeaveDays', 0)}
                                                             onChange={ev => patch(e.EmployeeID, 'LeaveDays', Number(ev.target.value))}
+                                                            className="hr-inp num"/>
+                                                    </td>
+                                                    <td className="num">
+                                                        <input type="number" step="0.5" min={0} max={31} disabled={!canEdit}
+                                                            value={Number(val(e.EmployeeID, 'WorkingDays', 0)) || ''}
+                                                            placeholder={monthSettings.WorkingDays ? `${monthSettings.WorkingDays} (default)` : 'calendar'}
+                                                            title="Overrides the month default for this employee only."
+                                                            onChange={ev => patch(e.EmployeeID, 'WorkingDays', Number(ev.target.value))}
                                                             className="hr-inp num"/>
                                                     </td>
                                                     <td>{dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(e.EmployeeID).then(load).catch(()=>{})}>Save</button>}</td>
