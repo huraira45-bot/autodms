@@ -617,7 +617,10 @@ exports.applyCampaign = async (req, res) => {
 
         // Campaign sanity
         const c = await new sql.Request(tx).input('id', sql.Int, campaignId).query(`
-            SELECT Status, ValidFrom, ValidTo, CampaignType FROM dms_ServiceCampaigns WHERE CampaignID = @id`);
+            SELECT Status, ValidFrom, ValidTo, CampaignType,
+                   LabourBenefitType, LabourBenefitPercent, LabourBenefitAmount,
+                   PartsBenefitType,  PartsBenefitPercent,  PartsBenefitAmount, IncludesTax
+            FROM dms_ServiceCampaigns WHERE CampaignID = @id`);
         if (!c.recordset.length) { await tx.rollback(); return res.status(404).json({ error: 'Campaign not found.' }); }
         const camp = c.recordset[0];
         if (camp.Status !== 'Active') { await tx.rollback(); return res.status(409).json({ error: `Campaign is ${camp.Status}.` }); }
@@ -644,6 +647,62 @@ exports.applyCampaign = async (req, res) => {
                 .query(`SELECT IsFinalized FROM data_StoreSaleInfo WHERE SaleID = @id`);
             if (!s.recordset.length) { await tx.rollback(); return res.status(404).json({ error: 'Sale not found.' }); }
             if (s.recordset[0].IsFinalized) { await tx.rollback(); return res.status(423).json({ error: 'Sale is finalized.' }); }
+        }
+
+        // Recompute the benefit server-side from the campaign's own rate and
+        // the JC/sale's CURRENT saved lines — never trust the client's
+        // BenefitAmount as the source of truth. Owner ask 2026-08-01: a
+        // campaign's fixed % must not be overridable, including by a direct
+        // API call bypassing the (now locked/read-only) frontend field.
+        // Tax pro-ration is intentionally not replicated exactly here (it
+        // needs a PST-rate lookup the frontend also does) — instead the
+        // ceiling below allows generous headroom for it, so a legitimate
+        // tax-inclusive amount is never falsely rejected, while an
+        // obviously-inflated override still gets caught.
+        const sideBenefit = (sideType, sidePct, sideAmt, gross) => {
+            if (!sideType || sideType === 'None') return 0;
+            if (sideType === 'Percent') return gross * Number(sidePct || 0) / 100;
+            if (sideType === 'Fixed')   return Math.min(Number(sideAmt || 0), gross);
+            if (sideType === 'Free')    return gross;
+            return 0;
+        };
+        const sumEligible = (lines, idField, allowSet) => {
+            if (!allowSet || allowSet.size === 0) return lines.reduce((s, l) => s + Math.max(0, Number(l.LineGross) || 0), 0);
+            return lines.reduce((s, l) => allowSet.has(l[idField]) ? s + Math.max(0, Number(l.LineGross) || 0) : s, 0);
+        };
+        const eligItems = await new sql.Request(tx).input('cid', sql.Int, campaignId)
+            .query(`SELECT ItemId FROM dms_ServiceCampaignEligibleItems WHERE CampaignID = @cid`);
+        const eligJobs = await new sql.Request(tx).input('cid', sql.Int, campaignId)
+            .query(`SELECT JobInfoId FROM dms_ServiceCampaignEligibleJobs WHERE CampaignID = @cid`);
+        const itSet = new Set(eligItems.recordset.map(r => r.ItemId));
+        const jbSet = new Set(eligJobs.recordset.map(r => r.JobInfoId));
+
+        let eligLabourGross = 0, eligPartsGross = 0;
+        if (JobCardId) {
+            const jobs = await new sql.Request(tx).input('id', sql.Int, JobCardId).query(`
+                SELECT JobInfoId, ISNULL(Price,0) - ISNULL(DiscAmt,0) AS LineGross
+                FROM Addata_JobCardInfoDetail WHERE JobCardId = @id`);
+            const items = await new sql.Request(tx).input('id', sql.Int, JobCardId).query(`
+                SELECT ItemId, (ISNULL(IssueQuantity,0) * ISNULL(ItemRate,0)) - ISNULL(DiscAmt,0) AS LineGross
+                FROM data_StockIssuetoJobCardDetail WHERE JobCardId = @id`);
+            eligLabourGross = sumEligible(jobs.recordset, 'JobInfoId', jbSet);
+            eligPartsGross  = sumEligible(items.recordset, 'ItemId', itSet);
+        } else {
+            const items = await new sql.Request(tx).input('id', sql.Int, SaleID).query(`
+                SELECT ItemID AS ItemId, (ISNULL(Quantity,0) * ISNULL(SaleRate,0)) - ISNULL(DiscountAmount,0) AS LineGross
+                FROM data_StoreSaleDetail WHERE SaleID = @id`);
+            eligPartsGross = sumEligible(items.recordset, 'ItemId', itSet);
+        }
+        const baseBenefit = sideBenefit(camp.LabourBenefitType, camp.LabourBenefitPercent, camp.LabourBenefitAmount, eligLabourGross)
+                           + sideBenefit(camp.PartsBenefitType,  camp.PartsBenefitPercent,  camp.PartsBenefitAmount,  eligPartsGross);
+        // Generous ceiling: base benefit + 50% headroom (covers tax pro-ration
+        // when IncludesTax is set) + a small flat buffer for rounding.
+        const ceiling = baseBenefit * 1.5 + 50;
+        if (Number(BenefitAmount) > ceiling) {
+            await tx.rollback();
+            return res.status(400).json({
+                error: `BenefitAmount (PKR ${Number(BenefitAmount).toFixed(2)}) is higher than this campaign's rate allows (max ~PKR ${ceiling.toFixed(2)} based on current lines). Refresh and re-apply.`,
+            });
         }
 
         // No stacking — refuse if there's already an active application

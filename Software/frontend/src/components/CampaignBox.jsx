@@ -151,7 +151,6 @@ function PickerModal({ type, id, grossAmount, labourGross = 0, partsGross = 0, t
     const isJC = type === 'jobcard';
     const [campaigns, setCampaigns] = useState([]);
     const [selected, setSelected]   = useState(null);
-    const [benefit, setBenefit]     = useState('');
     const [busy, setBusy]           = useState(false);
     const [err, setErr]             = useState(null);
     const [loading, setLoading]     = useState(true);
@@ -211,14 +210,9 @@ function PickerModal({ type, id, grossAmount, labourGross = 0, partsGross = 0, t
         };
     })();
 
-    useEffect(() => {
-        setBenefit(computedSplit.total > 0 ? computedSplit.total.toFixed(2) : '');
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selected, labourGross, partsGross, taxAmount]);
-
     const apply = async () => {
         if (!selected) return;
-        const amt = Number(benefit);
+        const amt = computedSplit.total;
         if (!(amt > 0)) { setErr('Benefit amount must be > 0.'); return; }
         setBusy(true); setErr(null);
         try {
@@ -299,11 +293,13 @@ function PickerModal({ type, id, grossAmount, labourGross = 0, partsGross = 0, t
 
                         <div style={{ marginTop: 14 }}>
                             <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#475569' }}>
-                                Benefit amount (PKR) — auto-computed from selected campaign, but you can override:
+                                Benefit amount (PKR) — fixed by the campaign's rate, not editable:
                             </label>
-                            <input type="number" value={benefit} onChange={e => setBenefit(e.target.value)}
-                                style={{ width: '100%', padding: '8px 10px', border: '1px solid #cbd5e1',
-                                         borderRadius: 6, fontSize: '0.9rem', marginTop: 4 }} />
+                            <div style={{ width: '100%', padding: '8px 10px', border: '1px solid #e2e8f0',
+                                          borderRadius: 6, fontSize: '0.9rem', marginTop: 4,
+                                          background: '#f8fafc', color: '#0f172a', fontWeight: 700 }}>
+                                {fmt(computedSplit.total)}
+                            </div>
                             {selected && (
                                 <div style={{ marginTop: 6, padding: 8, background: '#f8fafc',
                                               border: '1px solid #e2e8f0', borderRadius: 6, fontSize: '0.75rem',
@@ -334,7 +330,7 @@ function PickerModal({ type, id, grossAmount, labourGross = 0, partsGross = 0, t
                 <div style={modalFooter}>
                     <button type="button" className="btn-sm" onClick={onClose}>Cancel</button>
                     <button type="button" className="btn" onClick={apply}
-                            disabled={busy || !selected || !(Number(benefit) > 0)}>
+                            disabled={busy || !selected || !(computedSplit.total > 0)}>
                         {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                         Apply
                     </button>
