@@ -556,16 +556,32 @@ exports.updateVoucherDepartment = async (req, res) => {
 };
 
 // GET /accounts/vouchers/needs-department — posted CPV/BPV/JV vouchers with
-// no department tagged yet, for the bulk segregation workspace. Always
-// restricted to vouchers with a Debit line on an Expense-class (5xxxxx) GL
-// account -- JVs/CPVs/BPVs that only move Assets/Liabilities (opening
-// stock, advances, loan entries...) aren't expenses and are excluded
-// unconditionally (owner ask 2026-08-01: "the mapping should only show who
-// is hitting expenses"). Within that, hides vouchers that ALSO touch a
-// Parts (502003xxx) or Sales (502004xxx) GL account by default -- those are
-// self-evidently Parts/Sales department expenses already, going by the
-// same COA-prefix classification the P&L by Department report uses (see
-// PNL_DEPARTMENTS in reportsController.js). Pass ?all=1 to include those too.
+// no department tagged yet, for the bulk segregation workspace.
+//
+// Owner ask 2026-08-01, refined across three messages:
+//   "the mapping should only show who is hitting expenses"
+//   "it still show cost of sold paint which is obvious"
+//   "the vouchers which are linked to job cards"
+//   "502 OPERATING EXPENSES / 502001 ADMIN / 502002 SERVICE / 502003 PARTS
+//    / 502004 SALES ... only show segregation of these expenses"
+//
+// Net result: scope is OPERATING EXPENSES only (GLCode LIKE '502%') --
+// Admin/Service/Parts/Sales. This unconditionally excludes:
+//   - Asset/Liability-only postings (opening stock, advances, loans).
+//   - COST OF SALES (501xxx: COGS, incl. "Cost of Sold (Paint)" from Job
+//     Card paint consumption) -- COGS tracks against revenue, it isn't a
+//     discretionary operating expense to attribute to a department.
+// Within that 502xxx scope, by default (no ?all=1) also hides:
+//   1. Vouchers with a non-null SourceDocType (JOBCARD, JC_PAINT_CONS, GRN,
+//      GRTN, STORE_SALE, SSR, CHEQUE, ...) -- system-generated at finalize,
+//      not typed by an accountant, already traceable to a source document.
+//      Voucher Entry (saveVoucher) never sets this column, so
+//      SourceDocType IS NULL is exactly "a human typed this voucher".
+//   2. Vouchers touching Parts (502003xxx) or Sales (502004xxx) specifically
+//      -- self-evidently Parts/Sales department expenses by account name
+//      alone, same COA-prefix classification the P&L by Department report
+//      uses (see PNL_DEPARTMENTS in reportsController.js).
+// Pass ?all=1 to include everything untagged within the 502xxx scope.
 exports.getVouchersNeedingDepartment = async (req, res) => {
     try {
         const includeAll = req.query.all === '1';
@@ -582,22 +598,22 @@ exports.getVouchersNeedingDepartment = async (req, res) => {
             WHERE vt.Title IN ('CPV','BPV','JV')
               AND v.Status = 'Posted'
               AND v.DepartmentID IS NULL
-              -- Only vouchers that actually hit an Expense-class (5xxxxx)
-              -- account. Excludes JVs/CPVs/BPVs that move Assets/Liabilities
-              -- (opening stock, advances, loan entries, etc.) -- those
-              -- aren't "expenses" and don't belong in a department cost
-              -- breakdown. Owner ask 2026-08-01.
+              -- Scope: Operating Expenses only (502xxx). Excludes both
+              -- Asset/Liability-only postings AND Cost of Sales (501xxx).
               AND EXISTS (
                     SELECT 1 FROM data_FinanceVoucherDetail de
                     JOIN GLChartOFAccount ce ON ce.GLCAID = de.GLCAID
                     WHERE de.VoucherID = v.VoucherID AND de.Debit > 0
-                      AND LEFT(ce.GLCode, 1) = '5'
+                      AND ce.GLCode LIKE '502%'
               )
-              AND (@includeAll = 1 OR NOT EXISTS (
-                    SELECT 1 FROM data_FinanceVoucherDetail d
-                    JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
-                    WHERE d.VoucherID = v.VoucherID
-                      AND (c.GLCode LIKE '502003%' OR c.GLCode LIKE '502004%')
+              AND (@includeAll = 1 OR (
+                    v.SourceDocType IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM data_FinanceVoucherDetail d
+                        JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
+                        WHERE d.VoucherID = v.VoucherID
+                          AND (c.GLCode LIKE '502003%' OR c.GLCode LIKE '502004%')
+                    )
               ))`);
         const total = countRes.recordset[0].Total;
 
@@ -620,13 +636,16 @@ exports.getVouchersNeedingDepartment = async (req, res) => {
                     SELECT 1 FROM data_FinanceVoucherDetail de2
                     JOIN GLChartOFAccount ce2 ON ce2.GLCAID = de2.GLCAID
                     WHERE de2.VoucherID = v.VoucherID AND de2.Debit > 0
-                      AND LEFT(ce2.GLCode, 1) = '5'
+                      AND ce2.GLCode LIKE '502%'
               )
-              AND (@includeAll = 1 OR NOT EXISTS (
-                    SELECT 1 FROM data_FinanceVoucherDetail d3
-                    JOIN GLChartOFAccount c3 ON c3.GLCAID = d3.GLCAID
-                    WHERE d3.VoucherID = v.VoucherID
-                      AND (c3.GLCode LIKE '502003%' OR c3.GLCode LIKE '502004%')
+              AND (@includeAll = 1 OR (
+                    v.SourceDocType IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM data_FinanceVoucherDetail d3
+                        JOIN GLChartOFAccount c3 ON c3.GLCAID = d3.GLCAID
+                        WHERE d3.VoucherID = v.VoucherID
+                          AND (c3.GLCode LIKE '502003%' OR c3.GLCode LIKE '502004%')
+                    )
               ))
             ORDER BY v.VoucherDate DESC, v.VoucherID DESC
             OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`);

@@ -2586,7 +2586,17 @@ exports.getExpenseByDepartment = async (req, res) => {
         const { from, to } = req.query;
         const pool = await getPool();
         const request = pool.request();
-        const where = [`vt.Title IN ('CPV','BPV','JV')`, `v.Status = 'Posted'`];
+        // Scope: Operating Expenses only (502xxx: Admin/Service/Parts/
+        // Sales) -- same restriction as the Department Tagging workspace
+        // (accountController.getVouchersNeedingDepartment). Excludes Cost
+        // of Sales (501xxx) and any Asset/Liability-only posting; owner ask
+        // 2026-08-01: "only show segregation of these expenses" (502xxx).
+        const where = [
+            `vt.Title IN ('CPV','BPV','JV')`, `v.Status = 'Posted'`,
+            `EXISTS (SELECT 1 FROM data_FinanceVoucherDetail de
+                     JOIN GLChartOFAccount ce ON ce.GLCAID = de.GLCAID
+                     WHERE de.VoucherID = v.VoucherID AND de.Debit > 0 AND ce.GLCode LIKE '502%')`,
+        ];
         if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(v.VoucherDate AS DATE) >= @from'); }
         if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(v.VoucherDate AS DATE) <= @to'); }
 

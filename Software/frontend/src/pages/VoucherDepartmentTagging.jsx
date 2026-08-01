@@ -5,10 +5,17 @@
  * it only fills data_FinanceVoucherInfo.DepartmentID via PATCH
  * /accounts/vouchers/:id/department (migration 109).
  *
- * By default this hides vouchers that already touch a Parts or Sales GL
- * account (502003xxx / 502004xxx) — those are self-evidently Parts/Sales
- * department expenses already, same COA-prefix classification the P&L by
- * Department report uses. "Show all" reveals everything still untagged.
+ * Scope is Operating Expenses only (GLCode LIKE '502%' — Admin/Service/
+ * Parts/Sales); Cost of Sales (501xxx, e.g. Paint/Parts COGS) and any
+ * Asset/Liability-only posting never show up here.
+ *
+ * Within that, by default this also hides:
+ *   - vouchers linked to a source document (Job Card, GRN, Store Sale...) —
+ *     system-generated at finalize, not typed by an accountant;
+ *   - vouchers already touching a Parts (502003xxx) or Sales (502004xxx)
+ *     GL account — self-evidently Parts/Sales department expenses already,
+ *     same COA-prefix classification the P&L by Department report uses.
+ * "Show all" reveals everything still untagged within the 502xxx scope.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -84,16 +91,17 @@ export default function VoucherDepartmentTagging() {
                     </div>
                     <div className="subtitle">
                         Reporting-only. Picking a department here has no GL impact — it only feeds the
-                        Expense by Department report. Only vouchers that actually hit an Expense-class
-                        (5xxxxx) account are listed — asset/liability-only JVs (opening stock, advances,
-                        loan entries…) never show up here. Vouchers already touching a Parts or Sales GL
-                        account are hidden by default (already obviously Parts/Sales spend).
+                        Expense by Department report. Scope is Operating Expenses only (Admin / Service /
+                        Parts / Sales) — Cost of Sales (e.g. Paint/Parts COGS) and asset/liability-only JVs
+                        (opening stock, advances, loan entries…) never show up here. Vouchers linked to a
+                        Job Card/GRN/Store Sale, or already touching a Parts or Sales GL account, are
+                        hidden by default (system-generated or already obviously Parts/Sales spend).
                     </div>
                 </div>
                 <div className="row" style={{ gap: 8, alignItems: 'center' }}>
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: '#475569' }}>
                         <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} />
-                        Show all (incl. Parts/Sales)
+                        Show all (incl. job-card-linked / Parts / Sales)
                     </label>
                     <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading}>
                         {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
