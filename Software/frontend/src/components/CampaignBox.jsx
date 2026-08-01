@@ -34,15 +34,25 @@ export default function CampaignBox({ type, id, grossAmount, labourGross = 0, pa
     const [showPicker, setShowPicker] = useState(false);
     const [err, setErr] = useState(null);
 
+    // Single source of truth for this JC/sale's campaign application — the
+    // parent (JobCardForm/StoreSale totals) used to run its OWN separate
+    // fetch of the same endpoint via a callback prop, which drifted out of
+    // sync with this component's own state (owner report 2026-08-01: the
+    // banner here showed the correct benefit while the parent's Bill
+    // Details totals stayed at 0). Now `onChange` fires with the fetched
+    // data itself on every load — initial mount included, not just after
+    // apply/reverse — so there's exactly one fetch and one truth.
     const load = useCallback(async () => {
-        if (!id) { setApplication(null); return; }
+        if (!id) { setApplication(null); onChange?.(null); return; }
         setLoading(true);
         try {
             const ep = isJC ? `applications/by-jobcard/${id}` : `applications/by-sale/${id}`;
             const r = await axios.get(`${API}/service-campaigns/${ep}`);
             setApplication(r.data);
+            onChange?.(r.data);
         } catch (e) { setErr(e.response?.data?.error || e.message); }
         setLoading(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id, isJC]);
     useEffect(() => { load(); }, [load]);
 
@@ -54,7 +64,6 @@ export default function CampaignBox({ type, id, grossAmount, labourGross = 0, pa
             await axios.post(`${API}/service-campaigns/applications/${application.ApplicationID}/reverse`,
                              { Reason: reason.trim() });
             await load();
-            onChange?.();
         } catch (e) { setErr(e.response?.data?.error || e.message); }
     };
 
@@ -137,7 +146,7 @@ export default function CampaignBox({ type, id, grossAmount, labourGross = 0, pa
                     partsGross={partsGross}
                     taxAmount={taxAmount}
                     onClose={() => setShowPicker(false)}
-                    onApplied={async () => { setShowPicker(false); await load(); onChange?.(); }}
+                    onApplied={async () => { setShowPicker(false); await load(); }}
                 />
             )}
         </div>

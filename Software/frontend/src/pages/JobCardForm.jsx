@@ -81,14 +81,12 @@ export default function JobCardForm() {
   // Refreshed after finalize and whenever the JC is re-opened. Owner ask
   // 2026-07-01: a finalized JC should show what the customer still owes.
   const [balance, setBalance] = useState(null);
+  // Fed directly by <CampaignBox>'s onChange — it already fetches this JC's
+  // campaign application for its own banner; this used to run a SEPARATE,
+  // redundant fetch of the same endpoint that drifted out of sync with the
+  // banner (owner report 2026-08-01: banner showed the right benefit while
+  // Bill Details stayed at 0). One fetch, one source of truth now.
   const [campaign, setCampaign] = useState(null);
-  const reloadCampaign = async () => {
-    if (!isEdit) return;
-    try {
-      const r = await axios.get(`${API}/service-campaigns/applications/by-jobcard/${id}`);
-      setCampaign(r.data || null);
-    } catch { setCampaign(null); }
-  };
 
   // Insurance tab — claim header + per-part depreciation rows + payments
   const [insHeader, setInsHeader] = useState({
@@ -295,8 +293,6 @@ export default function JobCardForm() {
           } else {
             setBalance(null);
           }
-          // Load any campaign applied to this JC (used by the totals box).
-          reloadCampaign();
           try {
             const navRes = await axios.get(`${API}/job-cards/${id}/navigation`);
             setNav(navRes.data);
@@ -911,7 +907,7 @@ export default function JobCardForm() {
                        labourGross={totalLabour}
                        partsGross={totalParts}
                        taxAmount={totalTax}
-                       onChange={reloadCampaign} />
+                       onChange={setCampaign} />
 
           {/* Top row: Business Unit | Order Type | PM Type | Date In | RO Status | Promise Date | Service Advisor | Repeat RO */}
           <div style={{ ...S.groupBox }}>
