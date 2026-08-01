@@ -95,12 +95,15 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         // null = user hasn't picked yet. Required on CRV/BRV; irrelevant
         // elsewhere. Owner ask 2026-07-18 v2.
         IsCharitable: null,
-        // Reporting-only department tag — optional, CPV/BPV/JV only.
-        DepartmentID: '',
     });
+    // Department + IsExpense are per-LINE (owner ask 2026-08-01 — a JV can
+    // mix an expense line with a non-expense line, or split one bill across
+    // two departments). DepartmentID '' = not tagged; IsExpense false =
+    // explicitly "not an expense" (no department needed, drops out of the
+    // tagging queue).
     const [items, setItems] = useState([
-        { GLCAID: '', Narration: '', Debit: 0, Credit: 0 },
-        { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }
+        { GLCAID: '', Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null },
+        { GLCAID: '', Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null }
     ]);
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
@@ -189,7 +192,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     }, [mode, active, params]);
 
     // ---------- New-voucher state mgmt ----------
-    const addItem = () => setItems([...items, { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }]);
+    const addItem = () => setItems([...items, { GLCAID: '', Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null }]);
     const removeItem = (i) => setItems(items.filter((_, j) => j !== i));
     const updateItem = (i, k, v) => {
         // Row 0 is locked for CPV/CRV/BPV/BRV: the wrong-side Dr/Cr input and
@@ -284,10 +287,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         setMode('new');
         setActive(null);
         const row0 = isFixedCash
-            ? { GLCAID: cashBookGLCAID, Narration: '', Debit: 0, Credit: 0 }
-            : { GLCAID: '', Narration: '', Debit: 0, Credit: 0 };
-        setItems([row0, { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }]);
-        setHeader(h => ({ ...h, Remarks: '', DepartmentID: '' }));
+            ? { GLCAID: cashBookGLCAID, Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null }
+            : { GLCAID: '', Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null };
+        setItems([row0, { GLCAID: '', Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null }]);
+        setHeader(h => ({ ...h, Remarks: '' }));
         setMsg(null);
         params.delete('id'); setParams(params);
     };
@@ -329,13 +332,17 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             // Server always returns a bool; treat that as the current
             // Yes/No state so the radio hydrates correctly on edit.
             IsCharitable: active.IsCharitable === true ? true : false,
-            DepartmentID: active.DepartmentID || '',
         });
+        // Full-replace edit (updateVoucher deletes+reinserts every line), so
+        // each line's existing DepartmentID/IsExpense must be echoed back or
+        // it's lost — carry it forward from the loaded voucher.
         setItems(active.lines.map(l => ({
             GLCAID: l.GLCAID,
             Narration: l.Narration || '',
             Debit: Number(l.Debit) || 0,
-            Credit: Number(l.Credit) || 0
+            Credit: Number(l.Credit) || 0,
+            DepartmentID: l.DepartmentID || '',
+            IsExpense: l.IsExpense === true || l.IsExpense === 1 ? true : (l.IsExpense === false || l.IsExpense === 0 ? false : null),
         })));
         setEditingId(active.VoucherID);
         setMode('new');
@@ -369,23 +376,36 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         }
     };
 
-    // ---------- Set Department (any status — reporting-only metadata) ----------
-    const [deptEditOpen, setDeptEditOpen] = useState(false);
-    const [deptEditVal, setDeptEditVal] = useState('');
+    // ---------- Set Department per line (any status — reporting-only metadata) ----------
+    // Owner ask 2026-08-01: department is tagged per voucher LINE, not per
+    // whole voucher. `lineBusyId` disables just the one row mid-request so
+    // the rest of the table stays interactive.
+    const [lineBusyId, setLineBusyId] = useState(null);
 
-    const openDeptEdit = () => {
-        if (!active) return;
-        setDeptEditVal(active.DepartmentID || '');
-        setDeptEditOpen(true);
+    // deptId: chosen department (or null). isExpense: true (department
+    // picked) | false ("not an expense") | null (cleared, back to undecided).
+    const setLineDepartmentAndFlag = async (lineId, deptId, isExpense) => {
+        setLineBusyId(lineId);
+        try {
+            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/lines/${lineId}/department`, { DepartmentID: deptId, IsExpense: isExpense });
+            await loadVoucher(active.VoucherID);
+        } catch (err) {
+            setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
+        } finally {
+            setLineBusyId(null);
+        }
     };
-    const submitDeptChange = async () => {
+
+    // Whole-voucher shortcut: mark every Debit line "not an expense" in one
+    // click, instead of tagging each line individually. Owner ask
+    // 2026-08-01: "set an option whether it's expense or not the whole voucher."
+    const markWholeVoucherNotExpense = async () => {
         if (!active) return;
         setBusy(true);
         try {
-            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/department`, { DepartmentID: deptEditVal || null });
-            setDeptEditOpen(false);
+            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/expense-flag`, { IsExpense: false });
             await loadVoucher(active.VoucherID);
-            setMsg({ kind: 'ok', text: 'Department updated.' });
+            setMsg({ kind: 'ok', text: 'All lines marked as not an expense.' });
         } catch (err) {
             setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
         } finally {
@@ -616,25 +636,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                             );
                         })()}
                         {isDeptScopedView && canEdit && (
-                            <button type="button" className="erp-btn" onClick={openDeptEdit} disabled={busy}
-                                title="Reporting-only tag — no GL impact. Which department does this expense belong to?">
-                                <Edit3 size={14} /> {active.DepartmentName ? `Department: ${active.DepartmentName}` : 'Set Department'}
+                            <button type="button" className="erp-btn" onClick={markWholeVoucherNotExpense} disabled={busy}
+                                title="One-click shortcut: marks every line as not an expense, instead of tagging each line individually. Reporting-only — no GL impact.">
+                                {busy ? <Loader2 size={14} className="animate-spin" /> : <Edit3 size={14} />} Mark whole voucher: Not an expense
                             </button>
-                        )}
-                        {deptEditOpen && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 8px', border: '1px solid var(--erp-border)', borderRadius: 4, background: 'var(--erp-surface-alt)' }}>
-                                <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>Department:</span>
-                                <select value={deptEditVal} onChange={e => setDeptEditVal(e.target.value)} style={{ padding: '2px 6px', fontSize: 12 }}>
-                                    <option value="">— Not set —</option>
-                                    {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
-                                </select>
-                                <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={submitDeptChange} disabled={busy}>
-                                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
-                                </button>
-                                <button type="button" className="erp-btn erp-btn-sm" onClick={() => setDeptEditOpen(false)} disabled={busy}>
-                                    Cancel
-                                </button>
-                            </div>
                         )}
                         {isReversed && (
                             <div className="erp-alert danger" style={{ margin: 0 }}>
@@ -680,17 +685,58 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     <div className="table-wrapper">
                         <table>
                             <thead>
-                                <tr><th>Account</th><th>Narration</th><th style={{ textAlign: 'right' }}>Debit</th><th style={{ textAlign: 'right' }}>Credit</th></tr>
+                                <tr>
+                                    <th>Account</th><th>Narration</th>
+                                    <th style={{ textAlign: 'right' }}>Debit</th><th style={{ textAlign: 'right' }}>Credit</th>
+                                    {isDeptScopedView && <th style={{ width: 240 }}>Department <span style={{ fontWeight: 400, color: 'var(--erp-text-muted)' }}>(reporting only)</span></th>}
+                                </tr>
                             </thead>
                             <tbody>
-                                {active.lines.map((l, i) => (
-                                    <tr key={i}>
+                                {active.lines.map((l) => {
+                                    const isLineBusy = lineBusyId === l.VoucherDetailID;
+                                    const showDeptCell = isDeptScopedView && Number(l.Debit) > 0;
+                                    return (
+                                    <tr key={l.VoucherDetailID}>
                                         <td><span style={{ fontFamily: 'monospace', color: '#64748b' }}>{l.GLCode}</span> {l.GLTitle}</td>
                                         <td>{l.Narration}</td>
                                         <td style={{ textAlign: 'right' }}>{Number(l.Debit) ? fmt(l.Debit) : '—'}</td>
                                         <td style={{ textAlign: 'right' }}>{Number(l.Credit) ? fmt(l.Credit) : '—'}</td>
+                                        {isDeptScopedView && (
+                                            <td>
+                                                {!showDeptCell ? (
+                                                    <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span>
+                                                ) : l.IsExpense === false ? (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                        <span style={{ fontSize: 11, color: 'var(--erp-text-muted)', fontStyle: 'italic' }}>Not an expense</span>
+                                                        {canEdit && (
+                                                            <button type="button" className="erp-btn erp-btn-sm" disabled={isLineBusy}
+                                                                onClick={() => setLineDepartmentAndFlag(l.VoucherDetailID, null, null)}>
+                                                                Undo
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ) : canEdit ? (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                        <select value={l.DepartmentID || ''} disabled={isLineBusy}
+                                                            onChange={e => setLineDepartmentAndFlag(l.VoucherDetailID, e.target.value || null, e.target.value ? true : null)}
+                                                            style={{ padding: '3px 6px', fontSize: 12, flex: 1 }}>
+                                                            <option value="">— Pick —</option>
+                                                            {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
+                                                        </select>
+                                                        <button type="button" className="erp-btn erp-btn-sm" disabled={isLineBusy}
+                                                            title="Not an expense"
+                                                            onClick={() => setLineDepartmentAndFlag(l.VoucherDetailID, null, false)}>
+                                                            {isLineBusy ? <Loader2 size={12} className="animate-spin" /> : '✕'}
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    l.DepartmentName || <span style={{ color: '#cbd5e1', fontSize: 11 }}>Untagged</span>
+                                                )}
+                                            </td>
+                                        )}
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                             <tfoot>
                                 {(() => {
@@ -711,6 +757,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                                             <td colSpan={2}>Total{unbalanced && <span style={{ color: '#dc2626', marginLeft: 6 }}>UNBALANCED</span>}</td>
                                             <td style={{ textAlign: 'right', color: unbalanced ? '#dc2626' : undefined }}>{fmt(dr)}</td>
                                             <td style={{ textAlign: 'right', color: unbalanced ? '#dc2626' : undefined }}>{fmt(cr)}</td>
+                                            {isDeptScopedView && <td></td>}
                                         </tr>
                                     );
                                 })()}
@@ -923,16 +970,12 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         </select>
                     </div>
                     <div className="form-group"><label>Reference / Remarks</label><input type="text" value={header.Remarks} onChange={e => setHeader({...header, Remarks: e.target.value})} placeholder="Overall voucher description..." /></div>
-                    {isDeptScoped && (
-                        <div className="form-group">
-                            <label>Department <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>(reporting only, optional)</span></label>
-                            <select value={header.DepartmentID} onChange={e => setHeader({ ...header, DepartmentID: e.target.value })}>
-                                <option value="">— Not set —</option>
-                                {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
-                            </select>
-                        </div>
-                    )}
                 </div>
+                {isDeptScoped && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
+                        Department is tagged per line below (reporting only, optional) — pick one per expense line in the table.
+                    </div>
+                )}
                 {/* Charity flag — owner ask 2026-07-18 v2. Yes/No is
                     mandatory on CRV/BRV only. Yes → record 1% of the voucher
                     total in dms_CharityTracking (side ledger, no GL impact).
@@ -975,13 +1018,19 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                 <div className="table-wrapper">
                     <table>
                         <thead>
-                            <tr><th style={{ width: '30%' }}>Account</th><th>Narration</th><th style={{ width: '15%' }}>Debit</th><th style={{ width: '15%' }}>Credit</th><th></th></tr>
+                            <tr>
+                                <th style={{ width: '25%' }}>Account</th><th>Narration</th>
+                                <th style={{ width: '13%' }}>Debit</th><th style={{ width: '13%' }}>Credit</th>
+                                {isDeptScoped && <th style={{ width: 200 }}>Department <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span></th>}
+                                <th></th>
+                            </tr>
                         </thead>
                         <tbody>
                             {items.map((item, idx) => {
                                 const isLockedRow0 = idx === 0 && (isFixedCash || isFixedBank);
                                 const drLocked = isLockedRow0 && fixedLockedSide === 'Debit';
                                 const crLocked = isLockedRow0 && fixedLockedSide === 'Credit';
+                                const showDeptCell = isDeptScoped && !isLockedRow0 && Number(item.Debit) > 0;
                                 return (
                                 <tr key={idx}>
                                     <td>
@@ -1008,6 +1057,28 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                                     <td><input type="text" value={item.Narration} onChange={e => updateItem(idx, 'Narration', e.target.value)} placeholder="Line narration..." /></td>
                                     <td><input type="number" value={item.Debit}  onChange={e => updateItem(idx, 'Debit',  e.target.value)} disabled={drLocked} style={{ textAlign: 'right', background: drLocked ? '#f1f5f9' : 'white' }} /></td>
                                     <td><input type="number" value={item.Credit} onChange={e => updateItem(idx, 'Credit', e.target.value)} disabled={crLocked} style={{ textAlign: 'right', background: crLocked ? '#f1f5f9' : 'white' }} /></td>
+                                    {isDeptScoped && (
+                                        <td>
+                                            {!showDeptCell ? (
+                                                <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span>
+                                            ) : item.IsExpense === false ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Not an expense</span>
+                                                    <button type="button" className="erp-btn erp-btn-sm" onClick={() => { updateItem(idx, 'IsExpense', null); updateItem(idx, 'DepartmentID', ''); }}>Undo</button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    <select value={item.DepartmentID} style={{ padding: '3px 6px', fontSize: 12, flex: 1 }}
+                                                        onChange={e => { updateItem(idx, 'DepartmentID', e.target.value); updateItem(idx, 'IsExpense', e.target.value ? true : null); }}>
+                                                        <option value="">— Pick —</option>
+                                                        {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
+                                                    </select>
+                                                    <button type="button" className="erp-btn erp-btn-sm" title="Not an expense"
+                                                        onClick={() => { updateItem(idx, 'IsExpense', false); updateItem(idx, 'DepartmentID', ''); }}>✕</button>
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
                                     <td>{isLockedRow0 ? <span style={{ color: '#cbd5e1', fontSize: 11 }}>—</span> : <button onClick={() => removeItem(idx)} style={{ color: '#ef4444' }}><Trash2 size={18} /></button>}</td>
                                 </tr>
                                 );

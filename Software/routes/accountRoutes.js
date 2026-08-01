@@ -35,7 +35,8 @@ router.get(   '/vouchers/needs-department', requirePerm('finance_vouchers', 'vie
 router.get(   '/vouchers/:id',      requirePerm('finance_vouchers', 'view'),   accountController.getVoucher);
 router.put(   '/vouchers/:id',      requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucher);
 router.patch( '/vouchers/:id/date', requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucherDate);
-router.patch( '/vouchers/:id/department', requirePerm('finance_vouchers', 'edit'), accountController.updateVoucherDepartment);
+router.patch( '/vouchers/:id/expense-flag', requirePerm('finance_vouchers', 'edit'), accountController.bulkSetVoucherExpenseFlag);
+router.patch( '/vouchers/:id/lines/:lineId/department', requirePerm('finance_vouchers', 'edit'), accountController.updateVoucherLineDepartment);
 router.delete('/vouchers/:id',      requirePerm('finance_vouchers', 'delete'), accountController.deleteVoucher);
 
 module.exports = router;

@@ -1,26 +1,32 @@
 /**
  * Department Tagging workspace — owner ask 2026-08-01. Posted CPV/BPV/JV
- * vouchers don't carry a department yet (tagging was added after they were
+ * lines don't carry a department yet (tagging was added after they were
  * posted). Reporting-only: picking a department here never touches the GL,
- * it only fills data_FinanceVoucherInfo.DepartmentID via PATCH
- * /accounts/vouchers/:id/department (migration 109).
+ * it only fills data_FinanceVoucherDetail.DepartmentID via PATCH
+ * /accounts/vouchers/:id/lines/:lineId/department (migration 110).
+ *
+ * Line-level, not voucher-level: a JV that mixes an expense line with a
+ * non-expense line, or splits one bill across two departments, is tagged
+ * one line at a time. Each row here is a LINE, not a whole voucher — a
+ * voucher with two qualifying lines shows up twice.
  *
  * Scope is Operating Expenses only (GLCode LIKE '502%' — Admin/Service/
  * Parts/Sales); Cost of Sales (501xxx, e.g. Paint/Parts COGS) and any
- * Asset/Liability-only posting never show up here.
+ * Asset/Liability-only line never show up here.
  *
  * Within that, by default this also hides:
- *   - vouchers linked to a source document (Job Card, GRN, Store Sale...) —
- *     system-generated at finalize, not typed by an accountant;
- *   - vouchers already touching a Parts (502003xxx) or Sales (502004xxx)
- *     GL account — self-evidently Parts/Sales department expenses already,
- *     same COA-prefix classification the P&L by Department report uses.
- * "Show all" reveals everything still untagged within the 502xxx scope.
+ *   - lines on a voucher linked to a source document (Job Card, GRN, Store
+ *     Sale...) — system-generated at finalize, not typed by an accountant;
+ *   - lines already on a Parts (502003xxx) or Sales (502004xxx) GL account
+ *     — self-evidently Parts/Sales department expenses already, same
+ *     COA-prefix classification the P&L by Department report uses.
+ * "Show all" reveals everything still undecided within the 502xxx scope.
+ * A line explicitly marked "Not an expense" never resurfaces regardless.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Building2, Search, RefreshCw, Save, ArrowRight, Loader2 } from 'lucide-react';
+import { Building2, Search, RefreshCw, Save, ArrowRight, Loader2, X } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 
 const API = '/api';
@@ -37,8 +43,8 @@ export default function VoucherDepartmentTagging() {
     const [loading, setLoading] = useState(true);
     const [showAll, setShowAll] = useState(false);
     const [query, setQuery] = useState('');
-    const [picks, setPicks] = useState({});     // VoucherID -> DepartmentID chosen (not yet saved)
-    const [savingId, setSavingId] = useState(null);
+    const [picks, setPicks] = useState({});     // VoucherDetailID -> DepartmentID chosen (not yet saved)
+    const [busyId, setBusyId] = useState(null); // VoucherDetailID currently saving
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -62,24 +68,37 @@ export default function VoucherDepartmentTagging() {
         if (!q) return true;
         return (r.VoucherNo || '').toLowerCase().includes(q)
             || (r.Remarks || '').toLowerCase().includes(q)
-            || (r.AccountsTouched || '').toLowerCase().includes(q);
+            || (r.Narration || '').toLowerCase().includes(q)
+            || (r.GLTitle || '').toLowerCase().includes(q);
     });
 
-    const save = async (voucherId) => {
-        const deptId = picks[voucherId];
+    const saveDepartment = async (row) => {
+        const deptId = picks[row.VoucherDetailID];
         if (!deptId) {
             notify({ type: 'warning', title: 'Pick a department', message: 'Choose a department before saving.' });
             return;
         }
-        setSavingId(voucherId);
+        setBusyId(row.VoucherDetailID);
         try {
-            await axios.patch(`${API}/accounts/vouchers/${voucherId}/department`, { DepartmentID: deptId });
-            setRows(prev => prev.filter(r => r.VoucherID !== voucherId));
+            await axios.patch(`${API}/accounts/vouchers/${row.VoucherID}/lines/${row.VoucherDetailID}/department`, { DepartmentID: deptId, IsExpense: true });
+            setRows(prev => prev.filter(r => r.VoucherDetailID !== row.VoucherDetailID));
             notify({ type: 'success', title: 'Tagged', message: 'Department saved.' });
         } catch (e) {
             notify({ type: 'error', title: 'Save failed', message: e.response?.data?.error || e.message });
         }
-        setSavingId(null);
+        setBusyId(null);
+    };
+
+    const markNotExpense = async (row) => {
+        setBusyId(row.VoucherDetailID);
+        try {
+            await axios.patch(`${API}/accounts/vouchers/${row.VoucherID}/lines/${row.VoucherDetailID}/department`, { DepartmentID: null, IsExpense: false });
+            setRows(prev => prev.filter(r => r.VoucherDetailID !== row.VoucherDetailID));
+            notify({ type: 'success', title: 'Marked', message: 'Line marked as not an expense.' });
+        } catch (e) {
+            notify({ type: 'error', title: 'Save failed', message: e.response?.data?.error || e.message });
+        }
+        setBusyId(null);
     };
 
     return (
@@ -90,12 +109,11 @@ export default function VoucherDepartmentTagging() {
                         <Building2 size={16} color="var(--erp-brand)" /> Department Tagging — CPV / BPV / JV
                     </div>
                     <div className="subtitle">
-                        Reporting-only. Picking a department here has no GL impact — it only feeds the
-                        Expense by Department report. Scope is Operating Expenses only (Admin / Service /
-                        Parts / Sales) — Cost of Sales (e.g. Paint/Parts COGS) and asset/liability-only JVs
-                        (opening stock, advances, loan entries…) never show up here. Vouchers linked to a
-                        Job Card/GRN/Store Sale, or already touching a Parts or Sales GL account, are
-                        hidden by default (system-generated or already obviously Parts/Sales spend).
+                        Reporting-only, per line — it only feeds the Expense by Department report, no GL
+                        impact. Scope is Operating Expenses only (Admin / Service / Parts / Sales) — Cost of
+                        Sales (e.g. Paint/Parts COGS) and asset/liability-only lines never show up here.
+                        Lines on a Job Card/GRN/Store Sale-linked voucher, or already on a Parts or Sales GL
+                        account, are hidden by default. Mark a line "Not an expense" (✕) and it's gone for good.
                     </div>
                 </div>
                 <div className="row" style={{ gap: 8, alignItems: 'center' }}>
@@ -113,7 +131,7 @@ export default function VoucherDepartmentTagging() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                     <Search size={16} color="#94a3b8" />
                     <input type="text" value={query} onChange={e => setQuery(e.target.value)}
-                        placeholder="Search voucher #, remarks, account…"
+                        placeholder="Search voucher #, account, narration…"
                         style={{ flex: 1, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }} />
                     <span style={{ fontSize: '0.75rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
                         {filtered.length} of {rows.length} untagged
@@ -133,15 +151,17 @@ export default function VoucherDepartmentTagging() {
                                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                                     <th style={{ padding: 10, textAlign: 'left', position: 'sticky', top: 0, background: '#f8fafc' }}>Voucher</th>
                                     <th style={{ padding: 10, textAlign: 'left', position: 'sticky', top: 0, background: '#f8fafc' }}>Date</th>
+                                    <th style={{ padding: 10, textAlign: 'left', position: 'sticky', top: 0, background: '#f8fafc' }}>Account / Narration</th>
                                     <th style={{ padding: 10, textAlign: 'right', position: 'sticky', top: 0, background: '#f8fafc' }}>Amount</th>
-                                    <th style={{ padding: 10, textAlign: 'left', position: 'sticky', top: 0, background: '#f8fafc' }}>Account(s) / Remarks</th>
                                     <th style={{ padding: 10, textAlign: 'left', width: 220, position: 'sticky', top: 0, background: '#f8fafc' }}>Department</th>
-                                    <th style={{ padding: 10, width: 90, position: 'sticky', top: 0, background: '#f8fafc' }}></th>
+                                    <th style={{ padding: 10, width: 130, position: 'sticky', top: 0, background: '#f8fafc' }}></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {filtered.map(r => (
-                                    <tr key={r.VoucherID} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                {filtered.map(r => {
+                                    const isBusy = busyId === r.VoucherDetailID;
+                                    return (
+                                    <tr key={r.VoucherDetailID} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                         <td style={{ padding: 10 }}>
                                             <span
                                                 style={{ fontFamily: 'monospace', fontWeight: 700, color: '#1e40af', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
@@ -152,26 +172,32 @@ export default function VoucherDepartmentTagging() {
                                             <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{r.VoucherTypeCode}</div>
                                         </td>
                                         <td style={{ padding: 10, color: '#475569' }}>{new Date(r.VoucherDate).toLocaleDateString()}</td>
-                                        <td style={{ padding: 10, textAlign: 'right', fontWeight: 600 }}>{fmt(r.TotalAmount)}</td>
                                         <td style={{ padding: 10, color: '#64748b' }}>
-                                            <div>{r.AccountsTouched || '—'}</div>
-                                            {r.Remarks && <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{r.Remarks}</div>}
+                                            <div><span style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{r.GLCode}</span> {r.GLTitle}</div>
+                                            {(r.Narration || r.Remarks) && <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{r.Narration || r.Remarks}</div>}
                                         </td>
+                                        <td style={{ padding: 10, textAlign: 'right', fontWeight: 600 }}>{fmt(r.Debit)}</td>
                                         <td style={{ padding: 10 }}>
-                                            <select value={picks[r.VoucherID] || ''} onChange={e => setPicks(p => ({ ...p, [r.VoucherID]: e.target.value }))}
+                                            <select value={picks[r.VoucherDetailID] || ''} onChange={e => setPicks(p => ({ ...p, [r.VoucherDetailID]: e.target.value }))}
+                                                disabled={isBusy}
                                                 style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }}>
                                                 <option value="">— Pick department —</option>
                                                 {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
                                             </select>
                                         </td>
-                                        <td style={{ padding: 10 }}>
+                                        <td style={{ padding: 10, display: 'flex', gap: 6 }}>
                                             <button type="button" className="erp-btn erp-btn-sm erp-btn-primary"
-                                                onClick={() => save(r.VoucherID)} disabled={savingId === r.VoucherID || !picks[r.VoucherID]}>
-                                                {savingId === r.VoucherID ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
+                                                onClick={() => saveDepartment(r)} disabled={isBusy || !picks[r.VoucherDetailID]}>
+                                                {isBusy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
+                                            </button>
+                                            <button type="button" className="erp-btn erp-btn-sm" title="Not an expense"
+                                                onClick={() => markNotExpense(r)} disabled={isBusy}>
+                                                <X size={12} />
                                             </button>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

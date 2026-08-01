@@ -336,19 +336,21 @@ exports.getVoucher = async (req, res) => {
         const id = parseInt(req.params.id);
         const pool = await getPool();
         const hdr = await pool.request().input('id', sql.Int, id).query(`
-            SELECT v.*, vt.Title AS VoucherTypeCode, vt.Description AS VoucherTypeName,
-                   dept.DepartmentName
+            SELECT v.*, vt.Title AS VoucherTypeCode, vt.Description AS VoucherTypeName
             FROM data_FinanceVoucherInfo v
             JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
-            LEFT JOIN gen_DepartmentInfo dept ON dept.DepartmentID = v.DepartmentID
             WHERE v.VoucherID = @id
         `);
         if (!hdr.recordset.length) return res.status(404).json({ error: 'Voucher not found' });
 
+        // Department + IsExpense are per-LINE (migration 110) -- a JV can mix
+        // an expense line with an asset/liability line, or split one bill
+        // across two departments, so tagging lives on data_FinanceVoucherDetail.
         const lines = await pool.request().input('id', sql.Int, id).query(`
-            SELECT d.*, c.GLCode, c.GLTitle
+            SELECT d.*, c.GLCode, c.GLTitle, dept.DepartmentName
             FROM data_FinanceVoucherDetail d
             JOIN GLChartOFAccount c ON d.GLCAID = c.GLCAID
+            LEFT JOIN gen_DepartmentInfo dept ON dept.DepartmentID = d.DepartmentID
             WHERE d.VoucherID = @id
             ORDER BY d.VoucherDetailID
         `);
@@ -523,65 +525,119 @@ exports.updateVoucherDate = async (req, res) => {
     }
 };
 
-// PATCH /accounts/vouchers/:id/department — tag which HR department this
-// CPV/BPV/JV's expense belongs to. Reporting-only metadata: no GL impact,
-// no Status restriction (works on Draft, Posted, even Reversed vouchers),
-// so this doubles as the fix-up tool for historical vouchers posted before
-// department tagging existed. Owner ask 2026-08-01.
-exports.updateVoucherDepartment = async (req, res) => {
+// PATCH /accounts/vouchers/:id/lines/:lineId/department — tag ONE voucher
+// line with which HR department its expense belongs to, and/or mark it as
+// not an expense at all. Reporting-only metadata: no GL impact, no Status
+// restriction (works on Draft, Posted, even Reversed vouchers) -- doubles
+// as the fix-up tool for historical lines posted before tagging existed.
+// Owner ask 2026-08-01 (line-level follow-up to migration 109's
+// voucher-level version): "I want to tag department on each entry of the
+// voucher... set an option whether it's expense or not."
+//
+// Body: { DepartmentID, IsExpense }
+//   IsExpense === false  -> line marked NOT an expense; DepartmentID forced
+//                           to NULL (can't attribute a department to a
+//                           non-expense line).
+//   DepartmentID set     -> implies IsExpense = true (picking a department
+//                           only makes sense for an expense line).
+//   Both omitted/null    -> clears both (back to "undecided").
+exports.updateVoucherLineDepartment = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
+        const lineId = parseInt(req.params.lineId);
         const deptId = Number(req.body.DepartmentID) || null;
+        const isExpenseRaw = req.body.IsExpense;
+        const pool = await getPool();
+
+        const line = await pool.request().input('id', sql.Int, lineId).input('vid', sql.Int, id)
+            .query(`SELECT VoucherDetailID FROM data_FinanceVoucherDetail WHERE VoucherDetailID = @id AND VoucherID = @vid`);
+        if (!line.recordset.length) return res.status(404).json({ error: 'Voucher line not found.' });
+
+        let isExpense = isExpenseRaw === false ? false : (isExpenseRaw === true ? true : (deptId ? true : null));
+        const finalDeptId = isExpense === false ? null : deptId;
+
+        if (finalDeptId !== null) {
+            const dept = await pool.request().input('d', sql.Int, finalDeptId)
+                .query(`SELECT DepartmentID FROM gen_DepartmentInfo WHERE DepartmentID = @d`);
+            if (!dept.recordset.length) return res.status(400).json({ error: 'Unknown department.' });
+        }
+
+        await pool.request()
+            .input('id', sql.Int, lineId)
+            .input('dep', sql.Int, finalDeptId)
+            .input('exp', sql.Bit, isExpense === null ? null : (isExpense ? 1 : 0))
+            .query(`UPDATE data_FinanceVoucherDetail SET DepartmentID = @dep, IsExpense = @exp WHERE VoucherDetailID = @id`);
+        res.json({ message: 'Line updated', VoucherDetailID: lineId, DepartmentID: finalDeptId, IsExpense: isExpense });
+    } catch (err) {
+        console.error('updateVoucherLineDepartment:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// PATCH /accounts/vouchers/:id/expense-flag — bulk shortcut: mark EVERY
+// Debit line on this voucher as "not an expense" (or clear that back to
+// undecided) in one action, instead of tagging each line individually.
+// Owner ask 2026-08-01: "set an option whether it's expense or not the
+// whole voucher." Only ever writes IsExpense=false (clears DepartmentID
+// too) or null (undecided) -- there's no bulk "mark all as expense" since
+// each expense line still needs its own department.
+exports.bulkSetVoucherExpenseFlag = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const isExpenseRaw = req.body.IsExpense;
+        if (isExpenseRaw !== false && isExpenseRaw !== null) {
+            return res.status(400).json({ error: 'IsExpense must be false or null for the whole-voucher shortcut.' });
+        }
         const pool = await getPool();
 
         const head = await pool.request().input('id', sql.Int, id)
             .query(`SELECT VoucherID FROM data_FinanceVoucherInfo WHERE VoucherID = @id`);
         if (!head.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
 
-        if (deptId !== null) {
-            const dept = await pool.request().input('d', sql.Int, deptId)
-                .query(`SELECT DepartmentID FROM gen_DepartmentInfo WHERE DepartmentID = @d`);
-            if (!dept.recordset.length) return res.status(400).json({ error: 'Unknown department.' });
-        }
-
-        await pool.request()
+        const result = await pool.request()
             .input('id', sql.Int, id)
-            .input('dep', sql.Int, deptId)
-            .query(`UPDATE data_FinanceVoucherInfo SET DepartmentID = @dep WHERE VoucherID = @id`);
-        res.json({ message: 'Department updated', VoucherID: id, DepartmentID: deptId });
+            .input('exp', sql.Bit, isExpenseRaw === false ? 0 : null)
+            .query(`UPDATE data_FinanceVoucherDetail
+                    SET DepartmentID = NULL, IsExpense = @exp
+                    WHERE VoucherID = @id AND Debit > 0`);
+        res.json({ message: 'Voucher lines updated', VoucherID: id, LinesAffected: result.rowsAffected[0] });
     } catch (err) {
-        console.error('updateVoucherDepartment:', err);
+        console.error('bulkSetVoucherExpenseFlag:', err);
         res.status(500).json({ error: err.message });
     }
 };
 
-// GET /accounts/vouchers/needs-department — posted CPV/BPV/JV vouchers with
-// no department tagged yet, for the bulk segregation workspace.
+// GET /accounts/vouchers/needs-department — individual CPV/BPV/JV LINES
+// with no department tagged yet, for the bulk segregation workspace.
+// Line-level (migration 110), not voucher-level: a JV that mixes an
+// expense line with a non-expense line, or splits one bill across two
+// departments, is tagged one line at a time.
 //
-// Owner ask 2026-08-01, refined across three messages:
+// Owner ask 2026-08-01, refined across several messages:
 //   "the mapping should only show who is hitting expenses"
 //   "it still show cost of sold paint which is obvious"
 //   "the vouchers which are linked to job cards"
 //   "502 OPERATING EXPENSES / 502001 ADMIN / 502002 SERVICE / 502003 PARTS
 //    / 502004 SALES ... only show segregation of these expenses"
+//   "I want to tag department on each entry of the voucher... set an
+//    option whether it's expense or not"
 //
-// Net result: scope is OPERATING EXPENSES only (GLCode LIKE '502%') --
-// Admin/Service/Parts/Sales. This unconditionally excludes:
-//   - Asset/Liability-only postings (opening stock, advances, loans).
-//   - COST OF SALES (501xxx: COGS, incl. "Cost of Sold (Paint)" from Job
-//     Card paint consumption) -- COGS tracks against revenue, it isn't a
-//     discretionary operating expense to attribute to a department.
-// Within that 502xxx scope, by default (no ?all=1) also hides:
-//   1. Vouchers with a non-null SourceDocType (JOBCARD, JC_PAINT_CONS, GRN,
-//      GRTN, STORE_SALE, SSR, CHEQUE, ...) -- system-generated at finalize,
-//      not typed by an accountant, already traceable to a source document.
+// Scope is OPERATING EXPENSES only (GLCode LIKE '502%') -- excludes both
+// Asset/Liability-only lines AND Cost of Sales (501xxx, e.g. Paint/Parts
+// COGS). A line explicitly marked IsExpense=0 (via the per-line or
+// whole-voucher "not an expense" action) never shows up again regardless
+// of ?all=1 -- that's a confirmed answer, not a heuristic to override.
+// Within the 502xxx/undecided scope, by default (no ?all=1) also hides:
+//   1. Lines on a voucher with a non-null SourceDocType (JOBCARD,
+//      JC_PAINT_CONS, GRN, GRTN, STORE_SALE, SSR, CHEQUE, ...) --
+//      system-generated at finalize, not typed by an accountant.
 //      Voucher Entry (saveVoucher) never sets this column, so
 //      SourceDocType IS NULL is exactly "a human typed this voucher".
-//   2. Vouchers touching Parts (502003xxx) or Sales (502004xxx) specifically
-//      -- self-evidently Parts/Sales department expenses by account name
-//      alone, same COA-prefix classification the P&L by Department report
-//      uses (see PNL_DEPARTMENTS in reportsController.js).
-// Pass ?all=1 to include everything untagged within the 502xxx scope.
+//   2. Lines on Parts (502003xxx) or Sales (502004xxx) accounts
+//      specifically -- self-evidently Parts/Sales department expenses by
+//      account name alone, same COA-prefix classification the P&L by
+//      Department report uses (see PNL_DEPARTMENTS in reportsController.js).
+// Pass ?all=1 to include everything still undecided within the 502xxx scope.
 exports.getVouchersNeedingDepartment = async (req, res) => {
     try {
         const includeAll = req.query.all === '1';
@@ -591,63 +647,33 @@ exports.getVouchersNeedingDepartment = async (req, res) => {
         const pool = await getPool();
         const r = pool.request().input('includeAll', sql.Bit, includeAll ? 1 : 0);
 
-        const countRes = await r.query(`
-            SELECT COUNT(*) AS Total
-            FROM data_FinanceVoucherInfo v
+        const baseWhere = `
+            FROM data_FinanceVoucherDetail d
+            JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
             JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+            JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
             WHERE vt.Title IN ('CPV','BPV','JV')
               AND v.Status = 'Posted'
-              AND v.DepartmentID IS NULL
+              AND d.Debit > 0
+              AND d.DepartmentID IS NULL
+              AND (d.IsExpense IS NULL OR d.IsExpense = 1)
               -- Scope: Operating Expenses only (502xxx). Excludes both
-              -- Asset/Liability-only postings AND Cost of Sales (501xxx).
-              AND EXISTS (
-                    SELECT 1 FROM data_FinanceVoucherDetail de
-                    JOIN GLChartOFAccount ce ON ce.GLCAID = de.GLCAID
-                    WHERE de.VoucherID = v.VoucherID AND de.Debit > 0
-                      AND ce.GLCode LIKE '502%'
-              )
+              -- Asset/Liability-only lines AND Cost of Sales (501xxx).
+              AND c.GLCode LIKE '502%'
               AND (@includeAll = 1 OR (
                     v.SourceDocType IS NULL
-                    AND NOT EXISTS (
-                        SELECT 1 FROM data_FinanceVoucherDetail d
-                        JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
-                        WHERE d.VoucherID = v.VoucherID
-                          AND (c.GLCode LIKE '502003%' OR c.GLCode LIKE '502004%')
-                    )
-              ))`);
+                    AND c.GLCode NOT LIKE '502003%' AND c.GLCode NOT LIKE '502004%'
+              ))`;
+
+        const countRes = await r.query(`SELECT COUNT(*) AS Total ${baseWhere}`);
         const total = countRes.recordset[0].Total;
 
         const rows = await r.query(`
-            SELECT v.VoucherID, v.VoucherNo, vt.Title AS VoucherTypeCode,
-                   v.VoucherDate, v.TotalAmount, v.Remarks,
-                   STUFF((
-                       SELECT DISTINCT ', ' + c2.GLTitle
-                       FROM data_FinanceVoucherDetail d2
-                       JOIN GLChartOFAccount c2 ON c2.GLCAID = d2.GLCAID
-                       WHERE d2.VoucherID = v.VoucherID AND d2.Debit > 0
-                       FOR XML PATH('')
-                   ), 1, 2, '') AS AccountsTouched
-            FROM data_FinanceVoucherInfo v
-            JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
-            WHERE vt.Title IN ('CPV','BPV','JV')
-              AND v.Status = 'Posted'
-              AND v.DepartmentID IS NULL
-              AND EXISTS (
-                    SELECT 1 FROM data_FinanceVoucherDetail de2
-                    JOIN GLChartOFAccount ce2 ON ce2.GLCAID = de2.GLCAID
-                    WHERE de2.VoucherID = v.VoucherID AND de2.Debit > 0
-                      AND ce2.GLCode LIKE '502%'
-              )
-              AND (@includeAll = 1 OR (
-                    v.SourceDocType IS NULL
-                    AND NOT EXISTS (
-                        SELECT 1 FROM data_FinanceVoucherDetail d3
-                        JOIN GLChartOFAccount c3 ON c3.GLCAID = d3.GLCAID
-                        WHERE d3.VoucherID = v.VoucherID
-                          AND (c3.GLCode LIKE '502003%' OR c3.GLCode LIKE '502004%')
-                    )
-              ))
-            ORDER BY v.VoucherDate DESC, v.VoucherID DESC
+            SELECT d.VoucherDetailID, d.VoucherID, d.Debit, d.Narration,
+                   v.VoucherNo, vt.Title AS VoucherTypeCode, v.VoucherDate, v.Remarks,
+                   c.GLCode, c.GLTitle
+            ${baseWhere}
+            ORDER BY v.VoucherDate DESC, v.VoucherID DESC, d.VoucherDetailID
             OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`);
 
         res.json({ total, limit, offset, rows: rows.recordset });
@@ -660,7 +686,7 @@ exports.getVouchersNeedingDepartment = async (req, res) => {
 exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable, DepartmentID } = req.body;
+        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
         const badIdx = Items.findIndex(it => !it.GLCAID);
@@ -734,22 +760,30 @@ exports.updateVoucher = async (req, res) => {
                 .input('VTID',        sql.Int,          parseInt(VoucherTypeID))
                 .input('Remarks',     sql.NVarChar(sql.MAX), Remarks)
                 .input('Total',       sql.Decimal(18,2),     totalAmount)
-                .input('DepartmentID', sql.Int, Number(DepartmentID) || null)
                 .query(`UPDATE data_FinanceVoucherInfo
                         SET VoucherDate=@VoucherDate, VoucherTypeID=@VTID,
-                            Remarks=@Remarks, TotalAmount=@Total, DepartmentID=@DepartmentID
+                            Remarks=@Remarks, TotalAmount=@Total
                         WHERE VoucherID=@id`);
 
+            // Department + IsExpense are per-line (migration 110). This
+            // replaces every line, so the caller must echo back whatever
+            // tags the existing lines carried (VoucherEntry.jsx's edit-draft
+            // hydration does this) or they're lost -- same as any other
+            // line field on a full-replace edit.
             for (const item of Items) {
+                const lineDeptId = Number(item.DepartmentID) || null;
+                const lineIsExpense = item.IsExpense === false ? false : (item.IsExpense === true ? true : (lineDeptId ? true : null));
                 await new sql.Request(transaction)
                     .input('VID',  sql.Int,              id)
                     .input('GL',   sql.Int,              item.GLCAID)
                     .input('Nar',  sql.NVarChar(sql.MAX), item.Narration)
                     .input('Dr',   sql.Decimal(18,2),    item.Debit  || 0)
                     .input('Cr',   sql.Decimal(18,2),    item.Credit || 0)
+                    .input('Dep',  sql.Int,              lineIsExpense === false ? null : lineDeptId)
+                    .input('Exp',  sql.Bit,               lineIsExpense === null ? null : (lineIsExpense ? 1 : 0))
                     .query(`INSERT INTO data_FinanceVoucherDetail
-                                (VoucherID, GLCAID, Narration, Debit, Credit)
-                            VALUES (@VID, @GL, @Nar, @Dr, @Cr)`);
+                                (VoucherID, GLCAID, Narration, Debit, Credit, DepartmentID, IsExpense)
+                            VALUES (@VID, @GL, @Nar, @Dr, @Cr, @Dep, @Exp)`);
             }
             await transaction.commit();
 
@@ -824,7 +858,7 @@ exports.deleteVoucher = async (req, res) => {
 
 exports.saveVoucher = async (req, res) => {
     try {
-        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable, DepartmentID } = req.body;
+        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
         const dateErr = checkVoucherDateIsToday(VoucherDate);
         if (dateErr) return res.status(400).json({ error: dateErr });
         // Defensive guard: every line must have a GLCAID. A blank GLCAID slips through
@@ -876,26 +910,31 @@ exports.saveVoucher = async (req, res) => {
                 .input('TotalAmount', sql.Decimal(18,2), totalAmount)
                 .input('CreatedBy', sql.Int, req.user?.userId || null)
                 .input('CreatedByName', sql.NVarChar(100), req.user?.userName || null)
-                .input('DepartmentID', sql.Int, Number(DepartmentID) || null)
                 .query(`INSERT INTO data_FinanceVoucherInfo
                             (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
-                             Status, Posted, CreatedBy, CreatedByName, DepartmentID)
+                             Status, Posted, CreatedBy, CreatedByName)
                         OUTPUT INSERTED.VoucherID
                         VALUES (@VoucherDate, @VoucherNo, @VoucherTypeID, @Remarks, @TotalAmount,
-                                'Draft', 0, @CreatedBy, @CreatedByName, @DepartmentID)`);
+                                'Draft', 0, @CreatedBy, @CreatedByName)`);
 
             const voucherID = infoResult.recordset[0].VoucherID;
 
-            // 4. Insert each detail line with its own request to avoid parameter reuse
+            // 4. Insert each detail line with its own request to avoid parameter
+            // reuse. Department + IsExpense are per-line (migration 110).
             for (const item of Items) {
+                const lineDeptId = Number(item.DepartmentID) || null;
+                const lineIsExpense = item.IsExpense === false ? false : (item.IsExpense === true ? true : (lineDeptId ? true : null));
                 await new sql.Request(transaction)
                     .input('VoucherID', sql.Int, voucherID)
                     .input('GLCAID', sql.Int, item.GLCAID)
                     .input('Narration', sql.NVarChar(sql.MAX), item.Narration)
                     .input('Debit', sql.Decimal(18,2), item.Debit || 0)
                     .input('Credit', sql.Decimal(18,2), item.Credit || 0)
-                    .query(`INSERT INTO data_FinanceVoucherDetail (VoucherID, GLCAID, Narration, Debit, Credit)
-                            VALUES (@VoucherID, @GLCAID, @Narration, @Debit, @Credit)`);
+                    .input('DepartmentID', sql.Int, lineIsExpense === false ? null : lineDeptId)
+                    .input('IsExpense', sql.Bit, lineIsExpense === null ? null : (lineIsExpense ? 1 : 0))
+                    .query(`INSERT INTO data_FinanceVoucherDetail
+                                (VoucherID, GLCAID, Narration, Debit, Credit, DepartmentID, IsExpense)
+                            VALUES (@VoucherID, @GLCAID, @Narration, @Debit, @Credit, @DepartmentID, @IsExpense)`);
             }
 
             await transaction.commit();

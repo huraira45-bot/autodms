@@ -2586,37 +2586,44 @@ exports.getExpenseByDepartment = async (req, res) => {
         const { from, to } = req.query;
         const pool = await getPool();
         const request = pool.request();
+        // Line-level (migration 110) -- department is tagged per voucher
+        // LINE, not per whole voucher, so this sums individual Debit lines.
         // Scope: Operating Expenses only (502xxx: Admin/Service/Parts/
-        // Sales) -- same restriction as the Department Tagging workspace
+        // Sales), same restriction as the Department Tagging workspace
         // (accountController.getVouchersNeedingDepartment). Excludes Cost
-        // of Sales (501xxx) and any Asset/Liability-only posting; owner ask
-        // 2026-08-01: "only show segregation of these expenses" (502xxx).
+        // of Sales (501xxx) and any Asset/Liability-only posting. Lines
+        // explicitly marked IsExpense=0 ("not an expense") are dropped
+        // entirely -- they're a confirmed answer, not unassigned.
+        // Owner ask 2026-08-01: "only show segregation of these expenses"
+        // (502xxx); "tag department on each entry of the voucher."
         const where = [
             `vt.Title IN ('CPV','BPV','JV')`, `v.Status = 'Posted'`,
-            `EXISTS (SELECT 1 FROM data_FinanceVoucherDetail de
-                     JOIN GLChartOFAccount ce ON ce.GLCAID = de.GLCAID
-                     WHERE de.VoucherID = v.VoucherID AND de.Debit > 0 AND ce.GLCode LIKE '502%')`,
+            `d.Debit > 0`, `c.GLCode LIKE '502%'`,
+            `(d.IsExpense IS NULL OR d.IsExpense = 1)`,
         ];
         if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(v.VoucherDate AS DATE) >= @from'); }
         if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(v.VoucherDate AS DATE) <= @to'); }
 
         const rows = (await request.query(`
-            SELECT v.VoucherID, v.VoucherNo, vt.Title AS VoucherTypeCode, v.VoucherDate,
-                   v.TotalAmount, v.Remarks, v.DepartmentID, dept.DepartmentName
-            FROM data_FinanceVoucherInfo v
+            SELECT d.VoucherDetailID, d.VoucherID, v.VoucherNo, vt.Title AS VoucherTypeCode, v.VoucherDate,
+                   d.Debit AS Amount, d.Narration, v.Remarks, c.GLCode, c.GLTitle,
+                   d.DepartmentID, dept.DepartmentName
+            FROM data_FinanceVoucherDetail d
+            JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
             JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
-            LEFT JOIN gen_DepartmentInfo dept ON dept.DepartmentID = v.DepartmentID
+            JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
+            LEFT JOIN gen_DepartmentInfo dept ON dept.DepartmentID = d.DepartmentID
             WHERE ${where.join(' AND ')}
-            ORDER BY v.VoucherDate DESC, v.VoucherID DESC
+            ORDER BY v.VoucherDate DESC, v.VoucherID DESC, d.VoucherDetailID
         `)).recordset;
 
         const byDept = new Map();
         let unassignedTotal = 0, unassignedCount = 0;
         for (const r of rows) {
-            const amt = Number(r.TotalAmount) || 0;
+            const amt = Number(r.Amount) || 0;
             if (!r.DepartmentID) { unassignedTotal += amt; unassignedCount++; continue; }
-            const b = byDept.get(r.DepartmentID) || { DepartmentID: r.DepartmentID, DepartmentName: r.DepartmentName, total: 0, voucherCount: 0 };
-            b.total += amt; b.voucherCount++;
+            const b = byDept.get(r.DepartmentID) || { DepartmentID: r.DepartmentID, DepartmentName: r.DepartmentName, total: 0, lineCount: 0 };
+            b.total += amt; b.lineCount++;
             byDept.set(r.DepartmentID, b);
         }
         const departments = Array.from(byDept.values())
@@ -2628,13 +2635,15 @@ exports.getExpenseByDepartment = async (req, res) => {
         res.json({
             from: from || null, to: to || null,
             departments,
-            unassigned: { total: +unassignedTotal.toFixed(2), voucherCount: unassignedCount },
+            unassigned: { total: +unassignedTotal.toFixed(2), lineCount: unassignedCount },
             totalTagged,
             grandTotal: +(totalTagged + unassignedTotal).toFixed(2),
-            vouchers: rows.map(r => ({
-                VoucherID: r.VoucherID, VoucherNo: r.VoucherNo, VoucherTypeCode: r.VoucherTypeCode,
-                VoucherDate: r.VoucherDate, TotalAmount: +Number(r.TotalAmount || 0).toFixed(2),
-                Remarks: r.Remarks, DepartmentID: r.DepartmentID, DepartmentName: r.DepartmentName,
+            lines: rows.map(r => ({
+                VoucherDetailID: r.VoucherDetailID, VoucherID: r.VoucherID, VoucherNo: r.VoucherNo,
+                VoucherTypeCode: r.VoucherTypeCode, VoucherDate: r.VoucherDate,
+                Amount: +Number(r.Amount || 0).toFixed(2), Narration: r.Narration, Remarks: r.Remarks,
+                GLCode: r.GLCode, GLTitle: r.GLTitle,
+                DepartmentID: r.DepartmentID, DepartmentName: r.DepartmentName,
             })),
         });
     } catch (err) {
