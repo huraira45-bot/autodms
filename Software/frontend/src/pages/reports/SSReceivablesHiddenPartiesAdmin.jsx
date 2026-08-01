@@ -100,26 +100,45 @@ export default function SSReceivablesHiddenPartiesAdmin() {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                             <thead>
                                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                                    <th style={{ padding: 10, textAlign: 'left', width: 80, position: 'sticky', top: 0, background: '#f8fafc' }}>Hidden</th>
+                                    <th style={{ padding: 10, textAlign: 'left', width: 90, position: 'sticky', top: 0, background: '#f8fafc' }}>Status</th>
                                     <th style={{ padding: 10, textAlign: 'left', position: 'sticky', top: 0, background: '#f8fafc' }}>Party Name</th>
                                     <th style={{ padding: 10, textAlign: 'left', position: 'sticky', top: 0, background: '#f8fafc' }}>Type</th>
+                                    <th style={{ padding: 10, textAlign: 'left', width: 100, position: 'sticky', top: 0, background: '#f8fafc' }}></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filtered.map(p => (
                                     <tr key={p.PartyID} style={{ borderBottom: '1px solid #f1f5f9', background: p.Hidden ? '#fef2f2' : undefined }}>
                                         <td style={{ padding: 10 }}>
-                                            <input type="checkbox" checked={!!p.Hidden} onChange={() => toggle(p.PartyID)}
-                                                style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                                            <span style={{
+                                                fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                                                background: p.Hidden ? '#fee2e2' : '#dcfce7',
+                                                color: p.Hidden ? '#991b1b' : '#166534',
+                                            }}>
+                                                {p.Hidden ? 'Hidden' : 'Visible'}
+                                            </span>
                                         </td>
                                         <td style={{ padding: 10, fontWeight: p.Hidden ? 400 : 600, color: p.Hidden ? '#94a3b8' : '#0f172a' }}>
                                             {p.PartyName}
                                         </td>
                                         <td style={{ padding: 10, color: '#64748b' }}>{p.PartyType || '—'}</td>
+                                        <td style={{ padding: 10 }}>
+                                            {p.Hidden ? (
+                                                <button type="button" onClick={() => toggle(p.PartyID)}
+                                                    style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                                                    Show
+                                                </button>
+                                            ) : (
+                                                <button type="button" onClick={() => toggle(p.PartyID)}
+                                                    style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                                                    Hide
+                                                </button>
+                                            )}
+                                        </td>
                                     </tr>
                                 ))}
                                 {filtered.length === 0 && (
-                                    <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>No matches.</td></tr>
+                                    <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>No matches.</td></tr>
                                 )}
                             </tbody>
                         </table>
