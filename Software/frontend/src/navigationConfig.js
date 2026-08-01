@@ -23,7 +23,7 @@ import {
     SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
     ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
     Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
-    Gauge, ScrollText, Monitor,
+    Gauge, ScrollText, Monitor, Building2,
 } from 'lucide-react';
 
 // Top-level module groups (order = sidebar order). Each has an id / label /
@@ -94,6 +94,7 @@ export const NAV_ITEMS = [
     { id: 'f-brv',       moduleGroup: 'finance', label: 'Bank Receipt (BRV)',     path: '/vouchers/brv',            icon: Landmark,    moduleKey: 'finance_vouchers',  description: 'Bank receipt voucher.', keywords: 'voucher' },
     { id: 'f-jv',        moduleGroup: 'finance', label: 'Journal Voucher (JV)',   path: '/vouchers/jv',             icon: ScrollText,  moduleKey: 'finance_vouchers',  description: 'General journal voucher.', keywords: 'voucher' },
     { id: 'f-vsearch',   moduleGroup: 'finance', label: 'Voucher Search',         path: '/vouchers',                icon: ListChecks,  moduleKey: 'finance_vouchers',  description: 'Find any posted voucher.', keywords: 'search', priority: 8 },
+    { id: 'f-deptTag',   moduleGroup: 'finance', label: 'Tag Departments',        path: '/vouchers/department-tagging', icon: Building2, moduleKey: 'finance_vouchers',  description: 'Assign HR department to posted CPV/BPV/JV missing one.', keywords: 'department segregate' },
     { id: 'f-rcv',       moduleGroup: 'finance', label: 'Receive Payment',        path: '/payments/receive',        icon: Receipt,     moduleKey: 'payments',          description: 'Customer receipts with allocation.', keywords: 'payment', priority: 10 },
     { id: 'f-mkp',       moduleGroup: 'finance', label: 'Make Payment',           path: '/payments/make',           icon: Wallet,      moduleKey: 'payments',          description: 'Supplier / vendor payments.', keywords: 'payment', priority: 9 },
     { id: 'f-pos',       moduleGroup: 'finance', label: 'POS Settlement',         path: '/payments/pos-settlement', icon: CreditCard,  moduleKey: 'payments',          description: 'POS clearance to bank.', keywords: 'card', isQueue: true },
@@ -156,6 +157,7 @@ export const NAV_ITEMS = [
     { id: 'r-gl',        moduleGroup: 'reports', section: 'Financial Statements',  label: 'GL Detail',           path: '/reports/gl-detail',           icon: ListChecks,   permission: 'report:gl_detail' },
     { id: 'r-pnl',       moduleGroup: 'reports', section: 'Financial Statements',  label: 'Profit & Loss',       path: '/reports/pnl',                 icon: ListChecks,   permission: 'report:pnl' },
     { id: 'r-pnl-dept',  moduleGroup: 'reports', section: 'Financial Statements',  label: 'P&L by Department',   path: '/reports/pnl-department',      icon: ListChecks,   permission: 'report:pnl_department', description: 'Sales / Service / Parts revenue vs cost, Admin (non-revenue) last.' },
+    { id: 'r-exp-dept',  moduleGroup: 'reports', section: 'Financial Statements',  label: 'Expense by Department', path: '/reports/expense-by-department', icon: Building2,  permission: 'report:expense_by_department', description: 'Posted CPV/BPV/JV grouped by tagged HR department.' },
     { id: 'r-findash',   moduleGroup: 'reports', section: 'Financial Statements',  label: 'Financial Dashboard', path: '/reports/financial-dashboard', icon: PieChart,     anyPermissions: ['report:pnl_department', 'report:cash_credit_expense'], description: 'All charts in one place: P&L by Department + Cash/Credit vs Expense.' },
     { id: 'r-ratios',    moduleGroup: 'reports', section: 'Financial Statements',  label: 'Financial Ratios',    path: '/reports/financial-ratios',    icon: Gauge,        permission: 'report:financial_ratios', description: 'Absorption rate, gross margins, liquidity + solvency ratios, DSO/DPO, inventory turnover.' },
     { id: 'r-bs',        moduleGroup: 'reports', section: 'Financial Statements',  label: 'Balance Sheet',       path: '/reports/balance-sheet',       icon: ListChecks,   permission: 'report:balance_sheet' },

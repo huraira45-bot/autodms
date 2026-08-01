@@ -161,6 +161,7 @@ const SECTIONS = [
             { key: 'report:cash_credit_expense',   label: 'Cash/Credit vs Expense (Store Sale & Job Card)', kind: 'report' },
             { key: 'report:bu_pnl',                label: 'Business Unit P&L (Rev vs Cost)', kind: 'report' },
             { key: 'report:store_sale_pnl',        label: 'Store Sale P&L (per Party)',      kind: 'report' },
+            { key: 'report:expense_by_department', label: 'Expense by Department (CPV/BPV/JV)', kind: 'report' },
         ],
     },
     {

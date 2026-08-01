@@ -2569,3 +2569,66 @@ exports.getCashCreditExpense = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+// ============================================================================
+// GET /api/reports/expense-by-department?from=&to=
+//
+// Posted CPV/BPV/JV vouchers grouped by the HR department they were tagged
+// with (data_FinanceVoucherInfo.DepartmentID, gen_DepartmentInfo master —
+// see migration 109). Reporting-only rollup of the manual tagging done in
+// Voucher Entry / the Department Tagging workspace; nothing here posts to
+// or reads from the GL beyond the voucher's own TotalAmount. Untagged
+// vouchers land in a separate "unassigned" bucket rather than being
+// silently dropped. Owner ask 2026-08-01.
+// ============================================================================
+exports.getExpenseByDepartment = async (req, res) => {
+    try {
+        const { from, to } = req.query;
+        const pool = await getPool();
+        const request = pool.request();
+        const where = [`vt.Title IN ('CPV','BPV','JV')`, `v.Status = 'Posted'`];
+        if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(v.VoucherDate AS DATE) >= @from'); }
+        if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(v.VoucherDate AS DATE) <= @to'); }
+
+        const rows = (await request.query(`
+            SELECT v.VoucherID, v.VoucherNo, vt.Title AS VoucherTypeCode, v.VoucherDate,
+                   v.TotalAmount, v.Remarks, v.DepartmentID, dept.DepartmentName
+            FROM data_FinanceVoucherInfo v
+            JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
+            LEFT JOIN gen_DepartmentInfo dept ON dept.DepartmentID = v.DepartmentID
+            WHERE ${where.join(' AND ')}
+            ORDER BY v.VoucherDate DESC, v.VoucherID DESC
+        `)).recordset;
+
+        const byDept = new Map();
+        let unassignedTotal = 0, unassignedCount = 0;
+        for (const r of rows) {
+            const amt = Number(r.TotalAmount) || 0;
+            if (!r.DepartmentID) { unassignedTotal += amt; unassignedCount++; continue; }
+            const b = byDept.get(r.DepartmentID) || { DepartmentID: r.DepartmentID, DepartmentName: r.DepartmentName, total: 0, voucherCount: 0 };
+            b.total += amt; b.voucherCount++;
+            byDept.set(r.DepartmentID, b);
+        }
+        const departments = Array.from(byDept.values())
+            .map(d => ({ ...d, total: +d.total.toFixed(2) }))
+            .sort((a, b) => b.total - a.total);
+
+        const totalTagged = +departments.reduce((s, d) => s + d.total, 0).toFixed(2);
+
+        res.json({
+            from: from || null, to: to || null,
+            departments,
+            unassigned: { total: +unassignedTotal.toFixed(2), voucherCount: unassignedCount },
+            totalTagged,
+            grandTotal: +(totalTagged + unassignedTotal).toFixed(2),
+            vouchers: rows.map(r => ({
+                VoucherID: r.VoucherID, VoucherNo: r.VoucherNo, VoucherTypeCode: r.VoucherTypeCode,
+                VoucherDate: r.VoucherDate, TotalAmount: +Number(r.TotalAmount || 0).toFixed(2),
+                Remarks: r.Remarks, DepartmentID: r.DepartmentID, DepartmentName: r.DepartmentName,
+            })),
+        });
+    } catch (err) {
+        console.error('getExpenseByDepartment:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

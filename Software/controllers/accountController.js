@@ -336,9 +336,11 @@ exports.getVoucher = async (req, res) => {
         const id = parseInt(req.params.id);
         const pool = await getPool();
         const hdr = await pool.request().input('id', sql.Int, id).query(`
-            SELECT v.*, vt.Title AS VoucherTypeCode, vt.Description AS VoucherTypeName
+            SELECT v.*, vt.Title AS VoucherTypeCode, vt.Description AS VoucherTypeName,
+                   dept.DepartmentName
             FROM data_FinanceVoucherInfo v
             JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+            LEFT JOIN gen_DepartmentInfo dept ON dept.DepartmentID = v.DepartmentID
             WHERE v.VoucherID = @id
         `);
         if (!hdr.recordset.length) return res.status(404).json({ error: 'Voucher not found' });
@@ -521,10 +523,106 @@ exports.updateVoucherDate = async (req, res) => {
     }
 };
 
+// PATCH /accounts/vouchers/:id/department — tag which HR department this
+// CPV/BPV/JV's expense belongs to. Reporting-only metadata: no GL impact,
+// no Status restriction (works on Draft, Posted, even Reversed vouchers),
+// so this doubles as the fix-up tool for historical vouchers posted before
+// department tagging existed. Owner ask 2026-08-01.
+exports.updateVoucherDepartment = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const deptId = Number(req.body.DepartmentID) || null;
+        const pool = await getPool();
+
+        const head = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT VoucherID FROM data_FinanceVoucherInfo WHERE VoucherID = @id`);
+        if (!head.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
+
+        if (deptId !== null) {
+            const dept = await pool.request().input('d', sql.Int, deptId)
+                .query(`SELECT DepartmentID FROM gen_DepartmentInfo WHERE DepartmentID = @d`);
+            if (!dept.recordset.length) return res.status(400).json({ error: 'Unknown department.' });
+        }
+
+        await pool.request()
+            .input('id', sql.Int, id)
+            .input('dep', sql.Int, deptId)
+            .query(`UPDATE data_FinanceVoucherInfo SET DepartmentID = @dep WHERE VoucherID = @id`);
+        res.json({ message: 'Department updated', VoucherID: id, DepartmentID: deptId });
+    } catch (err) {
+        console.error('updateVoucherDepartment:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// GET /accounts/vouchers/needs-department — posted CPV/BPV/JV vouchers with
+// no department tagged yet, for the bulk segregation workspace. By default
+// hides vouchers that already touch a Parts (502003xxx) or Sales (502004xxx)
+// GL account -- those are self-evidently Parts/Sales department expenses
+// already, going by the same COA-prefix classification the P&L by
+// Department report uses (see PNL_DEPARTMENTS in reportsController.js).
+// Pass ?all=1 to see everything, untagged included.
+// Owner ask 2026-08-01: "create me form of those who are not hitting sale
+// or parts so I can segregate them".
+exports.getVouchersNeedingDepartment = async (req, res) => {
+    try {
+        const includeAll = req.query.all === '1';
+        const limit  = Math.min(parseInt(req.query.limit)  || 100, 300);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const pool = await getPool();
+        const r = pool.request().input('includeAll', sql.Bit, includeAll ? 1 : 0);
+
+        const countRes = await r.query(`
+            SELECT COUNT(*) AS Total
+            FROM data_FinanceVoucherInfo v
+            JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+            WHERE vt.Title IN ('CPV','BPV','JV')
+              AND v.Status = 'Posted'
+              AND v.DepartmentID IS NULL
+              AND (@includeAll = 1 OR NOT EXISTS (
+                    SELECT 1 FROM data_FinanceVoucherDetail d
+                    JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
+                    WHERE d.VoucherID = v.VoucherID
+                      AND (c.GLCode LIKE '502003%' OR c.GLCode LIKE '502004%')
+              ))`);
+        const total = countRes.recordset[0].Total;
+
+        const rows = await r.query(`
+            SELECT v.VoucherID, v.VoucherNo, vt.Title AS VoucherTypeCode,
+                   v.VoucherDate, v.TotalAmount, v.Remarks,
+                   STUFF((
+                       SELECT DISTINCT ', ' + c2.GLTitle
+                       FROM data_FinanceVoucherDetail d2
+                       JOIN GLChartOFAccount c2 ON c2.GLCAID = d2.GLCAID
+                       WHERE d2.VoucherID = v.VoucherID AND d2.Debit > 0
+                       FOR XML PATH('')
+                   ), 1, 2, '') AS AccountsTouched
+            FROM data_FinanceVoucherInfo v
+            JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+            WHERE vt.Title IN ('CPV','BPV','JV')
+              AND v.Status = 'Posted'
+              AND v.DepartmentID IS NULL
+              AND (@includeAll = 1 OR NOT EXISTS (
+                    SELECT 1 FROM data_FinanceVoucherDetail d3
+                    JOIN GLChartOFAccount c3 ON c3.GLCAID = d3.GLCAID
+                    WHERE d3.VoucherID = v.VoucherID
+                      AND (c3.GLCode LIKE '502003%' OR c3.GLCode LIKE '502004%')
+              ))
+            ORDER BY v.VoucherDate DESC, v.VoucherID DESC
+            OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`);
+
+        res.json({ total, limit, offset, rows: rows.recordset });
+    } catch (err) {
+        console.error('getVouchersNeedingDepartment:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
+        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable, DepartmentID } = req.body;
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
         const badIdx = Items.findIndex(it => !it.GLCAID);
@@ -598,9 +696,10 @@ exports.updateVoucher = async (req, res) => {
                 .input('VTID',        sql.Int,          parseInt(VoucherTypeID))
                 .input('Remarks',     sql.NVarChar(sql.MAX), Remarks)
                 .input('Total',       sql.Decimal(18,2),     totalAmount)
+                .input('DepartmentID', sql.Int, Number(DepartmentID) || null)
                 .query(`UPDATE data_FinanceVoucherInfo
                         SET VoucherDate=@VoucherDate, VoucherTypeID=@VTID,
-                            Remarks=@Remarks, TotalAmount=@Total
+                            Remarks=@Remarks, TotalAmount=@Total, DepartmentID=@DepartmentID
                         WHERE VoucherID=@id`);
 
             for (const item of Items) {
@@ -687,7 +786,7 @@ exports.deleteVoucher = async (req, res) => {
 
 exports.saveVoucher = async (req, res) => {
     try {
-        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
+        const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable, DepartmentID } = req.body;
         const dateErr = checkVoucherDateIsToday(VoucherDate);
         if (dateErr) return res.status(400).json({ error: dateErr });
         // Defensive guard: every line must have a GLCAID. A blank GLCAID slips through
@@ -739,12 +838,13 @@ exports.saveVoucher = async (req, res) => {
                 .input('TotalAmount', sql.Decimal(18,2), totalAmount)
                 .input('CreatedBy', sql.Int, req.user?.userId || null)
                 .input('CreatedByName', sql.NVarChar(100), req.user?.userName || null)
+                .input('DepartmentID', sql.Int, Number(DepartmentID) || null)
                 .query(`INSERT INTO data_FinanceVoucherInfo
                             (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
-                             Status, Posted, CreatedBy, CreatedByName)
+                             Status, Posted, CreatedBy, CreatedByName, DepartmentID)
                         OUTPUT INSERTED.VoucherID
                         VALUES (@VoucherDate, @VoucherNo, @VoucherTypeID, @Remarks, @TotalAmount,
-                                'Draft', 0, @CreatedBy, @CreatedByName)`);
+                                'Draft', 0, @CreatedBy, @CreatedByName, @DepartmentID)`);
 
             const voucherID = infoResult.recordset[0].VoucherID;
 

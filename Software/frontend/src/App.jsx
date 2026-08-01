@@ -56,6 +56,7 @@ import JobKiosk           from './pages/JobKiosk';
 import Charity            from './pages/reports/Charity';
 import UnfinalizeLog      from './pages/reports/UnfinalizeLog';
 import RevenueSplit       from './pages/reports/RevenueSplit';
+import ExpenseByDepartment from './pages/reports/ExpenseByDepartment';
 import CashCreditExpense  from './pages/reports/CashCreditExpense';
 import FinancialDashboard from './pages/reports/FinancialDashboard';
 import FinancialRatios from './pages/reports/FinancialRatios';
@@ -104,6 +105,7 @@ import JobCardPSTPrint    from './pages/JobCardPSTPrint';
 import JobCardDepreciationPrint from './pages/JobCardDepreciationPrint';
 import VehicleHistory     from './pages/VehicleHistory';
 import VoucherEntry       from './pages/VoucherEntry';
+import VoucherDepartmentTagging from './pages/VoucherDepartmentTagging';
 import WorkshopCustomers  from './pages/WorkshopCustomers';
 import JobCardList        from './pages/JobCardList';
 import JobCardForm        from './pages/JobCardForm';
@@ -945,6 +947,9 @@ function AppShell() {
                     <Route path="/vouchers/browse" element={
                         <ProtectedRoute moduleKey="finance_vouchers"><VoucherBrowser /></ProtectedRoute>
                     } />
+                    <Route path="/vouchers/department-tagging" element={
+                        <ProtectedRoute moduleKey="finance_vouchers"><VoucherDepartmentTagging /></ProtectedRoute>
+                    } />
                     <Route path="/vouchers" element={<Navigate to="/vouchers/browse" replace />} />
                     <Route path="/accounting/setup" element={
                         <ProtectedRoute moduleKey="accounting_setup"><SystemAccounts /></ProtectedRoute>
@@ -989,6 +994,9 @@ function AppShell() {
                     } />
                     <Route path="/reports/revenue-split" element={
                         <ProtectedRoute moduleKey="report:revenue_split"><RevenueSplit /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/expense-by-department" element={
+                        <ProtectedRoute moduleKey="report:expense_by_department"><ExpenseByDepartment /></ProtectedRoute>
                     } />
                     <Route path="/reports/cash-credit-expense" element={
                         <ProtectedRoute moduleKey="report:cash_credit_expense"><CashCreditExpense /></ProtectedRoute>

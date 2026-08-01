@@ -58,6 +58,7 @@ router.get('/store-sale-receivables-custom/hidden-parties',  requireAccess('repo
 router.put('/store-sale-receivables-custom/hidden-parties',  requireAccess('report:store_sale_receivables_custom'), reports.putSSReceivablesHiddenParties);
 router.get('/revenue-split',          requireAccess('report:revenue_split'),          reports.getRevenueSplit);
 router.get('/cash-credit-expense',    requireAccess('report:cash_credit_expense'),    reports.getCashCreditExpense);
+router.get('/expense-by-department',  requireAccess('report:expense_by_department'),  reports.getExpenseByDepartment);
 router.get('/bu-pnl',                 requireAccess('report:bu_pnl'),                 buPnL.getBuPnL);
 router.get('/store-sale-pnl',         requireAccess('report:store_sale_pnl'),         ssPnL.getStoreSalePnL);
 // Unfinalize activity log — anyone in the workflow (AM or Admin) can view it,

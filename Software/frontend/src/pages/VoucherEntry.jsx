@@ -56,6 +56,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const [coa, setCoa] = useState([]);
     const [drafts, setDrafts] = useState([]);
     const [showDrafts, setShowDrafts] = useState(false);
+    // Department tagging (owner ask 2026-08-01): reporting-only, sourced
+    // from the HR module's department master. Only surfaced on CPV/BPV/JV
+    // — CRV/BRV are cash/bank coming IN, not an expense to attribute.
+    const [departments, setDepartments] = useState([]);
 
     // Voucher-type behavior flags. Cash vouchers lock row 0 to the Cash Book
     // account; bank vouchers lock row 0 to an active bank GL. The locked side
@@ -91,6 +95,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         // null = user hasn't picked yet. Required on CRV/BRV; irrelevant
         // elsewhere. Owner ask 2026-07-18 v2.
         IsCharitable: null,
+        // Reporting-only department tag — optional, CPV/BPV/JV only.
+        DepartmentID: '',
     });
     const [items, setItems] = useState([
         { GLCAID: '', Narration: '', Debit: 0, Credit: 0 },
@@ -141,6 +147,9 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     }, []);
 
     useEffect(() => { fetchInitial(); fetchDrafts(); }, [fetchInitial, fetchDrafts]);
+    useEffect(() => {
+        axios.get(`${API_BASE}/departments`).then(r => setDepartments(r.data || [])).catch(() => {});
+    }, []);
     useEffect(() => {
         if (initialId) loadVoucher(initialId);
     }, [initialId, loadVoucher]);
@@ -205,6 +214,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         || types.find(t => String(t.VoucherTypeID) === String(header.VoucherTypeID))?.VoucherTypeCode
         || '';
     const isCharityScoped = activeTypeCode === 'CRV' || activeTypeCode === 'BRV';
+    // Department tag is only meaningful on outgoing/expense vouchers.
+    const isDeptScoped = activeTypeCode === 'CPV' || activeTypeCode === 'BPV' || activeTypeCode === 'JV';
 
     const handleSave = async () => {
         if (!balanced) {
@@ -276,7 +287,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             ? { GLCAID: cashBookGLCAID, Narration: '', Debit: 0, Credit: 0 }
             : { GLCAID: '', Narration: '', Debit: 0, Credit: 0 };
         setItems([row0, { GLCAID: '', Narration: '', Debit: 0, Credit: 0 }]);
-        setHeader(h => ({ ...h, Remarks: '' }));
+        setHeader(h => ({ ...h, Remarks: '', DepartmentID: '' }));
         setMsg(null);
         params.delete('id'); setParams(params);
     };
@@ -318,6 +329,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             // Server always returns a bool; treat that as the current
             // Yes/No state so the radio hydrates correctly on edit.
             IsCharitable: active.IsCharitable === true ? true : false,
+            DepartmentID: active.DepartmentID || '',
         });
         setItems(active.lines.map(l => ({
             GLCAID: l.GLCAID,
@@ -350,6 +362,30 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             setDateEditOpen(false);
             await loadVoucher(active.VoucherID);
             setMsg({ kind: 'ok', text: 'Voucher date updated.' });
+        } catch (err) {
+            setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    // ---------- Set Department (any status — reporting-only metadata) ----------
+    const [deptEditOpen, setDeptEditOpen] = useState(false);
+    const [deptEditVal, setDeptEditVal] = useState('');
+
+    const openDeptEdit = () => {
+        if (!active) return;
+        setDeptEditVal(active.DepartmentID || '');
+        setDeptEditOpen(true);
+    };
+    const submitDeptChange = async () => {
+        if (!active) return;
+        setBusy(true);
+        try {
+            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/department`, { DepartmentID: deptEditVal || null });
+            setDeptEditOpen(false);
+            await loadVoucher(active.VoucherID);
+            setMsg({ kind: 'ok', text: 'Department updated.' });
         } catch (err) {
             setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
         } finally {
@@ -471,6 +507,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             && isWithinBackdateWindow(active.VoucherDate);
         const canChangeDate = canEdit && !isReversed && !active.ReversesVoucherID
             && (isJV || rpBackdateOk);
+        // Department tag — reporting-only, no GL impact, editable any time
+        // on CPV/BPV/JV regardless of status (also how the historical
+        // segregation form fixes up old vouchers one at a time).
+        const isDeptScopedView = ['CPV', 'BPV', 'JV'].includes(active.VoucherTypeCode);
         // Full-value edit: Draft (any type), Posted JVs, or Posted CPV/CRV/
         // BPV/BRV within the backdate window when the user has permission.
         const canEditValues = canEdit && !isReversed && !active.ReversesVoucherID &&
@@ -575,6 +615,27 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                             </div>
                             );
                         })()}
+                        {isDeptScopedView && canEdit && (
+                            <button type="button" className="erp-btn" onClick={openDeptEdit} disabled={busy}
+                                title="Reporting-only tag — no GL impact. Which department does this expense belong to?">
+                                <Edit3 size={14} /> {active.DepartmentName ? `Department: ${active.DepartmentName}` : 'Set Department'}
+                            </button>
+                        )}
+                        {deptEditOpen && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 8px', border: '1px solid var(--erp-border)', borderRadius: 4, background: 'var(--erp-surface-alt)' }}>
+                                <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>Department:</span>
+                                <select value={deptEditVal} onChange={e => setDeptEditVal(e.target.value)} style={{ padding: '2px 6px', fontSize: 12 }}>
+                                    <option value="">— Not set —</option>
+                                    {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
+                                </select>
+                                <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={submitDeptChange} disabled={busy}>
+                                    {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
+                                </button>
+                                <button type="button" className="erp-btn erp-btn-sm" onClick={() => setDeptEditOpen(false)} disabled={busy}>
+                                    Cancel
+                                </button>
+                            </div>
+                        )}
                         {isReversed && (
                             <div className="erp-alert danger" style={{ margin: 0 }}>
                                 <AlertTriangle size={14} />
@@ -862,6 +923,15 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         </select>
                     </div>
                     <div className="form-group"><label>Reference / Remarks</label><input type="text" value={header.Remarks} onChange={e => setHeader({...header, Remarks: e.target.value})} placeholder="Overall voucher description..." /></div>
+                    {isDeptScoped && (
+                        <div className="form-group">
+                            <label>Department <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>(reporting only, optional)</span></label>
+                            <select value={header.DepartmentID} onChange={e => setHeader({ ...header, DepartmentID: e.target.value })}>
+                                <option value="">— Not set —</option>
+                                {departments.map(d => <option key={d.DepartmentID} value={d.DepartmentID}>{d.DepartmentName}</option>)}
+                            </select>
+                        </div>
+                    )}
                 </div>
                 {/* Charity flag — owner ask 2026-07-18 v2. Yes/No is
                     mandatory on CRV/BRV only. Yes → record 1% of the voucher

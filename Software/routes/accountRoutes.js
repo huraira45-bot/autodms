@@ -31,9 +31,11 @@ router.get(   '/voucher-types',     requirePerm('finance_vouchers', 'view'),   a
 router.post(  '/vouchers',          requirePerm('finance_vouchers', 'insert'), accountController.saveVoucher);
 router.get(   '/vouchers/drafts',   requirePerm('finance_vouchers', 'view'),   accountController.getDraftVouchers);
 router.get(   '/vouchers/search',   requirePerm('finance_vouchers', 'view'),   accountController.searchVouchers);
+router.get(   '/vouchers/needs-department', requirePerm('finance_vouchers', 'view'), accountController.getVouchersNeedingDepartment);
 router.get(   '/vouchers/:id',      requirePerm('finance_vouchers', 'view'),   accountController.getVoucher);
 router.put(   '/vouchers/:id',      requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucher);
 router.patch( '/vouchers/:id/date', requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucherDate);
+router.patch( '/vouchers/:id/department', requirePerm('finance_vouchers', 'edit'), accountController.updateVoucherDepartment);
 router.delete('/vouchers/:id',      requirePerm('finance_vouchers', 'delete'), accountController.deleteVoucher);
 
 module.exports = router;
