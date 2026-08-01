@@ -751,6 +751,157 @@ exports.getPnLByDepartment = async (req, res) => {
 };
 
 /**
+ * GET /reports/financial-ratios?from=&to=
+ *
+ * Dealership + standard financial ratios, computed entirely from existing
+ * GL data — nothing new is entered or invented. Owner ask 2026-08-01.
+ *
+ * Sourcing:
+ *   - Absorption Rate / Service & Parts margin / Labor:Parts ratio — same
+ *     PNL_DEPARTMENTS classification as getPnLByDepartment. Admin (502001)
+ *     is used as the overhead denominator for Absorption Rate — it already
+ *     excludes vehicle-sales-specific costs (Sales dept, 502004), matching
+ *     the NADA "adjusted overhead" definition.
+ *   - Current/Quick Ratio, Debt-to-Equity, Trade Receivables/Payables,
+ *     Inventory — the live COA group structure: 102=Current Assets,
+ *     201=Current Liabilities, 301=Capital & Reserves; 102001=Stock &
+ *     Inventory, 102007/8/9=Trade Receivables, 201001=Trade Payables.
+ *   - DSO / Inventory Turnover — period revenue / COGS (501001xxx) already
+ *     computed for the department split above.
+ *   - DPO — a direct sum of GRN (data_PurchaseInfo/Detail) NetAmount in the
+ *     period; no report already exposes this as a single total.
+ *
+ * Benchmark bands cited in the frontend (NADA / dealership fixed-ops
+ * guides) — see FinancialRatios.jsx.
+ */
+exports.getFinancialRatios = async (req, res) => {
+    try {
+        const fromRaw = req.query.from ? new Date(req.query.from) : new Date(new Date().getFullYear(), 0, 1);
+        const toRaw   = req.query.to   ? new Date(req.query.to)   : new Date();
+        const from = new Date(fromRaw); from.setHours(0, 0, 0, 0);
+        const to   = endOfDay(toRaw);
+        const fromMinus = new Date(from); fromMinus.setSeconds(fromMinus.getSeconds() - 1);
+        const daysInPeriod = Math.max(1, Math.round((to - from) / 86400000));
+
+        const pool = await getPool();
+
+        // One call covers both the as-of-`to` Balance Sheet classes (1/2/3)
+        // and the cumulative-to-date Revenue/Expense (4/5) needed for
+        // retained earnings; a second covers the period-start snapshot so
+        // period P&L can be derived by delta — identical pattern to
+        // getPnLByDepartment above.
+        const atTo   = await getClassBalances(pool, to, ['1', '2', '3', '4', '5']);
+        const atFrom = await getClassBalances(pool, fromMinus, ['4', '5']);
+        const periodLeaves = (cls) => {
+            const t = atTo[cls]?.rows || [];
+            const f = atFrom[cls]?.rows || [];
+            const map = new Map(f.map(r => [r.GLCAID, Number(r.Balance)]));
+            const rows = t.map(r => ({ ...r, PeriodAmount: +(Number(r.Balance) - (map.get(r.GLCAID) || 0)).toFixed(2) }))
+                .filter(r => Math.abs(r.PeriodAmount) > 0.005);
+            for (const r of f) {
+                if (!t.find(x => x.GLCAID === r.GLCAID)) rows.push({ ...r, PeriodAmount: -Number(r.Balance) });
+            }
+            return rows;
+        };
+        const revenueLeaves = periodLeaves('4');
+        const expenseLeaves = periodLeaves('5');
+
+        // Bucket into Sales/Service/Parts/Admin exactly like P&L by Department.
+        const byDept = new Map(PNL_DEPARTMENTS.map(d => [d.key, { revenue: 0, expense: 0, cogs: 0 }]));
+        for (const r of revenueLeaves) {
+            const dept = classifyDept(r.GLCode, 'revenuePrefixes');
+            if (dept) byDept.get(dept.key).revenue += r.PeriodAmount;
+        }
+        for (const r of expenseLeaves) {
+            const dept = classifyDept(r.GLCode, 'expensePrefixes');
+            if (dept) {
+                byDept.get(dept.key).expense += r.PeriodAmount;
+                if (String(r.GLCode || '').startsWith('501001')) byDept.get(dept.key).cogs += r.PeriodAmount;
+            }
+        }
+        const service = byDept.get('service');
+        const parts   = byDept.get('parts');
+        const admin   = byDept.get('admin');
+        const totalRevenue = Array.from(byDept.values()).reduce((s, d) => s + d.revenue, 0);
+        const totalExpense = Array.from(byDept.values()).reduce((s, d) => s + d.expense, 0);
+        const totalCogs     = Array.from(byDept.values()).reduce((s, d) => s + d.cogs, 0);
+        const netProfit = totalRevenue - totalExpense;
+        const serviceGP = service.revenue - service.expense;
+        const partsGP   = parts.revenue - parts.expense;
+
+        // --- Balance-sheet-based, as of `to` ---
+        const sumByPrefix = (rows, prefixes) => rows
+            .filter(r => prefixes.some(p => String(r.GLCode || '').startsWith(p)))
+            .reduce((s, r) => s + Number(r.Balance), 0);
+        const assetRows  = atTo['1']?.rows || [];
+        const liabRows   = atTo['2']?.rows || [];
+        const equityRows = atTo['3']?.rows || [];
+
+        const currentAssets      = sumByPrefix(assetRows, ['102']);
+        const inventory          = sumByPrefix(assetRows, ['102001']);
+        const tradeReceivables   = sumByPrefix(assetRows, ['102007', '102008', '102009']);
+        const currentLiabilities = sumByPrefix(liabRows, ['201']);
+        const tradePayables      = sumByPrefix(liabRows, ['201001']);
+        const totalLiabilities   = liabRows.reduce((s, r) => s + Number(r.Balance), 0);
+        const capitalReserves    = equityRows.reduce((s, r) => s + Number(r.Balance), 0);
+        // Retained earnings = cumulative revenue − expense from inception to
+        // `to` — same definition getBalanceSheet uses below.
+        const cumRevenue = (atTo['4']?.rows || []).reduce((s, r) => s + Number(r.Balance), 0);
+        const cumExpense = (atTo['5']?.rows || []).reduce((s, r) => s + Number(r.Balance), 0);
+        const totalEquity = capitalReserves + (cumRevenue - cumExpense);
+
+        // --- Purchases in period (for DPO) — no existing report totals this. ---
+        const purchRes = await pool.request()
+            .input('from', sql.DateTime, from).input('to', sql.DateTime, to)
+            .query(`SELECT ISNULL(SUM(pd.NetAmount), 0) AS TotalPurchases
+                    FROM data_PurchaseInfo pi
+                    JOIN data_PurchaseDetail pd ON pd.PurchaseID = pi.PurchaseID
+                    WHERE pi.PurchaseDate BETWEEN @from AND @to`);
+        const totalPurchases = Number(purchRes.recordset[0]?.TotalPurchases) || 0;
+
+        // --- Ratios ---
+        const pct  = (a, b) => b > 0 ? +(a / b * 100).toFixed(2) : null;
+        const div  = (a, b) => b > 0 ? +(a / b).toFixed(2) : null;
+        const days = (a, b) => b > 0 ? +(a / b * daysInPeriod).toFixed(1) : null;
+
+        const ratios = {
+            absorptionRate:              pct(serviceGP + partsGP, admin.expense),
+            serviceMargin:               pct(serviceGP, service.revenue),
+            partsMargin:                 pct(partsGP, parts.revenue),
+            laborPartsRatio:             div(service.revenue, parts.revenue),
+            currentRatio:                div(currentAssets, currentLiabilities),
+            quickRatio:                  div(currentAssets - inventory, currentLiabilities),
+            debtToEquity:                div(totalLiabilities, totalEquity),
+            dso:                         days(tradeReceivables, totalRevenue),
+            dpo:                         days(tradePayables, totalPurchases),
+            inventoryTurnoverAnnualized: (totalCogs > 0 && inventory > 0)
+                ? +((totalCogs / inventory) * (365 / daysInPeriod)).toFixed(2) : null,
+            netProfitMargin:             pct(netProfit, totalRevenue),
+            grossProfitMargin:           pct(totalRevenue - totalCogs, totalRevenue),
+        };
+
+        res.json({
+            from: fromRaw.toISOString().slice(0, 10), to: toRaw.toISOString().slice(0, 10), daysInPeriod,
+            ratios,
+            figures: {
+                totalRevenue: +totalRevenue.toFixed(2), totalExpense: +totalExpense.toFixed(2), netProfit: +netProfit.toFixed(2),
+                serviceRevenue: +service.revenue.toFixed(2), serviceGP: +serviceGP.toFixed(2),
+                partsRevenue: +parts.revenue.toFixed(2), partsGP: +partsGP.toFixed(2),
+                adminExpense: +admin.expense.toFixed(2),
+                currentAssets: +currentAssets.toFixed(2), currentLiabilities: +currentLiabilities.toFixed(2),
+                inventory: +inventory.toFixed(2), tradeReceivables: +tradeReceivables.toFixed(2),
+                tradePayables: +tradePayables.toFixed(2), totalLiabilities: +totalLiabilities.toFixed(2),
+                totalEquity: +totalEquity.toFixed(2), totalPurchases: +totalPurchases.toFixed(2),
+                totalCogs: +totalCogs.toFixed(2),
+            },
+        });
+    } catch (err) {
+        console.error('Financial ratios error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
  * GET /reports/balance-sheet?asOf=
  * Assets (1) = Liabilities (2) + Equity (3) + Retained Earnings (Revenue − Expenses up to date).
  */

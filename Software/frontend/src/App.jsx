@@ -58,6 +58,7 @@ import UnfinalizeLog      from './pages/reports/UnfinalizeLog';
 import RevenueSplit       from './pages/reports/RevenueSplit';
 import CashCreditExpense  from './pages/reports/CashCreditExpense';
 import FinancialDashboard from './pages/reports/FinancialDashboard';
+import FinancialRatios from './pages/reports/FinancialRatios';
 import BuPnL              from './pages/reports/BuPnL';
 import StoreSalePnL       from './pages/reports/StoreSalePnL';
 import { getVisibleModuleGroups } from './navigationConfig';
@@ -994,6 +995,9 @@ function AppShell() {
                     } />
                     <Route path="/reports/financial-dashboard" element={
                         <ProtectedRoute moduleKey="reports"><FinancialDashboard /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/financial-ratios" element={
+                        <ProtectedRoute moduleKey="reports"><FinancialRatios /></ProtectedRoute>
                     } />
                     <Route path="/reports/bu-pnl" element={
                         <ProtectedRoute moduleKey="report:bu_pnl"><BuPnL /></ProtectedRoute>

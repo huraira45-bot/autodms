@@ -27,6 +27,7 @@ router.get('/daily-cash-book',        requireAccess('report:daily_cash_book'),  
 router.get('/tax-summary',            requireAccess('report:tax_summary'),           reports.getTaxSummary);
 router.get('/pnl',                    requireAccess('report:pnl'),                   reports.getPnL);
 router.get('/pnl-department',         requireAccess('report:pnl_department'),        reports.getPnLByDepartment);
+router.get('/financial-ratios',       requireAccess('report:financial_ratios'),      reports.getFinancialRatios);
 router.get('/balance-sheet',          requireAccess('report:balance_sheet'),         reports.getBalanceSheet);
 router.get('/day-book',               requireAccess('report:day_book'),              reports.getDayBook);
 router.get('/receivables-aging',      requireAccess('report:receivables_aging'),     reports.getReceivablesAging);
