@@ -476,10 +476,13 @@ export default function StoreSale() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: 'var(--primary)' }}><User size={18} /><strong>Customer Info</strong></div>
           <div className="form-group">
             <label>Party Name</label>
-            <select value={header.PartyID} onChange={e => setHeader({...header, PartyID: e.target.value})}>
-              <option value="">Select Account...</option>
-              {parties.map(p => <option key={p.PartyID} value={p.PartyID}>{p.PartyName}</option>)}
-            </select>
+            <SearchableSelect
+              value={header.PartyID}
+              onChange={id => setHeader({ ...header, PartyID: id })}
+              placeholder="Select Account..."
+              title="Party Name"
+              options={parties.map(p => ({ id: p.PartyID, label: p.PartyName }))}
+            />
           </div>
           <div className="form-group"><label>Customer Name *</label><input type="text" value={header.CustomerName} onChange={e => setHeader({...header, CustomerName: e.target.value})} /></div>
           <div className="grid-2">
