@@ -730,6 +730,15 @@ export default function JobCardForm() {
   const gstRate = Math.max(0, ...issuedParts.map(p => parseFloat(p.TaxRate) || 0));
   const totalTax = totalPST + totalGST;
   const totalPayable = +(grandTotal - totalDiscountUsed + totalTax).toFixed(2);
+  // Service Campaign benefit is a card-level lump sum on top of the manual
+  // (Care-Off/parts) discount already folded into totalPayable — mirrors
+  // jobCardJournalBuilder.js's customerPays = invoiceTotal − min(campaign
+  // BenefitAmount, invoiceTotal). Owner ask 2026-08-01: show the true final
+  // amount after campaign discount AND all other discount in one figure.
+  const campaignBenefit = campaign && Number(campaign.BenefitAmount) > 0
+    ? Math.min(Number(campaign.BenefitAmount), totalPayable)
+    : 0;
+  const totalAfterDiscount = +(totalPayable - campaignBenefit).toFixed(2);
   const capOver = !!careOff && totalLabourDisc > maxDiscountAllowed + 0.005;
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Loader2 size={32} style={{ animation: 'spin 1s linear infinite' }} /></div>;
@@ -1247,7 +1256,7 @@ export default function JobCardForm() {
                           {campaign.BorneBy === 'MCML' ? ' (MCML claim)' : ' (discount)'}
                         </div>
                         <div style={{ ...S.billVal, fontWeight: 700, color: '#166534', background: '#f0fdf4' }}>
-                          Net {(grandTotal - Number(campaign.BenefitAmount)).toLocaleString()}
+                          Net {totalAfterDiscount.toLocaleString()}
                         </div>
                       </div>
                       <div style={S.billField}>
@@ -1975,7 +1984,7 @@ export default function JobCardForm() {
           {/* Bill Details */}
           <div style={S.billPanel}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#1a3a6a', marginBottom: 4 }}>Bill Details</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr) 80px 80px', gap: 4, alignItems: 'end' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${campaignBenefit > 0 ? 10 : 9}, 1fr) 80px 80px`, gap: 4, alignItems: 'end' }}>
               {[
                 ['Labour', totalLabour],
                 ['Sublet Repair', totalSublet],
@@ -1986,14 +1995,17 @@ export default function JobCardForm() {
                 [`PST ${pstRate}%`, totalPST],
                 [`GST ${gstRate}%`, totalGST],
                 ['Total Payable', totalPayable],
+                // Only shown when a Service Campaign benefit actually applies —
+                // otherwise it's identical to Total Payable and just clutter.
+                ...(campaignBenefit > 0 ? [['Total After Discount', totalAfterDiscount]] : []),
               ].map(([lbl, val]) => (
-                <div key={lbl} style={S.billField}>
+                <div key={lbl} style={S.billField} title={lbl === 'Total After Discount' ? `Total Payable (${totalPayable.toLocaleString()}) − Campaign Benefit (${campaignBenefit.toLocaleString()})` : undefined}>
                   <div style={{ fontSize: 10, color: '#475569', marginBottom: 1 }}>{lbl}</div>
                   <div style={{
                     ...S.billVal,
-                    fontWeight: lbl === 'Total Amount' || lbl === 'Total Payable' ? 700 : 400,
-                    background: lbl === 'Total Amount' ? '#fff8e1' : (lbl === 'Total Payable' ? '#e8f5e9' : '#fff'),
-                    color: (typeof lbl === 'string' && lbl.startsWith('PST')) ? '#a21caf' : (typeof lbl === 'string' && lbl.startsWith('GST')) ? '#1d4ed8' : '#1e293b'
+                    fontWeight: lbl === 'Total Amount' || lbl === 'Total Payable' || lbl === 'Total After Discount' ? 700 : 400,
+                    background: lbl === 'Total Amount' ? '#fff8e1' : (lbl === 'Total Payable' ? '#e8f5e9' : (lbl === 'Total After Discount' ? '#f0fdf4' : '#fff')),
+                    color: lbl === 'Total After Discount' ? '#166534' : (typeof lbl === 'string' && lbl.startsWith('PST')) ? '#a21caf' : (typeof lbl === 'string' && lbl.startsWith('GST')) ? '#1d4ed8' : '#1e293b'
                   }}>
                     {typeof val === 'number' ? val.toLocaleString() : val}
                   </div>
