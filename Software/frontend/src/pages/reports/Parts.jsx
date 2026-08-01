@@ -26,6 +26,16 @@ const StockMovementControls = ({ params, updateParam }) => (
 );
 
 export function StockMovement() {
+    const excelExport = (data, params) => ({
+        filename: `stock-movement-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['Item Code', 'Item Name', 'Part No', 'Category', 'Location', 'Warehouse',
+                  'Qty In', 'Qty Out', 'Balance Qty', 'Rate', 'Value In', 'Value Out', 'Total Value'],
+        rows: (data.rows || []).map(r => [
+            r.ItemCode, r.ItemName, r.PartNumber, r.Category, r.BinLocation, r.Warehouse,
+            Number(r.QtyIn), Number(r.QtyOut), Number(r.BalanceQty), Number(r.Rate),
+            Number(r.ValIn), Number(r.ValOut), Number(r.TotalValue),
+        ]),
+    });
     return (
         <ReportShell
             title="Stock Movement Register"
@@ -34,6 +44,7 @@ export function StockMovement() {
             endpoint="parts/stock-movement"
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '' }}
             controls={StockMovementControls}
+            excelExport={excelExport}
             superWide
         >
             {(data) => (
@@ -98,6 +109,15 @@ export function StockMovement() {
 // Reorder Alert
 // =====================================================================
 export function ReorderAlert() {
+    const excelExport = (data) => ({
+        filename: `reorder-alert.csv`,
+        headers: ['Item Code', 'Item Name', 'Part No', 'Location', 'Category',
+                  'On Hand', 'Reorder Level', 'Shortfall', 'Rate', 'Suggested Order Value'],
+        rows: (data.rows || []).map(r => [
+            r.ItemCode, r.ItemName, r.PartNumber, r.BinLocation, r.Category,
+            Number(r.OnHand), Number(r.ReOrderLevel), Number(r.Shortfall), Number(r.Rate), Number(r.SuggestedOrderValue),
+        ]),
+    });
     return (
         <ReportShell
             title="Reorder Alert"
@@ -106,6 +126,7 @@ export function ReorderAlert() {
             endpoint="parts/reorder-alert"
             defaultParams={{}}
             controls={() => null}
+            excelExport={excelExport}
         >
             {(data) => (
                 <>
@@ -154,6 +175,14 @@ export function ReorderAlert() {
 // Parts Sales Register
 // =====================================================================
 export function PartsSalesRegister() {
+    const excelExport = (data, params) => ({
+        filename: `parts-sales-register-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['Invoice #', 'Date', 'Customer', 'Item Code', 'Item Name', 'Qty', 'Rate', 'Discount', 'Tax', 'Net'],
+        rows: (data.rows || []).map(r => [
+            r.SaleVoucherNo, r.SaleDate, r.Customer, r.ItemCode, r.ItemName,
+            Number(r.Quantity), Number(r.ItemRate), Number(r.Discount), Number(r.Tax), Number(r.LineNet),
+        ]),
+    });
     return (
         <ReportShell
             title="Parts Sales Register"
@@ -173,6 +202,7 @@ export function PartsSalesRegister() {
                     </label>
                 </>
             )}
+            excelExport={excelExport}
         >
             {(data) => (
                 <>
@@ -224,6 +254,14 @@ export function PartsSalesRegister() {
 // Parts Purchase Summary (GRN)
 // =====================================================================
 export function PartsPurchaseSummary() {
+    const excelExport = (data, params) => ({
+        filename: `parts-purchase-summary-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['GRN #', 'Date', 'Supplier', 'Item Code', 'Item Name', 'Qty', 'Rate', 'Discount', 'Tax', 'Net'],
+        rows: (data.rows || []).map(r => [
+            r.GRNNo, r.GRNDate, r.Supplier, r.ItemCode, r.ItemName,
+            Number(r.Quantity), Number(r.ItemRate), Number(r.Discount), Number(r.Tax), Number(r.LineNet),
+        ]),
+    });
     return (
         <ReportShell
             title="Parts Purchase Summary"
@@ -243,6 +281,7 @@ export function PartsPurchaseSummary() {
                     </label>
                 </>
             )}
+            excelExport={excelExport}
         >
             {(data) => (
                 <>
@@ -331,6 +370,15 @@ const ModePill = ({ mode }) => {
 };
 
 export function PartsIssuedToJc() {
+    const excelExport = (data, params) => ({
+        filename: `parts-issued-to-jc-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['Slip #', 'Date', 'Job Card', 'BU', 'Mode', 'Customer / Party', 'Vehicle',
+                  'Part #', 'Item', 'Qty', 'Rate', 'Discount', 'GST', 'Net'],
+        rows: (data.rows || []).map(r => [
+            r.SlipNo, r.IssueDate, `JC-${r.JobCardNo}`, r.BusinessUnitCode, r.Mode, r.Customer, r.VehicleRegNo,
+            r.ItemCode, r.ItemName, Number(r.Quantity), Number(r.Rate), Number(r.Discount), Number(r.Tax), Number(r.LineNet),
+        ]),
+    });
     return (
         <ReportShell
             title="Parts Issued to Job Cards"
@@ -339,6 +387,7 @@ export function PartsIssuedToJc() {
             endpoint="parts/issued-to-jc"
             landscape
             defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '', businessType: '', mode: '' }}
+            excelExport={excelExport}
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
@@ -472,6 +521,17 @@ export function PartsIssuedToJc() {
 // include finalized Store Sales. Owner ask 2026-07-22.
 // =====================================================================
 export function PartsSoldFinalized() {
+    const excelExport = (data, params) => ({
+        filename: `parts-sold-finalized-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['Doc', 'Voucher Date', 'Reference', 'BU', 'Mode', 'Customer / Party', 'Vehicle',
+                  'Part #', 'Item', 'Qty', 'Rate', 'Discount', 'Revenue', 'GST', 'Gross'],
+        rows: (data.rows || []).map(r => [
+            r.Channel, r.DocDate, r.Channel === 'JC' ? `JC-${r.RefNo}` : (r.RefNo || r.DocRef),
+            r.BusinessUnitCode, r.Mode, r.Customer || '', r.VehicleRegNo || '',
+            r.ItemCode, r.ItemName, Number(r.Quantity), Number(r.Rate), Number(r.Discount),
+            Number(r.Revenue), Number(r.Tax), Number(r.LineNet),
+        ]),
+    });
     return (
         <ReportShell
             title="Parts Sold (Finalized)"
@@ -484,6 +544,7 @@ export function PartsSoldFinalized() {
                 search: '', businessType: '', mode: '',
                 includeStoreSale: '1', includeReturns: '1',
             }}
+            excelExport={excelExport}
             controls={({ params, updateParam }) => (
                 <>
                     <PeriodControls params={params} updateParam={updateParam} />
