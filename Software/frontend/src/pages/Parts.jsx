@@ -100,6 +100,12 @@ export default function Parts() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const salePrice = Number(formData.ItemSalesPrice) || 0;
+    const purchasePrice = Number(formData.ItemPurchasePrice) || 0;
+    if (salePrice > 0 && purchasePrice > 0 && salePrice < purchasePrice) {
+      notify({ type: 'error', title: 'Sale price too low', message: `Sale price (${salePrice.toFixed(2)}) can't be less than purchase price (${purchasePrice.toFixed(2)}).` });
+      return;
+    }
     try {
       if (editingId) {
         await axios.put(`${API_BASE}/items/${editingId}`, formData);
@@ -177,7 +183,13 @@ export default function Parts() {
                     <td>{i.BinLocation || '—'}</td>
                     <td>{uomName(i.UOMId)}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {Number(i.ItemSalesPrice || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {(() => {
+                        const sale = Number(i.ItemSalesPrice || 0);
+                        const purchase = Number(i.ItemPurchasePrice || 0);
+                        if (sale <= 0) return <span style={{ color: '#b45309', fontStyle: 'italic' }} title="No sale price set yet">Not set</span>;
+                        if (purchase > 0 && sale < purchase) return <span style={{ color: '#b91c1c', fontWeight: 700 }} title={`Below purchase price (${purchase.toFixed(2)})`}>{sale.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+                        return sale.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      })()}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: iss ? '#0f172a' : '#94a3b8', fontWeight: iss ? 600 : 400 }}
                         title={iss ? `Across ${iss.IssueCount} slip(s) — PKR ${Number(iss.TotalIssuedValue || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'No issues yet'}>

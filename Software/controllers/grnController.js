@@ -25,6 +25,13 @@ exports.saveGRN = async (req, res) => {
     // format uses ItemId/Quantity/ItemRate/etc — map them so the SP's inserts
     // pick up the values. The new columns (AdditionalDiscount*, AITAmount,
     // TaxRate) are patched per-line in the follow-up UPDATE below.
+    //
+    // SalesRate is REQUIRED from the caller now (owner ask 2026-08-01) — no
+    // longer falls back to the purchase rate. The SP unconditionally does
+    // `InventItems.ItemSalesPrice = SalesRate` on every line, so silently
+    // defaulting to the purchase rate was quietly wiping out sale prices on
+    // every GRN. The frontend always sends the item's current sale price
+    // (or 0 if it never had one), so this is just the last line of defense.
     const spItems = (parsedItems || []).map(it => ({
       ItemID:    it.ItemId ?? it.ItemID,
       Qty:       Number(it.Quantity ?? it.Qty) || 0,
@@ -34,8 +41,22 @@ exports.saveGRN = async (req, res) => {
       DiscType:  'Amount',
       IsGST:     1,
       OtherExp:  0,
-      SalesRate: Number(it.SalesRate ?? it.ItemRate ?? it.Rate) || 0,
+      SalesRate: Number(it.SalesRate) || 0,
     }));
+
+    // Never let a line's sale rate undercut its purchase rate. 0 (not
+    // priced yet) is allowed through — the SP just won't touch a sale
+    // price we don't have — but a real sale rate below cost is rejected
+    // outright rather than silently posted.
+    const badLines = spItems
+      .map((it, idx) => ({ ...it, idx, part: (parsedItems[idx]?.ItenName) || `line ${idx + 1}` }))
+      .filter(it => it.SalesRate > 0 && it.SalesRate < it.Rate);
+    if (badLines.length) {
+      return res.status(400).json({
+        error: 'Sale rate can\'t be less than purchase rate: ' +
+          badLines.map(l => `${l.part} (sale ${l.SalesRate.toFixed(2)} < purchase ${l.Rate.toFixed(2)})`).join('; '),
+      });
+    }
 
     const pool = await getPool();
     const result = await pool.request()

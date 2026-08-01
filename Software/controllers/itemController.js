@@ -46,6 +46,17 @@ exports.createItem = async (req, res) => {
       BinLocation,
     } = req.body;
 
+    // Owner ask 2026-08-01: never let a part's sale price undercut its
+    // purchase price. Only checked when both are actually set (0 = not
+    // priced yet, not a real sale-below-cost case).
+    const salePrice = Number(ItemSalesPrice) || 0;
+    const purchasePrice = Number(ItemPurchasePrice) || 0;
+    if (salePrice > 0 && purchasePrice > 0 && salePrice < purchasePrice) {
+      return res.status(400).json({
+        error: `Sale price (${salePrice.toFixed(2)}) can't be less than purchase price (${purchasePrice.toFixed(2)}).`,
+      });
+    }
+
     const pool = await getPool();
     const result = await pool.request()
       .input('CategoryID', sql.Int, CategoryID)
@@ -102,6 +113,26 @@ exports.updateItem = async (req, res) => {
     const { ItenName, ItemSalesPrice, ItemPurchasePrice, DepartmentID, JobTypeID,
             CategoryID, BinLocation, UOMId, ItemBrandId, ManualNumber, ReOrderLevel } = req.body;
     const pool = await getPool();
+
+    // Owner ask 2026-08-01: never let a part's sale price undercut its
+    // purchase price. If this request isn't also changing the purchase
+    // price, check against whatever's currently on file. Only enforced
+    // when both sides are actually priced (0 = not priced yet).
+    const salePrice = Number(ItemSalesPrice) || 0;
+    if (salePrice > 0) {
+      let purchasePrice = ItemPurchasePrice !== undefined ? Number(ItemPurchasePrice) || 0 : null;
+      if (purchasePrice === null) {
+        const cur = await pool.request().input('id', sql.Int, req.params.id)
+          .query('SELECT ItemPurchasePrice FROM InventItems WHERE ItemId=@id');
+        purchasePrice = Number(cur.recordset[0]?.ItemPurchasePrice) || 0;
+      }
+      if (purchasePrice > 0 && salePrice < purchasePrice) {
+        return res.status(400).json({
+          error: `Sale price (${salePrice.toFixed(2)}) can't be less than purchase price (${purchasePrice.toFixed(2)}).`,
+        });
+      }
+    }
+
     // Build dynamic SET so callers can omit fields they don't want to touch.
     // Sale price flows from InventItems.ItemSalesPrice -> Store Sale + Parts
     // Issue pickers automatically (they read the same view), so updating here

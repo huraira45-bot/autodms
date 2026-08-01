@@ -46,7 +46,7 @@ function computeLine(raw) {
 }
 
 const emptyEntry = {
-    ItemID: '', ItenName: '', Qty: 1, ItemRate: 0,
+    ItemID: '', ItenName: '', Qty: 1, ItemRate: 0, SalesRate: 0,
     DiscountPct: 0, AdditionalDiscountPct: 0,
     TaxRate: 18, AITAmount: 0,
 };
@@ -179,6 +179,12 @@ export default function GRN() {
             notify({ type: 'warning', title: 'Add a part', message: 'Pick a part and a quantity greater than zero.' });
             return;
         }
+        const salesRate = Number(currentItem.SalesRate) || 0;
+        const itemRate  = Number(currentItem.ItemRate) || 0;
+        if (salesRate > 0 && salesRate < itemRate) {
+            notify({ type: 'error', title: 'Sale rate too low', message: `Sale rate (${salesRate.toFixed(2)}) can't be less than the purchase rate (${itemRate.toFixed(2)}).` });
+            return;
+        }
         const part = parts.find(p => p.ItemId == currentItem.ItemID);
         const line = computeLine({
             ...currentItem,
@@ -202,6 +208,7 @@ export default function GRN() {
             ItenName: row.ItenName,
             Qty: row.Qty,
             ItemRate: row.ItemRate,
+            SalesRate: row.SalesRate,
             DiscountPct: row.DiscountPct,
             AdditionalDiscountPct: row.AdditionalDiscountPct,
             TaxRate: row.TaxRate,
@@ -259,8 +266,10 @@ export default function GRN() {
         formData.append('Remarks', header.Remarks || '');
         formData.append('Items', JSON.stringify(lineItems.map(l => ({
             ItemId:                   l.ItemID,
+            ItenName:                 l.ItenName,
             Quantity:                 l.Qty,
             ItemRate:                 l.ItemRate,
+            SalesRate:                l.SalesRate,
             DiscountPercentage:       l.DiscountPct,
             DiscountAmount:           l.DiscountAmount,
             AdditionalDiscountPct:    l.AdditionalDiscountPct,
@@ -412,7 +421,7 @@ export default function GRN() {
                 {/* Line entry */}
                 <div className="card" style={{ marginTop: 12 }}>
                     <h2 className="card-title" style={{ marginBottom: 14 }}>Add Line</h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,2.6fr) 70px 110px 90px 90px 80px 100px 90px', gap: 8, alignItems: 'end' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,2.6fr) 70px 110px 110px 90px 90px 80px 100px 90px', gap: 8, alignItems: 'end' }}>
                         <div className="form-group" style={{ margin: 0 }}>
                             <label>Part / Description</label>
                             <SearchableSelect
@@ -423,6 +432,11 @@ export default function GRN() {
                                         ...currentItem,
                                         ItemID: id,
                                         ItemRate: part?.ItemPurchasePrice || 0,
+                                        // Pre-fill with the part's current sale price so it's
+                                        // preserved by default — GRN save always overwrites
+                                        // InventItems.ItemSalesPrice with whatever's here, so
+                                        // leaving this blank would silently wipe it.
+                                        SalesRate: part?.ItemSalesPrice || 0,
                                     });
                                 }}
                                 placeholder="Search part by code or name…"
@@ -442,6 +456,12 @@ export default function GRN() {
                         <div className="form-group" style={{ margin: 0 }}>
                             <label>Unit Retail</label>
                             <input type="number" step="0.01" value={currentItem.ItemRate} onChange={e => setCurrentItem({ ...currentItem, ItemRate: e.target.value })} />
+                        </div>
+                        <div className="form-group" style={{ margin: 0 }}>
+                            <label title="What we charge customers. Overwrites the part's sale price on save — can't be less than the purchase rate.">Sale Rate</label>
+                            <input type="number" step="0.01" value={currentItem.SalesRate}
+                                   style={Number(currentItem.SalesRate) > 0 && Number(currentItem.SalesRate) < Number(currentItem.ItemRate) ? { borderColor: '#dc2626', background: '#fef2f2' } : undefined}
+                                   onChange={e => setCurrentItem({ ...currentItem, SalesRate: e.target.value })} />
                         </div>
                         <div className="form-group" style={{ margin: 0 }}>
                             <label>Disc %</label>
@@ -489,6 +509,7 @@ export default function GRN() {
                                     <th style={thL}>Description</th>
                                     <th style={th}>Qty</th>
                                     <th style={th}>Unit Retail<br/>Excl Tax</th>
+                                    <th style={th} title="What we charge customers going forward">Sale Rate</th>
                                     <th style={th}>Value<br/>Excl Tax</th>
                                     <th style={th}>Disc %</th>
                                     <th style={th}>Disc Value</th>
@@ -504,7 +525,7 @@ export default function GRN() {
                             </thead>
                             <tbody>
                                 {lineItems.length === 0 && (
-                                    <tr><td colSpan={16} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>No lines yet — add one above.</td></tr>
+                                    <tr><td colSpan={17} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>No lines yet — add one above.</td></tr>
                                 )}
                                 {lineItems.map((l, idx) => (
                                     <tr key={idx}
@@ -519,6 +540,9 @@ export default function GRN() {
                                         <td style={tdL}>{l.ItenName}</td>
                                         <td style={td}>{l.Qty}</td>
                                         <td style={td}>{fmt(l.ItemRate)}</td>
+                                        <td style={{ ...td, color: Number(l.SalesRate) > 0 ? undefined : '#b45309', fontStyle: Number(l.SalesRate) > 0 ? undefined : 'italic' }}>
+                                            {Number(l.SalesRate) > 0 ? fmt(l.SalesRate) : 'not set'}
+                                        </td>
                                         <td style={td}>{fmt(l.ValueExclTax)}</td>
                                         <td style={td}>{Number(l.DiscountPct || 0)}</td>
                                         <td style={td}>{fmt(l.DiscountAmount)}</td>
