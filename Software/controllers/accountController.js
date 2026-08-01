@@ -556,14 +556,16 @@ exports.updateVoucherDepartment = async (req, res) => {
 };
 
 // GET /accounts/vouchers/needs-department — posted CPV/BPV/JV vouchers with
-// no department tagged yet, for the bulk segregation workspace. By default
-// hides vouchers that already touch a Parts (502003xxx) or Sales (502004xxx)
-// GL account -- those are self-evidently Parts/Sales department expenses
-// already, going by the same COA-prefix classification the P&L by
-// Department report uses (see PNL_DEPARTMENTS in reportsController.js).
-// Pass ?all=1 to see everything, untagged included.
-// Owner ask 2026-08-01: "create me form of those who are not hitting sale
-// or parts so I can segregate them".
+// no department tagged yet, for the bulk segregation workspace. Always
+// restricted to vouchers with a Debit line on an Expense-class (5xxxxx) GL
+// account -- JVs/CPVs/BPVs that only move Assets/Liabilities (opening
+// stock, advances, loan entries...) aren't expenses and are excluded
+// unconditionally (owner ask 2026-08-01: "the mapping should only show who
+// is hitting expenses"). Within that, hides vouchers that ALSO touch a
+// Parts (502003xxx) or Sales (502004xxx) GL account by default -- those are
+// self-evidently Parts/Sales department expenses already, going by the
+// same COA-prefix classification the P&L by Department report uses (see
+// PNL_DEPARTMENTS in reportsController.js). Pass ?all=1 to include those too.
 exports.getVouchersNeedingDepartment = async (req, res) => {
     try {
         const includeAll = req.query.all === '1';
@@ -580,6 +582,17 @@ exports.getVouchersNeedingDepartment = async (req, res) => {
             WHERE vt.Title IN ('CPV','BPV','JV')
               AND v.Status = 'Posted'
               AND v.DepartmentID IS NULL
+              -- Only vouchers that actually hit an Expense-class (5xxxxx)
+              -- account. Excludes JVs/CPVs/BPVs that move Assets/Liabilities
+              -- (opening stock, advances, loan entries, etc.) -- those
+              -- aren't "expenses" and don't belong in a department cost
+              -- breakdown. Owner ask 2026-08-01.
+              AND EXISTS (
+                    SELECT 1 FROM data_FinanceVoucherDetail de
+                    JOIN GLChartOFAccount ce ON ce.GLCAID = de.GLCAID
+                    WHERE de.VoucherID = v.VoucherID AND de.Debit > 0
+                      AND LEFT(ce.GLCode, 1) = '5'
+              )
               AND (@includeAll = 1 OR NOT EXISTS (
                     SELECT 1 FROM data_FinanceVoucherDetail d
                     JOIN GLChartOFAccount c ON c.GLCAID = d.GLCAID
@@ -603,6 +616,12 @@ exports.getVouchersNeedingDepartment = async (req, res) => {
             WHERE vt.Title IN ('CPV','BPV','JV')
               AND v.Status = 'Posted'
               AND v.DepartmentID IS NULL
+              AND EXISTS (
+                    SELECT 1 FROM data_FinanceVoucherDetail de2
+                    JOIN GLChartOFAccount ce2 ON ce2.GLCAID = de2.GLCAID
+                    WHERE de2.VoucherID = v.VoucherID AND de2.Debit > 0
+                      AND LEFT(ce2.GLCode, 1) = '5'
+              )
               AND (@includeAll = 1 OR NOT EXISTS (
                     SELECT 1 FROM data_FinanceVoucherDetail d3
                     JOIN GLChartOFAccount c3 ON c3.GLCAID = d3.GLCAID

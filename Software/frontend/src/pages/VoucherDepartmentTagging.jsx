@@ -84,8 +84,10 @@ export default function VoucherDepartmentTagging() {
                     </div>
                     <div className="subtitle">
                         Reporting-only. Picking a department here has no GL impact — it only feeds the
-                        Expense by Department report. Vouchers already touching a Parts or Sales GL account
-                        are hidden by default (already obviously Parts/Sales spend).
+                        Expense by Department report. Only vouchers that actually hit an Expense-class
+                        (5xxxxx) account are listed — asset/liability-only JVs (opening stock, advances,
+                        loan entries…) never show up here. Vouchers already touching a Parts or Sales GL
+                        account are hidden by default (already obviously Parts/Sales spend).
                     </div>
                 </div>
                 <div className="row" style={{ gap: 8, alignItems: 'center' }}>
