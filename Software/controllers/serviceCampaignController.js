@@ -569,9 +569,19 @@ exports.listApplicable = async (req, res) => {
  * Returns the active campaign application for this JC/sale (if any).
  */
 async function loadApplicationFor(pool, where, id) {
+    // `a.*` already carries the application's own BenefitAmount (the real
+    // computed amount for THIS application). Do not also select
+    // c.BenefitAmount here — it's the campaign template's legacy single-
+    // amount field (only populated for BenefitType='FixedDiscount'; NULL
+    // for the newer per-side Percent/Fixed/Free campaigns like "AZADI
+    // OFFER 14% OFF"). A same-named column collision with a.BenefitAmount
+    // made node-mssql return BOTH values as an array (BenefitAmount:
+    // [2100, null]) instead of a number, which the frontend's
+    // Number(arr).toLocaleString() then rendered as "PKR NaN". Confirmed
+    // 2026-08-01 via a live repro against the "AZADI OFFER" campaign.
     const r = await pool.request().input('id', sql.Int, id).query(`
         SELECT a.*, c.CampaignCode, c.CampaignName, c.BorneBy, c.BenefitType,
-               c.BenefitPercent, c.BenefitAmount, c.BenefitDescription,
+               c.BenefitPercent, c.BenefitDescription,
                gl.GLCode, gl.GLTitle AS GLAccountTitle
         FROM dms_ServiceCampaignApplications a
         JOIN dms_ServiceCampaigns c   ON a.CampaignID = c.CampaignID
