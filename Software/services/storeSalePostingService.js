@@ -11,7 +11,7 @@ async function resolveStoreSaleAccounts(/* transaction */) {
     // Credit-customer A/R uses the party's own PartyGLID — not a system role —
     // mirroring the JC posting path.
     const roles = ['CASH_BOOK', 'GENERAL_CUSTOMER', 'GST_PAYABLE', 'POS_CLEARING',
-                   'DEFAULT_DISCOUNT_GIVEN', 'CHEQUES_ON_HAND',
+                   'STORE_SALE_DISCOUNT_GIVEN', 'CHEQUES_ON_HAND',
                    'PARTS_REVENUE', 'COGS_PARTS', 'INVENTORY_PARTS'];
     const out = {};
     for (const r of roles) out[r] = { GLCAID: await resolveRole(r) };

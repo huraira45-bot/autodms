@@ -26,7 +26,7 @@ const { buildJournalLines } = require('../utils/jobCardJournalBuilder');
 async function resolveAllAccounts() {
     const roles = [
         'CASH_BOOK', 'GENERAL_CUSTOMER', 'GST_PAYABLE', 'INPUT_GST', 'PST_PAYABLE',
-        'POS_CLEARING', 'DEFAULT_DISCOUNT_GIVEN', 'ROUNDING_ADJUSTMENT',
+        'POS_CLEARING', 'SERVICE_DISCOUNT_GIVEN', 'ROUNDING_ADJUSTMENT',
         'PURCHASE_RETURN_VARIANCE', 'CUSTOMER_ADVANCE_RECEIVED', 'SUPPLIER_ADVANCE_PAID',
         'CHEQUES_ON_HAND',
         'INVENTORY_PARTS', 'PARTS_REVENUE', 'SERVICE_REVENUE', 'SUBLET_REVENUE',

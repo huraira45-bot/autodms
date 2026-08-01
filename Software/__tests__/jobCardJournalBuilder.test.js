@@ -9,7 +9,7 @@ const ACC = {
     INPUT_GST:                { GLCAID: 1007, GLCode: '101007', GLTitle: 'Input GST' },
     PST_PAYABLE:              { GLCAID: 2003, GLCode: '201003', GLTitle: 'PST Payable' },
     POS_CLEARING:             { GLCAID: 1002, GLCode: '101002', GLTitle: 'POS Clearing' },
-    DEFAULT_DISCOUNT_GIVEN:   { GLCAID: 5031, GLCode: '503001', GLTitle: 'Default Discount Given' },
+    SERVICE_DISCOUNT_GIVEN:   { GLCAID: 5031, GLCode: '503001', GLTitle: 'Default Discount Given' },
     PURCHASE_RETURN_VARIANCE: { GLCAID: 4014, GLCode: '401004', GLTitle: 'Purchase Return Variance' },
     CUSTOMER_ADVANCE_RECEIVED:{ GLCAID: 2004, GLCode: '201004', GLTitle: 'Customer Advance Received' },
     SUPPLIER_ADVANCE_PAID:    { GLCAID: 1008, GLCode: '101008', GLTitle: 'Supplier Advance Paid' },
@@ -88,7 +88,7 @@ describe('jobCardJournalBuilder — §14.6 worked example (cash, walk-in, with d
         expect(total(ACC.PARTS_REVENUE.GLCAID,         'Credit')).toBe(500);
         expect(total(ACC.SERVICE_REVENUE.GLCAID,       'Credit')).toBe(2000);
         expect(total(ACC.SUBLET_REVENUE.GLCAID,        'Credit')).toBe(1000);
-        expect(total(ACC.DEFAULT_DISCOUNT_GIVEN.GLCAID,'Debit' )).toBe(200);
+        expect(total(ACC.SERVICE_DISCOUNT_GIVEN.GLCAID,'Debit' )).toBe(200);
         expect(total(ACC.GST_PAYABLE.GLCAID,           'Credit')).toBe(85);
         expect(total(ACC.PST_PAYABLE.GLCAID,           'Credit')).toBe(448);   // labour 288 + sublet 160
         expect(total(ACC.COGS_PARTS.GLCAID,            'Debit' )).toBe(195);

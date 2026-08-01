@@ -97,10 +97,10 @@ function buildSSRJournalLines({ ssr, lines = [], accounts, paymentBank = null, p
         });
     }
 
-    // (2) Cr Default Discount Given (reverse the discount we recorded on original sale)
+    // (2) Cr Store Sale Discount Given (reverse the discount we recorded on original sale)
     if (partsDiscount > 0) {
         journalLines.push({
-            GLCAID: accounts.DEFAULT_DISCOUNT_GIVEN.GLCAID,
+            GLCAID: accounts.STORE_SALE_DISCOUNT_GIVEN.GLCAID,
             Debit: 0, Credit: partsDiscount,
             Narration: `Reverse discount — ${narrationRef}`,
             PartyID: null, JobCardID: null,

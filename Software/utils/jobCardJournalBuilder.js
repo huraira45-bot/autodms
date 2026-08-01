@@ -11,7 +11,7 @@
  *   subletLines   — [{ VendorID, Remarks, InvoiceAmount (= our cost), PayableAmount (= we charge customer), TaxRate, TaxAmount }]
  *   partsLines    — [{ ItemId, Quantity, Rate (= sell price/unit), UnitLandedCost, TaxRate, TaxAmount, Discount, DiscAmt }]
  *   accounts      — { CASH_BOOK, GENERAL_CUSTOMER, GST_PAYABLE, PST_PAYABLE,
- *                     DEFAULT_DISCOUNT_GIVEN, POS_CLEARING, CHEQUES_ON_HAND,
+ *                     SERVICE_DISCOUNT_GIVEN, POS_CLEARING, CHEQUES_ON_HAND,
  *                     PARTS_REVENUE, SERVICE_REVENUE, SUBLET_REVENUE,
  *                     COGS_PARTS, INVENTORY_PARTS, SUBLET_COST,
  *                     TRADE_DEBTORS, TRADE_CREDITORS } — all { GLCAID, GLCode, GLTitle }
@@ -258,10 +258,10 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
         });
     }
 
-    // (5) Default Discount Given — Dr (contra-revenue)
+    // (5) Service Discount Given — Dr (contra-revenue)
     if (totalDiscount > 0) {
         lines.push({
-            GLCAID: accounts.DEFAULT_DISCOUNT_GIVEN.GLCAID,
+            GLCAID: accounts.SERVICE_DISCOUNT_GIVEN.GLCAID,
             Debit: totalDiscount, Credit: 0,
             Narration: `Care-Off discount — JC-${jobCard.JobCardNo || jobCard.JobCardId}`,
             PartyID: null, JobCardID: jcTag,

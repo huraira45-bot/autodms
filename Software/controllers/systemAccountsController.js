@@ -9,7 +9,13 @@ const ROLE_DEFS = [
     { key: 'INPUT_GST',                label: 'Input GST',                type: 'Asset',     purpose: 'Input GST paid to suppliers (claimable from FBR)' },
     { key: 'PST_PAYABLE',              label: 'PST Payable',              type: 'Liability', purpose: 'Output PST collected on labour + sublet' },
     { key: 'POS_CLEARING',             label: 'POS Clearing',             type: 'Asset',     purpose: 'Card payments awaiting bank settlement' },
-    { key: 'DEFAULT_DISCOUNT_GIVEN',   label: 'Default Discount Given',   type: 'Expense',   purpose: 'Care-Off discounts on Job Cards / Store Sales' },
+    // DEFAULT_DISCOUNT_GIVEN is legacy — kept mapped for old postings'
+    // history/drill-down only. Owner ask 2026-08-01: Job Card and Store
+    // Sale discounts now post to separate accounts (below) instead of
+    // sharing this one.
+    { key: 'DEFAULT_DISCOUNT_GIVEN',   label: 'Default Discount Given (legacy, historical only)', type: 'Expense', purpose: 'No longer posted to — see SERVICE_DISCOUNT_GIVEN / STORE_SALE_DISCOUNT_GIVEN. Kept for old voucher history.' },
+    { key: 'SERVICE_DISCOUNT_GIVEN',   label: 'Service (Job Card) Discount Given', type: 'Expense', purpose: 'Care-Off discounts on Job Cards' },
+    { key: 'STORE_SALE_DISCOUNT_GIVEN',label: 'Store Sale Discount Given',type: 'Expense',   purpose: 'Discounts on Store Sale invoices and Sale Returns (SSR)' },
     { key: 'ROUNDING_ADJUSTMENT',      label: 'Rounding Adjustment',      type: 'Either',    purpose: 'Tiny PKR rounding orphans' },
     { key: 'PURCHASE_RETURN_VARIANCE', label: 'Purchase Return Variance', type: 'Revenue',   purpose: 'Variance income from GTRN at landed cost' },
     { key: 'CUSTOMER_ADVANCE_RECEIVED',label: 'Customer Advance Received',type: 'Liability', purpose: 'Customer pre-payments and overpayments' },

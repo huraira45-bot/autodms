@@ -8,7 +8,7 @@
  * Inputs:
  *   storeSale  — { SaleID, InvoiceNo, PaymentMode, PartyID, PaymentBankID }
  *   lines      — [{ Quantity, SaleRate, TaxPercent, TaxAmount, DiscountAmount, UnitLandedCost }]
- *   accounts   — { CASH_BOOK, GENERAL_CUSTOMER, GST_PAYABLE, DEFAULT_DISCOUNT_GIVEN,
+ *   accounts   — { CASH_BOOK, GENERAL_CUSTOMER, GST_PAYABLE, STORE_SALE_DISCOUNT_GIVEN,
  *                  POS_CLEARING, CHEQUES_ON_HAND, PARTS_REVENUE,
  *                  COGS_PARTS, INVENTORY_PARTS, TRADE_DEBTORS } — each { GLCAID }
  *   paymentBank — { GLCAID } for Bank Transfer mode
@@ -144,10 +144,10 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         });
     }
 
-    // (3) Dr Default Discount Given (if any)
+    // (3) Dr Store Sale Discount Given (if any)
     if (partsDiscount > 0) {
         journalLines.push({
-            GLCAID: accounts.DEFAULT_DISCOUNT_GIVEN.GLCAID,
+            GLCAID: accounts.STORE_SALE_DISCOUNT_GIVEN.GLCAID,
             Debit: partsDiscount, Credit: 0,
             Narration: `Discount given — ${narrationRef}`,
             PartyID: null, JobCardID: null,

@@ -6,7 +6,7 @@ const ACC = {
     GST_PAYABLE:              { GLCAID: 2002 },
     POS_CLEARING:             { GLCAID: 1002 },
     CHEQUES_ON_HAND:          { GLCAID: 1003 },
-    DEFAULT_DISCOUNT_GIVEN:   { GLCAID: 5031 },
+    STORE_SALE_DISCOUNT_GIVEN:   { GLCAID: 5031 },
     PARTS_REVENUE:            { GLCAID: 4012 },
     COGS_PARTS:               { GLCAID: 5011 },
     INVENTORY_PARTS:          { GLCAID: 1004 },
@@ -124,7 +124,7 @@ describe('storeSaleJournalBuilder — discount handling', () => {
         expect(r.totals.partsDiscount).toBe(100);
         expect(r.totals.customerPays).toBe(1053);
 
-        const discLine = r.lines.find(l => l.GLCAID === ACC.DEFAULT_DISCOUNT_GIVEN.GLCAID);
+        const discLine = r.lines.find(l => l.GLCAID === ACC.STORE_SALE_DISCOUNT_GIVEN.GLCAID);
         expect(discLine.Debit).toBe(100);
         // Revenue is still gross
         const revLine = r.lines.find(l => l.GLCAID === ACC.PARTS_REVENUE.GLCAID);
