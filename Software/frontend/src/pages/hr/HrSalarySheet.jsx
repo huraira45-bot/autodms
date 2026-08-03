@@ -277,24 +277,24 @@ export default function HrSalarySheet() {
                                         <table className="hr-sheet-tbl">
                                             <thead>
                                                 <tr>
-                                                    <th style={{ width: 40 }}>#</th>
-                                                    <th style={{ width: 180 }}>Employee</th>
-                                                    <th style={{ width: 130 }}>Designation</th>
-                                                    <th className="num" style={{ width: 90 }}>Basic</th>
-                                                    <th className="num" style={{ width: 70 }}>Paid</th>
-                                                    <th className="num" style={{ width: 90 }}>Prorated</th>
-                                                    <th className="num" style={{ width: 75 }}>Fuel</th>
-                                                    <th className="num neg" style={{ width: 80 }}>Abs Fine</th>
-                                                    <th className="num neg" style={{ width: 80 }}>Late Fine</th>
-                                                    <th className="num" style={{ width: 80 }}>Advance</th>
-                                                    <th className="num" style={{ width: 70 }}>Fine</th>
-                                                    <th className="num" style={{ width: 70 }}>Hold</th>
-                                                    <th className="num" style={{ width: 70 }}>Tax</th>
-                                                    <th className="num" style={{ width: 70 }}>Mess Days</th>
-                                                    <th className="num" style={{ width: 70 }}>EOBI</th>
-                                                    <th className="num net" style={{ width: 95 }}>Net</th>
-                                                    <th style={{ width: 60 }}>Mode</th>
-                                                    <th style={{ width: 90 }}></th>
+                                                    <th style={{ width: 50 }}>#</th>
+                                                    <th style={{ width: 220 }}>Employee</th>
+                                                    <th style={{ width: 160 }}>Designation</th>
+                                                    <th className="num" style={{ width: 100 }}>Basic</th>
+                                                    <th className="num" style={{ width: 90 }}>Paid</th>
+                                                    <th className="num" style={{ width: 105 }}>Prorated</th>
+                                                    <th className="num" style={{ width: 90 }}>Fuel</th>
+                                                    <th className="num neg" style={{ width: 95 }}>Abs Fine</th>
+                                                    <th className="num neg" style={{ width: 95 }}>Late Fine</th>
+                                                    <th className="num" style={{ width: 95 }}>Advance</th>
+                                                    <th className="num" style={{ width: 90 }}>Fine</th>
+                                                    <th className="num" style={{ width: 90 }}>Hold</th>
+                                                    <th className="num" style={{ width: 90 }}>Tax</th>
+                                                    <th className="num" style={{ width: 95 }}>Mess Days</th>
+                                                    <th className="num" style={{ width: 85 }}>EOBI</th>
+                                                    <th className="num net" style={{ width: 115 }}>Net</th>
+                                                    <th style={{ width: 100 }}>Mode</th>
+                                                    <th style={{ width: 110 }}></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -481,15 +481,15 @@ function PageStyles() {
             .hr-dept-tot b { color: #166534; font-weight: 700; }
 
             .hr-sheet-tbl-wrap { overflow-x: auto; }
-            .hr-sheet-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-            .hr-sheet-tbl thead th { position: sticky; top: 0; background: #fafafb; padding: 6px 8px;
+            .hr-sheet-tbl { width: 100%; min-width: 1900px; border-collapse: collapse; font-size: 13px; }
+            .hr-sheet-tbl thead th { position: sticky; top: 0; background: #fafafb; padding: 10px 12px;
                                      border-bottom: 1px solid var(--erp-border); text-align: left;
-                                     font-size: 10.5px; font-weight: 600; color: var(--erp-text-muted);
+                                     font-size: 12px; font-weight: 600; color: var(--erp-text-muted);
                                      text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
             .hr-sheet-tbl thead th.num { text-align: right; }
             .hr-sheet-tbl thead th.net { background: #fef3c7; color: #78350f; }
             .hr-sheet-tbl thead th.neg { color: var(--erp-red); }
-            .hr-sheet-tbl tbody td { padding: 3px 8px; border-bottom: 1px solid #f4f4f6; white-space: nowrap; color: var(--erp-text); }
+            .hr-sheet-tbl tbody td { padding: 7px 12px; border-bottom: 1px solid #f4f4f6; white-space: nowrap; color: var(--erp-text); }
             .hr-sheet-tbl tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
             .hr-sheet-tbl tbody td.emp { color: var(--erp-text); }
             .hr-sheet-tbl tbody td.muted { color: var(--erp-text-muted); }
@@ -499,12 +499,12 @@ function PageStyles() {
             .hr-sheet-tbl tbody tr:hover { background: var(--erp-surface-hover); }
             .hr-sheet-tbl tbody tr.dirty:hover { background: #fef3c7; }
 
-            .hr-inp { width: 100%; height: 24px; padding: 0 6px; font-size: 11.5px;
-                      border: 1px solid var(--erp-border); border-radius: 3px;
+            .hr-inp { width: 100%; min-width: 60px; height: 32px; padding: 0 8px; font-size: 13px;
+                      border: 1.5px solid var(--erp-border); border-radius: 4px;
                       background: var(--erp-surface); color: var(--erp-text);
                       font-variant-numeric: tabular-nums; }
             .hr-inp.num { text-align: right; }
-            .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1); }
+            .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15); }
             .hr-inp:disabled { background: #f7f7f9; color: var(--erp-text-muted); cursor: not-allowed; }
             .hr-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;
                       color: var(--erp-text-muted); font-weight: 600; margin-bottom: 4px; }
