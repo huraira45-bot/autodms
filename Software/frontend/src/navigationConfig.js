@@ -23,7 +23,7 @@ import {
     SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
     ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
     Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
-    Gauge, ScrollText, Monitor, Building2,
+    Gauge, ScrollText, Monitor, Building2, Utensils,
 } from 'lucide-react';
 
 // Top-level module groups (order = sidebar order). Each has an id / label /
@@ -136,6 +136,7 @@ export const NAV_ITEMS = [
     { id: 'hr-esalary',  moduleGroup: 'hr', label: 'Employee Salary Settings',  path: '/hr/employees-salary',    icon: Users,        moduleKey: 'hr_employees',  description: 'Per-employee salary / allowances / bank.', keywords: 'salary employee' },
     { id: 'hr-att',      moduleGroup: 'hr', label: 'Attendance',                path: '/hr/attendance',          icon: Users,        moduleKey: 'hr_attendance', description: 'Monthly absents / late / leave / working days.', keywords: 'attendance late absent' },
     { id: 'hr-sheet',    moduleGroup: 'hr', label: 'Salary Sheet',              path: '/hr/salary-sheet',        icon: Users,        moduleKey: 'hr_salary',     description: 'Monthly salary sheet + voucher posting.', keywords: 'salary payroll' },
+    { id: 'hr-mess',     moduleGroup: 'hr', label: 'Mess Sheet',                path: '/hr/mess-sheet',          icon: Utensils,     moduleKey: 'hr_salary',     description: 'Monthly mess days + rate per employee.', keywords: 'mess food canteen' },
     { id: 'hr-fine',     moduleGroup: 'hr', label: 'Fine Settings',             path: '/hr/fine-settings',       icon: SettingsIcon, moduleKey: 'hr_settings',   description: 'Late-fine and absent-fine rates (global + monthly).', keywords: 'fine' },
     { id: 'hr-dept-acct',moduleGroup: 'hr', label: 'Dept Salary Accounts',      path: '/hr/dept-accounts',       icon: SettingsIcon, moduleKey: 'hr_settings',   description: 'Per-department GLs for salary / fuel / fine / mess / EOBI.', keywords: 'gl account salary dept' },
     { id: 'hr-cfg',      moduleGroup: 'hr', label: 'HR Config',                 path: '/hr-settings',            icon: SettingsIcon, moduleKey: 'hr_settings',   description: 'Departments, designations.', keywords: 'setup' },

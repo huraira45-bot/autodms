@@ -104,6 +104,7 @@ exports.saveSalaryEntry = async (req, res) => {
             .input('mfr', sql.NVarChar(300), b.ManualFineRemarks || null)
             .input('ho',  sql.Decimal(18,2), Number(b.Hold) || 0)
             .input('md',  sql.Decimal(6,2),  Number(b.MessDays) || 0)
+            .input('mao', sql.Decimal(10,2), b.MessAmountOverride == null || b.MessAmountOverride === '' ? null : Number(b.MessAmountOverride))
             .input('pd',  sql.Decimal(6,2),  b.PaidDays == null || b.PaidDays === '' ? null : Number(b.PaidDays))
             .input('lfr', sql.Decimal(10,4), b.LateFineRate == null || b.LateFineRate === '' ? null : Number(b.LateFineRate))
             .input('aj',  sql.Decimal(18,2), Number(b.Adjustment) || 0)
@@ -115,13 +116,14 @@ exports.saveSalaryEntry = async (req, res) => {
                 USING (SELECT @e AS EmployeeID, @m AS MonthID) AS src
                    ON tgt.EmployeeID = src.EmployeeID AND tgt.MonthID = src.MonthID
                 WHEN MATCHED THEN UPDATE SET Advance=@ad, Fine=@fi, ManualFineRemarks=@mfr,
-                                             Hold=@ho, MessDays=@md, PaidDays=@pd, LateFineRate=@lfr,
+                                             Hold=@ho, MessDays=@md, MessAmountOverride=@mao,
+                                             PaidDays=@pd, LateFineRate=@lfr,
                                              Adjustment=@aj, Tax=@tx, Remarks=@rm,
                                              UpdatedAt=GETDATE(), UpdatedByName=@un
                 WHEN NOT MATCHED THEN INSERT (EmployeeID, MonthID, Advance, Fine, ManualFineRemarks,
-                                              Hold, MessDays, PaidDays, LateFineRate, Adjustment, Tax,
-                                              Remarks, UpdatedByName)
-                                      VALUES (@e, @m, @ad, @fi, @mfr, @ho, @md, @pd, @lfr, @aj, @tx, @rm, @un);
+                                              Hold, MessDays, MessAmountOverride, PaidDays, LateFineRate,
+                                              Adjustment, Tax, Remarks, UpdatedByName)
+                                      VALUES (@e, @m, @ad, @fi, @mfr, @ho, @md, @mao, @pd, @lfr, @aj, @tx, @rm, @un);
             `);
         res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }

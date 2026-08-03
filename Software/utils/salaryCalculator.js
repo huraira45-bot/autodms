@@ -104,7 +104,14 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const absentFine = r2(Number(att.Absents || 0) * absentRate);
     const lateFine   = r2(Number(att.LateMinutes || 0) * lateRate);
     const advance    = Number(ent.Advance || 0);
-    const messDeduc  = emp.HasMess ? r2(Number(emp.MessAmount || 0) * Number(ent.MessDays || 0)) : 0;
+    // Mess rate for this month — MessAmountOverride lets the owner raise or
+    // lower the daily rate for a single month without touching the
+    // employee's standing default (gen_EmployeeInfo.MessAmount).
+    const messRate =
+        (ent.MessAmountOverride !== null && ent.MessAmountOverride !== undefined && ent.MessAmountOverride !== '')
+            ? Number(ent.MessAmountOverride)
+            : Number(emp.MessAmount || 0);
+    const messDeduc  = emp.HasMess ? r2(messRate * Number(ent.MessDays || 0)) : 0;
     const manualFine = Number(ent.Fine || 0);
     const eobi       = emp.HasEOBI ? Number(emp.EOBI || 0) : 0;
     const hold       = Number(ent.Hold || 0);
@@ -119,7 +126,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
         basic, prorated, fuel, adjustment,
         additions,
         lateRate, absentRate,
-        absentFine, lateFine, advance, messDeduction: messDeduc, manualFine, eobi, hold, tax,
+        absentFine, lateFine, advance, messRate, messDeduction: messDeduc, manualFine, eobi, hold, tax,
         deductions,
         net,
     };

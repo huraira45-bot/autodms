@@ -68,6 +68,7 @@ import Employees          from './pages/Employees';
 import HRSettings         from './pages/HRSettings';
 import HrAttendance       from './pages/hr/HrAttendance';
 import HrSalarySheet      from './pages/hr/HrSalarySheet';
+import HrMessSheet        from './pages/hr/HrMessSheet';
 import HrEmployeeSalary   from './pages/hr/HrEmployeeSalary';
 import HrFineSettings     from './pages/hr/HrFineSettings';
 import HrDeptSalaryAccounts from './pages/hr/HrDeptSalaryAccounts';
@@ -1306,6 +1307,9 @@ function AppShell() {
                     } />
                     <Route path="/hr/salary-sheet" element={
                         <ProtectedRoute moduleKey="hr_salary"><HrSalarySheet /></ProtectedRoute>
+                    } />
+                    <Route path="/hr/mess-sheet" element={
+                        <ProtectedRoute moduleKey="hr_salary"><HrMessSheet /></ProtectedRoute>
                     } />
                     <Route path="/hr/fine-settings" element={
                         <ProtectedRoute moduleKey="hr_settings"><HrFineSettings /></ProtectedRoute>
