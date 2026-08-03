@@ -165,13 +165,13 @@ export default function HrMessSheet() {
                                 <table className="hr-sheet-tbl">
                                     <thead>
                                         <tr>
-                                            <th style={{ width: 40 }}>#</th>
-                                            <th style={{ width: 200 }}>Employee</th>
-                                            <th className="num" style={{ width: 110 }}>Default Rate</th>
-                                            <th className="num" style={{ width: 120 }}>Rate this month</th>
-                                            <th className="num" style={{ width: 100 }}>Mess Days</th>
-                                            <th className="num" style={{ width: 110 }}>Total</th>
-                                            <th style={{ width: 90 }}></th>
+                                            <th style={{ width: 44 }}>#</th>
+                                            <th style={{ width: 240 }}>Employee</th>
+                                            <th className="num" style={{ width: 150 }}>Default Rate</th>
+                                            <th className="num" style={{ width: 180 }}>Rate this month</th>
+                                            <th className="num" style={{ width: 150 }}>Mess Days</th>
+                                            <th className="num" style={{ width: 160 }}>Total</th>
+                                            <th style={{ width: 100 }}></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -233,19 +233,19 @@ export default function HrMessSheet() {
                 .hr-dept-name  { font-weight: 700; font-size: 13px; color: var(--erp-text); text-transform: uppercase; letter-spacing: 0.3px; }
                 .hr-dept-count { font-size: 11px; color: var(--erp-text-muted); }
                 .hr-sheet-tbl-wrap { overflow-x: auto; }
-                .hr-sheet-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-                .hr-sheet-tbl thead th { padding: 6px 8px; background: #fafafb; border-bottom: 1px solid var(--erp-border);
-                                         text-align: left; font-size: 10.5px; font-weight: 600; color: var(--erp-text-muted);
+                .hr-sheet-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+                .hr-sheet-tbl thead th { padding: 10px 12px; background: #fafafb; border-bottom: 1px solid var(--erp-border);
+                                         text-align: left; font-size: 12px; font-weight: 600; color: var(--erp-text-muted);
                                          text-transform: uppercase; letter-spacing: 0.3px; }
                 .hr-sheet-tbl thead th.num { text-align: right; }
-                .hr-sheet-tbl tbody td { padding: 3px 8px; border-bottom: 1px solid #f4f4f6; }
+                .hr-sheet-tbl tbody td { padding: 8px 12px; border-bottom: 1px solid #f4f4f6; }
                 .hr-sheet-tbl tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
                 .hr-sheet-tbl tbody tr.dirty { background: #fffbea; }
                 .hr-sheet-tbl tbody tr:hover { background: var(--erp-surface-hover); }
-                .hr-inp { width: 100%; height: 26px; padding: 0 6px; font-size: 11.5px; border: 1px solid var(--erp-border);
-                          border-radius: 3px; background: var(--erp-surface); color: var(--erp-text); font-variant-numeric: tabular-nums; }
+                .hr-inp { width: 100%; height: 38px; padding: 0 10px; font-size: 15px; border: 1.5px solid var(--erp-border);
+                          border-radius: 5px; background: var(--erp-surface); color: var(--erp-text); font-variant-numeric: tabular-nums; }
                 .hr-inp.num { text-align: right; }
-                .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1); }
+                .hr-inp:focus { outline: none; border-color: var(--erp-brand); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15); }
                 .hr-inp:disabled { background: #f7f7f9; color: var(--erp-text-muted); }
             `}</style>
         </div>
