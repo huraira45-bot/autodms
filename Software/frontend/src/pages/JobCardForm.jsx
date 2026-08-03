@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import KYCBanner from '../components/KYCBanner';
 import CampaignBox from '../components/CampaignBox';
 import { useFeedback } from '../context/FeedbackContext';
-import { fmtDate, toDTLocalInput, nowDTLocalInput } from '../utils/datetime';
+import { fmtDTLong, toDTLocalInput, nowDTLocalInput } from '../utils/datetime';
 import SearchableSelect from '../components/SearchableSelect';
 
 const API = '/api/workshop';
@@ -868,7 +868,7 @@ export default function JobCardForm() {
         <span style={S.roLabel}>DMS Job Card No:</span>
         <input style={{ ...S.roInput, width: 120 }} value={form.DMSJobCardNo} onChange={e => !disabled && f('DMSJobCardNo', e.target.value)} readOnly={disabled} placeholder="required to finalize" />
         {createdByName && <span style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 4, color: '#2a5a8a', fontSize: 11 }}><UserCircle size={12} /> Created: <strong>{createdByName}</strong></span>}
-        {isFinalized && finalizedByName && <span style={{ color: '#92400e', fontSize: 11 }}>| Finalized by: <strong>{finalizedByName}</strong>{finalizedAt ? ` on ${fmtDate(finalizedAt)}` : ''}</span>}
+        {isFinalized && finalizedByName && <span style={{ color: '#92400e', fontSize: 11 }}>| Finalized by: <strong>{finalizedByName}</strong>{finalizedAt ? ` on ${fmtDTLong(finalizedAt)}` : ''}</span>}
       </div>
 
       {statusMsg && <div style={{ background: '#dcfce7', color: '#166534', padding: '4px 10px', fontSize: 11 }}>{statusMsg}</div>}
