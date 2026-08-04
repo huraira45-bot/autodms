@@ -140,6 +140,11 @@ export default function HrSalarySheet() {
     const totals = useMemo(() => {
         if (!sheet) return null;
         const t = { additions: 0, deductions: 0, net: 0,
+                    // Owner ask 2026-08-04: segregate the single Deductions
+                    // total into its components — same 8 fields
+                    // salaryCalculator.js already sums into r.Calc.deductions.
+                    absentFine: 0, lateFine: 0, advance: 0, manualFine: 0,
+                    eobiDeduction: 0, hold: 0, tax: 0, messDeduction: 0,
                     bankEobi: 0, bankEobiCount: 0,
                     cashEobi: 0, cashEobiCount: 0,
                     cashNon:  0, cashNonCount:  0,
@@ -148,6 +153,14 @@ export default function HrSalarySheet() {
             t.additions  += r.Calc.additions;
             t.deductions += r.Calc.deductions;
             t.net        += r.Calc.net;
+            t.absentFine    += r.Calc.absentFine;
+            t.lateFine      += r.Calc.lateFine;
+            t.advance       += r.Calc.advance;
+            t.manualFine    += r.Calc.manualFine;
+            t.eobiDeduction += r.Calc.eobi;
+            t.hold          += r.Calc.hold;
+            t.tax           += r.Calc.tax;
+            t.messDeduction += r.Calc.messDeduction;
             if (r.Calc.net <= 0) return;
             t.empCount++;
             const eobi = !!r.Employee.HasEOBI;
@@ -202,6 +215,20 @@ export default function HrSalarySheet() {
                         <Kpi label="Cash — EOBI"     value={fmt(totals?.cashEobi)}     sub={`${totals?.cashEobiCount} emp`} />
                         <Kpi label="Cash — Non-EOBI" value={fmt(totals?.cashNon)}      sub={`${totals?.cashNonCount} emp`} />
                         <Kpi label="Late / min" value={fmt(sheet.effectiveLateRate)} />
+                    </div>
+
+                    {/* Owner ask 2026-08-04: segregate the single Deductions
+                        total above into its components. */}
+                    <div className="hr-kpi-group-label">Deductions Breakdown</div>
+                    <div className="hr-kpi-row hr-kpi-row-ded">
+                        <Kpi label="Absent Fine" value={fmt(totals?.absentFine)} tone="down" />
+                        <Kpi label="Late Fine"   value={fmt(totals?.lateFine)}   tone="down" />
+                        <Kpi label="Advance"     value={fmt(totals?.advance)}    tone="down" />
+                        <Kpi label="Fine"        value={fmt(totals?.manualFine)} tone="down" />
+                        <Kpi label="EOBI"        value={fmt(totals?.eobiDeduction)} tone="down" />
+                        <Kpi label="Hold"        value={fmt(totals?.hold)}       tone="down" />
+                        <Kpi label="Tax"         value={fmt(totals?.tax)}        tone="down" />
+                        <Kpi label="Mess"        value={fmt(totals?.messDeduction)} tone="down" />
                     </div>
 
                     <div className="hr-actions">
@@ -441,6 +468,11 @@ function PageStyles() {
             .hr-kpi-down .hr-kpi-v { color: var(--erp-red); }
             .hr-kpi-net { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border-color: #bbf7d0; }
             .hr-kpi-net .hr-kpi-v { color: #166534; }
+            .hr-kpi-group-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+                                   letter-spacing: 0.4px; color: var(--erp-text-muted); margin: 4px 2px 0; }
+            .hr-kpi-row-ded { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); margin-top: 4px; }
+            .hr-kpi-row-ded .hr-kpi { padding: 6px 10px; background: #fef2f2; border-color: #fecaca; }
+            .hr-kpi-row-ded .hr-kpi-v { font-size: 13px; }
 
             .hr-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
             .hr-actions .erp-btn { text-decoration: none; }
