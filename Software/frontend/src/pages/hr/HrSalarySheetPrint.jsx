@@ -74,6 +74,28 @@ export default function HrSalarySheetPrint() {
                         <span className="dept-count">{g.rows.length} employees</span>
                     </div>
                     <table className="sheet-tbl">
+                        {/* Fixed % widths (sum to 100) so 16 columns always fit one A4-landscape
+                            page-width — without this, table-layout:auto squeezes Employee/
+                            Designation down to nothing and wraps names letter-by-letter
+                            (owner report 2026-08-04: "wied", "follow the A4 rule"). */}
+                        <colgroup>
+                            <col style={{ width: '4%' }} />
+                            <col style={{ width: '13%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '6%' }} />
+                            <col style={{ width: '6%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '6%' }} />
+                            <col style={{ width: '6%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '5%' }} />
+                            <col style={{ width: '7%' }} />
+                            <col style={{ width: '6%' }} />
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>Sr</th><th>Employee</th><th>Designation</th>
@@ -97,7 +119,7 @@ export default function HrSalarySheetPrint() {
                                 <tr key={r.EmployeeID}>
                                     <td>{r.SrNo || i+1}</td>
                                     <td className="emp">{r.Name}</td>
-                                    <td>{r.Designation || ''}</td>
+                                    <td className="desig">{r.Designation || ''}</td>
                                     <td className="num">{fmt(r.Calc.basic)}</td>
                                     <td className="num">{fmt(r.Calc.prorated)}</td>
                                     <td className="num">{fmt(r.Calc.fuel)}</td>
@@ -163,13 +185,15 @@ export default function HrSalarySheetPrint() {
                 .dept-head { background: #1f2937; color: #fff; padding: 4px 10px; display: flex; justify-content: space-between; align-items: center; }
                 .dept-name { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
                 .dept-count { font-size: 10px; opacity: 0.85; }
-                .sheet-tbl { width: 100%; border-collapse: collapse; }
-                .sheet-tbl th, .sheet-tbl td { padding: 3px 5px; border: 1px solid #94a3b8; font-size: 10px; }
+                .sheet-tbl { width: 100%; table-layout: fixed; border-collapse: collapse; }
+                .sheet-tbl th, .sheet-tbl td { padding: 3px 5px; border: 1px solid #94a3b8; font-size: 9px;
+                                                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .sheet-tbl th { background: #e5e7eb; text-align: left; }
                 .sheet-tbl th.net { background: #fef3c7; }
-                .sheet-tbl .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+                .sheet-tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
                 .sheet-tbl .net { background: #fffbeb; font-weight: 700; }
                 .sheet-tbl .emp { font-weight: 600; }
+                .sheet-tbl .desig { color: #444; }
                 .sheet-tbl tr.subtot td { background: #f8fafc; font-weight: 700; }
                 .sheet-tbl tr.subtot td.right { text-align: right; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.3px; }
                 .grand { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #111827; color: #fff; margin-top: 8px; }
