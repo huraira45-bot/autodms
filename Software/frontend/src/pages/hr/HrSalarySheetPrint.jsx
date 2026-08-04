@@ -164,8 +164,16 @@ export default function HrSalarySheetPrint() {
 
             <style>{`
                 @page { size: A4 landscape; margin: 8mm; }
-                html, body { margin: 0; background: white !important; }
-                .sheet { font-family: Arial, sans-serif; font-size: 10px; color: #000; padding: 6mm; }
+                html, body { margin: 0; width: 100%; background: white !important; }
+                /* Owner report 2026-08-04: printed sheet left a large blank
+                   strip on the right instead of covering the page. @page
+                   already reserves 8mm all round -- .sheet's own padding was
+                   compounding on top of that AND it had no explicit width,
+                   so it wasn't reliably filling the page's content box.
+                   box-sizing:border-box + width:100% guarantees it always
+                   does, regardless of its own padding. */
+                .sheet { box-sizing: border-box; width: 100%; margin: 0 auto;
+                         font-family: Arial, sans-serif; font-size: 10px; color: #000; padding: 2mm 3mm; }
                 .meta { display: flex; gap: 20px; margin: 6px 0 12px; font-size: 10px; color: #333; }
                 .cat { margin-bottom: 14px; }
                 .cat-head { display: flex; justify-content: space-between; align-items: center;
