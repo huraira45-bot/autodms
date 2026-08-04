@@ -74,27 +74,28 @@ export default function HrSalarySheetPrint() {
                         <span className="dept-count">{g.rows.length} employees</span>
                     </div>
                     <table className="sheet-tbl">
-                        {/* Fixed % widths (sum to 100) so 16 columns always fit one A4-landscape
+                        {/* Fixed % widths (sum to 100) so 17 columns always fit one A4-landscape
                             page-width — without this, table-layout:auto squeezes Employee/
                             Designation down to nothing and wraps names letter-by-letter
                             (owner report 2026-08-04: "wied", "follow the A4 rule"). */}
                         <colgroup>
                             <col style={{ width: '4%' }} />
-                            <col style={{ width: '13%' }} />
-                            <col style={{ width: '11%' }} />
-                            <col style={{ width: '6%' }} />
-                            <col style={{ width: '6%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '6%' }} />
-                            <col style={{ width: '6%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '5.5%' }} />
+                            <col style={{ width: '5.5%' }} />
+                            <col style={{ width: '4.5%' }} />
                             <col style={{ width: '5%' }} />
                             <col style={{ width: '5%' }} />
+                            <col style={{ width: '4.5%' }} />
+                            <col style={{ width: '4.5%' }} />
+                            <col style={{ width: '4.5%' }} />
+                            <col style={{ width: '4.5%' }} />
+                            <col style={{ width: '4.5%' }} />
+                            <col style={{ width: '4.5%' }} />
+                            <col style={{ width: '6.5%' }} />
                             <col style={{ width: '5%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '7%' }} />
-                            <col style={{ width: '6%' }} />
+                            <col style={{ width: '10%' }} />
                         </colgroup>
                         <thead>
                             <tr>
@@ -112,6 +113,7 @@ export default function HrSalarySheetPrint() {
                                 <th className="num">Hold</th>
                                 <th className="num net">Net</th>
                                 <th>Mode</th>
+                                <th>Remarks</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -133,11 +135,13 @@ export default function HrSalarySheetPrint() {
                                     <td className="num">{fmt(r.Calc.hold)}</td>
                                     <td className="num net">{fmt(r.Calc.net)}</td>
                                     <td>{r.IsPaidByBank ? 'Bank' : 'Cash'}</td>
+                                    <td className="remarks">{r.Entry?.Remarks || ''}</td>
                                 </tr>
                             ))}
                             <tr className="subtot">
                                 <td colSpan={14} className="right">Department Subtotal — {g.name}</td>
                                 <td className="num net">{fmt(g.subtotal)}</td>
+                                <td></td>
                                 <td></td>
                             </tr>
                         </tbody>
@@ -202,6 +206,7 @@ export default function HrSalarySheetPrint() {
                 .sheet-tbl .net { background: #fffbeb; font-weight: 700; }
                 .sheet-tbl .emp { font-weight: 600; }
                 .sheet-tbl .desig { color: #444; }
+                .sheet-tbl .remarks { color: #444; font-style: italic; }
                 .sheet-tbl tr.subtot td { background: #f8fafc; font-weight: 700; }
                 .sheet-tbl tr.subtot td.right { text-align: right; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.3px; }
                 .grand { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #111827; color: #fff; margin-top: 8px; }

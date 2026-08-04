@@ -294,6 +294,7 @@ export default function HrSalarySheet() {
                                                     <th className="num" style={{ width: 85 }}>EOBI</th>
                                                     <th className="num net" style={{ width: 115 }}>Net</th>
                                                     <th style={{ width: 100 }}>Mode</th>
+                                                    <th style={{ width: 180 }}>Remarks</th>
                                                     <th style={{ width: 110 }}></th>
                                                 </tr>
                                             </thead>
@@ -354,6 +355,12 @@ export default function HrSalarySheet() {
                                                                         ? <span className="hr-pill hr-pill-bank">Bank · EOBI</span>
                                                                         : <span className="hr-pill hr-pill-cash">Cash · EOBI</span>)
                                                                     : <span className="hr-pill hr-pill-cash-non">Cash · Non-EOBI</span>}
+                                                            </td>
+                                                            <td>
+                                                                <input type="text" disabled={!canEdit}
+                                                                    value={draftedFor(r.EmployeeID, 'Remarks', r.Entry?.Remarks ?? '')}
+                                                                    onChange={e => patch(r.EmployeeID, 'Remarks', e.target.value)}
+                                                                    className="hr-inp" placeholder="Remarks…"/>
                                                             </td>
                                                             <td>
                                                                 {dirty && <button className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => saveOne(r.EmployeeID).then(load)}>Save</button>}
@@ -481,7 +488,7 @@ function PageStyles() {
             .hr-dept-tot b { color: #166534; font-weight: 700; }
 
             .hr-sheet-tbl-wrap { overflow-x: auto; }
-            .hr-sheet-tbl { width: 100%; min-width: 1900px; border-collapse: collapse; font-size: 13px; }
+            .hr-sheet-tbl { width: 100%; min-width: 2080px; border-collapse: collapse; font-size: 13px; }
             .hr-sheet-tbl thead th { position: sticky; top: 0; background: #fafafb; padding: 10px 12px;
                                      border-bottom: 1px solid var(--erp-border); text-align: left;
                                      font-size: 12px; font-weight: 600; color: var(--erp-text-muted);
