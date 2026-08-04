@@ -5,7 +5,14 @@
  * can reuse it.
  *
  * Net = max(0,
- *          (basicSalary × paidDays / monthDays)   -- prorated base
+ *          (basicSalary × paidDays / 30)          -- prorated base, fixed
+ *                                                     30-day divisor (owner
+ *                                                     ask 2026-08-04) —
+ *                                                     paidDays itself still
+ *                                                     defaults to the
+ *                                                     month's actual
+ *                                                     calendar days when
+ *                                                     nothing is overridden
  *        + fuelAllowance                          -- fixed if HasFuelAllowance
  *        + adjustment                             -- per-month manual
  *        - absentFine (attendance.absents × settings.absentFinePerDay)
@@ -73,7 +80,12 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const monthWorkingDays = m && Number.isFinite(Number(m.WorkingDays)) && Number(m.WorkingDays) > 0
         ? Number(m.WorkingDays) : null;
     const effectiveWorkingDays = empWorkingDays ?? monthWorkingDays;
-    const baseDays = effectiveWorkingDays ?? monthDays;
+    // Owner ask 2026-08-04: Basic Salary is always prorated against a fixed
+    // 30-day month (basic/30 × paidDays) — never the actual calendar length
+    // (28/29/30/31) and never the WorkingDays override. WorkingDays still
+    // drives what paidDays itself defaults to below; it just isn't the
+    // divisor anymore.
+    const baseDays = 30;
 
     let paidDays;
     if (ent.PaidDays !== undefined && ent.PaidDays !== null && ent.PaidDays !== '') {
@@ -81,6 +93,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     } else if (effectiveWorkingDays !== null) {
         paidDays = Math.max(0, effectiveWorkingDays - Number(att.Absents || 0));
     } else {
+        // Default: total days of that calendar month (owner ask 2026-08-04).
         paidDays = monthDays;
     }
     const prorated = r2((basic / baseDays) * paidDays);
@@ -122,7 +135,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     const net = Math.max(0, r2(additions - deductions));
 
     return {
-        monthDays, paidDays, effectiveWorkingDays, empWorkingDays, monthWorkingDays,
+        monthDays, baseDays, paidDays, effectiveWorkingDays, empWorkingDays, monthWorkingDays,
         basic, prorated, fuel, adjustment,
         additions,
         lateRate, absentRate,
