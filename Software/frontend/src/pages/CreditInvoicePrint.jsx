@@ -102,7 +102,10 @@ export default function CreditInvoicePrint() {
                         <td className="lbl">Address</td>
                         <td className="val" rowSpan={2}>{jc.Address || jc.CustomerAddress || '—'}</td>
                         <td className="lbl">Date:</td>
-                        <td className="val">{d(jc.JobCardDate || jc.CreatedAt)}</td>
+                        {/* Finalize date, not the JC's creation/receipt date
+                            (owner ask 2026-08-06) -- a credit invoice should
+                            read as of when the claim was actually finalized. */}
+                        <td className="val">{d(jc.FinalizedAt || jc.JobCardDate || jc.CreatedAt)}</td>
                     </tr>
                     <tr>
                         <td className="lbl">Mobile</td>
