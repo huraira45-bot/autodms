@@ -263,7 +263,15 @@ function sumLegacyRows(rows) {
     return t;
 }
 
-const LEGACY_COL_WIDTHS = [2.5, 9, 8, 4, 5, 2.5, 5, 4, 3, 4, 3, 4, 3, 3.5, 3.5, 4, 3.5, 3.5, 3.5, 5, 5, 2.5, 9];
+// Owner report 2026-08-06: numeric values (esp. department/grand totals
+// like "3,743,723") were getting truncated with "..." or overlapping
+// adjacent columns. Widths below are sized for the largest realistic
+// formatted value per column at the print font-size (see .ltbl CSS) on
+// A3 landscape — money columns get enough room for 7-digit totals with
+// thousands separators; Name/Designation/Remarks can wrap onto a second
+// line instead of needing guaranteed single-line width, so they gave up
+// some of their share to the numeric columns. Sums to exactly 100.
+const LEGACY_COL_WIDTHS = [2, 8, 7, 3.5, 6, 2.2, 6, 4, 2.5, 4.3, 3, 4.3, 2.5, 4, 3, 4, 4, 4, 4, 5, 5.5, 3, 8.2];
 
 function CombinedLegacySheet({ sheet, monthId, grouped }) {
     const deptRows = useMemo(() => grouped.map(g => ({
@@ -419,34 +427,62 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
             </div>
 
             <style>{`
-                @page { size: A4 landscape; margin: 6mm; }
+                /* Owner ask 2026-08-06: numeric values were getting compressed,
+                   ellipsis-truncated, or overlapping adjacent columns. A3
+                   landscape gives ~44% more usable width than A4 landscape at
+                   the same margins, and every numeric cell below is explicit
+                   about never truncating/wrapping -- ellipsis and
+                   overflow:hidden are banned from .num entirely; only the
+                   free-text cells (Name/Designation/Remarks) are allowed to
+                   wrap onto a second line. Scoped to this component's own
+                   .lsheet/.ltbl classes only -- the normal on-screen Salary
+                   Sheet and the other (EOBI Bank/Cash, Non-EOBI) print
+                   variants are untouched. */
+                @page { size: A3 landscape; margin: 8mm; }
                 html, body { margin: 0; width: 100%; background: white !important; }
                 .lsheet { box-sizing: border-box; width: 100%; margin: 0 auto;
-                          font-family: Arial, sans-serif; font-size: 8px; color: #000; padding: 2mm 3mm; }
-                .ldept { margin-bottom: 6px; page-break-inside: avoid; }
-                .ldept-head { background: #e5e7eb; padding: 3px 8px; font-weight: 700; font-size: 9px;
+                          font-family: Arial, sans-serif; font-size: 8.5px; color: #000; padding: 2mm 3mm; }
+                .ldept { margin-bottom: 6px; break-inside: avoid; page-break-inside: avoid; }
+                .ldept-head { background: #e5e7eb; padding: 3px 8px; font-weight: 700; font-size: 9.5px;
                               letter-spacing: 0.3px; border: 1px solid #94a3b8; border-bottom: none; }
-                .ltbl { width: 100%; table-layout: fixed; border-collapse: collapse; }
-                .ltbl th, .ltbl td { padding: 2px 3px; border: 1px solid #94a3b8; font-size: 7.5px;
-                                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.15; }
-                .ltbl th { background: #f1f3f5; text-align: left; font-weight: 700; }
+                .ltbl { width: 100%; min-width: 380mm; table-layout: fixed; border-collapse: collapse; }
+                /* Header repeats on every printed page a table spans. */
+                .ltbl thead { display: table-header-group; }
+                .ltbl tfoot { display: table-footer-group; }
+                .ltbl th, .ltbl td { padding: 2px 4px; border: 1px solid #94a3b8; font-size: 8px; line-height: 1.2; }
+                .ltbl th { background: #f1f3f5; text-align: left; font-weight: 700; white-space: normal; }
                 .ltbl th.net { background: #fde68a; }
-                .ltbl .num { text-align: right; font-variant-numeric: tabular-nums; }
-                .ltbl .net { background: #fffbeb; font-weight: 700; }
+                /* Free-text columns: allowed to wrap, never truncated either. */
+                .ltbl td.emp, .ltbl td.desig, .ltbl td.remarks { white-space: normal; overflow-wrap: break-word; word-break: break-word; }
                 .ltbl .emp { font-weight: 600; }
                 .ltbl .desig { color: #333; }
-                .ltbl .neg { color: #b91c1c; }
                 .ltbl .remarks { color: #444; font-style: italic; }
-                .ltbl tr.subtot td { background: #f1f3f5; font-weight: 700; }
-                .ltbl tr.grandrow td { background: #111827; color: #fff; font-weight: 700; font-size: 9px; padding: 4px 5px; }
+                /* Numeric columns: the whole point of this fix -- always
+                   complete, always inside their own cell, never wrapped,
+                   never ellipsis-truncated, never clipped. */
+                .ltbl .num, .ltbl th.num {
+                    text-align: right;
+                    font-variant-numeric: tabular-nums;
+                    white-space: nowrap !important;
+                    overflow: visible !important;
+                    text-overflow: clip !important;
+                }
+                .ltbl .neg { color: #b91c1c; }
+                .ltbl .net { background: #fffbeb; font-weight: 700; }
+                .ltbl tr { break-inside: avoid; page-break-inside: avoid; }
+                .ltbl tr.subtot td { background: #f1f3f5; font-weight: 700; white-space: nowrap; }
+                .ltbl tr.subtot td.num { overflow: visible; text-overflow: clip; }
+                .ltbl tr.grandrow { break-inside: avoid; page-break-inside: avoid; }
+                .ltbl tr.grandrow td { background: #111827; color: #fff; font-weight: 700; font-size: 9.5px; padding: 4px 6px;
+                                        white-space: nowrap; overflow: visible; text-overflow: clip; }
                 .grand-tbl { margin-top: 4px; }
                 .lnetpay { display: flex; gap: 10px; align-items: baseline; justify-content: flex-end;
-                           margin-top: 10px; padding-right: 8px; font-weight: 700; font-size: 12px; }
-                .lnetpay-amt { font-size: 15px; }
-                .lsigs { display: flex; gap: 20px; margin-top: 34px; padding: 0 10px; page-break-inside: avoid; }
+                           margin-top: 10px; padding-right: 8px; font-weight: 700; font-size: 12px; white-space: nowrap; }
+                .lnetpay-amt { font-size: 15px; white-space: nowrap; }
+                .lsigs { display: flex; gap: 20px; margin-top: 34px; padding: 0 10px; break-inside: avoid; page-break-inside: avoid; }
                 .lsig { flex: 1; text-align: center; font-size: 9px; }
                 .lline { border-bottom: 1px solid #000; padding-top: 26px; margin-bottom: 4px; }
-                @media screen { .lsheet { box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px auto; background: white; max-width: 297mm; } }
+                @media screen { .lsheet { box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px auto; background: white; max-width: 420mm; } }
             `}</style>
         </div>
     );
