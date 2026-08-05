@@ -10,12 +10,24 @@ const monthLabel = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { mont
 // ?type=eobi-cash → EOBI employees paid via cash
 // ?type=noneobi   → non-EOBI employees (always cash)
 // ?type=eobi      → all EOBI (bank + cash)
-// missing         → print all employees
+// missing         → single combined sheet, everyone together, department-
+//                    wise, no EOBI column and no EOBI/Non-EOBI distinction
+//                    anywhere (owner ask 2026-08-05)
 // No EOBI / Non-EOBI labels appear on the printed sheet (owner ask 2026-07-29).
 export default function HrSalarySheetPrint() {
     const { monthId } = useParams();
     const [qs] = useSearchParams();
     const type = qs.get('type');
+    // Owner ask 2026-08-05: a single combined (EOBI + non-EOBI together)
+    // sheet, department-wise, with no mention of EOBI anywhere on it. That's
+    // exactly the untyped/default print (already combines everyone by
+    // department, see the filter below) — it just still showed an EOBI
+    // deduction column. Only the untyped default drops that column; the
+    // existing EOBI Bank / EOBI Cash / Non-EOBI prints are unchanged.
+    const showEobiCol = !!type;
+    const colWidths = showEobiCol
+        ? [4, 12, 10, 5.5, 5.5, 4.5, 5, 5, 4.5, 4.5, 4.5, 4.5, 4.5, 4.5, 6.5, 5, 10]
+        : [4, 14.5, 12, 5.5, 5.5, 4.5, 5, 5, 4.5, 4.5, 4.5, 4.5, 4.5, 6.5, 5, 10];
     const [sheet, setSheet] = useState(null);
     const [err, setErr] = useState(null);
 
@@ -74,28 +86,14 @@ export default function HrSalarySheetPrint() {
                         <span className="dept-count">{g.rows.length} employees</span>
                     </div>
                     <table className="sheet-tbl">
-                        {/* Fixed % widths (sum to 100) so 17 columns always fit one A4-landscape
-                            page-width — without this, table-layout:auto squeezes Employee/
-                            Designation down to nothing and wraps names letter-by-letter
-                            (owner report 2026-08-04: "wied", "follow the A4 rule"). */}
+                        {/* Fixed % widths (sum to 100) so every column always fits one
+                            A4-landscape page-width — without this, table-layout:auto
+                            squeezes Employee/Designation down to nothing and wraps names
+                            letter-by-letter (owner report 2026-08-04: "wied", "follow the
+                            A4 rule"). Column count/widths shift when the EOBI column is
+                            dropped (owner ask 2026-08-05, see showEobiCol above). */}
                         <colgroup>
-                            <col style={{ width: '4%' }} />
-                            <col style={{ width: '12%' }} />
-                            <col style={{ width: '10%' }} />
-                            <col style={{ width: '5.5%' }} />
-                            <col style={{ width: '5.5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '4.5%' }} />
-                            <col style={{ width: '6.5%' }} />
-                            <col style={{ width: '5%' }} />
-                            <col style={{ width: '10%' }} />
+                            {colWidths.map((w, ci) => <col key={ci} style={{ width: `${w}%` }} />)}
                         </colgroup>
                         <thead>
                             <tr>
@@ -108,7 +106,7 @@ export default function HrSalarySheetPrint() {
                                 <th className="num">Adv</th>
                                 <th className="num">Mess</th>
                                 <th className="num">Fine</th>
-                                <th className="num">EOBI</th>
+                                {showEobiCol && <th className="num">EOBI</th>}
                                 <th className="num">Tax</th>
                                 <th className="num">Hold</th>
                                 <th className="num net">Net</th>
@@ -130,7 +128,7 @@ export default function HrSalarySheetPrint() {
                                     <td className="num">{fmt(r.Calc.advance)}</td>
                                     <td className="num">{fmt(r.Calc.messDeduction)}</td>
                                     <td className="num">{fmt(r.Calc.manualFine)}</td>
-                                    <td className="num">{fmt(r.Calc.eobi)}</td>
+                                    {showEobiCol && <td className="num">{fmt(r.Calc.eobi)}</td>}
                                     <td className="num">{fmt(r.Calc.tax)}</td>
                                     <td className="num">{fmt(r.Calc.hold)}</td>
                                     <td className="num net">{fmt(r.Calc.net)}</td>
@@ -139,7 +137,7 @@ export default function HrSalarySheetPrint() {
                                 </tr>
                             ))}
                             <tr className="subtot">
-                                <td colSpan={14} className="right">Department Subtotal — {g.name}</td>
+                                <td colSpan={showEobiCol ? 14 : 13} className="right">Department Subtotal — {g.name}</td>
                                 <td className="num net">{fmt(g.subtotal)}</td>
                                 <td></td>
                                 <td></td>

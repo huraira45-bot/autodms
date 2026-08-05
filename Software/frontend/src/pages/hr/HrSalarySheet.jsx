@@ -240,6 +240,10 @@ export default function HrSalarySheet() {
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
                         )}
+                        <a className="erp-btn" href={`/hr/salary/${monthId}/print`} target="_blank" rel="noreferrer"
+                           title="Everyone together, department-wise, no EOBI column">
+                            <Printer size={13}/> Sheet · All (Combined)
+                        </a>
                         <a className="erp-btn" href={`/hr/salary/${monthId}/print?type=eobi-bank`} target="_blank" rel="noreferrer">
                             <Printer size={13}/> Sheet · EOBI Bank
                         </a>
