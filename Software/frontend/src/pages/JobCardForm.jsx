@@ -284,15 +284,16 @@ export default function JobCardForm() {
           setFinalizedByName(jc.FinalizedByName || '');
           setFinalizedAt(jc.FinalizedAt || null);
 
-          // JC live balance (invoice total / paid / outstanding). Only meaningful
-          // once the JC has been finalized (an SI voucher exists).
-          if (jc.IsFinalized) {
-            axios.get(`/api/payments/jobcard-balance/${id}`)
-                .then(r => setBalance(r.data))
-                .catch(() => setBalance(null));
-          } else {
-            setBalance(null);
-          }
+          // JC live balance (invoice total / paid / outstanding / walk-in
+          // advance). getJobCardBalance computes a sensible invoiceTotal
+          // from raw line items even with no SI voucher yet, and walk-in
+          // advances (CUSTOMER_ADVANCE_RECEIVED ledger tagged to this JC)
+          // can exist before finalize too -- e.g. a deposit taken at
+          // intake -- so this isn't finalize-gated (owner report
+          // 2026-08-05: Advance always showed 0 on an unfinalized JC).
+          axios.get(`/api/payments/jobcard-balance/${id}`)
+              .then(r => setBalance(r.data))
+              .catch(() => setBalance(null));
           try {
             const navRes = await axios.get(`${API}/job-cards/${id}/navigation`);
             setNav(navRes.data);
@@ -2037,13 +2038,18 @@ export default function JobCardForm() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4, marginTop: 4 }}>
               {(() => {
-                const balance = +(totalPayable - totalDepPaid).toFixed(2);
+                // Local name avoids shadowing the outer `balance` state
+                // (the /payments/jobcard-balance API response) below.
+                const depBalance = +(totalPayable - totalDepPaid).toFixed(2);
                 const rows = [
-                  ['Advance', 0],
+                  // Walk-in advance actually collected against this JC
+                  // (CUSTOMER_ADVANCE_RECEIVED ledger tagged to it) --
+                  // was hardcoded to 0 before (owner report 2026-08-05).
+                  ['Advance', balance?.walkInAdvance || 0],
                   ['Payable', totalPayable],
                   ['Dep. Paid', totalDepPaid, '#7c2d12'],
                   ['Post Recovery', 0],
-                  ['Balance', balance, '#15803d'],
+                  ['Balance', depBalance, '#15803d'],
                 ];
                 return rows.map(([lbl, val, color]) => (
                   <div key={lbl} style={S.billField}>
