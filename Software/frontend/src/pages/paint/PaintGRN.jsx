@@ -173,7 +173,7 @@ export default function PaintGRN() {
 
     const buildPayload = () => ({
         GRNDate: form.GRNDate,
-        PartyID: form.PartyID,
+        PartyID: form.PartyID || null,
         SupplierBillNo: form.SupplierBillNo || null,
         PaintWHID: form.PaintWHID,
         Remarks: form.Remarks || null,
@@ -406,11 +406,11 @@ export default function PaintGRN() {
                                     <input className="field" type="date" value={form.GRNDate}
                                         onChange={e => patch('GRNDate', e.target.value)} />
                                 </label>
-                                <label>Supplier *
+                                <label>Supplier{form.PaymentMode !== 'CASH' ? ' *' : ''}
                                     <SearchableSelect value={form.PartyID}
                                         onChange={v => patch('PartyID', v)}
                                         options={partyOpts}
-                                        placeholder="Select supplier…"
+                                        placeholder={form.PaymentMode === 'CASH' ? 'Optional for cash…' : 'Select supplier…'}
                                         title="Pick supplier" />
                                 </label>
                                 <label>Warehouse *
@@ -443,7 +443,7 @@ export default function PaintGRN() {
                     {form.PaymentMode === 'CASH' && (
                         <div className="erp-alert info" style={{ padding: '6px 10px', fontSize: 12 }}>
                             Cash GRN — stock updates on finalize, but no GL voucher is posted at all (no Cash Book
-                            hit, no supplier payable). The supplier doesn't need a GL account linked.
+                            hit, no supplier payable). Supplier is optional — no GL account needed even if picked.
                         </div>
                     )}
 

@@ -119,9 +119,12 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
         PaymentMode = 'CREDIT', Lines = [],
     } = body;
     if (!GRNDate)   throw new Error('GRNDate required');
-    if (!PartyID)   throw new Error('PartyID required');
     if (!PaintWHID) throw new Error('PaintWHID required');
     if (!['CREDIT', 'CASH'].includes(PaymentMode)) throw new Error("PaymentMode must be 'CREDIT' or 'CASH'.");
+    // Credit GRNs need a party — that's who the payable is owed to. Cash
+    // GRNs are paid on the spot and never post a payable, so the supplier
+    // doesn't have to be on file at all (owner ask 2026-08-07).
+    if (PaymentMode === 'CREDIT' && !PartyID) throw new Error('Supplier is required for Credit GRNs.');
     if (!Array.isArray(Lines) || Lines.length === 0) throw new Error('At least one line required');
 
     const computed = Lines.map((l) => ({ src: l, calc: computeLineAmounts(l) }));
@@ -144,7 +147,7 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
             await new sql.Request(tx)
                 .input('id',  sql.Int, id)
                 .input('dt',  sql.Date, GRNDate)
-                .input('pid', sql.Int, PartyID)
+                .input('pid', sql.Int, PartyID || null)
                 .input('bn',  sql.NVarChar(100), SupplierBillNo || null)
                 .input('wh',  sql.Int, PaintWHID)
                 .input('rm',  sql.NVarChar(500), Remarks || null)
@@ -168,7 +171,7 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
             const ins = await new sql.Request(tx)
                 .input('no',  sql.NVarChar(30),  grnNo)
                 .input('dt',  sql.Date,          GRNDate)
-                .input('pid', sql.Int,           PartyID)
+                .input('pid', sql.Int,           PartyID || null)
                 .input('bn',  sql.NVarChar(100), SupplierBillNo || null)
                 .input('wh',  sql.Int,           PaintWHID)
                 .input('rm',  sql.NVarChar(500), Remarks || null)
