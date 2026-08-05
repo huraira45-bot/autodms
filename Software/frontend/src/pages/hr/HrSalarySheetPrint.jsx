@@ -295,6 +295,12 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                 {LEGACY_COL_WIDTHS.map((w, ci) => <col key={ci} style={{ width: `${w}%` }} />)}
                             </colgroup>
                             <thead>
+                                {/* Repeats with the rest of thead on every printed page this
+                                    department's table spans, so a continuation page still shows
+                                    which department the rows belong to (owner ask 2026-08-07). */}
+                                <tr>
+                                    <th colSpan={LEGACY_COL_WIDTHS.length} className="dept-repeat-head">{g.name.toUpperCase()} DEPARTMENT</th>
+                                </tr>
                                 <tr>
                                     <th>SR<br/>NO</th><th>NAME</th><th>DESIGNATION</th><th>A/C<br/>CODE</th>
                                     <th className="num">BASIC<br/>SALARY</th>
@@ -346,6 +352,12 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                         <td className="remarks">{r.remarks}</td>
                                     </tr>
                                 ))}
+                            </tbody>
+                            {/* Department total lives in a real tfoot now, displayed as an
+                                ordinary row-group (see .ltbl tfoot below) so it flows once,
+                                strictly after every employee row in this department, instead
+                                of repeating as a floating footer on each printed page. */}
+                            <tfoot>
                                 <tr className="subtot">
                                     <td colSpan={4}>{g.name.toUpperCase()} DEPARTMENT TOTAL</td>
                                     <td className="num">{money(t.basic)}</td>
@@ -368,7 +380,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                     <td className="num">{money(t.adj)}</td>
                                     <td></td>
                                 </tr>
-                            </tbody>
+                            </tfoot>
                         </table>
                     </section>
                 );
@@ -438,17 +450,36 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                    .lsheet/.ltbl classes only -- the normal on-screen Salary
                    Sheet and the other (EOBI Bank/Cash, Non-EOBI) print
                    variants are untouched. */
-                @page { size: A3 landscape; margin: 8mm; }
+                /* Owner report 2026-08-07: employees near the bottom of a page were
+                   being hidden/clipped instead of continuing onto the next page.
+                   Cause: .ldept (the department wrapper) had break-inside:avoid on
+                   a block that can run far taller than a single page -- when a
+                   block that large can't fit either on the remainder of the
+                   current page OR on a fresh page, "avoid" forces the browser into
+                   an all-or-nothing break that ends up clipping/hiding content
+                   instead of flowing it normally. Departments must be allowed to
+                   split across pages; only individual rows (and the two total
+                   rows) stay intact as a unit. */
+                @page { size: A3 landscape; margin: 10mm 8mm 14mm; }
                 html, body { margin: 0; width: 100%; background: white !important; }
                 .lsheet { box-sizing: border-box; width: 100%; margin: 0 auto;
                           font-family: Arial, sans-serif; font-size: 8.5px; color: #000; padding: 2mm 3mm; }
-                .ldept { margin-bottom: 6px; break-inside: avoid; page-break-inside: avoid; }
+                .ldept { margin-bottom: 6px; }
                 .ldept-head { background: #e5e7eb; padding: 3px 8px; font-weight: 700; font-size: 9.5px;
                               letter-spacing: 0.3px; border: 1px solid #94a3b8; border-bottom: none; }
                 .ltbl { width: 100%; min-width: 380mm; table-layout: fixed; border-collapse: collapse; }
-                /* Header repeats on every printed page a table spans. */
+                /* Header repeats on every printed page a table spans, including the
+                   department-name row -- so a department that continues onto a new
+                   page still shows which department the rows belong to. */
                 .ltbl thead { display: table-header-group; }
-                .ltbl tfoot { display: table-footer-group; }
+                .ltbl .dept-repeat-head { background: #1f2937; color: #fff; text-align: left;
+                                           font-size: 9.5px; letter-spacing: 0.4px; padding: 3px 6px; }
+                /* table-row-group (not table-footer-group): the department total must
+                   flow once, right after that department's own rows -- never repeat
+                   as a floating footer on every page, and never appear before all
+                   employee rows have rendered. */
+                .ltbl tfoot { display: table-row-group; }
+                .ltbl tbody { break-inside: auto; page-break-inside: auto; }
                 .ltbl th, .ltbl td { padding: 2px 4px; border: 1px solid #94a3b8; font-size: 8px; line-height: 1.2; }
                 .ltbl th { background: #f1f3f5; text-align: left; font-weight: 700; white-space: normal; }
                 .ltbl th.net { background: #fde68a; }
