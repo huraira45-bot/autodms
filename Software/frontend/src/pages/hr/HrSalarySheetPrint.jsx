@@ -3,31 +3,28 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../../components/PrintBusinessHeader';
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt   = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Legacy sheet shows whole rupees, no paisa (owner-supplied reference PDF,
+// 2026-08-05) — separate formatter so the other print variants are untouched.
+const money = (n) => Math.round(Number(n) || 0).toLocaleString('en-PK');
+// Day-count columns (Days, Leave, Absent, Work Days) show a decimal only
+// when the value actually has one (26, 24.5, 21.5 — never "26.0").
+const days  = (n) => { const v = Number(n) || 0; return Number.isInteger(v) ? String(v) : v.toFixed(1); };
 const monthLabel = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
 
 // ?type=eobi-bank → EOBI employees paid via bank
 // ?type=eobi-cash → EOBI employees paid via cash
 // ?type=noneobi   → non-EOBI employees (always cash)
 // ?type=eobi      → all EOBI (bank + cash)
-// missing         → single combined sheet, everyone together, department-
-//                    wise, no EOBI column and no EOBI/Non-EOBI distinction
-//                    anywhere (owner ask 2026-08-05)
+// missing         → single combined sheet, department-wise, everyone
+//                    together, laid out exactly like the legacy Changan
+//                    payroll sheet (owner-supplied reference PDF, owner ask
+//                    2026-08-05) — no EOBI/Non-EOBI distinction anywhere.
 // No EOBI / Non-EOBI labels appear on the printed sheet (owner ask 2026-07-29).
 export default function HrSalarySheetPrint() {
     const { monthId } = useParams();
     const [qs] = useSearchParams();
     const type = qs.get('type');
-    // Owner ask 2026-08-05: a single combined (EOBI + non-EOBI together)
-    // sheet, department-wise, with no mention of EOBI anywhere on it. That's
-    // exactly the untyped/default print (already combines everyone by
-    // department, see the filter below) — it just still showed an EOBI
-    // deduction column. Only the untyped default drops that column; the
-    // existing EOBI Bank / EOBI Cash / Non-EOBI prints are unchanged.
-    const showEobiCol = !!type;
-    const colWidths = showEobiCol
-        ? [4, 12, 10, 5.5, 5.5, 4.5, 5, 5, 4.5, 4.5, 4.5, 4.5, 4.5, 4.5, 6.5, 5, 10]
-        : [4, 14.5, 12, 5.5, 5.5, 4.5, 5, 5, 4.5, 4.5, 4.5, 4.5, 4.5, 6.5, 5, 10];
     const [sheet, setSheet] = useState(null);
     const [err, setErr] = useState(null);
 
@@ -65,6 +62,8 @@ export default function HrSalarySheetPrint() {
     if (err)    return <div style={{ padding: 40, color: '#b91c1c' }}>Cannot print: {err}</div>;
     if (!sheet) return <div style={{ padding: 40 }}>Loading…</div>;
 
+    if (!type) return <CombinedLegacySheet sheet={sheet} monthId={monthId} grouped={grouped} />;
+
     const empCount = grouped.reduce((s, g) => s + g.rows.length, 0);
     const totalNet = grouped.reduce((s, g) => s + g.subtotal, 0);
 
@@ -90,10 +89,10 @@ export default function HrSalarySheetPrint() {
                             A4-landscape page-width — without this, table-layout:auto
                             squeezes Employee/Designation down to nothing and wraps names
                             letter-by-letter (owner report 2026-08-04: "wied", "follow the
-                            A4 rule"). Column count/widths shift when the EOBI column is
-                            dropped (owner ask 2026-08-05, see showEobiCol above). */}
+                            A4 rule"). */}
                         <colgroup>
-                            {colWidths.map((w, ci) => <col key={ci} style={{ width: `${w}%` }} />)}
+                            {[4, 12, 10, 5.5, 5.5, 4.5, 5, 5, 4.5, 4.5, 4.5, 4.5, 4.5, 4.5, 6.5, 5, 10]
+                                .map((w, ci) => <col key={ci} style={{ width: `${w}%` }} />)}
                         </colgroup>
                         <thead>
                             <tr>
@@ -106,7 +105,7 @@ export default function HrSalarySheetPrint() {
                                 <th className="num">Adv</th>
                                 <th className="num">Mess</th>
                                 <th className="num">Fine</th>
-                                {showEobiCol && <th className="num">EOBI</th>}
+                                <th className="num">EOBI</th>
                                 <th className="num">Tax</th>
                                 <th className="num">Hold</th>
                                 <th className="num net">Net</th>
@@ -128,7 +127,7 @@ export default function HrSalarySheetPrint() {
                                     <td className="num">{fmt(r.Calc.advance)}</td>
                                     <td className="num">{fmt(r.Calc.messDeduction)}</td>
                                     <td className="num">{fmt(r.Calc.manualFine)}</td>
-                                    {showEobiCol && <td className="num">{fmt(r.Calc.eobi)}</td>}
+                                    <td className="num">{fmt(r.Calc.eobi)}</td>
                                     <td className="num">{fmt(r.Calc.tax)}</td>
                                     <td className="num">{fmt(r.Calc.hold)}</td>
                                     <td className="num net">{fmt(r.Calc.net)}</td>
@@ -137,7 +136,7 @@ export default function HrSalarySheetPrint() {
                                 </tr>
                             ))}
                             <tr className="subtot">
-                                <td colSpan={showEobiCol ? 14 : 13} className="right">Department Subtotal — {g.name}</td>
+                                <td colSpan={14} className="right">Department Subtotal — {g.name}</td>
                                 <td className="num net">{fmt(g.subtotal)}</td>
                                 <td></td>
                                 <td></td>
@@ -177,20 +176,6 @@ export default function HrSalarySheetPrint() {
                 .sheet { box-sizing: border-box; width: 100%; margin: 0 auto;
                          font-family: Arial, sans-serif; font-size: 10px; color: #000; padding: 2mm 3mm; }
                 .meta { display: flex; gap: 20px; margin: 6px 0 12px; font-size: 10px; color: #333; }
-                .cat { margin-bottom: 14px; }
-                .cat-head { display: flex; justify-content: space-between; align-items: center;
-                            padding: 6px 12px; color: #fff; font-weight: 700; font-size: 11px;
-                            text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
-                .cat-eobi    .cat-head { background: #7c3aed; }
-                .cat-noneobi .cat-head { background: #b91c1c; }
-                .cat-meta { font-size: 10px; opacity: 0.95; text-transform: none; letter-spacing: 0.3px; }
-                .cat-total { display: flex; justify-content: space-between; align-items: center;
-                             padding: 6px 12px; background: #f8fafc; border: 1px solid #cbd5e1;
-                             font-weight: 700; font-size: 10.5px; text-transform: uppercase;
-                             letter-spacing: 0.3px; margin-top: 4px; }
-                .cat-total-amt { font-size: 12px; }
-                .cat-eobi    .cat-total-amt { color: #7c3aed; }
-                .cat-noneobi .cat-total-amt { color: #b91c1c; }
                 .dept { margin-bottom: 8px; page-break-inside: avoid; }
                 .dept-head { background: #1f2937; color: #fff; padding: 4px 10px; display: flex; justify-content: space-between; align-items: center; }
                 .dept-name { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; }
@@ -213,6 +198,255 @@ export default function HrSalarySheetPrint() {
                 .sig { flex: 1; text-align: center; font-size: 10px; }
                 .sig .line { border-bottom: 1px solid #000; padding-top: 30px; margin-bottom: 4px; }
                 @media screen { .sheet { box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px auto; background: white; max-width: 297mm; } }
+            `}</style>
+        </div>
+    );
+}
+
+// ============================================================================
+// CombinedLegacySheet — recreates the legacy Changan payroll sheet layout
+// exactly (owner-supplied reference PDF, owner ask 2026-08-05): SR/NAME/
+// DESIGNATION/A-C CODE/BASIC/DAYS/TOTAL SALARY/FUEL/ABSENT/ABSENT FINE/
+// LATE MIN/LATE FINE/LEAVE/ADV/WORK DAYS/MESS DEDUCT/FINE/EOBI/HOLD/NET
+// PAY/HOLD+NET+ADV/ADJ/REMARKS, department blocks + department totals +
+// one grand total row, 5 signature blocks. No new backend fields needed —
+// everything comes from the existing salary-sheet response (Calc/
+// Attendance/Entry/AccountCode already carry all of it).
+// ============================================================================
+function legacyRow(r, i) {
+    const c = r.Calc;
+    const att = r.Attendance || {};
+    const leave = Number(att.LeaveDays) || 0;
+    const absent = Number(att.Absents) || 0;
+    // "Work Days" is a reference figure only (this sheet's own "Days" column
+    // — the actual paid-days input — can be set independently, e.g. a
+    // company-wide partial-period run). effectiveWorkingDays already
+    // resolves per-employee override -> month setting, matching the
+    // legacy sheet's fixed per-month standard (26 in the reference PDF).
+    const stdWorkDays = c.effectiveWorkingDays != null ? c.effectiveWorkingDays : (c.monthWorkingDays || 0);
+    const workDays = Math.max(0, stdWorkDays - leave - absent);
+    return {
+        key: r.EmployeeID,
+        sr: r.SrNo || i + 1,
+        name: r.Name,
+        designation: r.Designation || '',
+        acCode: r.AccountCode || '',
+        basic: c.basic,
+        paidDays: c.paidDays,
+        totalSalary: c.prorated,
+        fuel: c.fuel,
+        absent,
+        absentFine: c.absentFine,
+        lateMin: Number(att.LateMinutes) || 0,
+        lateFine: c.lateFine,
+        leave,
+        adv: c.advance,
+        workDays,
+        messDeduct: c.messDeduction,
+        fine: c.manualFine,
+        eobi: c.eobi,
+        hold: c.hold,
+        netPay: c.net,
+        holdNetAdv: +(c.hold + c.net + c.advance).toFixed(2),
+        adj: 0,
+        remarks: r.Entry?.Remarks || '',
+    };
+}
+
+const LEGACY_SUM_FIELDS = ['basic', 'totalSalary', 'fuel', 'absent', 'absentFine', 'lateMin', 'lateFine',
+    'leave', 'adv', 'workDays', 'messDeduct', 'fine', 'eobi', 'hold', 'netPay', 'holdNetAdv', 'adj'];
+
+function sumLegacyRows(rows) {
+    const t = {};
+    for (const f of LEGACY_SUM_FIELDS) t[f] = 0;
+    for (const r of rows) for (const f of LEGACY_SUM_FIELDS) t[f] += Number(r[f]) || 0;
+    return t;
+}
+
+const LEGACY_COL_WIDTHS = [2.5, 9, 8, 4, 5, 2.5, 5, 4, 3, 4, 3, 4, 3, 3.5, 3.5, 4, 3.5, 3.5, 3.5, 5, 5, 2.5, 9];
+
+function CombinedLegacySheet({ sheet, monthId, grouped }) {
+    const deptRows = useMemo(() => grouped.map(g => ({
+        name: g.name,
+        rows: g.rows.map((r, i) => legacyRow(r, i)),
+    })), [grouped]);
+    const grand = useMemo(() => sumLegacyRows(deptRows.flatMap(g => g.rows)), [deptRows]);
+    const empCount = deptRows.reduce((s, g) => s + g.rows.length, 0);
+
+    return (
+        <div className="lsheet">
+            <PrintBusinessHeader docTitle="Salary Sheet" docSubtitle={`FMO ${monthLabel(monthId).toUpperCase()}`} showOnScreen/>
+
+            {deptRows.map(g => {
+                const t = sumLegacyRows(g.rows);
+                return (
+                    <section key={g.name} className="ldept">
+                        <div className="ldept-head">{g.name.toUpperCase()} DEPARTMENT</div>
+                        <table className="ltbl">
+                            <colgroup>
+                                {LEGACY_COL_WIDTHS.map((w, ci) => <col key={ci} style={{ width: `${w}%` }} />)}
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>SR<br/>NO</th><th>NAME</th><th>DESIGNATION</th><th>A/C<br/>CODE</th>
+                                    <th className="num">BASIC<br/>SALARY</th>
+                                    <th className="num">DAYS</th>
+                                    <th className="num">TOTAL<br/>SALARY</th>
+                                    <th className="num">FUEL<br/>ALLOW</th>
+                                    <th className="num">ABSENT</th>
+                                    <th className="num">ABSENT<br/>FINE</th>
+                                    <th className="num">LATE<br/>MIN</th>
+                                    <th className="num">LATE<br/>FINE</th>
+                                    <th className="num">LEAVE</th>
+                                    <th className="num">ADV</th>
+                                    <th className="num">WORK<br/>DAYS</th>
+                                    <th className="num">MESS<br/>DEDUCT</th>
+                                    <th className="num">FINE</th>
+                                    <th className="num">EOBI</th>
+                                    <th className="num">HOLD</th>
+                                    <th className="num net">NET<br/>PAY</th>
+                                    <th className="num">HOLD+NET<br/>+ADV</th>
+                                    <th className="num">ADJ</th>
+                                    <th>REMARKS</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {g.rows.map(r => (
+                                    <tr key={r.key}>
+                                        <td>{r.sr}</td>
+                                        <td className="emp">{r.name}</td>
+                                        <td className="desig">{r.designation}</td>
+                                        <td>{r.acCode}</td>
+                                        <td className="num">{money(r.basic)}</td>
+                                        <td className="num">{days(r.paidDays)}</td>
+                                        <td className="num">{money(r.totalSalary)}</td>
+                                        <td className="num">{r.fuel ? money(r.fuel) : '-'}</td>
+                                        <td className="num">{days(r.absent)}</td>
+                                        <td className="num neg">{r.absentFine ? money(r.absentFine) : '0'}</td>
+                                        <td className="num">{days(r.lateMin)}</td>
+                                        <td className="num neg">{r.lateFine ? money(r.lateFine) : '0'}</td>
+                                        <td className="num">{days(r.leave)}</td>
+                                        <td className="num">{r.adv ? money(r.adv) : '0'}</td>
+                                        <td className="num">{days(r.workDays)}</td>
+                                        <td className="num">{r.messDeduct ? money(r.messDeduct) : '-'}</td>
+                                        <td className="num">{r.fine ? money(r.fine) : '0'}</td>
+                                        <td className="num">{r.eobi ? money(r.eobi) : '-'}</td>
+                                        <td className="num">{r.hold ? money(r.hold) : '0'}</td>
+                                        <td className="num net">{money(r.netPay)}</td>
+                                        <td className="num">{money(r.holdNetAdv)}</td>
+                                        <td className="num">{money(r.adj)}</td>
+                                        <td className="remarks">{r.remarks}</td>
+                                    </tr>
+                                ))}
+                                <tr className="subtot">
+                                    <td colSpan={4}>{g.name.toUpperCase()} DEPARTMENT TOTAL</td>
+                                    <td className="num">{money(t.basic)}</td>
+                                    <td></td>
+                                    <td className="num">{money(t.totalSalary)}</td>
+                                    <td className="num">{money(t.fuel)}</td>
+                                    <td className="num">{days(t.absent)}</td>
+                                    <td className="num">{money(t.absentFine)}</td>
+                                    <td className="num">{days(t.lateMin)}</td>
+                                    <td className="num">{money(t.lateFine)}</td>
+                                    <td className="num">{days(t.leave)}</td>
+                                    <td className="num">{money(t.adv)}</td>
+                                    <td className="num">{days(t.workDays)}</td>
+                                    <td className="num">{money(t.messDeduct)}</td>
+                                    <td className="num">{money(t.fine)}</td>
+                                    <td className="num">{money(t.eobi)}</td>
+                                    <td className="num">{money(t.hold)}</td>
+                                    <td className="num net">{money(t.netPay)}</td>
+                                    <td className="num">{money(t.holdNetAdv)}</td>
+                                    <td className="num">{money(t.adj)}</td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </section>
+                );
+            })}
+
+            {!deptRows.length && (
+                <div style={{ padding: 20, background: '#fef3c7', border: '1px solid #fcd34d' }}>
+                    No employees in this payroll for {monthLabel(monthId)}.
+                </div>
+            )}
+
+            <table className="ltbl grand-tbl">
+                <colgroup>
+                    {LEGACY_COL_WIDTHS.map((w, ci) => <col key={ci} style={{ width: `${w}%` }} />)}
+                </colgroup>
+                <tbody>
+                    <tr className="grandrow">
+                        <td colSpan={4}>GRAND TOTALS</td>
+                        <td className="num">{money(grand.basic)}</td>
+                        <td></td>
+                        <td className="num">{money(grand.totalSalary)}</td>
+                        <td className="num">{money(grand.fuel)}</td>
+                        <td className="num">{days(grand.absent)}</td>
+                        <td className="num">{money(grand.absentFine)}</td>
+                        <td className="num">{days(grand.lateMin)}</td>
+                        <td className="num">{money(grand.lateFine)}</td>
+                        <td className="num">{days(grand.leave)}</td>
+                        <td className="num">{money(grand.adv)}</td>
+                        <td className="num">{days(grand.workDays)}</td>
+                        <td className="num">{money(grand.messDeduct)}</td>
+                        <td className="num">{money(grand.fine)}</td>
+                        <td className="num">{money(grand.eobi)}</td>
+                        <td className="num">{money(grand.hold)}</td>
+                        <td className="num net">{money(grand.netPay)}</td>
+                        <td className="num">{money(grand.holdNetAdv)}</td>
+                        <td className="num">{money(grand.adj)}</td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div className="lnetpay">
+                <span>NET PAYABLE:</span>
+                <span className="lnetpay-amt">{money(grand.netPay)}</span>
+            </div>
+            <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>
+                {deptRows.length} department{deptRows.length === 1 ? '' : 's'} · {empCount} employees
+            </div>
+
+            <div className="lsigs">
+                <div className="lsig"><div className="lline"/><b>Prepared By</b></div>
+                <div className="lsig"><div className="lline"/><b>Checked By (Accounts)</b></div>
+                <div className="lsig"><div className="lline"/><b>Verified By (Audit)</b></div>
+                <div className="lsig"><div className="lline"/><b>HR Signature</b></div>
+                <div className="lsig"><div className="lline"/><b>CEO</b></div>
+            </div>
+
+            <style>{`
+                @page { size: A4 landscape; margin: 6mm; }
+                html, body { margin: 0; width: 100%; background: white !important; }
+                .lsheet { box-sizing: border-box; width: 100%; margin: 0 auto;
+                          font-family: Arial, sans-serif; font-size: 8px; color: #000; padding: 2mm 3mm; }
+                .ldept { margin-bottom: 6px; page-break-inside: avoid; }
+                .ldept-head { background: #e5e7eb; padding: 3px 8px; font-weight: 700; font-size: 9px;
+                              letter-spacing: 0.3px; border: 1px solid #94a3b8; border-bottom: none; }
+                .ltbl { width: 100%; table-layout: fixed; border-collapse: collapse; }
+                .ltbl th, .ltbl td { padding: 2px 3px; border: 1px solid #94a3b8; font-size: 7.5px;
+                                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.15; }
+                .ltbl th { background: #f1f3f5; text-align: left; font-weight: 700; }
+                .ltbl th.net { background: #fde68a; }
+                .ltbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+                .ltbl .net { background: #fffbeb; font-weight: 700; }
+                .ltbl .emp { font-weight: 600; }
+                .ltbl .desig { color: #333; }
+                .ltbl .neg { color: #b91c1c; }
+                .ltbl .remarks { color: #444; font-style: italic; }
+                .ltbl tr.subtot td { background: #f1f3f5; font-weight: 700; }
+                .ltbl tr.grandrow td { background: #111827; color: #fff; font-weight: 700; font-size: 9px; padding: 4px 5px; }
+                .grand-tbl { margin-top: 4px; }
+                .lnetpay { display: flex; gap: 10px; align-items: baseline; justify-content: flex-end;
+                           margin-top: 10px; padding-right: 8px; font-weight: 700; font-size: 12px; }
+                .lnetpay-amt { font-size: 15px; }
+                .lsigs { display: flex; gap: 20px; margin-top: 34px; padding: 0 10px; page-break-inside: avoid; }
+                .lsig { flex: 1; text-align: center; font-size: 9px; }
+                .lline { border-bottom: 1px solid #000; padding-top: 26px; margin-bottom: 4px; }
+                @media screen { .lsheet { box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px auto; background: white; max-width: 297mm; } }
             `}</style>
         </div>
     );
