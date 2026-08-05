@@ -245,6 +245,7 @@ function legacyRow(r, i) {
         messDeduct: c.messDeduction,
         fine: c.manualFine,
         eobi: c.eobi,
+        tax: c.tax,
         hold: c.hold,
         netPay: c.net,
         holdNetAdv: +(c.hold + c.net + c.advance).toFixed(2),
@@ -254,7 +255,7 @@ function legacyRow(r, i) {
 }
 
 const LEGACY_SUM_FIELDS = ['basic', 'totalSalary', 'fuel', 'absent', 'absentFine', 'lateMin', 'lateFine',
-    'leave', 'adv', 'workDays', 'messDeduct', 'fine', 'eobi', 'hold', 'netPay', 'holdNetAdv', 'adj'];
+    'leave', 'adv', 'workDays', 'messDeduct', 'fine', 'eobi', 'tax', 'hold', 'netPay', 'holdNetAdv', 'adj'];
 
 function sumLegacyRows(rows) {
     const t = {};
@@ -271,7 +272,11 @@ function sumLegacyRows(rows) {
 // thousands separators; Name/Designation/Remarks can wrap onto a second
 // line instead of needing guaranteed single-line width, so they gave up
 // some of their share to the numeric columns. Sums to exactly 100.
-const LEGACY_COL_WIDTHS = [2, 8, 7, 3.5, 6, 2.2, 6, 4, 2.5, 4.3, 3, 4.3, 2.5, 4, 3, 4, 4, 4, 4, 5, 5.5, 3, 8.2];
+// TAX column added 2026-08-07 (owner report: tax deduction wasn't shown
+// anywhere on this print, unlike the typed EOBI/Non-EOBI variants) —
+// slack pulled from Name/Designation/Remarks/Hold+Net+Adv/AC Code/Adj/
+// Work Days to make room without changing the other columns' shape.
+const LEGACY_COL_WIDTHS = [2, 7.5, 6.5, 3, 6, 2.2, 6, 4, 2.5, 4.3, 3, 4.3, 2.5, 4, 2.5, 4, 4, 4, 4, 4, 5, 5, 2.5, 7.2];
 
 function CombinedLegacySheet({ sheet, monthId, grouped }) {
     const deptRows = useMemo(() => grouped.map(g => ({
@@ -317,6 +322,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                     <th className="num">MESS<br/>DEDUCT</th>
                                     <th className="num">FINE</th>
                                     <th className="num">EOBI</th>
+                                    <th className="num">TAX</th>
                                     <th className="num">HOLD</th>
                                     <th className="num net">NET<br/>PAY</th>
                                     <th className="num">HOLD+NET<br/>+ADV</th>
@@ -345,6 +351,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                         <td className="num">{r.messDeduct ? money(r.messDeduct) : '-'}</td>
                                         <td className="num">{r.fine ? money(r.fine) : '0'}</td>
                                         <td className="num">{r.eobi ? money(r.eobi) : '-'}</td>
+                                        <td className="num">{r.tax ? money(r.tax) : '0'}</td>
                                         <td className="num">{r.hold ? money(r.hold) : '0'}</td>
                                         <td className="num net">{money(r.netPay)}</td>
                                         <td className="num">{money(r.holdNetAdv)}</td>
@@ -374,6 +381,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                     <td className="num">{money(t.messDeduct)}</td>
                                     <td className="num">{money(t.fine)}</td>
                                     <td className="num">{money(t.eobi)}</td>
+                                    <td className="num">{money(t.tax)}</td>
                                     <td className="num">{money(t.hold)}</td>
                                     <td className="num net">{money(t.netPay)}</td>
                                     <td className="num">{money(t.holdNetAdv)}</td>
@@ -413,6 +421,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                         <td className="num">{money(grand.messDeduct)}</td>
                         <td className="num">{money(grand.fine)}</td>
                         <td className="num">{money(grand.eobi)}</td>
+                        <td className="num">{money(grand.tax)}</td>
                         <td className="num">{money(grand.hold)}</td>
                         <td className="num net">{money(grand.netPay)}</td>
                         <td className="num">{money(grand.holdNetAdv)}</td>
