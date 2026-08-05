@@ -442,8 +442,8 @@ export default function PaintGRN() {
 
                     {form.PaymentMode === 'CASH' && (
                         <div className="erp-alert info" style={{ padding: '6px 10px', fontSize: 12 }}>
-                            Cash GRN — posts straight to Cash Book on finalize, no supplier payable created.
-                            The supplier doesn't need a GL account linked.
+                            Cash GRN — stock updates on finalize, but no GL voucher is posted at all (no Cash Book
+                            hit, no supplier payable). The supplier doesn't need a GL account linked.
                         </div>
                     )}
 
