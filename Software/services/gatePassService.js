@@ -46,12 +46,12 @@ async function loadJobCard(tx, jcId) {
     const r = await new sql.Request(tx)
         .input('id', sql.Int, jcId)
         .query(`SELECT jc.JobCardId, jc.JobCardNo, jc.VehicleRegNo, jc.ChasisNo,
-                       jc.PartyID, jc.PartyGLID, jc.IsFinalized, jc.JobCardType,
+                       jc.PartyID, jc.PartyGLID, jc.IsFinalized, jc.JobTypeId,
                        jct.CardCode AS JobCardTypeCode, jct.Title AS JobCardTypeTitle,
                        p.PartyName, p.PartyType,
                        ISNULL(jc.BringByName, p.PartyName) AS CustomerName
                 FROM Addata_JobCardInfo jc
-                LEFT JOIN gen_JobCardType jct ON jct.JobCardTypeId = jc.JobCardType
+                LEFT JOIN gen_JobCardType jct ON jct.JobCardTypeId = jc.JobTypeId
                 LEFT JOIN gen_PartiesInfo p    ON p.PartyID         = jc.PartyID
                 WHERE jc.JobCardId = @id`);
     return r.recordset[0] || null;
@@ -170,7 +170,7 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
                    jct.CardCode AS JobCardTypeCode, jct.Title AS JobCardTypeTitle,
                    bal.OutstandingDr - bal.OutstandingCr - adv.AdvanceCredit AS Outstanding
             FROM Addata_JobCardInfo jc
-            LEFT JOIN gen_JobCardType jct ON jct.JobCardTypeId = jc.JobCardType
+            LEFT JOIN gen_JobCardType jct ON jct.JobCardTypeId = jc.JobTypeId
             OUTER APPLY (
                 SELECT
                   ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0) AS OutstandingDr,
