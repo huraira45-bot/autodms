@@ -6,12 +6,17 @@
  * its own income account, and the supplier is credited for the balancing
  * amount. AIT already goes to Advance Tax 236G (added 2026-07-27).
  *
- * Journal on finalize:
+ * Journal on finalize (PaymentMode='CREDIT', the default):
  *   Dr  PAINT_INVENTORY         SubTotal (gross)
  *   Dr  INPUT_GST               GSTTotal
  *   Dr  ADVANCE_TAX_236G_PARTS  AITTotal
  *       Cr  PARTS_DISCOUNT_RECEIVED   DiscountTotal
  *       Cr  Supplier PartyGL          GrandTotal (balancing)
+ *
+ * Owner ask 2026-08-07: some Paint GRNs are paid cash on the spot rather
+ * than owed to the supplier. PaymentMode='CASH' credits CASH_BOOK instead
+ * of the supplier's PartyGL and skips the payable subsidiary-ledger row
+ * entirely — the supplier doesn't need a GL account linked for a cash GRN.
  *
  * Uses the same system accounts as parts GRN (INPUT_GST,
  * PARTS_DISCOUNT_RECEIVED) so no extra COA mapping is needed. Owner can
@@ -33,10 +38,19 @@ async function loadSupplierGL(partyId, transaction) {
     return { name: p.PartyName, GLCAID: p.PartyGLID };
 }
 
+async function loadSupplierName(partyId, transaction) {
+    const r = await new sql.Request(transaction)
+        .input('id', sql.Int, partyId)
+        .query('SELECT PartyName FROM gen_PartiesInfo WHERE PartyID=@id');
+    if (!r.recordset.length) throw new Error(`Supplier party #${partyId} not found.`);
+    return r.recordset[0].PartyName;
+}
+
 async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
     const hdrRes = await new sql.Request(transaction)
         .input('id', sql.Int, paintGRNID)
         .query(`SELECT PaintGRNID, GRNNo, GRNDate, PartyID, SupplierBillNo,
+                       ISNULL(PaymentMode, 'CREDIT') AS PaymentMode,
                        ISNULL(SubTotal, 0)      AS SubTotal,
                        ISNULL(DiscountTotal, 0) AS DiscountTotal,
                        ISNULL(GSTTotal, 0)      AS GSTTotal,
@@ -54,11 +68,18 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
     // Supplier payable balances the journal: gross + gst + ait − disc = GrandTotal.
     const supplierCredit = r2(subTotal + gstTotal + aitTotal - discountTotal);
 
+    const isCash = grn.PaymentMode === 'CASH';
+
     const paintInventoryGLCAID = await resolveRole('PAINT_INVENTORY');
     const inputGSTGLCAID       = gstTotal > 0      ? await resolveRole('INPUT_GST') : null;
     const advanceTaxGLCAID     = aitTotal > 0      ? await resolveRole('ADVANCE_TAX_236G_PARTS') : null;
     const discountGLCAID       = discountTotal > 0 ? await resolveRole('PARTS_DISCOUNT_RECEIVED') : null;
-    const supplier             = await loadSupplierGL(grn.PartyID, transaction);
+    // Cash GRNs pay straight out of Cash Book and never need the supplier to
+    // have a GL account linked — that requirement only applies to credit
+    // (payable) GRNs.
+    const supplier = isCash
+        ? { name: await loadSupplierName(grn.PartyID, transaction), GLCAID: await resolveRole('CASH_BOOK') }
+        : await loadSupplierGL(grn.PartyID, transaction);
 
     const vt = await new sql.Request(transaction)
         .query("SELECT Voucherid FROM GLVoucherType WHERE Title='PV'");
@@ -67,7 +88,8 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
 
     const voucherNo = await nextVoucherNo(transaction, 'PV');
     const narration = `Paint GRN ${grn.GRNNo} — ${supplier.name}` +
-                      (grn.SupplierBillNo ? ` (Bill: ${grn.SupplierBillNo})` : '');
+                      (grn.SupplierBillNo ? ` (Bill: ${grn.SupplierBillNo})` : '') +
+                      (isCash ? ' (Cash)' : '');
 
     // Voucher header — TotalAmount = total Dr side (subTotal + gst + ait), matches parts GRN
     const totalDr = r2(subTotal + gstTotal + aitTotal);
@@ -124,18 +146,23 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
             `Trade discount on paint — GRN ${grn.GRNNo}`);
     }
 
-    // Cr Supplier — balancing leg
-    await insertLeg(supplier.GLCAID, 0, supplierCredit, narration, grn.PartyID);
+    // Cr Supplier (credit GRN) or Cr Cash Book (cash GRN) — balancing leg.
+    // Cash Book is a shared account, not the party's own ledger, so it isn't
+    // tagged with PartyID the way the supplier-payable leg is.
+    await insertLeg(supplier.GLCAID, 0, supplierCredit, narration, isCash ? null : grn.PartyID);
 
-    // Subsidiary ledger — supplier payable
-    await new sql.Request(transaction)
-        .input('pid', sql.Int,               grn.PartyID)
-        .input('vid', sql.Int,               voucherId)
-        .input('gl',  sql.Int,               supplier.GLCAID)
-        .input('cr',  sql.Decimal(18,2),     supplierCredit)
-        .input('nar', sql.NVarChar(500),     narration)
-        .query(`INSERT INTO dms_PartyLedger (PartyID, VoucherID, GLCAID, Debit, Credit, Narration)
-                VALUES (@pid, @vid, @gl, 0, @cr, @nar)`);
+    // Subsidiary ledger — supplier payable. Skipped for cash GRNs: nothing
+    // is owed to the supplier, so there's no payable to track.
+    if (!isCash) {
+        await new sql.Request(transaction)
+            .input('pid', sql.Int,               grn.PartyID)
+            .input('vid', sql.Int,               voucherId)
+            .input('gl',  sql.Int,               supplier.GLCAID)
+            .input('cr',  sql.Decimal(18,2),     supplierCredit)
+            .input('nar', sql.NVarChar(500),     narration)
+            .query(`INSERT INTO dms_PartyLedger (PartyID, VoucherID, GLCAID, Debit, Credit, Narration)
+                    VALUES (@pid, @vid, @gl, 0, @cr, @nar)`);
+    }
 
     // Flip Draft → Posted (fires balanced-entry trigger)
     await new sql.Request(transaction)

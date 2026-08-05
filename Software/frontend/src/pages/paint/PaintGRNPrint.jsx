@@ -50,6 +50,7 @@ export default function PaintGRNPrint() {
                     <div><label>Supplier</label><span>{g.PartyName || ''}</span></div>
                     <div><label>Supplier Bill No</label><span>{g.SupplierBillNo || '—'}</span></div>
                     <div><label>Warehouse</label><span>{g.WHDesc}{g.WHCode ? ` (${g.WHCode})` : ''}</span></div>
+                    <div><label>Payment</label><span>{g.PaymentMode === 'CASH' ? 'Cash' : 'Credit'}</span></div>
                     <div><label>Remarks</label><span>{g.Remarks || '—'}</span></div>
                 </div>
                 <div className="hdr-col">

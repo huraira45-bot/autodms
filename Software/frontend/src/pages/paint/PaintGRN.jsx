@@ -92,7 +92,7 @@ export default function PaintGRN() {
             GRNDate: today(),
             PartyID: '', SupplierBillNo: '',
             PaintWHID: warehouses[0]?.PaintWHID || '',
-            Remarks: '', Status: 'Draft',
+            Remarks: '', Status: 'Draft', PaymentMode: 'CREDIT',
             Lines: [blankLine(null, gstRate)],
         });
         setDirty(false);
@@ -111,6 +111,7 @@ export default function PaintGRN() {
                 PaintWHID: data.PaintWHID,
                 Remarks: data.Remarks || '',
                 Status: data.Status,
+                PaymentMode: data.PaymentMode || 'CREDIT',
                 VoucherNo: data.VoucherNo,
                 Lines: (data.Lines || []).map(l => ({
                     PaintItemID: l.PaintItemID,
@@ -176,6 +177,7 @@ export default function PaintGRN() {
         SupplierBillNo: form.SupplierBillNo || null,
         PaintWHID: form.PaintWHID,
         Remarks: form.Remarks || null,
+        PaymentMode: form.PaymentMode || 'CREDIT',
         Lines: form.Lines.map(l => ({
             PaintItemID: l.PaintItemID,
             PaintUOMID: l.PaintUOMID || null,
@@ -362,6 +364,7 @@ export default function PaintGRN() {
                                     <th>Supplier</th>
                                     <th>Bill #</th>
                                     <th>Warehouse</th>
+                                    <th>Payment</th>
                                     <th>Voucher</th>
                                     <th className="num">Grand Total</th>
                                     <th>Status</th>
@@ -375,13 +378,14 @@ export default function PaintGRN() {
                                         <td className="trunc">{row.PartyName}</td>
                                         <td className="trunc">{row.SupplierBillNo || ''}</td>
                                         <td className="trunc">{row.WHDesc}</td>
+                                        <td>{row.PaymentMode === 'CASH' ? 'Cash' : 'Credit'}</td>
                                         <td className="mono">{row.VoucherID ? `#${row.VoucherID}` : ''}</td>
                                         <td className="num">{fmt(row.GrandTotal)}</td>
                                         <td><StatusPill status={row.Status} /></td>
                                     </tr>
                                 ))}
                                 {list.length === 0 && (
-                                    <tr><td colSpan={8} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
+                                    <tr><td colSpan={9} style={{ padding: 16, textAlign: 'center', color: '#94a3b8' }}>
                                         No Paint GRNs. Click New to record one.
                                     </td></tr>
                                 )}
@@ -421,6 +425,13 @@ export default function PaintGRN() {
                                         onChange={e => patch('SupplierBillNo', e.target.value)}
                                         placeholder="e.g. INV-12345" />
                                 </label>
+                                <label>Payment Mode
+                                    <select className="field" value={form.PaymentMode || 'CREDIT'}
+                                        onChange={e => patch('PaymentMode', e.target.value)}>
+                                        <option value="CREDIT">Credit (supplier payable)</option>
+                                        <option value="CASH">Cash (paid now)</option>
+                                    </select>
+                                </label>
                                 <label className="span-2">Remarks
                                     <input className="field" value={form.Remarks || ''}
                                         onChange={e => patch('Remarks', e.target.value)} placeholder="Optional" />
@@ -428,6 +439,13 @@ export default function PaintGRN() {
                             </div>
                         </fieldset>
                     </div>
+
+                    {form.PaymentMode === 'CASH' && (
+                        <div className="erp-alert info" style={{ padding: '6px 10px', fontSize: 12 }}>
+                            Cash GRN — posts straight to Cash Book on finalize, no supplier payable created.
+                            The supplier doesn't need a GL account linked.
+                        </div>
+                    )}
 
                     {parties.length === 0 && (
                         <div className="erp-alert warning" style={{ padding: '6px 10px', fontSize: 12 }}>

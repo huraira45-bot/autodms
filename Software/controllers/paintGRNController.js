@@ -70,7 +70,7 @@ exports.list = async (req, res) => {
         }
         const r = await rq.query(`
             SELECT g.PaintGRNID, g.GRNNo, g.GRNDate, g.Status, g.SupplierBillNo,
-                   g.PartyID, p.PartyName,
+                   g.PartyID, p.PartyName, g.PaymentMode,
                    g.PaintWHID, w.WHDesc,
                    g.SubTotal, g.DiscountTotal, g.GSTTotal, g.GrandTotal,
                    g.VoucherID, g.CreatedByName, g.CreatedAt,
@@ -116,11 +116,12 @@ exports.get = async (req, res) => {
 async function writeDraft({ pool, paintGRNID, body, user }) {
     const {
         GRNDate, PartyID, SupplierBillNo, PaintWHID, Remarks,
-        Lines = [],
+        PaymentMode = 'CREDIT', Lines = [],
     } = body;
     if (!GRNDate)   throw new Error('GRNDate required');
     if (!PartyID)   throw new Error('PartyID required');
     if (!PaintWHID) throw new Error('PaintWHID required');
+    if (!['CREDIT', 'CASH'].includes(PaymentMode)) throw new Error("PaymentMode must be 'CREDIT' or 'CASH'.");
     if (!Array.isArray(Lines) || Lines.length === 0) throw new Error('At least one line required');
 
     const computed = Lines.map((l) => ({ src: l, calc: computeLineAmounts(l) }));
@@ -147,6 +148,7 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('bn',  sql.NVarChar(100), SupplierBillNo || null)
                 .input('wh',  sql.Int, PaintWHID)
                 .input('rm',  sql.NVarChar(500), Remarks || null)
+                .input('pm',  sql.NVarChar(20), PaymentMode)
                 .input('st',  sql.Decimal(18,2), subTotal)
                 .input('dc',  sql.Decimal(18,2), discountTotal)
                 .input('gt',  sql.Decimal(18,2), gstTotal)
@@ -154,7 +156,7 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('gr',  sql.Decimal(18,2), grandTotal)
                 .query(`UPDATE paint_GRN SET
                             GRNDate=@dt, PartyID=@pid, SupplierBillNo=@bn, PaintWHID=@wh,
-                            Remarks=@rm, SubTotal=@st, DiscountTotal=@dc, GSTTotal=@gt,
+                            Remarks=@rm, PaymentMode=@pm, SubTotal=@st, DiscountTotal=@dc, GSTTotal=@gt,
                             AITTotal=@at, GrandTotal=@gr
                         WHERE PaintGRNID=@id`);
             await new sql.Request(tx).input('id', sql.Int, id)
@@ -170,6 +172,7 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('bn',  sql.NVarChar(100), SupplierBillNo || null)
                 .input('wh',  sql.Int,           PaintWHID)
                 .input('rm',  sql.NVarChar(500), Remarks || null)
+                .input('pm',  sql.NVarChar(20),  PaymentMode)
                 .input('st',  sql.Decimal(18,2), subTotal)
                 .input('dc',  sql.Decimal(18,2), discountTotal)
                 .input('gt',  sql.Decimal(18,2), gstTotal)
@@ -179,11 +182,11 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
                 .input('cbn', sql.NVarChar(100), user?.userName || null)
                 .query(`INSERT INTO paint_GRN
                             (GRNNo, GRNDate, PartyID, SupplierBillNo, PaintWHID, Remarks,
-                             Status, SubTotal, DiscountTotal, GSTTotal, AITTotal, GrandTotal,
+                             PaymentMode, Status, SubTotal, DiscountTotal, GSTTotal, AITTotal, GrandTotal,
                              CreatedBy, CreatedByName)
                         OUTPUT INSERTED.PaintGRNID
                         VALUES (@no, @dt, @pid, @bn, @wh, @rm,
-                                'Draft', @st, @dc, @gt, @at, @gr, @cby, @cbn)`);
+                                @pm, 'Draft', @st, @dc, @gt, @at, @gr, @cby, @cbn)`);
             id = ins.recordset[0].PaintGRNID;
         }
 
