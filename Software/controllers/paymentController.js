@@ -48,13 +48,19 @@ exports.getOutstanding = async (req, res) => {
         }
 
         // For receive: invoice voucher Status=Posted, SourceDocType in (JOBCARD, STORE_SALE), has any line with this PartyID + Dr>0.
-        // For make:   voucher Status=Posted, SourceDocType in (GRN, GRTN),     has any line with this PartyID + Cr>0.
+        // For make:   voucher Status=Posted, SourceDocType in (GRN, GRTN, PAINT_GRN, PAINT_GRTN), has any line with this PartyID + Cr>0.
         //
         // We intentionally do NOT filter by a fixed Trade-Debtors / Trade-Creditors GLCode, because the
         // posting services now tag the customer-receivable / supplier-payable leg with the party's own
         // PartyGLID (a leaf account picked by the user at party creation). The PartyID column itself is
         // the authoritative subsidiary marker - any positive-side row carrying it is part of the A/R or A/P.
-        const sourceTypes = isReceive ? "('JOBCARD','STORE_SALE')" : "('GRN','GRTN')";
+        //
+        // Owner report 2026-08-07: a posted Paint GRN (credit mode) for supplier
+        // "MEX PAINT" wasn't showing in Make Payment at all -- PAINT_GRN/PAINT_GRTN
+        // were never added to this filter when the Paint Lab module shipped, even
+        // though paintGRNPostingService.js already tags the supplier Cr leg with
+        // PartyID exactly the same way the regular GRN posting does.
+        const sourceTypes = isReceive ? "('JOBCARD','STORE_SALE')" : "('GRN','GRTN','PAINT_GRN','PAINT_GRTN')";
 
         const result = await pool.request()
             .input('pid', sql.Int, partyId)
@@ -99,6 +105,8 @@ exports.getOutstanding = async (req, res) => {
                         (SELECT CAST(InvoiceNo AS NVARCHAR(50)) FROM data_StoreSaleInfo WHERE SaleID = i.SourceDocID AND i.SourceDocType = 'STORE_SALE'),
                         (SELECT CAST(PurchaseVoucherNo AS NVARCHAR(50)) FROM data_PurchaseInfo WHERE PurchaseID = i.SourceDocID AND i.SourceDocType = 'GRN'),
                         (SELECT CAST(PurchaseReturnNo AS NVARCHAR(50)) FROM data_PurchaseReturnInfo WHERE PurchaseReturnID = i.SourceDocID AND i.SourceDocType = 'GRTN'),
+                        (SELECT CAST(GRNNo AS NVARCHAR(50)) FROM paint_GRN WHERE PaintGRNID = i.SourceDocID AND i.SourceDocType = 'PAINT_GRN'),
+                        (SELECT CAST(GRTNNo AS NVARCHAR(50)) FROM paint_GRTN WHERE PaintGRTNID = i.SourceDocID AND i.SourceDocType = 'PAINT_GRTN'),
                         CAST(i.VoucherNo AS NVARCHAR(50))
                     ) AS SourceRef,
                     i.PartyShare AS Invoiced,
