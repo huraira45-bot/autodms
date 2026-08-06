@@ -10,11 +10,20 @@ const d   = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
 export default function WorkOrderPrint() {
     const { id } = useParams();
     const [jc, setJc] = useState(null);
+    const [ins, setIns] = useState(null);
     const [err, setErr] = useState(null);
 
     useEffect(() => {
-        axios.get(`/api/workshop/job-cards/${id}/print-data`)
-            .then(r => { setJc(r.data); setTimeout(() => window.print(), 400); })
+        // Insurance depreciation totals (owner report 2026-08-07: a
+        // customer's depreciation payment wasn't showing on this print at
+        // all — this print never fetched insurance data). Best-effort:
+        // most Work Orders aren't insurance claims, so a 404/empty result
+        // here is normal, not an error.
+        Promise.all([
+            axios.get(`/api/workshop/job-cards/${id}/print-data`),
+            axios.get(`/api/workshop/job-cards/${id}/insurance`).catch(() => ({ data: null })),
+        ])
+            .then(([jcRes, insRes]) => { setJc(jcRes.data); setIns(insRes.data); setTimeout(() => window.print(), 400); })
             .catch(e => setErr(e.response?.data?.error || e.message));
     }, [id]);
 
@@ -57,6 +66,14 @@ export default function WorkOrderPrint() {
     const campaign    = jc.Campaign || null;
     const campaignBenefit = Number(campaign?.BenefitAmount || 0);
     const total       = grossTotal - campaignBenefit;
+
+    // Insurance depreciation (owner report 2026-08-07: a customer's paid
+    // depreciation wasn't showing anywhere on this print). customerShareTotal
+    // already folds in depreciation + under-insurance + CV4; only shown when
+    // this JC actually has an insurance claim with a nonzero customer share.
+    const depTotal   = Number(ins?.totals?.customerShareTotal) || 0;
+    const depPaid    = Number(ins?.totals?.depreciationPaid) || 0;
+    const depBalance = Number(ins?.totals?.depreciationBalance) || 0;
 
     return (
         <div className="wo-print" style={{ position: 'relative' }}>
@@ -209,6 +226,13 @@ export default function WorkOrderPrint() {
                                                 </td>
                                                 <td>({fmt(campaignBenefit)})</td>
                                             </tr>
+                                        </>
+                                    )}
+                                    {depTotal > 0 && (
+                                        <>
+                                            <tr><td>Insurance Depreciation</td><td>({fmt(depTotal)})</td></tr>
+                                            <tr><td>Depreciation Received</td><td>{fmt(depPaid)}</td></tr>
+                                            <tr><td>Depreciation Balance</td><td>{fmt(depBalance)}</td></tr>
                                         </>
                                     )}
                                     <tr className="grand"><td>Total Amount</td><td><b>{fmt(total)}</b></td></tr>

@@ -74,7 +74,19 @@ export default function CreditInvoicePrint() {
     }));
     const partsNet  = partsRows.reduce((s, p) => s + (Number(p.TotalAmount)||0), 0);
     const gst       = partsRows.reduce((s, p) => s + (Number(p.TaxAmount)||0), 0);
-    const dep       = partsRows.reduce((s, p) => s + (Number(p.DepAmount)||0), 0);
+    // Prefer the Insurance tab's own authoritative totals (depreciation +
+    // under-insurance + CV4 — everything that's the CUSTOMER's share, not
+    // the insurer's) over a client-side recompute that only ever summed the
+    // per-part depreciation and silently missed under-insurance/CV4. Falls
+    // back to the old parts-only sum if the /insurance fetch failed.
+    const partsDepOnly = partsRows.reduce((s, p) => s + (Number(p.DepAmount)||0), 0);
+    const dep        = ins?.totals ? Number(ins.totals.customerShareTotal) || 0 : partsDepOnly;
+    // Depreciation Received / Balance — owner report 2026-08-07: a customer
+    // paid their depreciation share and it never showed anywhere on this
+    // invoice. The payment itself was posted correctly (Receive Payment >
+    // JC Insurance Depreciation); it just was never surfaced on the print.
+    const depPaid    = ins?.totals ? Number(ins.totals.depreciationPaid) || 0 : 0;
+    const depBalance = ins?.totals ? Number(ins.totals.depreciationBalance) || 0 : dep;
     const totalPayable = (labourNet + sublet) + pst + partsNet + gst - dep;
 
     // Party name — for credit sales, prefer the linked party's name; falls
@@ -239,7 +251,7 @@ export default function CreditInvoicePrint() {
             <table className="tot">
                 <tbody>
                     <tr>
-                        <td rowSpan={6} className="tot-blank" />
+                        <td rowSpan={dep > 0 ? 8 : 6} className="tot-blank" />
                         <td className="tot-lbl">Labour + Sublet without PST</td>
                         <td className="tot-val">{fmt(labourNet + sublet)}</td>
                     </tr>
@@ -247,6 +259,12 @@ export default function CreditInvoicePrint() {
                     <tr><td className="tot-lbl">Parts Without GST</td><td className="tot-val">{fmt(partsNet)}</td></tr>
                     <tr><td className="tot-lbl">18% GST</td><td className="tot-val">{fmt(gst)}</td></tr>
                     <tr><td className="tot-lbl">Depreciation</td><td className="tot-val">{fmt(dep)}</td></tr>
+                    {dep > 0 && (
+                        <>
+                            <tr><td className="tot-lbl">Depreciation Received</td><td className="tot-val">{fmt(depPaid)}</td></tr>
+                            <tr><td className="tot-lbl">Depreciation Balance</td><td className="tot-val">{fmt(depBalance)}</td></tr>
+                        </>
+                    )}
                     <tr><td className="tot-lbl b"><b>Total Payble by Party</b></td><td className="tot-val b"><b>{fmt(totalPayable)}</b></td></tr>
                 </tbody>
             </table>
