@@ -18,9 +18,11 @@
  *   Salary sheet (calculated view for one month):
  *     GET  /api/hr/salary-sheet/:monthId
  *   Voucher postings (guarded by hr_salary_post):
- *     POST /api/hr/post/accrual        body: {MonthID}
- *     POST /api/hr/post/pay-bank       body: {MonthID}
- *     POST /api/hr/post/pay-cash       body: {MonthID}
+ *     POST /api/hr/post/accrual        body: {MonthID, PostDate}
+ *     POST /api/hr/post/disbursement   body: {MonthID, PostDate} — pays out
+ *                                       the already-accrued net salary in
+ *                                       cash/bank (one voucher per Non-EOBI
+ *                                       Cash / EOBI Cash / EOBI-per-bank group)
  *     GET  /api/hr/postings?monthId=YYYY-MM  (audit)
  */
 const { sql, getPool } = require('../config/db');
@@ -477,11 +479,126 @@ exports.postAccrual = async (req, res) => {
     }
 };
 
-// Payment vouchers (bank / cash) — REMOVED per owner ask 2026-07-29.
-// The new model uses ONE accrual JV (see postAccrual above rewrite) that
-// posts per-department expense Drs and per-employee GL Crs. Actual cash
-// disbursement is done via existing CPV/BPV screens transferring from
-// Employee GL to Cash/Bank when payment happens.
+// (2) Disbursement — bulk pay-out of the already-accrued net salary
+// (owner ask 2026-08-07, reinstating what the 2026-07-29 note above says
+// was removed, now with per-bank splitting since employees can be paid
+// from different company bank accounts — see migration 115).
+//
+// Pays exactly r.Calc.net per employee — the same figure already shown
+// on the Salary Sheet's Net column and printed on the Bank/Cash Letters,
+// so what gets disbursed always matches what those letters instruct.
+// Advance/Hold are already netted out of Calc.net by salaryCalculator.js;
+// this does not touch Employee GL beyond that (see postAccrual's comment
+// on how Advance/Hold flow through Employee GL across periods).
+//
+// For each employee: Dr EmployeeGLID (clears what they're owed this run)
+//     Cr CASH_BOOK (cash-paid) or Cr the specific bank GL they're assigned
+//     (PaymentBankGLCAID) for bank-paid employees, grouped so each distinct
+//     bank gets its own voucher — mirrors the Bank Letter's per-bank split.
+// Three groups, one voucher each (skipped if empty):
+//   Non-EOBI (always cash) · EOBI cash · EOBI bank (one BPV per bank).
+//
+// Refuses to re-run a group that's already been disbursed this month
+// (checked via hr_SalaryPostings) — actual cash/bank movement is higher
+// stakes than the accrual JV, so this guards harder than postAccrual does.
+// Body: { MonthID, PostDate (YYYY-MM-DD) }
+exports.postDisbursement = async (req, res) => {
+    const { MonthID, PostDate } = req.body || {};
+    if (!MonthID)  return res.status(400).json({ error: 'MonthID required' });
+    if (!PostDate) return res.status(400).json({ error: 'PostDate required' });
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        const sheet = await buildSheet(pool, MonthID);
+        const payable = sheet.rows.filter(r => r.Calc.net > 0);
+        if (!payable.length) throw new Error('No employees with positive net pay for this month.');
+
+        const missingEmp = payable.filter(r => !r.Employee.EmployeeGLID);
+        if (missingEmp.length) {
+            throw new Error(`No Employee GL mapped for: ${missingEmp.slice(0, 5).map(r => r.Name).join(', ')}${missingEmp.length > 5 ? ` + ${missingEmp.length - 5} more` : ''}. Set 'Salary GL' in Employee Salary Settings.`);
+        }
+        const missingBank = payable.filter(r => r.Employee.IsPaidByBank && !r.Employee.PaymentBankGLCAID);
+        if (missingBank.length) {
+            throw new Error(`No paying bank chosen for: ${missingBank.slice(0, 5).map(r => r.Name).join(', ')}${missingBank.length > 5 ? ` + ${missingBank.length - 5} more` : ''}. Set 'Pay Bank' in Employee Salary Settings.`);
+        }
+
+        const already = await new sql.Request(tx).input('m', sql.Char(7), MonthID)
+            .query(`SELECT DISTINCT PostingType FROM hr_SalaryPostings
+                    WHERE MonthID=@m
+                      AND (PostingType IN ('PAY_CASH_NONEOBI','PAY_CASH_EOBI') OR PostingType LIKE 'PAY[_]BANK[_]%')`);
+        const alreadyKeys = new Set(already.recordset.map(r => r.PostingType));
+
+        const cashGL = await loadRoleOrThrow('CASH_BOOK');
+
+        const buildAndPost = async (label, postingType, creditGL, rows) => {
+            if (!rows.length) return null;
+            if (alreadyKeys.has(postingType)) {
+                throw new Error(`${label} has already been disbursed this month. Reverse that voucher first if you need to redo it.`);
+            }
+            const lines = [];
+            let total = 0;
+            for (const row of rows) {
+                const amt = r2(row.Calc.net);
+                if (amt <= 0) continue;
+                lines.push({ glCAID: row.Employee.EmployeeGLID, dr: amt, cr: 0, narration: `Salary ${MonthID} paid — ${row.Name}` });
+                total = r2(total + amt);
+            }
+            if (total <= 0) return null;
+            lines.push({ glCAID: creditGL, dr: 0, cr: total, narration: `${label} salary disbursement — ${MonthID}` });
+
+            const vtCode = creditGL === cashGL ? 'CPV' : 'BPV';
+            const voucherNo = await nextVoucherNo(tx, vtCode);
+            const voucherId = await insertVoucherHeader(tx, {
+                voucherNo, voucherTypeCode: vtCode,
+                date: parseWallDate(PostDate),
+                narration: `Salary disbursement ${MonthID} — ${label}`,
+                totalAmount: total,
+                srcType: 'HR_SALARY_DISBURSE', srcId: null, user: req.user,
+            });
+            for (const l of lines) await insertLeg(tx, { voucherId, glCAID: l.glCAID, dr: l.dr, cr: l.cr, narration: l.narration });
+            await postDraftToPosted(tx, voucherId, req.user);
+            await recordPosting(tx, { monthId: MonthID, postingType, voucherId, totalAmount: total, employeeCount: rows.length, user: req.user });
+            return { voucherNo, voucherId, totalAmount: total, employees: rows.length, label };
+        };
+
+        const nonEobiRows  = payable.filter(r => !r.Employee.HasEOBI);
+        const eobiCashRows = payable.filter(r => r.Employee.HasEOBI && !r.Employee.IsPaidByBank);
+        const eobiBankRows = payable.filter(r => r.Employee.HasEOBI && r.Employee.IsPaidByBank);
+
+        const results = [];
+        const nonEobiRes = await buildAndPost('Non-EOBI Cash', 'PAY_CASH_NONEOBI', cashGL, nonEobiRows);
+        if (nonEobiRes) results.push(nonEobiRes);
+        const eobiCashRes = await buildAndPost('EOBI Cash', 'PAY_CASH_EOBI', cashGL, eobiCashRows);
+        if (eobiCashRes) results.push(eobiCashRes);
+
+        const byBank = new Map();
+        for (const row of eobiBankRows) {
+            const key = row.Employee.PaymentBankGLCAID;
+            if (!byBank.has(key)) byBank.set(key, []);
+            byBank.get(key).push(row);
+        }
+        for (const [bankGL, rows] of byBank) {
+            const bankTitle = rows[0]?.PaymentBankTitle || `Bank #${bankGL}`;
+            const bankRes = await buildAndPost(`EOBI Bank — ${bankTitle}`, `PAY_BANK_${bankGL}`, bankGL, rows);
+            if (bankRes) results.push(bankRes);
+        }
+
+        if (!results.length) throw new Error('Nothing to disburse.');
+
+        await tx.commit();
+        res.json({
+            ok: true,
+            vouchers: results,
+            totalPaid: r2(results.reduce((s, r) => s + r.totalAmount, 0)),
+            totalEmployees: results.reduce((s, r) => s + r.employees, 0),
+        });
+    } catch (err) {
+        try { await tx.rollback(); } catch {}
+        res.status(400).json({ error: err.message });
+    }
+};
 
 exports.listPostings = async (req, res) => {
     try {

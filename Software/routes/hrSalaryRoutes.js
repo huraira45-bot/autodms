@@ -26,10 +26,11 @@ router.put( '/dept-accounts/:departmentId', requirePerm('hr_settings', 'edit'), 
 router.get( '/salary-sheet/:monthId',   requirePerm('hr_salary', 'view'),       c.getSalarySheet);
 router.get( '/salary-slip/:monthId/:employeeId', requirePerm('hr_salary', 'view'), c.getEmployeeSlip);
 
-// Voucher posting — only the Accrual JV remains per owner ask 2026-07-29.
-// The old Pay Bank / Pay Cash routes were removed; actual disbursement
-// clears Employee GL via existing BPV/CPV screens.
+// Voucher posting.
 router.post('/post/accrual',            requirePerm('hr_salary_post'),          c.postAccrual);
+// Disbursement — bulk pay-out of the already-accrued net salary in cash/bank,
+// reinstated 2026-08-07 with per-bank splitting (owner ask).
+router.post('/post/disbursement',       requirePerm('hr_salary_post'),          c.postDisbursement);
 router.get( '/postings',                requirePerm('hr_salary', 'view'),       c.listPostings);
 
 module.exports = router;

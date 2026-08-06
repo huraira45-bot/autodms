@@ -29,6 +29,7 @@ export default function HrSalarySheet() {
     const [collapsedDepts, setCollapsedDepts] = useState({});
     const [postModalOpen, setPostModalOpen] = useState(false);
     const [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10));
+    const [payModalOpen, setPayModalOpen] = useState(false);
 
     const load = async () => {
         try {
@@ -104,6 +105,27 @@ export default function HrSalarySheet() {
             await load();
         } catch (err) {
             notify({ type: 'error', title: `Accrual failed`, message: err.response?.data?.error || err.message });
+        } finally { setBusy(false); }
+    };
+
+    // Bulk pay-out of the already-accrued net salary (owner ask 2026-08-07).
+    // One voucher per group: Non-EOBI Cash, EOBI Cash, and one BPV per
+    // distinct bank used by EOBI bank-paid employees.
+    const runDisbursement = async () => {
+        try {
+            setBusy(true);
+            const res = await axios.post(`${API}/post/disbursement`, { MonthID: monthId, PostDate: postDate });
+            const summary = (res.data.vouchers || []).map(v =>
+                `${v.label}: ${v.voucherNo} · PKR ${fmt(v.totalAmount)} · ${v.employees} emp`).join(' · ');
+            notify({
+                type: 'success',
+                title: `Salary disbursed — ${res.data.vouchers?.length || 0} vouchers`,
+                message: `Total paid: PKR ${fmt(res.data.totalPaid)} across ${res.data.totalEmployees} employees. ${summary}`,
+            });
+            setPayModalOpen(false);
+            await load();
+        } catch (err) {
+            notify({ type: 'error', title: `Disbursement failed`, message: err.response?.data?.error || err.message });
         } finally { setBusy(false); }
     };
 
@@ -236,6 +258,9 @@ export default function HrSalarySheet() {
                             <>
                                 <button className="erp-btn erp-btn-primary" onClick={() => setPostModalOpen(true)}>
                                     <FileText size={13}/> Post Accrual (JV)
+                                </button>
+                                <button className="erp-btn erp-btn-primary" onClick={() => setPayModalOpen(true)}>
+                                    <Wallet size={13}/> Pay Salary
                                 </button>
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
@@ -439,6 +464,35 @@ export default function HrSalarySheet() {
                             <button className="erp-btn" onClick={() => setPostModalOpen(false)}>Cancel</button>
                             <button className="erp-btn erp-btn-primary" disabled={busy || !postDate} onClick={runAccrual}>
                                 {busy ? 'Posting…' : 'Post JV'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {payModalOpen && (
+                <div className="hr-modal-bg" onClick={() => setPayModalOpen(false)}>
+                    <div className="hr-modal" onClick={e => e.stopPropagation()}>
+                        <div className="hr-modal-head">Pay Salary (Cash + Bank)</div>
+                        <div className="hr-modal-body">
+                            <p>Pay out the net salary for <b>{monthLabel(monthId)}</b> — Non-EOBI Cash, EOBI Cash,
+                               and one voucher per bank for EOBI employees paid by bank.</p>
+                            <label style={{ display: 'block', marginTop: 12 }}>
+                                <div className="hr-lbl">Voucher Date</div>
+                                <input type="date" value={postDate}
+                                    onChange={e => setPostDate(e.target.value)}
+                                    className="hr-inp" style={{ width: '100%', height: 34 }}/>
+                            </label>
+                            <p className="hr-hint" style={{ marginTop: 10 }}>
+                                Pays exactly each employee's Net (same figure on the Bank/Cash Letters), debiting
+                                their Salary GL and crediting Cash Book or their assigned Pay Bank. A group already
+                                disbursed this month is skipped with an error — reverse that voucher first to redo it.
+                            </p>
+                        </div>
+                        <div className="hr-modal-foot">
+                            <button className="erp-btn" onClick={() => setPayModalOpen(false)}>Cancel</button>
+                            <button className="erp-btn erp-btn-primary" disabled={busy || !postDate} onClick={runDisbursement}>
+                                {busy ? 'Paying…' : 'Pay Salary'}
                             </button>
                         </div>
                     </div>
