@@ -151,6 +151,7 @@ exports.setSalarySettings = async (req, res) => {
       .input('cv',  sql.Decimal(10,4), Number(b.CustomLateFineAmount) || 0)
       .input('bk',  sql.Bit,          isBank ? 1 : 0)
       .input('ba',  sql.NVarChar(100), isBank ? (b.BankAccountNumber || null) : null)
+      .input('pbg', sql.Int,          isBank && b.PaymentBankGLCAID ? parseInt(b.PaymentBankGLCAID) : null)
       .input('sn',  sql.NVarChar(50),  b.SrNo || null)
       .input('gl',  sql.Int,          b.EmployeeGLID ? parseInt(b.EmployeeGLID) : null)
       .query(`UPDATE gen_EmployeeInfo
@@ -165,6 +166,7 @@ exports.setSalarySettings = async (req, res) => {
                      CustomLateFineAmount = @cv,
                      IsPaidByBank         = @bk,
                      BankAccountNumber    = @ba,
+                     PaymentBankGLCAID    = @pbg,
                      SrNo                 = @sn,
                      EmployeeGLID         = COALESCE(@gl, EmployeeGLID)
                WHERE EmployeeID = @id`);

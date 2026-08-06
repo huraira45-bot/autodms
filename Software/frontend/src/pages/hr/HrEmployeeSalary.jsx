@@ -5,11 +5,13 @@ import { useFeedback } from '../../context/FeedbackContext';
 import { useCan } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
 import GLAccountPicker from '../../components/GLAccountPicker';
+import SearchableSelect from '../../components/SearchableSelect';
 
 export default function HrEmployeeSalary() {
     const { notify } = useFeedback();
     const canEdit = useCan('hr_employees').canEdit;
     const [employees, setEmployees] = useState([]);
+    const [banks, setBanks] = useState([]);
     const [drafts, setDrafts] = useState({});
     const [busy, setBusy] = useState(false);
     const [collapsed, setCollapsed] = useState({});
@@ -28,14 +30,18 @@ export default function HrEmployeeSalary() {
             notify({ type: 'error', title: 'Load failed', message: err.response?.data?.error || err.message });
         } finally { setBusy(false); }
     };
-    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        load();
+        axios.get('/api/accounts/banks').then(r => setBanks(r.data || [])).catch(() => {});
+    }, []);
 
     const patch = (id, field, value) => setDrafts(prev => {
         const next = { ...(prev[id] || {}), [field]: value };
         // Owner rule 2026-07-29: non-EOBI employees are ALWAYS paid in cash.
         // Unchecking EOBI must force pay-mode back to Cash automatically so
         // the UI can't send an invalid combination to the backend.
-        if (field === 'HasEOBI' && !value) next.IsPaidByBank = false;
+        if (field === 'HasEOBI' && !value) { next.IsPaidByBank = false; next.PaymentBankGLCAID = null; }
+        if (field === 'IsPaidByBank' && !value) next.PaymentBankGLCAID = null;
         return { ...prev, [id]: next };
     });
     const val = (id, key, fallback) => (drafts[id] && key in drafts[id]) ? drafts[id][key] : (employees.find(e => e.EmployeeID === id)?.[key] ?? fallback);
@@ -57,6 +63,7 @@ export default function HrEmployeeSalary() {
             CustomLateFineAmount: val(id, 'CustomLateFineAmount', emp.CustomLateFineAmount || 0),
             IsPaidByBank:         val(id, 'IsPaidByBank',        !!emp.IsPaidByBank),
             BankAccountNumber:    val(id, 'BankAccountNumber',   emp.BankAccountNumber || ''),
+            PaymentBankGLCAID:    val(id, 'PaymentBankGLCAID',   emp.PaymentBankGLCAID || null),
             EmployeeGLID:         val(id, 'EmployeeGLID',        emp.EmployeeGLID || null),
         };
         try {
@@ -77,6 +84,8 @@ export default function HrEmployeeSalary() {
             await load();
         } catch {}
     };
+
+    const bankOpts = useMemo(() => banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode })), [banks]);
 
     const grouped = useMemo(() => {
         const groups = [];
@@ -130,6 +139,7 @@ export default function HrEmployeeSalary() {
                                             <th className="num" style={{ width: 80 }}>Late/min</th>
                                             <th style={{ width: 75 }}>Pay Mode</th>
                                             <th style={{ width: 140 }}>Bank Acct #</th>
+                                            <th style={{ width: 200 }}>Pay Bank</th>
                                             <th style={{ width: 220 }}>Salary GL</th>
                                             <th style={{ width: 60 }}></th>
                                         </tr>
@@ -218,6 +228,18 @@ export default function HrEmployeeSalary() {
                                                             value={val(id, 'BankAccountNumber', e.BankAccountNumber || '') || ''}
                                                             onChange={ev => patch(id, 'BankAccountNumber', ev.target.value)}
                                                             className="hr-inp"/>
+                                                    </td>
+                                                    <td>
+                                                        {/* Which of the company's bank accounts pays this employee
+                                                            (owner ask 2026-08-07) -- the Bank Letter print groups
+                                                            employees by this so each bank only sees its own list. */}
+                                                        <SearchableSelect
+                                                            value={val(id, 'PaymentBankGLCAID', e.PaymentBankGLCAID || '')}
+                                                            onChange={v => patch(id, 'PaymentBankGLCAID', v)}
+                                                            options={bankOpts}
+                                                            disabled={!canEdit || !val(id, 'IsPaidByBank', e.IsPaidByBank)}
+                                                            placeholder="Pick bank…"
+                                                            title="Pick paying bank" />
                                                     </td>
                                                     <td>
                                                         <GLAccountPicker

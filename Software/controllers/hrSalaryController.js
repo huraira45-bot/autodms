@@ -197,12 +197,14 @@ async function buildSheet(pool, monthId) {
                    e.HasMess, e.MessAmount,
                    e.HasCustomLateFine, e.CustomLateFineAmount,
                    e.IsPaidByBank, e.BankAccountNumber,
+                   e.PaymentBankGLCAID, pb.GLTitle AS PaymentBankTitle, pb.GLCode AS PaymentBankCode,
                    e.EmployeeGLID, gl.GLCode AS AccountCode, gl.GLTitle AS AccountTitle,
                    e.IsActive
               FROM gen_EmployeeInfo e
               LEFT JOIN gen_DepartmentInfo d  ON d.DepartmentID  = e.DepartmentID
               LEFT JOIN gen_DesignationInfo dg ON dg.DesignationID = e.DesignationID
               LEFT JOIN GLChartOFAccount gl   ON gl.GLCAID = e.EmployeeGLID
+              LEFT JOIN GLChartOFAccount pb   ON pb.GLCAID = e.PaymentBankGLCAID
              WHERE e.IsActive = 1 AND ISNULL(e.IsOnPayroll, 1) = 1
              ORDER BY ISNULL(d.DepartmentName, '~'), e.SrNo, e.EmployeeName`),
         pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_AttendanceRecords WHERE MonthID=@m'),
@@ -226,6 +228,7 @@ async function buildSheet(pool, monthId) {
             Designation: emp.Designation, DepartmentName: emp.DepartmentName,
             AccountCode: emp.AccountCode, AccountTitle: emp.AccountTitle,
             IsPaidByBank: !!emp.IsPaidByBank, BankAccountNumber: emp.BankAccountNumber,
+            PaymentBankGLCAID: emp.PaymentBankGLCAID, PaymentBankTitle: emp.PaymentBankTitle, PaymentBankCode: emp.PaymentBankCode,
             Employee: emp,
             Attendance: attByE.get(emp.EmployeeID) || null,
             Entry:      entByE.get(emp.EmployeeID) || null,
