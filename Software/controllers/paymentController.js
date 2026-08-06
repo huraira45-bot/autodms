@@ -152,11 +152,20 @@ exports.getJobCardBalance = async (req, res) => {
         const jobCard = jcRes.recordset[0];
 
         // 2. Auto-posted SI voucher (if any)
+        // ReversesVoucherID IS NULL — without this, a reversal voucher created
+        // while the JC is between unfinalize and re-finalize (itself tagged
+        // SourceDocType='JOBCARD'/SourceDocID=<jc> and Status='Posted') can
+        // outrank the real invoice voucher on ORDER BY VoucherID DESC, so a
+        // walk-in payment made in that window gets allocated against the dead
+        // reversal voucher instead of the live one (owner report 2026-08-07,
+        // JC B&P-0008 — a 40,000 walk-in payment vanished this way). Mirrors
+        // the equivalent guard already in getStoreSaleBalance below.
         const voucherRes = await pool.request()
             .input('id', sql.Int, jobCardId)
             .query(`SELECT TOP 1 VoucherID, VoucherNo, TotalAmount
                     FROM data_FinanceVoucherInfo
                     WHERE SourceDocType='JOBCARD' AND SourceDocID=@id AND Status='Posted'
+                      AND ReversesVoucherID IS NULL
                     ORDER BY VoucherID DESC`);
         const voucher = voucherRes.recordset[0] || null;
 

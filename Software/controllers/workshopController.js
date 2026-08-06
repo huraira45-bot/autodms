@@ -2152,9 +2152,9 @@ exports.recordDepreciationPayment = async (req, res) => {
         }
 
         // Cap at outstanding balance to prevent overpayment. Balance =
-        // depreciation + under-insurance − paid. Excludes payments whose
-        // linked voucher was later reversed — otherwise a reversed receipt
-        // would still count against the cap and block re-recording.
+        // depreciation + under-insurance + CV4 − paid. Excludes payments
+        // whose linked voucher was later reversed — otherwise a reversed
+        // receipt would still count against the cap and block re-recording.
         const totals = await pool.request().input('id', sql.Int, id).query(`
             SELECT
               (SELECT ISNULL(SUM(DepAmount), 0)
@@ -2163,6 +2163,9 @@ exports.recordDepreciationPayment = async (req, res) => {
               (SELECT ISNULL(UnderInsurancePct, 0)
                  FROM dms_JobCardInsurance
                  WHERE JobCardId=@id) AS UIPct,
+              (SELECT ISNULL(CV4Amount, 0)
+                 FROM dms_JobCardInsurance
+                 WHERE JobCardId=@id) AS CV4Amount,
               (SELECT ISNULL(SUM((Price - ISNULL(DiscAmt,0)) + ISNULL(TaxAmount,0)), 0)
                  FROM Addata_JobCardInfoDetail WHERE JobCardId=@id) AS LabourTot,
               (SELECT ISNULL(SUM(ISNULL(PayableAmount,0) + ISNULL(TaxAmount,0)), 0)
@@ -2179,11 +2182,12 @@ exports.recordDepreciationPayment = async (req, res) => {
         const invoiceTot  = Number(row.LabourTot) + Number(row.SubletTot) + Number(row.PartsTot);
         const uiBase      = Math.max(0, invoiceTot - depTotal);
         const uiAmount    = +((uiBase * (Number(row.UIPct) || 0)) / 100).toFixed(2);
-        const total       = +(depTotal + uiAmount).toFixed(2);
+        const cv4Amount   = Number(row.CV4Amount) || 0;
+        const total       = +(depTotal + uiAmount + cv4Amount).toFixed(2);
         const paid        = Number(row.Paid) || 0;
         const balance     = +(total - paid).toFixed(2);
         if (amount > balance + 0.005) {
-            return res.status(400).json({ error: `Amount (${amount.toFixed(2)}) exceeds outstanding customer share (dep + under-ins) balance (${balance.toFixed(2)})` });
+            return res.status(400).json({ error: `Amount (${amount.toFixed(2)}) exceeds outstanding customer share (dep + under-ins + CV4) balance (${balance.toFixed(2)})` });
         }
 
         // Resolve GL accounts for the voucher:
