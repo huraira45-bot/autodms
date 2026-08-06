@@ -1862,9 +1862,10 @@ exports.getJobCardInsurance = async (req, res) => {
         const pool = await getPool();
         const hdr = await pool.request().input('id', sql.Int, id)
             .query(`SELECT CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo,
-                           ISNULL(UnderInsurancePct, 0) AS UnderInsurancePct
+                           ISNULL(UnderInsurancePct, 0) AS UnderInsurancePct,
+                           ISNULL(CV4Amount, 0) AS CV4Amount
                     FROM dms_JobCardInsurance WHERE JobCardId=@id`);
-        const header = hdr.recordset[0] || { CompanyName:'', SurveyorName:'', SurveyorMobile:'', SurveyorMobile2:'', InsClaimNo:'', UnderInsurancePct: 0 };
+        const header = hdr.recordset[0] || { CompanyName:'', SurveyorName:'', SurveyorMobile:'', SurveyorMobile2:'', InsClaimNo:'', UnderInsurancePct: 0, CV4Amount: 0 };
 
         // Parts issued to the JC
         const partsRs = await pool.request().input('id', sql.Int, id).query(`
@@ -1957,9 +1958,15 @@ exports.getJobCardInsurance = async (req, res) => {
         const underInsuranceBase = Math.max(0, invoiceTotal - depreciationTotal);
         const underInsuranceAmount = +(underInsuranceBase * underInsurancePct / 100).toFixed(2);
 
+        // CV4 — flat, manually-entered customer-owed amount (owner ask
+        // 2026-08-07). Unlike under-insurance it isn't computed from a base;
+        // the operator just types a figure on the Insurance tab. Rides the
+        // same customer-share pool as depreciation / under-insurance.
+        const cv4Amount = +(Number(header.CV4Amount) || 0).toFixed(2);
+
         // Customer's total share (paid via Depreciation Receive Payment) =
-        // depreciation + under-insurance.
-        const customerShareTotal = +(depreciationTotal + underInsuranceAmount).toFixed(2);
+        // depreciation + under-insurance + CV4.
+        const customerShareTotal = +(depreciationTotal + underInsuranceAmount + cv4Amount).toFixed(2);
 
         res.json({
             header,
@@ -1970,7 +1977,7 @@ exports.getJobCardInsurance = async (req, res) => {
                 depreciationPaid:     +depreciationPaid.toFixed(2),
                 // depreciationBalance still called that for backward
                 // compatibility with existing UI, but it's now
-                // (dep + under-ins) − paid. Frontend / Receive Payment
+                // (dep + under-ins + CV4) − paid. Frontend / Receive Payment
                 // treats it as the total customer share balance.
                 depreciationBalance:  +(customerShareTotal - depreciationPaid).toFixed(2),
                 // Extra fields so the Insurance tab can show a breakdown.
@@ -1978,6 +1985,7 @@ exports.getJobCardInsurance = async (req, res) => {
                 underInsurancePct:    +underInsurancePct.toFixed(2),
                 underInsuranceBase:   +underInsuranceBase.toFixed(2),
                 underInsuranceAmount: underInsuranceAmount,
+                cv4Amount:            cv4Amount,
                 customerShareTotal:   customerShareTotal,
             }
         });
@@ -2020,17 +2028,19 @@ exports.saveJobCardInsurance = async (req, res) => {
             .input('sm2', sql.NVarChar(30),  header.SurveyorMobile2 || null)
             .input('cn',  sql.NVarChar(80),  header.InsClaimNo      || null)
             .input('uip', sql.Decimal(5,2),  Number.isFinite(Number(header.UnderInsurancePct)) ? Number(header.UnderInsurancePct) : 0)
+            .input('cv4', sql.Decimal(18,2), Number.isFinite(Number(header.CV4Amount)) ? Number(header.CV4Amount) : 0)
             .query(`
                 IF EXISTS (SELECT 1 FROM dms_JobCardInsurance WHERE JobCardId=@id)
                     UPDATE dms_JobCardInsurance
                        SET CompanyName=@co, SurveyorName=@sn, SurveyorMobile=@sm,
                            SurveyorMobile2=@sm2, InsClaimNo=@cn, UnderInsurancePct=@uip,
+                           CV4Amount=@cv4,
                            UpdatedAt=GETDATE()
                      WHERE JobCardId=@id;
                 ELSE
                     INSERT INTO dms_JobCardInsurance
-                        (JobCardId, CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo, UnderInsurancePct)
-                    VALUES (@id, @co, @sn, @sm, @sm2, @cn, @uip);
+                        (JobCardId, CompanyName, SurveyorName, SurveyorMobile, SurveyorMobile2, InsClaimNo, UnderInsurancePct, CV4Amount)
+                    VALUES (@id, @co, @sn, @sm, @sm2, @cn, @uip, @cv4);
             `);
 
         // Replace depreciation rows

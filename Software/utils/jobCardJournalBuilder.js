@@ -35,7 +35,7 @@ const PAYMENT_MODES = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsLines = [], accounts, paymentBank = null, campaign = null, partyGL = null, subletVendorGLs = new Map(), depreciationTotal = 0, underInsurancePct = 0 }) {
+function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsLines = [], accounts, paymentBank = null, campaign = null, partyGL = null, subletVendorGLs = new Map(), depreciationTotal = 0, underInsurancePct = 0, cv4Amount = 0 }) {
     if (!accounts) throw new Error('accounts map required');
 
     // ---- Compute totals from each line group ----
@@ -173,9 +173,20 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
         ? round2(Math.min(uiBase * (uiPct / 100), uiBase))
         : 0;
 
-    // Combined customer share (depreciation + under-insurance) → General
-    // Customer A/C. Insurer share = whatever's left after both.
-    const depSplit = round2(depAmount + underInsAmount);
+    // CV4 — flat, manually-entered customer-owed amount (owner ask
+    // 2026-08-07), unlike under-insurance which is computed from a base.
+    // Capped to whatever's left of customerPays after depreciation and
+    // under-insurance — same greedy-sequential capping as the other two —
+    // so depSplit can never exceed customerPays (which would push
+    // insurerShare negative and unbalance the journal).
+    const cv4Base = Math.max(0, round2(customerPays - depAmount - underInsAmount));
+    const cv4Applied = Number(cv4Amount) > 0
+        ? round2(Math.min(Number(cv4Amount) || 0, cv4Base))
+        : 0;
+
+    // Combined customer share (depreciation + under-insurance + CV4) →
+    // General Customer A/C. Insurer share = whatever's left after all three.
+    const depSplit = round2(depAmount + underInsAmount + cv4Applied);
     const insurerShare = round2(customerPays - depSplit);
 
     if (insurerShare > 0) {
@@ -195,12 +206,21 @@ function buildJournalLines({ jobCard, labourLines = [], subletLines = [], partsL
     }
 
     if (depSplit > 0) {
-        // Narration reflects whether under-insurance contributed too, so
+        // Narration reflects which of dep / under-ins / CV4 contributed, so
         // reports and party ledger reads are unambiguous.
-        const narr = underInsAmount > 0 && depAmount > 0
-            ? `Customer share (dep ${depAmount.toFixed(2)} + under-ins ${underInsAmount.toFixed(2)}) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`
-            : underInsAmount > 0
-                ? `Customer under-insurance share (${uiPct}% of ${uiBase.toFixed(2)}) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`
+        const soloLabels = {
+            depreciation: 'depreciation share',
+            underIns: `under-insurance share (${uiPct}% of ${uiBase.toFixed(2)})`,
+            cv4: 'CV4 share',
+        };
+        const shareParts = [];
+        if (depAmount > 0) shareParts.push({ key: 'depreciation', combined: `dep ${depAmount.toFixed(2)}` });
+        if (underInsAmount > 0) shareParts.push({ key: 'underIns', combined: `under-ins ${underInsAmount.toFixed(2)}` });
+        if (cv4Applied > 0) shareParts.push({ key: 'cv4', combined: `CV4 ${cv4Applied.toFixed(2)}` });
+        const narr = shareParts.length > 1
+            ? `Customer share (${shareParts.map(p => p.combined).join(' + ')}) — JC-${jobCard.JobCardNo || jobCard.JobCardId}`
+            : shareParts.length === 1
+                ? `Customer ${soloLabels[shareParts[0].key]} — JC-${jobCard.JobCardNo || jobCard.JobCardId}`
                 : `Customer depreciation share — JC-${jobCard.JobCardNo || jobCard.JobCardId}`;
         lines.push({
             GLCAID: accounts.GENERAL_CUSTOMER.GLCAID,

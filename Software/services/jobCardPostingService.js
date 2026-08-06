@@ -170,12 +170,17 @@ async function loadJobCardData(jobCardId, transaction) {
 
     // Under-insurance percentage — flat % applied to (invoice − depreciation).
     // Same customer pool as depreciation. Owner ask 2026-07-08.
+    // CV4 — flat manually-entered customer-owed amount. Same customer pool
+    // as depreciation / under-insurance. Owner ask 2026-08-07.
     const uipRs = await new sql.Request(transaction)
         .input('id', sql.Int, jobCardId)
-        .query(`SELECT ISNULL(UnderInsurancePct, 0) AS Pct
+        .query(`SELECT ISNULL(UnderInsurancePct, 0) AS Pct, ISNULL(CV4Amount, 0) AS CV4Amount
                 FROM dms_JobCardInsurance WHERE JobCardId=@id`);
     const underInsurancePct = uipRs.recordset.length
         ? Number(uipRs.recordset[0].Pct) || 0
+        : 0;
+    const cv4Amount = uipRs.recordset.length
+        ? Number(uipRs.recordset[0].CV4Amount) || 0
         : 0;
 
     return {
@@ -185,6 +190,7 @@ async function loadJobCardData(jobCardId, transaction) {
         partsLines: parts.recordset,
         depreciationTotal,
         underInsurancePct,
+        cv4Amount,
     };
 }
 
@@ -208,7 +214,7 @@ async function resolvePaymentBank(jobCard, transaction) {
  */
 async function postJobCardVoucher(jobCardId, userInfo, transaction) {
     // 1. Load all job-card data + any active campaign application
-    const { jobCard, labourLines, subletLines, partsLines, depreciationTotal, underInsurancePct } = await loadJobCardData(jobCardId, transaction);
+    const { jobCard, labourLines, subletLines, partsLines, depreciationTotal, underInsurancePct, cv4Amount } = await loadJobCardData(jobCardId, transaction);
     const campaign = await loadCampaignApplication(jobCardId, transaction);
 
     // 2. Resolve system accounts + per-party GLs. Customer A/R uses the JC
@@ -235,6 +241,7 @@ async function postJobCardVoucher(jobCardId, userInfo, transaction) {
         accounts, campaign, partyGL, subletVendorGLs,
         depreciationTotal,
         underInsurancePct,
+        cv4Amount,
     });
 
     // Empty Job Cards (no labour / sublet / parts) — owner decision: allow them

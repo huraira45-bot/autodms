@@ -91,7 +91,7 @@ export default function JobCardForm() {
   // Insurance tab — claim header + per-part depreciation rows + payments
   const [insHeader, setInsHeader] = useState({
     CompanyName: '', SurveyorName: '', SurveyorMobile: '', SurveyorMobile2: '', InsClaimNo: '',
-    UnderInsurancePct: 0,
+    UnderInsurancePct: 0, CV4Amount: 0,
   });
   const [insTotals, setInsTotals] = useState({ underInsuranceBase: 0, underInsuranceAmount: 0, customerShareTotal: 0 });
   const [insParts, setInsParts] = useState([]);      // includes TaxRate / TaxAmount / TotalWithTax
@@ -1816,7 +1816,8 @@ export default function JobCardForm() {
                         const liveBase = Math.max(0, +(invoiceTotal - totalDepAmount).toFixed(2));
                         const pct = Number(insHeader.UnderInsurancePct) || 0;
                         const liveAmount = +(liveBase * pct / 100).toFixed(2);
-                        const liveCustomerShare = +(totalDepAmount + liveAmount).toFixed(2);
+                        const liveCV4 = Number(insHeader.CV4Amount) || 0;
+                        const liveCustomerShare = +(totalDepAmount + liveAmount + liveCV4).toFixed(2);
                         return (
                           <>
                             <div style={S.field}>
@@ -1843,9 +1844,25 @@ export default function JobCardForm() {
                                 </div>
                               </div>
                             )}
-                            {(liveAmount > 0 || totalDepAmount > 0) && (
+                            {/* CV4 (owner ask 2026-08-07) — flat amount the operator types
+                                directly, not computed from a base. Rides the same customer-
+                                share pool as depreciation / under-insurance, collected via
+                                Receive Payment > "JC Insurance Depreciation" mode, and the
+                                outstanding balance reduces as payments come in. */}
+                            <div style={S.field}>
+                              <label style={S.label}>CV4</label>
+                              <input style={S.input} type="number" step="0.01" min="0"
+                                     value={insHeader.CV4Amount ?? 0}
+                                     onChange={e => {
+                                       const v = e.target.value;
+                                       setInsHeader(h => ({ ...h, CV4Amount: v === '' ? '' : Number(v) }));
+                                     }}
+                                     disabled={disabled}
+                                     placeholder="e.g. 5000" />
+                            </div>
+                            {(liveAmount > 0 || totalDepAmount > 0 || liveCV4 > 0) && (
                               <div style={S.field}>
-                                <label style={{ ...S.label, fontWeight: 700, color: '#7c2d12' }}>Customer Share Total (dep + under-ins)</label>
+                                <label style={{ ...S.label, fontWeight: 700, color: '#7c2d12' }}>Customer Share Total (dep + under-ins + CV4)</label>
                                 <div style={{ ...S.billVal, fontWeight: 700, color: '#7c2d12', background: '#ffedd5', textAlign: 'right', padding: '4px 8px' }}>
                                   {liveCustomerShare.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
@@ -1940,10 +1957,16 @@ export default function JobCardForm() {
                       <div style={{ border: '1px solid #c8d4e4', borderRadius: 4, padding: 8, background: '#fafbfc' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6, flexWrap: 'wrap' }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: '#1a3a6a' }}>Depreciation Payments (read-only)</div>
+                          {/* Total/Balance read from insTotals (backend-authoritative
+                              customerShareTotal = dep + under-ins + CV4) rather than the
+                              locally-computed totalDepAmount/totalDepBalance, which only
+                              ever tracked the per-part depreciation grid and would under-
+                              state the customer's real balance now that under-insurance
+                              and CV4 also ride this same pool. */}
                           <div style={{ fontSize: 10, color: '#475569' }}>
-                            Total: <strong style={{ color: '#7c2d12' }}>PKR {totalDepAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            Total: <strong style={{ color: '#7c2d12' }}>PKR {(Number(insTotals.customerShareTotal) || totalDepAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                             {'  '}·{'  '}Paid: <strong style={{ color: '#15803d' }}>PKR {totalDepPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                            {'  '}·{'  '}Balance: <strong style={{ color: totalDepBalance > 0.005 ? '#b91c1c' : '#15803d' }}>PKR {totalDepBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            {'  '}·{'  '}Balance: <strong style={{ color: (insTotals.depreciationBalance ?? totalDepBalance) > 0.005 ? '#b91c1c' : '#15803d' }}>PKR {(insTotals.depreciationBalance ?? totalDepBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                           </div>
                         </div>
                         <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', padding: '6px 10px', borderRadius: 4, marginBottom: 8 }}>
