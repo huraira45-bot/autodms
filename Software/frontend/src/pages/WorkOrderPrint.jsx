@@ -65,15 +65,21 @@ export default function WorkOrderPrint() {
     // Not printed unless a campaign is actually attached.
     const campaign    = jc.Campaign || null;
     const campaignBenefit = Number(campaign?.BenefitAmount || 0);
-    const total       = grossTotal - campaignBenefit;
 
     // Insurance depreciation (owner report 2026-08-07: a customer's paid
     // depreciation wasn't showing anywhere on this print). customerShareTotal
     // already folds in depreciation + under-insurance + CV4; only shown when
     // this JC actually has an insurance claim with a nonzero customer share.
+    // Owner follow-up: the depreciation line was printed in parentheses
+    // (the usual "this reduces the total" convention) but Total Amount
+    // never actually subtracted it — Party Name here is the insurer, and
+    // the depreciation is the customer's own portion, not the insurer's,
+    // so it must come off Total Amount the same way Credit Invoice's
+    // "Total Payable by Party" already excludes it.
     const depTotal   = Number(ins?.totals?.customerShareTotal) || 0;
     const depPaid    = Number(ins?.totals?.depreciationPaid) || 0;
     const depBalance = Number(ins?.totals?.depreciationBalance) || 0;
+    const total       = grossTotal - campaignBenefit - depTotal;
 
     return (
         <div className="wo-print" style={{ position: 'relative' }}>
