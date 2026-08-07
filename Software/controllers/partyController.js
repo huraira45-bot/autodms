@@ -75,13 +75,24 @@ async function validatePartyGLID(pool, partyGLID) {
 
 exports.getParties = async (req, res) => {
     try {
-        const { type, search, business } = req.query;
+        const { type, search, business, glCode } = req.query;
         const pool = await getPool();
         const r = pool.request();
         let where = `1=1`;
         if (type)   { r.input('t', sql.NVarChar(20), type);     where += ` AND p.PartyType = @t`; }
         if (search) { r.input('q', sql.NVarChar(200), `%${search}%`);
                       where += ` AND (p.PartyName LIKE @q OR p.CNIC LIKE @q OR p.PhoneOne LIKE @q OR p.NTNNO LIKE @q)`; }
+        // Optional direct-COA filter (?glCode=201002): parties whose
+        // PartyGLID falls under that GL code OR any of its sub-accounts
+        // (prefix match — e.g. 201002 covers 201002002, 201002100, ...).
+        // Used by the Vehicle Sales booking picker to scope to genuine
+        // vehicle-purchase customers, each tied to their own legacy
+        // sub-account under 201002 CUSTOMER ADVANCES - VEHICLE PARTIES,
+        // directly off the party's COA link — no separate access table.
+        if (glCode) {
+            r.input('glc', sql.NVarChar(20), `${glCode}%`);
+            where += ` AND c.GLCode LIKE @glc`;
+        }
         // Optional business filter (?business=WORKSHOP|SALES|PROCUREMENT|SUBLET):
         // only parties mapped to that business via dms_PartyBusinessAccess are returned.
         // No row in the access table → party is hidden from that picker (strict opt-in).
@@ -141,12 +152,7 @@ exports.savePartyBusinessAccess = async (req, res) => {
         // Owner ask 2026-07-04: PAINT_LAB is the new business option so paint
         // suppliers can be exposed in Paint GRN without polluting the spare-parts
         // GRN party dropdown.
-        // VEHICLE_SALES (owner ask 2026-08-07): scopes the Booking customer
-        // picker to genuine vehicle-purchase customers instead of every party
-        // in the system. Deliberately excluded from grant-all, same as
-        // PAINT_LAB -- opt-in only (bootstrapped once via migration 120 from
-        // the legacy GL 201002 tagging, then grown normally from there).
-        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET', 'PAINT_LAB', 'VEHICLE_SALES']);
+        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET', 'PAINT_LAB']);
         for (const k of keys) {
             if (!valid.has(k)) return res.status(400).json({ error: `Invalid BusinessKey: ${k}` });
         }

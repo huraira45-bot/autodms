@@ -94,7 +94,7 @@ export default function NewBooking() {
         const t = setTimeout(async () => {
             setPartyLoading(true);
             try {
-                const params = { business: 'VEHICLE_SALES' };
+                const params = { glCode: '201002' };
                 if (partySearch && partySearch.length >= 1) params.search = partySearch;
                 const r = await axios.get(`${API}/parties`, { params });
                 const rows = Array.isArray(r.data) ? r.data : (r.data.parties || []);
@@ -330,6 +330,16 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
 
+    // NOTE: every party requires a PartyGLID, and 201002 itself is a
+    // parent/group account (can't be posted against directly) -- each of
+    // the 336 existing vehicle customers has their OWN leaf sub-account
+    // under it (201002001, 201002002, ...) inherited from the legacy
+    // system. There's no defined convention yet for provisioning a new
+    // leaf for a brand-new customer created here, so this still hits the
+    // backend's "PartyGLID is required" error -- pre-existing gap (this
+    // form was already marked "quick-create deferred to v2"), not
+    // introduced by the 2026-08-07 picker fix. Needs an owner decision on
+    // how new customers should be GL-provisioned before this can work.
     const save = async () => {
         if (!name.trim()) { setErr('Name is required'); return; }
         setBusy(true); setErr(null);
@@ -344,9 +354,6 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
             });
             const partyId = r.data?.PartyID;
             if (!partyId) throw new Error('Created but server did not return a PartyID.');
-            // Grant Vehicle Sales business access so this customer shows up
-            // again on future booking searches (picker filters by it).
-            await axios.post(`${API}/parties/business-access`, { PartyID: partyId, BusinessKeys: ['VEHICLE_SALES'] });
             // Fetch the full row so the booking form has name/phone/type to render
             const full = await axios.get(`${API}/parties/${partyId}`);
             onCreated(full.data);
