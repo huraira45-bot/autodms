@@ -204,7 +204,10 @@ export default function PaintIssue() {
     // Filter picker to the same family (weight/volume vs Piece) as the
     // item's base UoM (paint_UOM.Scale > 0 = mass, Scale = 0 = counting) —
     // UNLESS the item has a per-item GramsPerUnit factor set, in which case
-    // Piece is also offered (issue "1 box = 700g" etc. — owner ask 2026-07-30).
+    // Piece is offered INSTEAD of the raw weight base (issue "1 box = 700g"
+    // etc. — owner ask 2026-07-30). The raw gram base is deliberately
+    // excluded once a GramsPerUnit conversion exists, to match the same fix
+    // on Paint GRN (owner ask 2026-08-07, after PGRN-0060's mis-entry).
     const uomOptsForItem = React.useCallback((paintItemID) => {
         if (!paintItemID) return uomOpts;
         const it = items.find(x => Number(x.PaintItemID) === Number(paintItemID));
@@ -216,8 +219,8 @@ export default function PaintIssue() {
         return uoms
             .filter(u => {
                 const uIsCounting = !(Number(u.Scale) > 0);
-                if (uIsCounting === baseIsCounting) return true;
-                return !baseIsCounting && uIsCounting && gramsPerUnit > 0;
+                if (!baseIsCounting && gramsPerUnit > 0) return uIsCounting;
+                return uIsCounting === baseIsCounting;
             })
             .map(u => ({
                 id: u.PaintUOMID,

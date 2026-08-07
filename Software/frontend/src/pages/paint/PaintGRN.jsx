@@ -275,8 +275,13 @@ export default function PaintGRN() {
     // UoM picker filter: keep the operator in the same family as the item's
     // base UoM. Weight/volume family (paint_UOM.Scale > 0) can't cross into
     // the counting/Piece family (Scale = 0 or NULL) — UNLESS the item has a
-    // per-item GramsPerUnit factor set, in which case Piece is also offered
-    // (receive "1 box = 700g" etc. — owner ask 2026-07-30).
+    // per-item GramsPerUnit factor set, in which case Piece is offered
+    // INSTEAD of the raw weight base (receive "1 box = 700g" etc. — owner
+    // ask 2026-07-30). The raw gram base is deliberately excluded once a
+    // GramsPerUnit conversion exists: PGRN-0060 (2026-08-05) had an operator
+    // enter "16" against "Gram (base)" meaning 16 cans, inflating AvgCost
+    // ~12x/420x — forcing Piece entry here removes that mistake at the
+    // source (owner ask 2026-08-07).
     const uomOptsForItem = React.useCallback((paintItemID) => {
         if (!paintItemID) return uomOpts;
         const it = items.find(x => Number(x.PaintItemID) === Number(paintItemID));
@@ -288,8 +293,8 @@ export default function PaintGRN() {
         return uoms
             .filter(u => {
                 const uIsCounting = !(Number(u.Scale) > 0);
-                if (uIsCounting === baseIsCounting) return true;
-                return !baseIsCounting && uIsCounting && gramsPerUnit > 0;
+                if (!baseIsCounting && gramsPerUnit > 0) return uIsCounting;
+                return uIsCounting === baseIsCounting;
             })
             .map(u => ({
                 id: u.PaintUOMID,
