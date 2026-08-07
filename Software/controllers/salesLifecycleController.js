@@ -493,7 +493,15 @@ exports.deliveryReadiness = async (req, res) => {
         const fullyPaid = paidPct >= 100;
         const reasons = [];
         if (!b.AllocatedVehicleID) reasons.push('Vehicle not allocated');
-        if (b.Status !== 'MasterInvoicePosted' && b.Status !== 'ReadyForDelivery') reasons.push(`Status must be MasterInvoicePosted or ReadyForDelivery (currently ${b.Status})`);
+        // Master Invoice is NOT a prerequisite for delivery (owner ask
+        // 2026-08-07) — in the agency model the dealer never owns the
+        // vehicle, so Master Invoice only affects the Master incentive
+        // accrual, not the customer-facing delivery. Matches the set
+        // issueGatePass itself has always accepted; this preflight check
+        // was stricter than the actual action for no real reason.
+        if (!['Allocated', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(b.Status)) {
+            reasons.push(`Status must be Allocated / MasterInvoicePosted / ReadyForDelivery (currently ${b.Status})`);
+        }
 
         if (!fullyPaid) {
             if (!b.AllowPartialDelivery) reasons.push('Not fully paid AND AllowPartialDelivery flag is off');
