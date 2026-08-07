@@ -7,16 +7,17 @@ import { ErpControlPanel } from '../components/erp';
 const API = '/api/parties';
 
 // Business keys mirror the whitelist in partyController.js:
-//   WORKSHOP / SALES / PROCUREMENT / SUBLET / PAINT_LAB.
+//   WORKSHOP / SALES / PROCUREMENT / SUBLET / PAINT_LAB / VEHICLE_SALES.
 // Adding a new one here requires the same entry in the controller's
 // `valid` set (owner ask 2026-07-04 added PAINT_LAB for the Paint Lab
 // module — GRN / GRTN supplier pickers filter parties by this key).
 const BUSINESSES = [
-    { key: 'WORKSHOP',    label: 'Workshop',    hint: 'Job Card customers' },
-    { key: 'SALES',       label: 'Spare Parts', hint: 'Store Sale customers' },
-    { key: 'PROCUREMENT', label: 'Procurement', hint: 'GRN / GRTN suppliers' },
-    { key: 'SUBLET',      label: 'Sublet',      hint: 'Sublet repair vendors' },
-    { key: 'PAINT_LAB',   label: 'Paint Lab',   hint: 'Paint GRN / GRTN suppliers' },
+    { key: 'WORKSHOP',      label: 'Workshop',      hint: 'Job Card customers' },
+    { key: 'SALES',         label: 'Spare Parts',   hint: 'Store Sale customers' },
+    { key: 'PROCUREMENT',   label: 'Procurement',   hint: 'GRN / GRTN suppliers' },
+    { key: 'SUBLET',        label: 'Sublet',        hint: 'Sublet repair vendors' },
+    { key: 'PAINT_LAB',     label: 'Paint Lab',     hint: 'Paint GRN / GRTN suppliers' },
+    { key: 'VEHICLE_SALES', label: 'Vehicle Sales', hint: 'Booking customer picker' },
 ];
 
 export default function PartyBusinessAccess() {

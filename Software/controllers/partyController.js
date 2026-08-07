@@ -141,7 +141,12 @@ exports.savePartyBusinessAccess = async (req, res) => {
         // Owner ask 2026-07-04: PAINT_LAB is the new business option so paint
         // suppliers can be exposed in Paint GRN without polluting the spare-parts
         // GRN party dropdown.
-        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET', 'PAINT_LAB']);
+        // VEHICLE_SALES (owner ask 2026-08-07): scopes the Booking customer
+        // picker to genuine vehicle-purchase customers instead of every party
+        // in the system. Deliberately excluded from grant-all, same as
+        // PAINT_LAB -- opt-in only (bootstrapped once via migration 120 from
+        // the legacy GL 201002 tagging, then grown normally from there).
+        const valid = new Set(['WORKSHOP', 'SALES', 'PROCUREMENT', 'SUBLET', 'PAINT_LAB', 'VEHICLE_SALES']);
         for (const k of keys) {
             if (!valid.has(k)) return res.status(400).json({ error: `Invalid BusinessKey: ${k}` });
         }

@@ -94,7 +94,7 @@ export default function NewBooking() {
         const t = setTimeout(async () => {
             setPartyLoading(true);
             try {
-                const params = {};
+                const params = { business: 'VEHICLE_SALES' };
                 if (partySearch && partySearch.length >= 1) params.search = partySearch;
                 const r = await axios.get(`${API}/parties`, { params });
                 const rows = Array.isArray(r.data) ? r.data : (r.data.parties || []);
@@ -344,6 +344,9 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
             });
             const partyId = r.data?.PartyID;
             if (!partyId) throw new Error('Created but server did not return a PartyID.');
+            // Grant Vehicle Sales business access so this customer shows up
+            // again on future booking searches (picker filters by it).
+            await axios.post(`${API}/parties/business-access`, { PartyID: partyId, BusinessKeys: ['VEHICLE_SALES'] });
             // Fetch the full row so the booking form has name/phone/type to render
             const full = await axios.get(`${API}/parties/${partyId}`);
             onCreated(full.data);
