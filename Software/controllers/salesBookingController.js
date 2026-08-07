@@ -725,29 +725,11 @@ exports.recordPayment = async (req, res) => {
                              BookingID, LinkedPaymentID, UploadedByEmployeeID, UploadedByName)
                         VALUES (@dt, @desc, @fp, @orig, @mime, @sz, @bid, @pid, @emp, @empN)`);
 
-            // If minimum booking payment is now satisfied, advance the booking state
-            if (willConfirmBooking) {
-                await new sql.Request(tx).input('id', sql.Int, id)
-                    .query(`UPDATE dms_SalesBookings SET Status='BookingConfirmed', UpdatedAt=GETDATE() WHERE BookingID=@id`);
-                await logTransition(tx, id, 'PendingBookingPayment', 'BookingConfirmed', req.user,
-                    `Minimum booking amount (PKR ${minAmt.toLocaleString()}) received. Booking confirmed. Cancellation now requires AM approval.`);
-            }
-
-            // Once the booking is fully paid (or over-paid), advance to
-            // PendingPayment so the Allocate Vehicle button becomes available.
-            // This jump may skip BookingConfirmed if min and full are crossed
-            // by the same payment.
-            if (willFlagFullyPaid) {
-                const fromState = willConfirmBooking ? 'BookingConfirmed' : booking.Status;
-                await new sql.Request(tx).input('id', sql.Int, id)
-                    .query(`UPDATE dms_SalesBookings SET Status='PendingPayment', UpdatedAt=GETDATE() WHERE BookingID=@id`);
-                await logTransition(tx, id, fromState, 'PendingPayment', req.user,
-                    `Booking fully paid (PKR ${newTotal.toLocaleString()} of ${negotiated.toLocaleString()}). Ready for vehicle allocation.`);
-            }
-
             // GL posting — gated. If any required system-account role is unmapped,
             // we keep the payment row and skip posting (admin must map roles in
             // Accounting › System Accounts). Any other error rolls back the tx.
+            // The voucher is created as Draft, not auto-posted (owner ask
+            // 2026-08-07) — see the note in salesPaymentPostingService.js.
             let glPostingSkipped = null;
             let voucherId = null;
             try {
@@ -762,14 +744,40 @@ exports.recordPayment = async (req, res) => {
                 }
             }
 
+            // Booking status: if a Draft voucher was created, the
+            // BookingConfirmed / PendingPayment thresholds wait until that
+            // voucher is reviewed + Finalized (finalizeController.js's
+            // POST_COMMIT_HOOKS.VOUCHER re-checks these same thresholds and
+            // applies them then — see salesVoucherPostHookService.js). If
+            // there's no voucher to wait for (GL not configured yet), advance
+            // immediately as before.
+            if (!voucherId) {
+                if (willConfirmBooking) {
+                    await new sql.Request(tx).input('id', sql.Int, id)
+                        .query(`UPDATE dms_SalesBookings SET Status='BookingConfirmed', UpdatedAt=GETDATE() WHERE BookingID=@id`);
+                    await logTransition(tx, id, 'PendingBookingPayment', 'BookingConfirmed', req.user,
+                        `Minimum booking amount (PKR ${minAmt.toLocaleString()}) received. Booking confirmed. Cancellation now requires AM approval.`);
+                }
+                if (willFlagFullyPaid) {
+                    const fromState = willConfirmBooking ? 'BookingConfirmed' : booking.Status;
+                    await new sql.Request(tx).input('id', sql.Int, id)
+                        .query(`UPDATE dms_SalesBookings SET Status='PendingPayment', UpdatedAt=GETDATE() WHERE BookingID=@id`);
+                    await logTransition(tx, id, fromState, 'PendingPayment', req.user,
+                        `Booking fully paid (PKR ${newTotal.toLocaleString()} of ${negotiated.toLocaleString()}). Ready for vehicle allocation.`);
+                }
+            }
+
             await tx.commit();
             res.status(201).json({
-                message: 'Payment recorded',
+                message: voucherId
+                    ? 'Payment recorded — GL voucher created as Draft, awaiting Finalize. Booking status will advance once reviewed.'
+                    : 'Payment recorded',
                 PaymentID: paymentId,
                 VoucherID: voucherId,
                 GLPostingSkipped: glPostingSkipped,
                 MinimumBookingMet: willConfirmBooking || booking.Status !== 'PendingBookingPayment',
-                BookingConfirmedNow: willConfirmBooking,
+                BookingConfirmedNow: !voucherId && willConfirmBooking,
+                PendingReview: !!voucherId,
             });
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {

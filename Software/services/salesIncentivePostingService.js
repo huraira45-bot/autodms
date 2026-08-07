@@ -15,6 +15,9 @@
  * Accrual reversal (when a booking is cancelled): reuses the accrual voucher
  * with flipped Dr/Cr — handled by voucherReversalService (existing pattern),
  * not by this service directly.
+ *
+ * Both voucher types are created as Draft, not auto-posted (owner ask
+ * 2026-08-07) — someone reviews + Finalizes via the normal Voucher screen.
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
@@ -88,12 +91,12 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
     await insertLine(expenseGL, amount, 0, `Incentive expense — ${a.BookingNo}`);
     await insertLine(payableGL, 0, amount, `Owed to employee #${a.EarnerEmployeeID}`);
 
-    await new sql.Request(transaction)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
+    // Deliberately left as Draft (owner ask 2026-08-07). Unlike Master
+    // Invoice/Payment/Delivery, nothing downstream needs to wait for this —
+    // the accrual row's own Status='Accrued' is already set unconditionally
+    // by the caller regardless of voucher/GL state (same pre-existing
+    // pattern as AmountPaidToDate for payments), so there's no booking-side
+    // status to defer. No entry needed in salesVoucherPostHookService.js.
 
     // Stamp back
     await new sql.Request(transaction)
@@ -173,12 +176,10 @@ async function postDisbursementVoucher(dis, userInfo, transaction) {
     await insertLine(payableGL, amount, 0, 'Incentive payable settled');
     await insertLine(creditGL,  0, amount, dis.mode === 'Cash' ? 'Cash paid out' : 'Bank disbursement');
 
-    await new sql.Request(transaction)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
+    // Deliberately left as Draft (owner ask 2026-08-07). The accrual rows'
+    // DisbursedAmount/Status are already updated unconditionally by the
+    // caller before this runs (same pattern as AmountPaidToDate for
+    // payments), so there's no booking-side status to defer here either.
 
     return voucherId;
 }

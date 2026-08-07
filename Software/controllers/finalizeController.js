@@ -24,14 +24,14 @@ const POST_COMMIT_HOOKS = {
     // voucher's own SourceDocType so each sales flow's booking-side status
     // only advances once its voucher is actually posted, not when the
     // booking action originally happened. See salesVoucherPostHookService.js.
-    VOUCHER: async (id) => {
+    VOUCHER: async (id, user) => {
         const pool = await getPool();
         const v = await pool.request().input('id', sql.Int, id)
             .query(`SELECT SourceDocType, SourceDocID FROM data_FinanceVoucherInfo WHERE VoucherID=@id`);
         const row = v.recordset[0];
         if (!row?.SourceDocType || row.SourceDocID == null) return;
         const { handleSalesVoucherPosted } = require('../services/salesVoucherPostHookService');
-        await handleSalesVoucherPosted(id, row.SourceDocType, row.SourceDocID);
+        await handleSalesVoucherPosted(id, row.SourceDocType, row.SourceDocID, user);
     },
 };
 

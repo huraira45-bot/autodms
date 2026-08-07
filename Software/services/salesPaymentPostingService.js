@@ -136,13 +136,8 @@ async function postDirectPayOrderVoucher(paymentId, p, amount, accounts, custome
         .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                 VALUES (@pid, @bid, @vid, @gl, 0, @cr, @nar)`);
 
-    // Flip Posted; balanced-entry trigger validates here.
-    await new sql.Request(transaction)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
+    // Deliberately left as Draft (owner ask 2026-08-07) — see the note in
+    // postSalesPaymentVoucher below for the finalize hook that takes over.
 
     // Stamp voucher # back on the payment row
     await new sql.Request(transaction)
@@ -283,13 +278,14 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
                     VALUES (@pid, @bid, @vid, @gl, 0, @cr, @nar)`);
     }
 
-    // Flip to Posted (balanced-entry trigger validates here)
-    await new sql.Request(transaction)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
+    // Deliberately left as Draft (owner ask 2026-08-07) — every sales-module
+    // voucher sits in Draft for manual review + Finalize via the normal
+    // Voucher screen before it hits the GL, same as any other manual
+    // voucher. finalizeController.js's POST_COMMIT_HOOKS.VOUCHER handler
+    // advances the booking's own status once this voucher is actually
+    // finalized (see services/salesVoucherPostHookService.js) — the
+    // BookingConfirmed / PendingPayment thresholds that used to fire
+    // immediately in the controller now wait for that.
 
     // Stamp the VoucherID back onto the payment row
     await new sql.Request(transaction)

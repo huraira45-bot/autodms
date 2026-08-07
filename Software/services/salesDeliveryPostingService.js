@@ -162,12 +162,11 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
                     VALUES (@pid, @bid, @vid, @gl, @dr, 0, @nar)`);
     }
 
-    await new sql.Request(transaction)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
+    // Deliberately left as Draft (owner ask 2026-08-07) — every sales-module
+    // voucher sits in Draft for manual review + Finalize via the normal
+    // Voucher screen before it hits the GL. For Gate Pass specifically, the
+    // vehicle does not release and the booking does not close until this
+    // voucher is finalized — see salesVoucherPostHookService.js.
 
     // Stamp back
     await new sql.Request(transaction)

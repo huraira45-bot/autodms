@@ -559,6 +559,39 @@ exports.financeCoSignPartial = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+// Auto-creates a placeholder recovery plan when delivery proceeds without
+// full payment. The plan holds a single installment due in 30 days; the
+// recovery officer adjusts the schedule afterward. Shared between the
+// immediate-close path here (GL not configured) and the deferred-close path
+// in salesVoucherPostHookService.js (GL configured — waits for Finalize).
+async function createRecoveryPlanIfNeeded(tx, bookingId, b, fullyPaid, user) {
+    if (fullyPaid) return null;
+    const remainder = Number(b.NegotiatedPrice) - Number(b.AmountPaidToDate);
+    if (remainder <= 0.01) return null;
+    const planIns = await new sql.Request(tx)
+        .input('bid',   sql.Int,             bookingId)
+        .input('rem',   sql.Decimal(18,2),   remainder)
+        .input('json',  sql.NVarChar(sql.MAX),
+               JSON.stringify([{ DueDate: addDaysISO(30), AmountDue: remainder, Notes: 'Auto-created at gate pass — adjust schedule.' }]))
+        .input('cby',   sql.Int,             user?.employeeId || null)
+        .input('cbyN',  sql.NVarChar(100),   user?.userName || null)
+        .query(`INSERT INTO dms_SalesRecoveryPlans
+                    (BookingID, TotalRemainingAtDelivery, InstallmentsJSON,
+                     Status, CreatedByEmployeeID, CreatedByName)
+                OUTPUT INSERTED.RecoveryPlanID
+                VALUES (@bid, @rem, @json, 'Active', @cby, @cbyN)`);
+    const planId = planIns.recordset[0].RecoveryPlanID;
+    await new sql.Request(tx)
+        .input('pid', sql.Int,           planId)
+        .input('bid', sql.Int,           bookingId)
+        .input('due', sql.Date,          addDaysISO(30))
+        .input('amt', sql.Decimal(18,2), remainder)
+        .query(`INSERT INTO dms_SalesRecoveryInstallments
+                    (RecoveryPlanID, BookingID, SeqNo, DueDate, AmountDue, Notes)
+                VALUES (@pid, @bid, 1, @due, @amt, 'Auto-created at gate pass — adjust schedule.')`);
+    return planId;
+}
+
 // POST /api/sales/bookings/:id/issue-gate-pass — final step, moves to Closed
 // body: { GatePassNumber?, Notes? }
 exports.issueGatePass = async (req, res) => {
@@ -596,32 +629,15 @@ exports.issueGatePass = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
-            const gatePassNo = req.body?.GatePassNumber || `GP-${Date.now()}`;
-            await new sql.Request(tx)
-                .input('id', sql.Int, id)
-                .input('by', sql.Int, req.user?.employeeId || null)
-                .input('byN', sql.NVarChar(100), req.user?.userName || null)
-                .query(`UPDATE dms_SalesBookings
-                        SET Status='Closed',
-                            GatePassIssuedAt=GETDATE(),
-                            DeliveredAt=COALESCE(DeliveredAt, GETDATE()),
-                            ClosedAt=GETDATE(),
-                            UpdatedAt=GETDATE(), UpdatedByEmployeeID=@by, UpdatedByName=@byN
-                        WHERE BookingID=@id`);
-            await new sql.Request(tx)
-                .input('vid', sql.Int, b.AllocatedVehicleID)
-                .query(`UPDATE dms_Vehicle SET Status='Sold', SoldDeliveredAt=GETDATE(), UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
-
-            // Mark open-allocation memo as Sold (if applicable)
-            await new sql.Request(tx)
-                .input('vid', sql.Int, b.AllocatedVehicleID)
-                .input('bid', sql.Int, id)
-                .query(`UPDATE dms_OpenAllocationLedger
-                        SET Status='Sold', SoldAt=GETDATE(), SoldToBookingID=@bid
-                        WHERE VehicleID=@vid AND Status='AtDealer'`);
-
-            // GL post — revenue recognition + COGS + premium (if any).
-            // The service joins to dms_VehicleVariant to pull WholesalePrice for the COGS leg.
+            // GL post FIRST — revenue recognition + COGS + premium (if any).
+            // The service joins to dms_VehicleVariant to pull WholesalePrice
+            // for the COGS leg. Voucher is created as Draft, not auto-posted
+            // (owner ask 2026-08-07) — and for Gate Pass specifically, the
+            // owner chose the strict option: the vehicle does NOT release
+            // (no Sold status, no Closed booking) until this voucher is
+            // reviewed + Finalized. See the SALES_DELIVERY handler in
+            // salesVoucherPostHookService.js for the rest of what used to
+            // happen immediately here.
             let deliveryVoucherId = null;
             if (glPostingEnabled) {
                 try {
@@ -633,52 +649,62 @@ exports.issueGatePass = async (req, res) => {
                 }
             }
 
-            const glIntent = deliveryVoucherId
-                ? `GL posted as voucher #${deliveryVoucherId}.`
-                : glPostingEnabled
-                    ? `GL posting attempted but service raised; check logs.`
-                    : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}.`;
-            await logTransition(tx, id, b.Status, 'Closed', req.user,
-                `Gate pass ${gatePassNo} issued. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`} ${glIntent}`);
+            let responseMessage;
+            let bookingClosedNow = false;
 
-            // Auto-create a placeholder recovery plan when delivery proceeds
-            // without full payment. The plan holds a single installment due in
-            // 30 days; the recovery officer adjusts the schedule afterward.
-            let autoRecoveryPlanId = null;
-            if (!fullyPaid) {
-                const remainder = Number(b.NegotiatedPrice) - Number(b.AmountPaidToDate);
-                if (remainder > 0.01) {
-                    const planIns = await new sql.Request(tx)
-                        .input('bid',   sql.Int,             id)
-                        .input('rem',   sql.Decimal(18,2),   remainder)
-                        .input('json',  sql.NVarChar(sql.MAX),
-                               JSON.stringify([{ DueDate: addDaysISO(30), AmountDue: remainder, Notes: 'Auto-created at gate pass — adjust schedule.' }]))
-                        .input('cby',   sql.Int,             req.user?.employeeId || null)
-                        .input('cbyN',  sql.NVarChar(100),   req.user?.userName || null)
-                        .query(`INSERT INTO dms_SalesRecoveryPlans
-                                    (BookingID, TotalRemainingAtDelivery, InstallmentsJSON,
-                                     Status, CreatedByEmployeeID, CreatedByName)
-                                OUTPUT INSERTED.RecoveryPlanID
-                                VALUES (@bid, @rem, @json, 'Active', @cby, @cbyN)`);
-                    autoRecoveryPlanId = planIns.recordset[0].RecoveryPlanID;
-                    await new sql.Request(tx)
-                        .input('pid', sql.Int,           autoRecoveryPlanId)
-                        .input('bid', sql.Int,           id)
-                        .input('due', sql.Date,          addDaysISO(30))
-                        .input('amt', sql.Decimal(18,2), remainder)
-                        .query(`INSERT INTO dms_SalesRecoveryInstallments
-                                    (RecoveryPlanID, BookingID, SeqNo, DueDate, AmountDue, Notes)
-                                VALUES (@pid, @bid, 1, @due, @amt, 'Auto-created at gate pass — adjust schedule.')`);
-                }
+            if (deliveryVoucherId) {
+                // Hold at GatePassIssued — vehicle stays with the dealer,
+                // booking stays open, until someone finalizes the voucher.
+                await new sql.Request(tx)
+                    .input('id', sql.Int, id)
+                    .input('by', sql.Int, req.user?.employeeId || null)
+                    .input('byN', sql.NVarChar(100), req.user?.userName || null)
+                    .query(`UPDATE dms_SalesBookings
+                            SET Status='GatePassIssued',
+                                UpdatedAt=GETDATE(), UpdatedByEmployeeID=@by, UpdatedByName=@byN
+                            WHERE BookingID=@id`);
+                await logTransition(tx, id, b.Status, 'GatePassIssued', req.user,
+                    `Delivery voucher #${deliveryVoucherId} created as Draft — vehicle release and booking close wait for review + Finalize. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable once closed).`}`);
+                responseMessage = `Delivery voucher #${deliveryVoucherId} created as Draft. Vehicle will not release and the booking will not close until it's reviewed and Finalized.`;
+            } else {
+                // Nothing to wait for (GL not configured yet) — proceed
+                // immediately, same as before this change.
+                bookingClosedNow = true;
+                await new sql.Request(tx)
+                    .input('id', sql.Int, id)
+                    .input('by', sql.Int, req.user?.employeeId || null)
+                    .input('byN', sql.NVarChar(100), req.user?.userName || null)
+                    .query(`UPDATE dms_SalesBookings
+                            SET Status='Closed',
+                                GatePassIssuedAt=GETDATE(),
+                                DeliveredAt=COALESCE(DeliveredAt, GETDATE()),
+                                ClosedAt=GETDATE(),
+                                UpdatedAt=GETDATE(), UpdatedByEmployeeID=@by, UpdatedByName=@byN
+                            WHERE BookingID=@id`);
+                await new sql.Request(tx)
+                    .input('vid', sql.Int, b.AllocatedVehicleID)
+                    .query(`UPDATE dms_Vehicle SET Status='Sold', SoldDeliveredAt=GETDATE(), UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
+                await new sql.Request(tx)
+                    .input('vid', sql.Int, b.AllocatedVehicleID)
+                    .input('bid', sql.Int, id)
+                    .query(`UPDATE dms_OpenAllocationLedger
+                            SET Status='Sold', SoldAt=GETDATE(), SoldToBookingID=@bid
+                            WHERE VehicleID=@vid AND Status='AtDealer'`);
+
+                await logTransition(tx, id, b.Status, 'Closed', req.user,
+                    `Gate pass issued. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`} GL posting SKIPPED — unmapped roles: ${missing.join(', ')}.`);
+
+                await createRecoveryPlanIfNeeded(tx, id, b, fullyPaid, req.user);
             }
 
             await tx.commit();
             res.json({
-                message: 'Gate pass issued — booking closed',
+                message: responseMessage || 'Gate pass issued — booking closed',
                 BookingID: id,
-                GatePassNumber: gatePassNo,
                 FullyPaid: fullyPaid,
                 DeliveryVoucherID: deliveryVoucherId,
+                BookingClosed: bookingClosedNow,
+                PendingReview: !bookingClosedNow,
                 PartialDeliveryRemainder: fullyPaid ? 0 : (Number(b.NegotiatedPrice) - Number(b.AmountPaidToDate)),
                 GLPostingEnabled: glPostingEnabled,
                 UnmappedRoles: missing,
@@ -694,8 +720,7 @@ exports.issueGatePass = async (req, res) => {
 // DRAFT VOUCHERS — sales-module vouchers awaiting review + Finalize
 // =========================================================================
 // Every SourceDocType a sales posting service can stamp on a voucher header.
-// Only MASTER_INVOICE stops at Draft today (owner ask 2026-08-07); the rest
-// still auto-post and will show up here once they're converted too.
+// All five stop at Draft for review now (owner ask 2026-08-07).
 const SALES_VOUCHER_SOURCE_TYPES = [
     'MASTER_INVOICE', 'SALES_PAYMENT', 'SALES_DELIVERY',
     'SALES_INCENTIVE_ACCRUAL', 'SALES_INCENTIVE_DISB',
