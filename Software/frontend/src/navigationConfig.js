@@ -116,20 +116,30 @@ export const NAV_ITEMS = [
     { id: 'crm-camp',    moduleGroup: 'crm', label: 'CRO Campaigns',            path: '/cro/campaigns',        icon: Ticket,         moduleKey: 'cro_admin',        description: 'Campaign broadcast manager.', keywords: 'campaign' },
 
     // ── Vehicle Sales ────────────────────────────────────────
-    { id: 's-models',    moduleGroup: 'sales', label: 'Models',                path: '/sales/models',            icon: Car,          moduleKey: 'sales_models',        description: 'Model master.', keywords: 'car' },
-    { id: 's-variants',  moduleGroup: 'sales', label: 'Variants',              path: '/sales/variants',          icon: Car,          moduleKey: 'sales_variants',      description: 'Variant + pricing.', keywords: 'trim' },
-    { id: 's-inv',       moduleGroup: 'sales', label: 'Vehicle Inventory',     path: '/sales/inventory',         icon: Package,      moduleKey: 'sales_inventory',     description: 'On-hand chassis.', keywords: 'chassis' },
-    { id: 's-book',      moduleGroup: 'sales', label: 'Bookings',              path: '/sales/bookings',          icon: ClipboardList,moduleKey: 'sales_bookings',      description: 'Customer bookings.', keywords: 'sales', priority: 9 },
-    { id: 's-inq',       moduleGroup: 'sales', label: 'Sales Inquiries',       path: '/sales/inquiries',         icon: MessageSquare,moduleKey: 'sales_inquiries',     description: 'Pre-booking inquiries.', keywords: 'lead' },
-    { id: 's-neg',       moduleGroup: 'sales', label: 'Negotiations',          path: '/sales/negotiations',      icon: Handshake,    moduleKey: 'sales_negotiations',  description: 'Price + discount approvals.', keywords: 'discount', isQueue: true },
-    { id: 's-cancel',    moduleGroup: 'sales', label: 'Cancellations',         path: '/sales/cancellations',     icon: Undo2,        moduleKey: 'sales_cancellations', description: 'Booking cancellations.', keywords: 'cancel' },
-    { id: 's-inc-pol',   moduleGroup: 'sales', label: 'Incentive Policies',    path: '/sales/incentive-policies',icon: SlidersHorizontal, moduleKey: 'sales_incentive_policies', description: 'Sales-staff incentive rules.', keywords: 'incentive' },
-    { id: 's-inc-disb',  moduleGroup: 'sales', label: 'Incentive Disbursement',path: '/sales/incentive-disbursement', icon: DollarSign, moduleKey: 'sales_incentive_disbursement', description: 'Pay incentives to staff.', keywords: 'incentive' },
-    { id: 's-mst-inc',   moduleGroup: 'sales', label: 'Master Incentive',      path: '/sales/master-incentive',  icon: Award,        moduleKey: 'sales_master_incentive', description: 'Master-Changan incentive tracking.', keywords: 'master' },
-    { id: 's-recov',     moduleGroup: 'sales', label: 'Sales Recovery',        path: '/sales/recovery',          icon: TrendingUp,   moduleKey: 'sales_recovery',      description: 'Payment recovery queue.', keywords: 'recovery' },
-    { id: 's-targets',   moduleGroup: 'sales', label: 'Hierarchy & Targets',   path: '/sales/hierarchy-targets', icon: TrendingUp,   moduleKey: 'sales_targets',       description: 'Sales-staff structure + monthly targets.', keywords: 'target' },
+    // moduleKey/anyPermissions values below match the actual role-based keys
+    // each screen's own hasModule()/backend requireAny() checks use (see
+    // pages/sales/*.jsx, routes/salesRoutes.js) — NOT the ad-hoc per-screen
+    // keys this file originally had (sales_models, sales_bookings, etc.),
+    // which were never registered in config/modules.js or granted to any
+    // group, so every one of these tiles was silently filtered out of the
+    // nav for every user, including admin (owner report 2026-08-07).
+    // OR-lists below mirror App.jsx's sidebar guards for these same routes
+    // (lines ~704-773) exactly, so the hub tile and the sidebar link never
+    // disagree about who can see a given screen.
+    { id: 's-models',    moduleGroup: 'sales', label: 'Models',                path: '/sales/models',            icon: Car,          anyPermissions: ['sales_admin_settings', 'sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], description: 'Model master.', keywords: 'car' },
+    { id: 's-variants',  moduleGroup: 'sales', label: 'Variants',              path: '/sales/variants',          icon: Car,          anyPermissions: ['sales_admin_settings', 'sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], description: 'Variant + pricing.', keywords: 'trim' },
+    { id: 's-inv',       moduleGroup: 'sales', label: 'Vehicle Inventory',     path: '/sales/inventory',         icon: Package,      anyPermissions: ['sales_admin_settings', 'sales_master_settlement', 'sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], description: 'On-hand chassis.', keywords: 'chassis' },
+    { id: 's-book',      moduleGroup: 'sales', label: 'Bookings',              path: '/sales/bookings',          icon: ClipboardList,anyPermissions: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], description: 'Customer bookings.', keywords: 'sales', priority: 9 },
+    { id: 's-inq',       moduleGroup: 'sales', label: 'Sales Inquiries',       path: '/sales/inquiries',         icon: MessageSquare,anyPermissions: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings', 'sales_reports'], description: 'Pre-booking inquiries.', keywords: 'lead' },
+    { id: 's-neg',       moduleGroup: 'sales', label: 'Negotiations',          path: '/sales/negotiations',      icon: Handshake,    moduleKey: 'sales_admin_pricing',  description: 'Price + discount approvals.', keywords: 'discount', isQueue: true },
+    { id: 's-cancel',    moduleGroup: 'sales', label: 'Cancellations',         path: '/sales/cancellations',     icon: Undo2,        anyPermissions: ['sales_executive', 'sales_agm', 'sales_gm', 'am_approve', 'admin_unfinalize', 'sales_admin_settings'], description: 'Booking cancellations.', keywords: 'cancel' },
+    { id: 's-inc-pol',   moduleGroup: 'sales', label: 'Incentive Policies',    path: '/sales/incentive-policies',icon: SlidersHorizontal, anyPermissions: ['sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Sales-staff incentive rules.', keywords: 'incentive' },
+    { id: 's-inc-disb',  moduleGroup: 'sales', label: 'Incentive Disbursement',path: '/sales/incentive-disbursement', icon: DollarSign, anyPermissions: ['sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Pay incentives to staff.', keywords: 'incentive' },
+    { id: 's-mst-inc',   moduleGroup: 'sales', label: 'Master Incentive',      path: '/sales/master-incentive',  icon: Award,        anyPermissions: ['sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Master-Changan incentive tracking.', keywords: 'master' },
+    { id: 's-recov',     moduleGroup: 'sales', label: 'Sales Recovery',        path: '/sales/recovery',          icon: TrendingUp,   anyPermissions: ['sales_recovery', 'sales_admin_settings', 'sales_gm', 'sales_agm', 'sales_reports'], description: 'Payment recovery queue.', keywords: 'recovery' },
+    { id: 's-targets',   moduleGroup: 'sales', label: 'Hierarchy & Targets',   path: '/sales/hierarchy-targets', icon: TrendingUp,   anyPermissions: ['sales_hierarchy', 'sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Sales-staff structure + monthly targets.', keywords: 'target' },
     { id: 's-reports',   moduleGroup: 'sales', label: 'Sales Reports',         path: '/sales/reports',           icon: LineChart,    moduleKey: 'sales_reports',       description: 'Booking, inventory, executive-performance.', keywords: 'reports' },
-    { id: 's-cro-rep',   moduleGroup: 'sales', label: 'CRO Reports',           path: '/cro/reports',             icon: LineChart,    moduleKey: 'cro_admin',           description: 'Customer-relations reports.', keywords: 'cro' },
+    { id: 's-cro-rep',   moduleGroup: 'sales', label: 'CRO Reports',           path: '/cro/reports',             icon: LineChart,    moduleKey: 'cro_reports',         description: 'Customer-relations reports.', keywords: 'cro' },
 
     // ── HR ───────────────────────────────────────────────────
     { id: 'hr-emp',      moduleGroup: 'hr', label: 'Employees',                 path: '/employees',              icon: Users,        moduleKey: 'hr_employees',  description: 'Employee master.', keywords: 'staff' },
