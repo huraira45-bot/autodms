@@ -391,13 +391,11 @@ exports.postMasterInvoice = async (req, res) => {
                 .input('vid', sql.Int, booking.AllocatedVehicleID)
                 .query(`UPDATE dms_Vehicle SET UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
 
-            // Booking → MasterInvoicePosted
-            await new sql.Request(tx).input('bid', sql.Int, bookingId)
-                .query(`UPDATE dms_SalesBookings SET Status='MasterInvoicePosted', UpdatedAt=GETDATE() WHERE BookingID=@bid`);
-
-            // GL posting — if roles are mapped, post the Master invoice voucher
-            // (Dr Vehicle Inventory + Master Incentive Receivable; Cr Master
-            // Payable + Master Incentive Income). Special/Additional campaign
+            // GL posting — if roles are mapped, create the Master invoice
+            // voucher as Draft (Dr Master Incentive Receivable; Cr Master
+            // Incentive Income). It does NOT auto-post (owner ask 2026-08-07)
+            // — someone must review + Finalize it via the Voucher screen,
+            // same as any other manual voucher. Special/Additional campaign
             // incentives go through their own accrual vouchers via the
             // incentive posting service if mapped — they're already saved as
             // accrual rows above with Status='Accrued'.
@@ -405,31 +403,61 @@ exports.postMasterInvoice = async (req, res) => {
             if (glPostingEnabled) {
                 try {
                     const { postMasterInvoiceVoucher } = require('../services/salesMasterInvoicePostingService');
-                    masterVoucherId = await postMasterInvoiceVoucher(bookingId, {
+                    const posted = await postMasterInvoiceVoucher(bookingId, {
                         invoiceNo: b.MasterInvoiceNo.trim(),
                         invoiceDate,
                         wholesalePrice,
                         stdIncentive: standardAmt,
                     }, req.user, tx);
+                    if (posted) {
+                        masterVoucherId = posted.voucherId;
+                        // Stamp the voucher link onto the Standard accrual row
+                        // inserted above (this service call only posts the
+                        // voucher — it no longer inserts its own accrual row).
+                        const stdAccrual = accruals.find(a => a.category === 'Standard');
+                        if (stdAccrual) {
+                            await new sql.Request(tx)
+                                .input('id',  sql.Int, stdAccrual.id)
+                                .input('vid', sql.Int, posted.voucherId)
+                                .input('vno', sql.NVarChar(20), posted.voucherNo)
+                                .query(`UPDATE dms_SalesIncentiveAccruals
+                                        SET AccrualVoucherID=@vid, AccrualVoucherNo=@vno
+                                        WHERE AccrualID=@id`);
+                        }
+                    }
                 } catch (glErr) {
                     if (glErr.code !== 'SYSTEM_ACCOUNT_NOT_CONFIGURED') throw glErr;
                     console.warn(`[sales] Master invoice GL posting SKIPPED — ${glErr.message}`);
                 }
             }
 
+            // Booking status: if a Draft voucher was actually created, the
+            // booking stays MasterInvoicePending until someone finalizes
+            // that voucher (finalizeController.js's POST_COMMIT_HOOKS.VOUCHER
+            // advances it to MasterInvoicePosted from there). If there was
+            // nothing to post (GL not configured yet, or no standard
+            // incentive on this variant), there's nothing to wait for, so
+            // advance immediately as before.
+            const newStatus = masterVoucherId ? 'MasterInvoicePending' : 'MasterInvoicePosted';
+            await new sql.Request(tx).input('bid', sql.Int, bookingId).input('st', sql.NVarChar(30), newStatus)
+                .query(`UPDATE dms_SalesBookings SET Status=@st, UpdatedAt=GETDATE() WHERE BookingID=@bid`);
+
             const glIntent = masterVoucherId
-                ? `GL posted as voucher #${masterVoucherId}.`
+                ? `GL voucher #${masterVoucherId} created as Draft — awaiting review + Finalize before booking moves to MasterInvoicePosted.`
                 : glPostingEnabled
-                    ? `GL posting attempted but service raised; check logs.`
-                    : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}. Admin must map via /accounting/setup.`;
-            await logTransition(tx, bookingId, booking.Status, 'MasterInvoicePosted', req.user,
-                `Master invoice ${b.MasterInvoiceNo} posted (${invoiceDate.toISOString().slice(0,10)}). Wholesale: PKR ${wholesalePrice.toLocaleString()}. Std incentive: ${standardAmt.toLocaleString()}, Special: ${specialSum.toLocaleString()}, Additional: ${additionalSum.toLocaleString()}. ${glIntent}`);
+                    ? `No Draft voucher needed (no standard incentive) — booking advanced directly.`
+                    : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}. Admin must map via /accounting/setup. Booking advanced directly.`;
+            await logTransition(tx, bookingId, booking.Status, newStatus, req.user,
+                `Master invoice ${b.MasterInvoiceNo} recorded (${invoiceDate.toISOString().slice(0,10)}). Wholesale: PKR ${wholesalePrice.toLocaleString()}. Std incentive: ${standardAmt.toLocaleString()}, Special: ${specialSum.toLocaleString()}, Additional: ${additionalSum.toLocaleString()}. ${glIntent}`);
 
             await tx.commit();
 
             res.json({
-                message: 'Master invoice posted',
+                message: masterVoucherId
+                    ? 'Master invoice recorded — GL voucher created as Draft, awaiting Finalize.'
+                    : 'Master invoice recorded.',
                 BookingID: bookingId,
+                Status: newStatus,
                 WholesalePrice: wholesalePrice,
                 MasterInvoiceVoucherID: masterVoucherId,
                 IncentiveAccrued: { standard: standardAmt, special: specialSum, additional: additionalSum, total: standardAmt + specialSum + additionalSum },
@@ -658,6 +686,42 @@ exports.issueGatePass = async (req, res) => {
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('issueGatePass:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// =========================================================================
+// DRAFT VOUCHERS — sales-module vouchers awaiting review + Finalize
+// =========================================================================
+// Every SourceDocType a sales posting service can stamp on a voucher header.
+// Only MASTER_INVOICE stops at Draft today (owner ask 2026-08-07); the rest
+// still auto-post and will show up here once they're converted too.
+const SALES_VOUCHER_SOURCE_TYPES = [
+    'MASTER_INVOICE', 'SALES_PAYMENT', 'SALES_DELIVERY',
+    'SALES_INCENTIVE_ACCRUAL', 'SALES_INCENTIVE_DISB',
+];
+
+// GET /api/sales/draft-vouchers — everything awaiting review before it hits the GL
+exports.listDraftVouchers = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const placeholders = SALES_VOUCHER_SOURCE_TYPES.map((_, i) => `@t${i}`).join(',');
+        const request = pool.request();
+        SALES_VOUCHER_SOURCE_TYPES.forEach((t, i) => request.input(`t${i}`, sql.NVarChar(20), t));
+        const r = await request.query(`
+            SELECT v.VoucherID, v.VoucherNo, vt.Title AS VoucherType, v.VoucherDate, v.TotalAmount,
+                   v.SourceDocType, v.SourceDocID AS BookingID, v.CreatedByName, v.EntryUserDateTime,
+                   b.BookingNo, p.PartyName AS CustomerName, veh.ChasisNo
+            FROM data_FinanceVoucherInfo v
+            JOIN GLVoucherType vt ON v.VoucherTypeID = vt.Voucherid
+            LEFT JOIN dms_SalesBookings b ON b.BookingID = v.SourceDocID
+            LEFT JOIN gen_PartiesInfo p ON p.PartyID = b.PartyID
+            LEFT JOIN dms_Vehicle veh ON veh.VehicleID = b.AllocatedVehicleID
+            WHERE v.Status = 'Draft' AND v.SourceDocType IN (${placeholders})
+            ORDER BY v.VoucherDate DESC, v.VoucherID DESC`);
+        res.json(r.recordset);
+    } catch (err) {
+        console.error('listDraftVouchers:', err);
         res.status(500).json({ error: err.message });
     }
 };

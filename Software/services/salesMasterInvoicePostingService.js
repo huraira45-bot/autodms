@@ -18,6 +18,10 @@
  *
  * Subsidiary ledger: a row keyed by PartyID=NULL, BookingID, in dms_PartyLedger
  * for traceability of Master-side amounts — Master is not a "Party" in this DB.
+ *
+ * The voucher is created as Draft, not auto-posted (owner ask 2026-08-07) —
+ * see the note above the accrual-row comment further down for the finalize
+ * hook that takes over once someone reviews and posts it.
  */
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
@@ -115,15 +119,16 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
         await insertLine(acc.MASTER_INCENTIVE_INCOME.GLCAID, 0, stdIncentive, `Master incentive earned on ${b.BookingNo}`);
     }
 
-    await new sql.Request(transaction)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
+    // Deliberately left as Draft (owner ask 2026-08-07): every sales-module
+    // voucher must sit in Draft for manual review + Finalize via the normal
+    // Voucher screen before it hits the GL, same as any other manual
+    // voucher. finalizeController.js's POST_COMMIT_HOOKS.VOUCHER handler
+    // advances the booking's own status once this voucher is actually
+    // finalized (see services/salesVoucherPostHookService.js).
 
     // Stamp voucher back onto the vehicle (per migration 018: MasterInvoiceVoucherID
-    // lives on dms_Vehicle, not dms_SalesBookings).
+    // lives on dms_Vehicle, not dms_SalesBookings). This is just a reference
+    // link, not a GL effect, so it's safe to set immediately.
     if (b.AllocatedVehicleID) {
         await new sql.Request(transaction)
             .input('vehid', sql.Int, b.AllocatedVehicleID)
@@ -132,21 +137,15 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
                     WHERE VehicleID=@vehid`);
     }
 
-    // Write the matching accrual row so the Master Incentive page can drive
-    // an MRV receipt against it. Per migration 023's accrual schema.
-    await new sql.Request(transaction)
-        .input('bid',   sql.Int,           b.BookingID)
-        .input('vehid', sql.Int,           b.AllocatedVehicleID || null)
-        .input('amt',   sql.Decimal(18,2), stdIncentive)
-        .input('vid',   sql.Int,           voucherId)
-        .input('vno',   sql.NVarChar(20),  voucherNo)
-        .query(`INSERT INTO dms_SalesIncentiveAccruals
-                    (BookingID, VehicleID, EarnerType, IncentiveCategory,
-                     AmountAccrued, AccrualVoucherID, AccrualVoucherNo, Status)
-                VALUES (@bid, @vehid, 'Master', 'Standard',
-                        @amt, @vid, @vno, 'Accrued')`);
-
-    return voucherId;
+    // NOTE: the 'Standard' accrual row itself is inserted by the caller
+    // (salesLifecycleController.postMasterInvoice), which creates it
+    // unconditionally so it exists even when GL posting is skipped
+    // (unmapped roles). This function only posts the voucher and returns
+    // its id/no so the caller can stamp AccrualVoucherID/No back onto that
+    // same row -- inserting a second row here duplicated every Standard
+    // accrual (owner report 2026-08-07, screenshot showed two identical
+    // "Standard" rows per booking).
+    return { voucherId, voucherNo };
 }
 
 module.exports = { postMasterInvoiceVoucher };

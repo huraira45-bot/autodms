@@ -94,6 +94,7 @@ router.post('/bookings/:id/enable-partial-delivery', requireAny('sales_gm'), lc.
 router.post('/bookings/:id/finance-cosign',          requireAny('sales_admin_settings'), lc.financeCoSignPartial);  // proxy for Finance Head — wire to real finance role when HR adds it
 router.post('/bookings/:id/issue-gate-pass',         requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), lc.issueGatePass);
 router.get( '/bookings/:id/audit',                   requireAny(...SALES_READERS, 'am_approve', 'admin_unfinalize'), lc.bookingAudit);
+router.get( '/draft-vouchers',                       requireAny(...SALES_READERS), lc.listDraftVouchers);
 
 // Sales-side inquiry queue (from CRO inquiries with Category='ProductInfo')
 router.get(  '/inquiries',                  requireAny(...SALES_READERS), iq.list);

@@ -23,7 +23,7 @@ import {
     SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
     ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
     Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
-    Gauge, ScrollText, Monitor, Building2, Utensils,
+    Gauge, ScrollText, Monitor, Building2, Utensils, FileClock,
 } from 'lucide-react';
 
 // Top-level module groups (order = sidebar order). Each has an id / label /
@@ -137,6 +137,7 @@ export const NAV_ITEMS = [
     { id: 's-inc-disb',  moduleGroup: 'sales', label: 'Incentive Disbursement',path: '/sales/incentive-disbursement', icon: DollarSign, anyPermissions: ['sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Pay incentives to staff.', keywords: 'incentive' },
     { id: 's-mst-inc',   moduleGroup: 'sales', label: 'Master Incentive',      path: '/sales/master-incentive',  icon: Award,        anyPermissions: ['sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Master-Changan incentive tracking.', keywords: 'master' },
     { id: 's-recov',     moduleGroup: 'sales', label: 'Sales Recovery',        path: '/sales/recovery',          icon: TrendingUp,   anyPermissions: ['sales_recovery', 'sales_admin_settings', 'sales_gm', 'sales_agm', 'sales_reports'], description: 'Payment recovery queue.', keywords: 'recovery' },
+    { id: 's-draft-vou', moduleGroup: 'sales', label: 'Draft Vouchers',        path: '/sales/draft-vouchers',    icon: FileClock,    anyPermissions: ['sales_master_settlement', 'sales_admin_settings', 'sales_gm'], description: 'Booking vouchers awaiting review + Finalize.', keywords: 'draft finalize voucher gl' },
     { id: 's-targets',   moduleGroup: 'sales', label: 'Hierarchy & Targets',   path: '/sales/hierarchy-targets', icon: TrendingUp,   anyPermissions: ['sales_hierarchy', 'sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Sales-staff structure + monthly targets.', keywords: 'target' },
     { id: 's-reports',   moduleGroup: 'sales', label: 'Sales Reports',         path: '/sales/reports',           icon: LineChart,    moduleKey: 'sales_reports',       description: 'Booking, inventory, executive-performance.', keywords: 'reports' },
     { id: 's-cro-rep',   moduleGroup: 'sales', label: 'CRO Reports',           path: '/cro/reports',             icon: LineChart,    moduleKey: 'cro_reports',         description: 'Customer-relations reports.', keywords: 'cro' },

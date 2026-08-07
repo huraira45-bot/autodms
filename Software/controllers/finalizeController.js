@@ -19,6 +19,20 @@ const POST_COMMIT_HOOKS = {
         await triggerPostJobCard(id);
         await generateForJobCard(id);
     },
+    // Sales-module vouchers sit in Draft until finalized here (owner ask
+    // 2026-08-07) — this is the other half of that wait, dispatched by the
+    // voucher's own SourceDocType so each sales flow's booking-side status
+    // only advances once its voucher is actually posted, not when the
+    // booking action originally happened. See salesVoucherPostHookService.js.
+    VOUCHER: async (id) => {
+        const pool = await getPool();
+        const v = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT SourceDocType, SourceDocID FROM data_FinanceVoucherInfo WHERE VoucherID=@id`);
+        const row = v.recordset[0];
+        if (!row?.SourceDocType || row.SourceDocID == null) return;
+        const { handleSalesVoucherPosted } = require('../services/salesVoucherPostHookService');
+        await handleSalesVoucherPosted(id, row.SourceDocType, row.SourceDocID);
+    },
 };
 
 const ENTITY_MAP = Object.freeze({
@@ -164,6 +178,13 @@ exports.finalize = async (req, res) => {
                             SET Status='Posted', Posted=1, PostedBy=@by, PostedAt=GETDATE()
                             WHERE ${em.pk}=@id`);
                 await transaction.commit();
+
+                const postHook = POST_COMMIT_HOOKS.VOUCHER;
+                if (postHook) {
+                    postHook(entityId, { userId: req.user.userId, userName: req.user.userName })
+                        .catch(e => console.error(`[POST_COMMIT] VOUCHER ${entityId}:`, e.message));
+                }
+
                 return res.json({ message: 'Voucher posted', voucherId: entityId });
             }
 

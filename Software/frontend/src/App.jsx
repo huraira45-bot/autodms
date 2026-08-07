@@ -8,7 +8,7 @@ import {
     BoxSelect, PlusCircle, ExternalLink, SlidersHorizontal, LogOut, ShieldCheck, UsersRound, Unlock, UserCheck,
     FileBarChart, ListChecks, Headphones, UserCog, Truck, Percent, Bell, MessageSquare, Megaphone, Layers, Ban, Search,
     TrendingUp, ChevronDown, ChevronRight as ChevronRightIcon,
-    Paintbrush,
+    Paintbrush, FileClock,
 } from 'lucide-react';
 
 // Collapsible sidebar section — clicking the header toggles the child
@@ -173,6 +173,7 @@ import SalesRecovery         from './pages/sales/SalesRecovery';
 import HierarchyTargets      from './pages/sales/HierarchyTargets';
 import SalesReportsV2        from './pages/sales/SalesReportsV2';
 import IncentiveDisbursement from './pages/sales/IncentiveDisbursement';
+import DraftVouchers         from './pages/sales/DraftVouchers';
 import CancellationQueue from './pages/sales/CancellationQueue';
 import SalesInquiryQueue from './pages/sales/SalesInquiryQueue';
 import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
@@ -761,6 +762,11 @@ function LegacySidebar() {
                         <UsersRound size={20} /> Hierarchy & Targets
                     </NavLink>
                 )}
+                {(hasModule('sales_master_settlement') || hasModule('sales_admin_settings') || hasModule('sales_gm')) && (
+                    <NavLink to="/sales/draft-vouchers" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileClock size={20} /> Draft Vouchers
+                    </NavLink>
+                )}
                 {anyReport(
                     'booking_register','vehicle_inventory','executive_performance',
                     'customer_advances_aging','booking_pipeline','master_invoice_aging',
@@ -1286,6 +1292,9 @@ function AppShell() {
                     } />
                     <Route path="/sales/hierarchy-targets" element={
                         <ProtectedRoute><HierarchyTargets /></ProtectedRoute>
+                    } />
+                    <Route path="/sales/draft-vouchers" element={
+                        <ProtectedRoute><DraftVouchers /></ProtectedRoute>
                     } />
                     <Route path="/sales/reports" element={
                         <ProtectedRoute><SalesReportsV2 /></ProtectedRoute>
