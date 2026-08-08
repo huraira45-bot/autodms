@@ -157,7 +157,7 @@ export default function CreditInvoicePrint() {
                 </thead>
                 <tbody>
                     <tr>
-                        <td>{jc.VehicleModel || jc.VehicleName || '—'}</td>
+                        <td>{jc.VersionCode || '—'}</td>
                         <td>{jc.VehicleRegNo || '—'}</td>
                         <td>{jc.EngineNo || '—'}</td>
                         <td>{jc.Odometer || jc.KiloMeter || jc.KM || '—'}</td>
@@ -250,21 +250,36 @@ export default function CreditInvoicePrint() {
             {/* Totals block */}
             <table className="tot">
                 <tbody>
-                    <tr>
-                        <td rowSpan={dep > 0 ? 8 : 6} className="tot-blank" />
-                        <td className="tot-lbl">Labour + Sublet without PST</td>
-                        <td className="tot-val">{fmt(labourNet + sublet)}</td>
-                    </tr>
-                    <tr><td className="tot-lbl">16% PST</td><td className="tot-val">{fmt(pst)}</td></tr>
-                    <tr><td className="tot-lbl">Parts Without GST</td><td className="tot-val">{fmt(partsNet)}</td></tr>
-                    <tr><td className="tot-lbl">18% GST</td><td className="tot-val">{fmt(gst)}</td></tr>
-                    <tr><td className="tot-lbl">Depreciation</td><td className="tot-val">{fmt(dep)}</td></tr>
-                    {dep > 0 && (
-                        <>
-                            <tr><td className="tot-lbl">Depreciation Received</td><td className="tot-val">{fmt(depPaid)}</td></tr>
-                            <tr><td className="tot-lbl">Depreciation Balance</td><td className="tot-val">{fmt(depBalance)}</td></tr>
-                        </>
-                    )}
+                    {(() => {
+                        // Depreciation is a deduction — always labeled "Less:" and
+                        // shown as a negative so it reads as a subtraction from the
+                        // total, not another line item being added in (owner ask
+                        // 2026-08-08). The Received/Balance breakdown only adds
+                        // information when something is still outstanding; when
+                        // fully received it was just repeating the same number
+                        // twice plus a redundant zero, so it collapses to one line.
+                        const stillOwing = dep > 0 && depBalance > 0.01;
+                        const rowCount = 6 + (stillOwing ? 2 : 0); // includes the Total row below
+                        return (
+                            <>
+                                <tr>
+                                    <td rowSpan={rowCount} className="tot-blank" />
+                                    <td className="tot-lbl">Labour + Sublet without PST</td>
+                                    <td className="tot-val">{fmt(labourNet + sublet)}</td>
+                                </tr>
+                                <tr><td className="tot-lbl">16% PST</td><td className="tot-val">{fmt(pst)}</td></tr>
+                                <tr><td className="tot-lbl">Parts Without GST</td><td className="tot-val">{fmt(partsNet)}</td></tr>
+                                <tr><td className="tot-lbl">18% GST</td><td className="tot-val">{fmt(gst)}</td></tr>
+                                <tr><td className="tot-lbl">Less: Depreciation</td><td className="tot-val">{dep > 0 ? `(${fmt(dep)})` : fmt(dep)}</td></tr>
+                                {stillOwing && (
+                                    <>
+                                        <tr><td className="tot-lbl">Depreciation Received</td><td className="tot-val">{fmt(depPaid)}</td></tr>
+                                        <tr><td className="tot-lbl">Depreciation Balance</td><td className="tot-val">{fmt(depBalance)}</td></tr>
+                                    </>
+                                )}
+                            </>
+                        );
+                    })()}
                     <tr><td className="tot-lbl b"><b>Total Payble by Party</b></td><td className="tot-val b"><b>{fmt(totalPayable)}</b></td></tr>
                 </tbody>
             </table>
