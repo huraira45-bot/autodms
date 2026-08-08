@@ -112,7 +112,7 @@ export default function CreditInvoicePrint() {
                     </tr>
                     <tr>
                         <td className="lbl">Address</td>
-                        <td className="val" rowSpan={2}>{jc.Address || jc.CustomerAddress || '—'}</td>
+                        <td className="val">{jc.Address || jc.CustomerAddress || '—'}</td>
                         <td className="lbl">Date:</td>
                         {/* Finalize date, not the JC's creation/receipt date
                             (owner ask 2026-08-06) -- a credit invoice should
@@ -121,6 +121,10 @@ export default function CreditInvoicePrint() {
                     </tr>
                     <tr>
                         <td className="lbl">Mobile</td>
+                        {/* Was missing entirely -- Address's old rowSpan={2}
+                            silently occupied this cell's slot instead
+                            (owner report 2026-08-08). */}
+                        <td className="val">{jc.CustomerPhone || jc.PhoneNo || '—'}</td>
                         <td className="lbl">Inv #</td>
                         <td className="val invno">{jc.JobCardNo || '—'}</td>
                     </tr>
@@ -270,7 +274,7 @@ export default function CreditInvoicePrint() {
                                 <tr><td className="tot-lbl">16% PST</td><td className="tot-val">{fmt(pst)}</td></tr>
                                 <tr><td className="tot-lbl">Parts Without GST</td><td className="tot-val">{fmt(partsNet)}</td></tr>
                                 <tr><td className="tot-lbl">18% GST</td><td className="tot-val">{fmt(gst)}</td></tr>
-                                <tr><td className="tot-lbl">Less: Depreciation</td><td className="tot-val">{dep > 0 ? `(${fmt(dep)})` : fmt(dep)}</td></tr>
+                                <tr><td className="tot-lbl">{dep > 0 ? 'Less: Depreciation' : 'Depreciation'}</td><td className="tot-val">{dep > 0 ? `(${fmt(dep)})` : fmt(dep)}</td></tr>
                                 {stillOwing && (
                                     <>
                                         <tr><td className="tot-lbl">Depreciation Received</td><td className="tot-val">{fmt(depPaid)}</td></tr>
