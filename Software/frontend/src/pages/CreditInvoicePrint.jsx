@@ -129,10 +129,18 @@ export default function CreditInvoicePrint() {
                         <td className="val invno">{jc.JobCardNo || '—'}</td>
                     </tr>
                     <tr>
+                        {/* Owner correction 2026-08-08: "Party / Insurance" is
+                            the actual credit party the bill is owed by (the
+                            JC's own linked Party -- an insurer like IGI is
+                            set up as a real Party record), NOT the free-text
+                            CompanyName field on the Insurance Details form
+                            (which staff have been using for something else,
+                            e.g. a broker/intermediary name). BILL shows that
+                            free-text field instead -- was backwards. */}
                         <td className="lbl">Party / Insurance</td>
-                        <td className="val">{ins?.header?.CompanyName || (jc.Status === 'Credit' ? partyName : '—')}</td>
+                        <td className="val">{(jc.Status === 'Credit' ? partyName : '') || ins?.header?.CompanyName || '—'}</td>
                         <td className="lbl">BILL</td>
-                        <td className="val">{partyName ? `(${partyName})` : '—'}</td>
+                        <td className="val">{ins?.header?.CompanyName ? `(${ins.header.CompanyName})` : '—'}</td>
                     </tr>
                     <tr>
                         <td className="lbl">Surveyor Company</td>
