@@ -60,7 +60,7 @@ export function JobCardRegister() {
         filename: `job-card-register-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
         headers: [
             'Card #', 'Finalized Date', 'Finalized By', 'Customer', 'Customer Code',
-            'Vehicle Reg', 'Chassis', 'Advisor', 'Job Type', 'Payment Type',
+            'Credit Party', 'Vehicle Reg', 'Chassis', 'Advisor', 'Job Type', 'Payment Type',
             'Status', 'Labour', 'Sublet', 'PST', 'Parts', 'GST', 'Total',
         ],
         rows: (data.rows || []).map(r => [
@@ -69,6 +69,7 @@ export function JobCardRegister() {
             r.FinalizedByName || '',
             r.CustomerName || '',
             r.CustomerCode || '',
+            r.CreditPartyName || '',
             r.VehicleRegNo || '',
             r.ChasisNo || '',
             r.ServiceAdvisor || '',
@@ -178,7 +179,7 @@ export function JobCardRegister() {
                         <table style={tableStyle}>
                             <thead>
                                 <tr style={trHeader}>
-                                    <TH>Card #</TH><TH>Finalized Date</TH><TH>Customer</TH><TH>Vehicle</TH>
+                                    <TH>Card #</TH><TH>Finalized Date</TH><TH>Customer</TH><TH>Credit Party</TH><TH>Vehicle</TH>
                                     <TH>Advisor</TH><TH>Status</TH>
                                     <TH align="right">Labour</TH>
                                     <TH align="right">Sublet</TH>
@@ -189,7 +190,7 @@ export function JobCardRegister() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={12}>No job cards in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={13}>No job cards in this period.</Empty>}
                                 {data.rows.map(r => (
                                     <tr key={r.JobCardId} style={trBody}>
                                         <TD mono><strong>{r.JobCardNo}</strong></TD>
@@ -198,6 +199,7 @@ export function JobCardRegister() {
                                             {r.FinalizedByName && <div style={subText}>by {r.FinalizedByName}</div>}
                                         </TD>
                                         <TD>{r.CustomerName}<div style={subText}>{r.CustomerCode}</div></TD>
+                                        <TD>{r.CreditPartyName || '—'}</TD>
                                         <TD mono>{r.VehicleRegNo}<div style={subText}>{r.ChasisNo}</div></TD>
                                         <TD>{r.ServiceAdvisor}</TD>
                                         <TD><StatusPill v={r.Status} finalized={r.IsFinalized} /></TD>

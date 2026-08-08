@@ -103,6 +103,7 @@ exports.jobCardRegister = async (req, res) => {
                    j.FinalizedAt      AS FinalizedAt,
                    j.FinalizedByName  AS FinalizedByName,
                    c.endUserName AS CustomerName, c.PhoneNo, c.CustomerCode,
+                   p.PartyName AS CreditPartyName,
                    t.Title AS JobType,
                    ISNULL((SELECT SUM(ISNULL(d.Price,0) * ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0))
                            FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourGross,
@@ -118,6 +119,7 @@ exports.jobCardRegister = async (req, res) => {
                            FROM data_StockIssuetoJobCardDetail s WHERE s.JobCardId = j.JobCardId), 0) AS PartsTax
             FROM Addata_JobCardInfo j
             LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
+            LEFT JOIN gen_PartiesInfo     p ON j.PartyID   = p.PartyID
             LEFT JOIN gen_JobCardType t      ON j.JobTypeId = t.JobCardTypeId
             WHERE ${conds.join(' AND ')}
             ORDER BY ${dateCol} DESC, j.JobCardId DESC`);
@@ -137,6 +139,7 @@ exports.jobCardRegister = async (req, res) => {
                 Status:       x.Status || (x.IsFinalized ? 'Finalized' : 'Open'),
                 CustomerName: x.CustomerName || '',
                 CustomerCode: x.CustomerCode || '',
+                CreditPartyName: x.CreditPartyName || '',
                 PhoneNo:      x.PhoneNo || '',
                 VehicleRegNo: x.VehicleRegNo || '',
                 ChasisNo:     x.ChasisNo || '',
