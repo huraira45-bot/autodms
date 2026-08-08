@@ -136,9 +136,16 @@ export default function CreditInvoicePrint() {
                             CompanyName field on the Insurance Details form
                             (which staff have been using for something else,
                             e.g. a broker/intermediary name). BILL shows that
-                            free-text field instead -- was backwards. */}
+                            free-text field instead -- was backwards.
+                            NOTE: dropped the old `jc.Status === 'Credit'`
+                            gate on partyName -- jc.Status is actually the
+                            PaymentType field (Cash/Credit/POS/...), not a
+                            reliable literal-string match, and it was
+                            silently falling through to CompanyName even
+                            when a real Party was linked. A linked party
+                            should always win when present. */}
                         <td className="lbl">Party / Insurance</td>
-                        <td className="val">{(jc.Status === 'Credit' ? partyName : '') || ins?.header?.CompanyName || '—'}</td>
+                        <td className="val">{partyName || ins?.header?.CompanyName || '—'}</td>
                         <td className="lbl">BILL</td>
                         <td className="val">{ins?.header?.CompanyName ? `(${ins.header.CompanyName})` : '—'}</td>
                     </tr>
