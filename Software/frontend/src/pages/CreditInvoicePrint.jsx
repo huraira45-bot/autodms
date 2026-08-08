@@ -146,11 +146,17 @@ export default function CreditInvoicePrint() {
                             should always win when present. */}
                         <td className="lbl">Party / Insurance</td>
                         <td className="val">{partyName || ins?.header?.CompanyName || '—'}</td>
-                        <td className="lbl">BILL</td>
-                        <td className="val">{ins?.header?.CompanyName ? `(${ins.header.CompanyName})` : '—'}</td>
+                        {/* Owner ask 2026-08-08: "BILL" renamed to "Surveyor
+                            Company" -- CompanyName is the surveying/
+                            inspection firm (e.g. DOVE INTER PRICE), distinct
+                            from SurveyorName below which is the individual
+                            surveyor (e.g. QASER) -- relabeled that row to
+                            "Surveyor Name" so the two don't collide. */}
+                        <td className="lbl">Surveyor Company</td>
+                        <td className="val">{ins?.header?.CompanyName || '—'}</td>
                     </tr>
                     <tr>
-                        <td className="lbl">Surveyor Company</td>
+                        <td className="lbl">Surveyor Name</td>
                         <td className="val">
                             {ins?.header?.SurveyorName
                                 ? <>{ins.header.SurveyorName}</>
