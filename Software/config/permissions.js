@@ -198,6 +198,7 @@ const SECTIONS = [
             { key: 'report:booking_pipeline',          label: 'Booking Pipeline',          kind: 'report' },
             { key: 'report:master_invoice_aging',      label: 'Master Invoice Aging',      kind: 'report' },
             { key: 'report:incentive_receivable_aging',label: 'Incentive Receivable Aging', kind: 'report' },
+            { key: 'report:booking_account_reconciliation', label: 'Booking Account Reconciliation', kind: 'report' },
         ],
     },
 ];

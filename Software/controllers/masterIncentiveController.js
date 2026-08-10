@@ -90,13 +90,14 @@ exports.listReceipts = async (req, res) => {
 
 // POST /api/sales/master-incentive/receipts
 // body: { AccrualID, GrossAmount, WHTAmount?, GSTOnIncentive?, NetCashReceived,
-//         BankAccountGLCAID, CertificateRef?, Notes? }
+//         PaymentMode? ('Bank' default | 'POS'), BankAccountGLCAID (required
+//         unless PaymentMode='POS'), CertificateRef?, Notes? }
 //
 // Inserts the receipt row, posts the MRV voucher, stamps the voucher # back,
 // and updates the accrual's DisbursedAmount / Status.
 exports.createReceipt = async (req, res) => {
     const { AccrualID, GrossAmount, WHTAmount, GSTOnIncentive, NetCashReceived,
-            BankAccountGLCAID, CertificateRef, Notes } = req.body || {};
+            PaymentMode, BankAccountGLCAID, CertificateRef, Notes } = req.body || {};
     if (!AccrualID || !Number.isFinite(Number(AccrualID))) {
         return res.status(400).json({ error: 'AccrualID is required.' });
     }
@@ -112,7 +113,11 @@ exports.createReceipt = async (req, res) => {
             error: `NetCashReceived must equal Gross - WHT + GST (expected ${(gross - wht + gst).toFixed(2)}).`,
         });
     }
-    if (!BankAccountGLCAID) return res.status(400).json({ error: 'BankAccountGLCAID is required.' });
+    // POS is received like any other POS receipt in this app -- posts against
+    // the shared POS_CLEARING account instead of a specific bank (owner ask
+    // 2026-08-08), so no bank account needs picking in that mode.
+    const mode = PaymentMode === 'POS' ? 'POS' : 'Bank';
+    if (mode === 'Bank' && !BankAccountGLCAID) return res.status(400).json({ error: 'BankAccountGLCAID is required.' });
 
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
@@ -156,7 +161,8 @@ exports.createReceipt = async (req, res) => {
         const receiptId = ins.recordset[0].ReceiptID;
 
         // Post the MRV voucher; updates accrual + stamps receipt internally.
-        const voucherId = await postMasterReceiptVoucher(receiptId, Number(BankAccountGLCAID), req.user, tx);
+        const voucherId = await postMasterReceiptVoucher(
+            receiptId, mode === 'Bank' ? Number(BankAccountGLCAID) : null, req.user, tx, mode);
 
         await tx.commit();
         res.json({ message: 'Master incentive receipt posted.', ReceiptID: receiptId, VoucherID: voucherId });

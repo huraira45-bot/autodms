@@ -233,6 +233,7 @@ function ReceiptModal({ accrual, onClose, onSaved }) {
     const [gross, setGross] = useState(String(outstanding.toFixed(2)));
     const [wht, setWht]     = useState('0');
     const [gst, setGst]     = useState('0');
+    const [paymentMode, setPaymentMode] = useState('Bank'); // 'Bank' | 'POS'
     const [bankAccountId, setBankAccountId] = useState('');
     const [certRef, setCertRef] = useState('');
     const [notes, setNotes] = useState('');
@@ -251,14 +252,15 @@ function ReceiptModal({ accrual, onClose, onSaved }) {
     const save = async () => {
         if (g <= 0)             return notify('Gross must be > 0', 'error');
         if (g > outstanding + 0.01) return notify(`Gross exceeds outstanding (${fmt(outstanding)})`, 'error');
-        if (!bankAccountId)     return notify('Pick a bank account', 'error');
+        if (paymentMode === 'Bank' && !bankAccountId) return notify('Pick a bank account', 'error');
         setBusy(true);
         try {
             await axios.post('/api/sales/master-incentive/receipts', {
                 AccrualID: accrual.AccrualID,
                 GrossAmount: g, WHTAmount: w, GSTOnIncentive: s,
                 NetCashReceived: net,
-                BankAccountGLCAID: Number(bankAccountId),
+                PaymentMode: paymentMode,
+                BankAccountGLCAID: paymentMode === 'Bank' ? Number(bankAccountId) : null,
                 CertificateRef: certRef || null,
                 Notes: notes || null,
             });
@@ -281,15 +283,23 @@ function ReceiptModal({ accrual, onClose, onSaved }) {
                     <span>Booking <strong>{accrual.BookingNo}</strong> · {accrual.IncentiveCategory}</span>
                     <span>Outstanding <strong>PKR {fmt(outstanding)}</strong></span>
                 </div>
-                <Row label="Bank Account *">
-                    <SearchableSelect
-                        value={bankAccountId}
-                        onChange={setBankAccountId}
-                        placeholder="— Pick the bank that received the funds —"
-                        title="Pick Bank Account"
-                        options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
-                    />
+                <Row label="Received Via *">
+                    <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)} style={input}>
+                        <option value="Bank">Bank Deposit</option>
+                        <option value="POS">POS</option>
+                    </select>
                 </Row>
+                {paymentMode === 'Bank' && (
+                    <Row label="Bank Account *">
+                        <SearchableSelect
+                            value={bankAccountId}
+                            onChange={setBankAccountId}
+                            placeholder="— Pick the bank that received the funds —"
+                            title="Pick Bank Account"
+                            options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                        />
+                    </Row>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <Row label="Gross Amount (PKR) *">
                         <input type="number" value={gross} onChange={e => setGross(e.target.value)} style={input} />
@@ -311,7 +321,7 @@ function ReceiptModal({ accrual, onClose, onSaved }) {
                     <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{...input, resize: 'vertical'}} />
                 </Row>
                 <div style={{ marginTop: 14, padding: 8, background: '#eff6ff', color: '#1e3a8a', borderRadius: 6, fontSize: '0.78rem' }}>
-                    Will post: <strong>Dr Bank PKR {fmt(net)}</strong>{w > 0 && <> + <strong>Dr WHT Recvbl PKR {fmt(w)}</strong></>}{s > 0 && <> + <strong>Cr GST Payable PKR {fmt(s)}</strong></>} / <strong>Cr Master Incentive Recvbl PKR {fmt(g)}</strong>.
+                    Will post: <strong>Dr {paymentMode === 'POS' ? 'POS Clearing' : 'Bank'} PKR {fmt(net)}</strong>{w > 0 && <> + <strong>Dr WHT Recvbl PKR {fmt(w)}</strong></>}{s > 0 && <> + <strong>Cr GST Payable PKR {fmt(s)}</strong></>} / <strong>Cr Master Incentive Recvbl PKR {fmt(g)}</strong>.
                 </div>
                 <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button onClick={onClose} className="btn-sm">Cancel</button>

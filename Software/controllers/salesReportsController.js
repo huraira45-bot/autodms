@@ -6,6 +6,7 @@
  *   - Customer Advances Aging      — outstanding deposits bucketed by age
  */
 const { sql, getPool } = require('../config/db');
+const { resolveRole } = require('./systemAccountsController');
 
 function parseRange(req) {
     const today = new Date();
@@ -338,4 +339,73 @@ exports.incentiveReceivableAging = async (req, res) => {
         }
         res.json({ rows, buckets, total: +total.toFixed(2) });
     } catch (err) { console.error('incentiveReceivableAging:', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
+ * GET /reports/sales/booking-account-reconciliation
+ *
+ * Owner ask 2026-08-08. BOOKING_VARIANT_RECEIVABLE (GL "BOOKING VARIANT
+ * RECEIVABLE (VEHICLES PENDING DELIVERY)") is Dr'd when we pay Master for an
+ * allocated chassis and Cr'd back to zero at delivery (salesDeliveryPostingService
+ * settles it against the customer's account). A booking still sitting between
+ * those two events should show a matching balance here — this reconciles the
+ * per-booking detail against the account's real GL total so a mismatch (e.g.
+ * a booking that delivered but didn't zero out, or a posting with no
+ * BookingID tag at all) is visible instead of silently sitting in the GL.
+ */
+exports.bookingAccountReconciliation = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const bvrGL = await resolveRole('BOOKING_VARIANT_RECEIVABLE');
+
+        // Per-booking Dr/Cr for every booking not yet closed/cancelled —
+        // these are the "pending delivery" bookings that should still be
+        // carrying a balance here (or not, if Master hasn't been paid yet).
+        const rows = await pool.request().input('gl', sql.Int, bvrGL).query(`
+            SELECT b.BookingID, b.BookingNo, b.Status, veh.ChasisNo, p.PartyName,
+                   ISNULL((SELECT SUM(d.Debit) FROM data_FinanceVoucherDetail d
+                           JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                           WHERE v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0) AS PaidToMaster,
+                   ISNULL((SELECT SUM(d.Credit) FROM data_FinanceVoucherDetail d
+                           JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                           WHERE v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0) AS SettledAtDelivery
+            FROM dms_SalesBookings b
+            LEFT JOIN dms_Vehicle     veh ON veh.VehicleID = b.AllocatedVehicleID
+            LEFT JOIN gen_PartiesInfo p   ON p.PartyID     = b.PartyID
+            WHERE b.Status NOT IN ('Closed', 'Cancelled', 'CancellationApproved')
+            ORDER BY b.BookingID DESC`);
+
+        const list = rows.recordset.map(x => ({
+            ...x,
+            PaidToMaster: +Number(x.PaidToMaster).toFixed(2),
+            SettledAtDelivery: +Number(x.SettledAtDelivery).toFixed(2),
+            Outstanding: +(Number(x.PaidToMaster) - Number(x.SettledAtDelivery)).toFixed(2),
+        }));
+        const sumOfBookings = +list.reduce((s, x) => s + x.Outstanding, 0).toFixed(2);
+
+        // The account's actual GL balance — across every voucher line ever
+        // posted to it, not just the pending-delivery bookings above. If this
+        // doesn't match sumOfBookings, something is posted here that isn't
+        // explained by a currently-open booking (a delivered booking that
+        // didn't net to zero, an entry with no BookingID, etc).
+        const glTotal = await pool.request().input('gl', sql.Int, bvrGL).query(`
+            SELECT ISNULL(SUM(d.Debit),0) - ISNULL(SUM(d.Credit),0) AS Balance
+            FROM data_FinanceVoucherDetail d
+            JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+            WHERE v.Status='Posted' AND d.GLCAID=@gl`);
+        const glBalance = +Number(glTotal.recordset[0].Balance).toFixed(2);
+        const difference = +(glBalance - sumOfBookings).toFixed(2);
+
+        res.json({
+            rows: list,
+            sumOfBookings,
+            glBalance,
+            difference,
+            reconciled: Math.abs(difference) < 0.01,
+        });
+    } catch (err) {
+        if (err.code === 'SYSTEM_ACCOUNT_NOT_CONFIGURED') return res.status(409).json({ error: err.message });
+        console.error('bookingAccountReconciliation:', err);
+        res.status(500).json({ error: err.message });
+    }
 };

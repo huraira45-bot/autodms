@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Loader2, BarChart3, Clock, TrendingUp } from 'lucide-react';
+import { Loader2, BarChart3, Clock, TrendingUp, Scale } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import { ErpControlPanel } from '../../components/erp';
 
@@ -18,6 +18,7 @@ export default function SalesReportsV2() {
     const [pipeline, setPipeline] = useState(null);
     const [miAging, setMiAging]   = useState(null);
     const [incAging, setIncAging] = useState(null);
+    const [bvrRecon, setBvrRecon] = useState(null);
     const [busy, setBusy] = useState(false);
 
     const load = useCallback(async () => {
@@ -29,9 +30,12 @@ export default function SalesReportsV2() {
             } else if (tab === 'miAging') {
                 const r = await axios.get('/api/reports/sales/master-invoice-aging');
                 setMiAging(r.data);
-            } else {
+            } else if (tab === 'incAging') {
                 const r = await axios.get('/api/reports/sales/incentive-receivable-aging');
                 setIncAging(r.data);
+            } else {
+                const r = await axios.get('/api/reports/sales/booking-account-reconciliation');
+                setBvrRecon(r.data);
             }
         } catch (err) { notify(err.response?.data?.error || err.message, 'error'); }
         setBusy(false);
@@ -50,6 +54,7 @@ export default function SalesReportsV2() {
                     ['pipeline','Booking Pipeline', BarChart3],
                     ['miAging','Master Invoice Aging', Clock],
                     ['incAging','Incentive Receivable Aging', TrendingUp],
+                    ['bvrRecon','Booking Account Reconciliation', Scale],
                 ].map(([key,label,Icon]) => (
                     <button key={key} onClick={() => setTab(key)}
                         style={{ padding: '8px 14px', background: tab===key?'#1e40af':'#f1f5f9', color: tab===key?'white':'#475569', border:'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -171,6 +176,53 @@ export default function SalesReportsV2() {
                                         </tr>
                                     ))}
                                     {incAging.rows.length === 0 && <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>No open Master incentives.</td></tr>}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )
+            )}
+            {tab === 'bvrRecon' && (
+                busy ? <Loader2 className="spin" /> : bvrRecon && (
+                    <>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
+                            <Tile label="Sum of Pending Bookings" value={`PKR ${fmt(bvrRecon.sumOfBookings)}`} color="#1e40af" />
+                            <Tile label="GL Account Balance" value={`PKR ${fmt(bvrRecon.glBalance)}`} color="#1e40af" />
+                            <Tile label="Difference" value={`PKR ${fmt(bvrRecon.difference)}`} color={bvrRecon.reconciled ? '#15803d' : '#b91c1c'} />
+                        </div>
+                        {!bvrRecon.reconciled && (
+                            <div style={{ marginBottom: 16, padding: 10, background: '#fee2e2', color: '#991b1b', borderRadius: 6, fontSize: '0.85rem' }}>
+                                Doesn't reconcile — PKR {fmt(Math.abs(bvrRecon.difference))} on the GL account isn't explained by any currently pending-delivery booking below. Check for a delivered booking that didn't settle to zero, or a posting with no BookingID tag.
+                            </div>
+                        )}
+                        <div className="card">
+                            <h3 style={{ marginTop: 0 }}>{bvrRecon.rows.length} bookings pending delivery</h3>
+                            <p style={{ marginTop: -8, color: '#64748b', fontSize: '0.82rem' }}>
+                                Booking Variant Receivable — Dr'd when we pay Master for an allocated chassis, Cr'd back to zero at delivery. A nonzero balance here means Master's been paid but the vehicle hasn't been delivered yet.
+                            </p>
+                            <table style={tbl}>
+                                <thead><tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                                    <th style={th}>Booking</th>
+                                    <th style={th}>Status</th>
+                                    <th style={th}>Customer</th>
+                                    <th style={th}>Chassis</th>
+                                    <th style={{...th, textAlign:'right'}}>Paid to Master</th>
+                                    <th style={{...th, textAlign:'right'}}>Settled at Delivery</th>
+                                    <th style={{...th, textAlign:'right'}}>Outstanding</th>
+                                </tr></thead>
+                                <tbody>
+                                    {bvrRecon.rows.map(r => (
+                                        <tr key={r.BookingID} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                            <td style={td}>{r.BookingNo}</td>
+                                            <td style={td}>{r.Status}</td>
+                                            <td style={td}>{r.PartyName || '—'}</td>
+                                            <td style={{...td, fontFamily: 'monospace'}}>{r.ChasisNo || '—'}</td>
+                                            <td style={{...td, textAlign: 'right', fontFamily: 'monospace'}}>{fmt(r.PaidToMaster)}</td>
+                                            <td style={{...td, textAlign: 'right', fontFamily: 'monospace'}}>{fmt(r.SettledAtDelivery)}</td>
+                                            <td style={{...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.Outstanding > 0 ? '#1e40af' : '#94a3b8'}}>{fmt(r.Outstanding)}</td>
+                                        </tr>
+                                    ))}
+                                    {bvrRecon.rows.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>No bookings pending delivery.</td></tr>}
                                 </tbody>
                             </table>
                         </div>

@@ -10,5 +10,6 @@ router.get('/customer-advances-aging',    requireAccess('report:customer_advance
 router.get('/booking-pipeline',           requireAccess('report:booking_pipeline'),           c.bookingPipeline);
 router.get('/master-invoice-aging',       requireAccess('report:master_invoice_aging'),       c.masterInvoiceAging);
 router.get('/incentive-receivable-aging', requireAccess('report:incentive_receivable_aging'), c.incentiveReceivableAging);
+router.get('/booking-account-reconciliation', requireAccess('report:booking_account_reconciliation'), c.bookingAccountReconciliation);
 
 module.exports = router;
