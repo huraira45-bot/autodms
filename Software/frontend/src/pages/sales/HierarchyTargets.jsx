@@ -200,7 +200,7 @@ function AssignModal({ employees, onClose, onSaved }) {
                 onChange={setEmpId}
                 placeholder="— Pick employee —"
                 title="Pick Employee"
-                options={employees.map(e => ({ id: e.EmployeeID, label: e.EmployeeName, sub: e.EmployeeCode }))}
+                options={employees.map(e => ({ id: e.EmployeeID, label: e.EmployeeName, sub: e.EmployeeNo }))}
             />
         </Row>
         <Row label="Hierarchy Role *">
@@ -243,7 +243,7 @@ function TargetModal({ employees, onClose, onSaved }) {
                 onChange={setEmpId}
                 placeholder="— Pick employee —"
                 title="Pick Employee"
-                options={employees.map(e => ({ id: e.EmployeeID, label: e.EmployeeName, sub: e.EmployeeCode }))}
+                options={employees.map(e => ({ id: e.EmployeeID, label: e.EmployeeName, sub: e.EmployeeNo }))}
             />
         </Row>
         <Row label="Period">

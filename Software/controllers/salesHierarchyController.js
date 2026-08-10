@@ -18,7 +18,7 @@ exports.listAssignments = async (req, res) => {
         const activeOnly = (req.query.activeOnly || 'true') !== 'false';
         const pool = await getPool();
         const r = await pool.request().query(`
-            SELECT h.AssignmentID, h.EmployeeID, e.EmployeeName, e.EmployeeCode,
+            SELECT h.AssignmentID, h.EmployeeID, e.EmployeeName, e.EmployeeNo AS EmployeeCode,
                    h.HierarchyRole, h.AssignedAt, h.AssignedByEmployeeID,
                    h.UnassignedAt, h.Notes
             FROM dms_SalesHierarchyAssignments h
@@ -108,7 +108,7 @@ exports.listTargets = async (req, res) => {
             .input('from', sql.Date,         from || null)
             .input('to',   sql.Date,         to   || null)
             .input('eid',  sql.Int,          employeeId ? Number(employeeId) : null)
-            .query(`SELECT t.TargetID, t.EmployeeID, e.EmployeeName, e.EmployeeCode,
+            .query(`SELECT t.TargetID, t.EmployeeID, e.EmployeeName, e.EmployeeNo AS EmployeeCode,
                            t.PeriodType, t.PeriodStart, t.PeriodEnd,
                            t.UnitsTarget, t.RevenueTarget,
                            t.AssignedByName, t.AssignedAt, t.IsActive, t.Notes
@@ -187,7 +187,7 @@ exports.setTarget = async (req, res) => {
 
 // GET /api/sales/targets/performance?periodType=&from=&to=
 // For each active target, computes actual units delivered and revenue collected
-// from dms_SalesBookings where the SalesExecutiveID matches and gate pass was
+// from dms_SalesBookings where CreatedBy_SalesExecutiveID matches and gate pass was
 // issued within the period.
 exports.targetPerformance = async (req, res) => {
     try {
@@ -198,7 +198,7 @@ exports.targetPerformance = async (req, res) => {
             .input('from', sql.Date,         from || null)
             .input('to',   sql.Date,         to   || null)
             .query(`
-                SELECT t.TargetID, t.EmployeeID, e.EmployeeName, e.EmployeeCode,
+                SELECT t.TargetID, t.EmployeeID, e.EmployeeName, e.EmployeeNo AS EmployeeCode,
                        t.PeriodType, t.PeriodStart, t.PeriodEnd,
                        t.UnitsTarget, t.RevenueTarget,
                        ISNULL(p.ActualUnits, 0)   AS ActualUnits,
@@ -210,7 +210,7 @@ exports.targetPerformance = async (req, res) => {
                 OUTER APPLY (
                     SELECT COUNT(*) AS ActualUnits, SUM(NegotiatedPrice) AS ActualRevenue
                     FROM dms_SalesBookings b
-                    WHERE b.SalesExecutiveID = t.EmployeeID
+                    WHERE b.CreatedBy_SalesExecutiveID = t.EmployeeID
                       AND b.GatePassIssuedAt IS NOT NULL
                       AND b.GatePassIssuedAt >= t.PeriodStart
                       AND b.GatePassIssuedAt <  DATEADD(day, 1, t.PeriodEnd)
