@@ -4,7 +4,7 @@
  */
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
-const { postMasterReceiptVoucher } = require('../services/masterIncentiveReceiptService');
+const { postMasterReceiptVoucher, postBulkMasterReceiptVoucher } = require('../services/masterIncentiveReceiptService');
 const { postReversalVoucher } = require('../services/voucherReversalService');
 
 // GET /api/sales/master-incentive/summary
@@ -173,6 +173,106 @@ exports.createReceipt = async (req, res) => {
     }
 };
 
+// POST /api/sales/master-incentive/receipts/bulk
+// body: { AccrualIDs: [10,12,...], TotalGrossAmount, TotalWHTAmount?, TotalGSTOnIncentive?,
+//         TotalNetCashReceived, PaymentMode ('Bank'|'POS'), BankAccountGLCAID (if Bank),
+//         CertificateRef?, Notes? }
+//
+// Owner ask 2026-08-08: Master pays the incentive once a month as one lump
+// sum covering many accruals at once, not one bank transfer per booking.
+// FIFO-splits TotalGrossAmount across the selected accruals (oldest first,
+// same distribution logic as salesIncentiveController.disburse), inserts one
+// dms_MasterIncentiveReceipts row per accrual touched, then posts ONE MRV
+// voucher covering all of them.
+exports.createBulkReceipt = async (req, res) => {
+    const { AccrualIDs, TotalGrossAmount, TotalWHTAmount, TotalGSTOnIncentive, TotalNetCashReceived,
+            PaymentMode, BankAccountGLCAID, CertificateRef, Notes } = req.body || {};
+    if (!Array.isArray(AccrualIDs) || !AccrualIDs.length) {
+        return res.status(400).json({ error: 'AccrualIDs is required (pick at least one accrual).' });
+    }
+    const ids = AccrualIDs.map(id => parseInt(id)).filter(Number.isFinite);
+    if (!ids.length) return res.status(400).json({ error: 'AccrualIDs must contain valid accrual IDs.' });
+    if (!TotalGrossAmount || Number(TotalGrossAmount) <= 0) {
+        return res.status(400).json({ error: 'TotalGrossAmount must be > 0.' });
+    }
+    const gross = Number(TotalGrossAmount);
+    const wht   = Number(TotalWHTAmount || 0);
+    const gst   = Number(TotalGSTOnIncentive || 0);
+    const net   = Number(TotalNetCashReceived || 0);
+    if (Math.abs(net - (gross - wht + gst)) > 0.01) {
+        return res.status(400).json({
+            error: `TotalNetCashReceived must equal Gross - WHT + GST (expected ${(gross - wht + gst).toFixed(2)}).`,
+        });
+    }
+    const mode = PaymentMode === 'POS' ? 'POS' : 'Bank';
+    if (mode === 'Bank' && !BankAccountGLCAID) return res.status(400).json({ error: 'BankAccountGLCAID is required.' });
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+        const accs = await new sql.Request(tx)
+            .query(`SELECT AccrualID, AmountAccrued, DisbursedAmount, Status, AccruedAt
+                    FROM dms_SalesIncentiveAccruals WITH (UPDLOCK, HOLDLOCK)
+                    WHERE AccrualID IN (${ids.join(',')}) AND EarnerType='Master'
+                    ORDER BY AccruedAt ASC, AccrualID ASC`);
+        const outstanding = accs.recordset
+            .map(a => ({ ...a, Outstanding: Number(a.AmountAccrued) - Number(a.DisbursedAmount) }))
+            .filter(a => a.Outstanding > 0.01);
+        if (!outstanding.length) throw new Error('None of the selected accruals have an outstanding balance.');
+        const totalOutstanding = outstanding.reduce((s, a) => s + a.Outstanding, 0);
+        if (gross > totalOutstanding + 0.01) {
+            throw new Error(`Gross ${gross.toFixed(2)} exceeds total outstanding ${totalOutstanding.toFixed(2)} across the selected accruals.`);
+        }
+
+        // FIFO-fill: take what each accrual needs, in order, until the gross
+        // is used up. WHT/GST/net are prorated per accrual's share of gross
+        // so each receipt row stays internally consistent (Net = Gross-WHT+GST
+        // is enforced per-row by the DB, same as the single-receipt path).
+        let remaining = gross;
+        const receiptIds = [];
+        for (let i = 0; i < outstanding.length && remaining > 0.01; i++) {
+            const a = outstanding[i];
+            const take = Math.min(remaining, a.Outstanding);
+            const share = take / gross;
+            const rowWht = +(wht * share).toFixed(2);
+            const rowGst = +(gst * share).toFixed(2);
+            const rowNet = +(take - rowWht + rowGst).toFixed(2);
+            const initialStatus = (rowWht > 0 || rowGst > 0) ? 'PendingCert' : 'Settled';
+
+            const ins = await new sql.Request(tx)
+                .input('aid',    sql.Int,           a.AccrualID)
+                .input('gross',  sql.Decimal(18,2), take)
+                .input('wht',    sql.Decimal(18,2), rowWht)
+                .input('gst',    sql.Decimal(18,2), rowGst)
+                .input('net',    sql.Decimal(18,2), rowNet)
+                .input('cref',   sql.NVarChar(100), CertificateRef || null)
+                .input('st',     sql.NVarChar(20),  initialStatus)
+                .input('rby',    sql.Int,           req.user?.employeeId || null)
+                .input('rbyN',   sql.NVarChar(100), req.user?.userName   || 'system')
+                .input('nts',    sql.NVarChar(sql.MAX), Notes || null)
+                .query(`INSERT INTO dms_MasterIncentiveReceipts
+                            (AccrualID, GrossAmount, WHTAmount, GSTOnIncentive, NetCashReceived,
+                             CertificateRef, Status, ReceivedByEmployeeID, ReceivedByName, Notes)
+                        OUTPUT INSERTED.ReceiptID
+                        VALUES (@aid, @gross, @wht, @gst, @net,
+                                @cref, @st, @rby, @rbyN, @nts)`);
+            receiptIds.push(ins.recordset[0].ReceiptID);
+            remaining -= take;
+        }
+
+        const voucherId = await postBulkMasterReceiptVoucher(
+            receiptIds, mode === 'Bank' ? Number(BankAccountGLCAID) : null, req.user, tx, mode);
+
+        await tx.commit();
+        res.json({ message: 'Master incentive lump-sum receipt posted.', ReceiptIDs: receiptIds, VoucherID: voucherId });
+    } catch (err) {
+        try { await tx.rollback(); } catch {}
+        console.error('masterIncentive.createBulkReceipt:', err);
+        res.status(400).json({ error: err.message });
+    }
+};
+
 // POST /api/sales/master-incentive/receipts/:id/mark-cert-received
 // Flips Status from PendingCert → CertReceived (auditable check-in for the
 // WHT certificate without altering the GL).
@@ -202,6 +302,12 @@ exports.markCertReceived = async (req, res) => {
 // POST /api/sales/master-incentive/receipts/:id/revoke   body: { reason }
 // Reverses the MRV voucher (which auto-flips dms_PendingCheques etc. via the
 // reversal service's step 10) and rolls back the accrual's DisbursedAmount.
+//
+// A bulk/lump-sum receipt (createBulkReceipt) shares ONE voucher across
+// several dms_MasterIncentiveReceipts rows — reversing just the one the
+// caller asked for would leave its siblings pointing at a Reversed voucher
+// while their accruals stayed wrongly marked Disbursed. Revoking any one of
+// them revokes the whole batch together.
 exports.revokeReceipt = async (req, res) => {
     const id = parseInt(req.params.id);
     const { reason } = req.body || {};
@@ -210,42 +316,55 @@ exports.revokeReceipt = async (req, res) => {
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {
-        const r = await new sql.Request(tx)
+        const target = await new sql.Request(tx)
             .input('id', sql.Int, id)
-            .query(`SELECT r.ReceiptID, r.AccrualID, r.GrossAmount, r.ReceiptVoucherID,
+            .query(`SELECT ReceiptVoucherID FROM dms_MasterIncentiveReceipts WHERE ReceiptID=@id`);
+        if (!target.recordset.length) throw new Error(`Receipt ${id} not found.`);
+        const voucherId = target.recordset[0].ReceiptVoucherID;
+        if (!voucherId) throw new Error('Receipt has no voucher to reverse.');
+
+        // Every receipt sharing this voucher (bulk receipts touch several).
+        const siblings = await new sql.Request(tx)
+            .input('vid', sql.Int, voucherId)
+            .query(`SELECT r.ReceiptID, r.AccrualID, r.GrossAmount,
                            a.AmountAccrued, a.DisbursedAmount
                     FROM dms_MasterIncentiveReceipts r WITH (UPDLOCK, HOLDLOCK)
                     INNER JOIN dms_SalesIncentiveAccruals a ON a.AccrualID = r.AccrualID
-                    WHERE r.ReceiptID=@id`);
-        if (!r.recordset.length) throw new Error(`Receipt ${id} not found.`);
-        const rec = r.recordset[0];
-        if (!rec.ReceiptVoucherID) throw new Error('Receipt has no voucher to reverse.');
+                    WHERE r.ReceiptVoucherID=@vid`);
 
-        const { reversalId } = await postReversalVoucher(rec.ReceiptVoucherID, req.user, tx);
+        const { reversalId } = await postReversalVoucher(voucherId, req.user, tx);
 
-        // Roll back the accrual disbursement
-        const newDisbursed = Math.max(0, Number(rec.DisbursedAmount) - Number(rec.GrossAmount));
-        const newStatus = newDisbursed > 0.01 ? 'PartiallyDisbursed' : 'Accrued';
-        await new sql.Request(tx)
-            .input('aid', sql.Int,           rec.AccrualID)
-            .input('amt', sql.Decimal(18,2), newDisbursed)
-            .input('st',  sql.NVarChar(20),  newStatus)
-            .query(`UPDATE dms_SalesIncentiveAccruals
-                    SET DisbursedAmount=@amt, Status=@st
-                    WHERE AccrualID=@aid`);
+        const noteText = `REVERSED: ${reason.trim()}`;
+        for (const rec of siblings.recordset) {
+            const newDisbursed = Math.max(0, Number(rec.DisbursedAmount) - Number(rec.GrossAmount));
+            const newStatus = newDisbursed > 0.01 ? 'PartiallyDisbursed' : 'Accrued';
+            await new sql.Request(tx)
+                .input('aid', sql.Int,           rec.AccrualID)
+                .input('amt', sql.Decimal(18,2), newDisbursed)
+                .input('st',  sql.NVarChar(20),  newStatus)
+                .query(`UPDATE dms_SalesIncentiveAccruals
+                        SET DisbursedAmount=@amt, Status=@st
+                        WHERE AccrualID=@aid`);
 
-        // Mark the receipt as reversed (we don't have a Revoked* set of columns
-        // on this table — fold the metadata into Notes for audit, status stays
-        // 'Settled' but the linked voucher being Reversed signals the truth).
-        await new sql.Request(tx)
-            .input('id',  sql.Int,               id)
-            .input('rsn', sql.NVarChar(sql.MAX), `REVERSED: ${reason.trim()}`)
-            .query(`UPDATE dms_MasterIncentiveReceipts
-                    SET Notes = ISNULL(Notes + CHAR(10), '') + @rsn
-                    WHERE ReceiptID=@id`);
+            // Mark the receipt as reversed (we don't have a Revoked* set of
+            // columns on this table — fold the metadata into Notes for
+            // audit, status stays 'Settled' but the linked voucher being
+            // Reversed signals the truth).
+            await new sql.Request(tx)
+                .input('id',  sql.Int,               rec.ReceiptID)
+                .input('rsn', sql.NVarChar(sql.MAX), noteText)
+                .query(`UPDATE dms_MasterIncentiveReceipts
+                        SET Notes = ISNULL(Notes + CHAR(10), '') + @rsn
+                        WHERE ReceiptID=@id`);
+        }
 
         await tx.commit();
-        res.json({ message: 'Receipt voucher reversed.', ReversalVoucherID: reversalId });
+        res.json({
+            message: siblings.recordset.length > 1
+                ? `Bulk receipt voucher reversed (${siblings.recordset.length} accruals rolled back).`
+                : 'Receipt voucher reversed.',
+            ReversalVoucherID: reversalId,
+        });
     } catch (err) {
         try { await tx.rollback(); } catch {}
         console.error('masterIncentive.revokeReceipt:', err);

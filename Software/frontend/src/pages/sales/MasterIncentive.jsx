@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { TrendingUp, Wallet, Clock, Plus, X, FileCheck2, RotateCcw, Loader2, ReceiptText } from 'lucide-react';
+import { TrendingUp, Wallet, Clock, Plus, X, FileCheck2, RotateCcw, Loader2, ReceiptText, ShoppingCart, Check } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import SearchableSelect from '../../components/SearchableSelect';
 import { ErpControlPanel } from '../../components/erp';
@@ -27,6 +27,7 @@ export default function MasterIncentive() {
     const [showAll, setShowAll]   = useState(false);
     const [busy, setBusy]         = useState(false);
     const [receiptFor, setReceiptFor] = useState(null);  // accrual obj or null
+    const [bulkOpen, setBulkOpen] = useState(false);
 
     const load = useCallback(async () => {
         setBusy(true);
@@ -94,6 +95,12 @@ export default function MasterIncentive() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <h3 style={{ margin: 0 }}>{showAll ? 'All Master Accruals' : 'Open Accruals (awaiting Master payment)'}</h3>
                     <div style={{ display: 'flex', gap: 8 }}>
+                        {accruals.some(a => ['Accrued', 'PartiallyDisbursed'].includes(a.Status)) && (
+                            <button onClick={() => setBulkOpen(true)}
+                                style={{ padding: '6px 12px', background: '#15803d', color: 'white', border: 'none', borderRadius: 6, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <ShoppingCart size={14} /> Record Monthly Payment
+                            </button>
+                        )}
                         <button onClick={() => setShowAll(v => !v)} className="btn-sm">
                             {showAll ? 'Open only' : 'Show all'}
                         </button>
@@ -221,6 +228,13 @@ export default function MasterIncentive() {
             {receiptFor && (
                 <ReceiptModal accrual={receiptFor} onClose={() => setReceiptFor(null)} onSaved={() => { setReceiptFor(null); load(); }} />
             )}
+            {bulkOpen && (
+                <BulkReceiptModal
+                    accruals={accruals.filter(a => ['Accrued', 'PartiallyDisbursed'].includes(a.Status))}
+                    onClose={() => setBulkOpen(false)}
+                    onSaved={() => { setBulkOpen(false); load(); }}
+                />
+            )}
 
             <style>{`.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
@@ -331,6 +345,169 @@ function ReceiptModal({ accrual, onClose, onSaved }) {
                 </div>
             </div>
         </div>
+    );
+}
+
+// Owner ask 2026-08-08: Master pays the whole month's incentive as one lump
+// sum, not one bank transfer per booking. This is a checkout-style screen —
+// pick which open accruals this payment covers (all pre-checked, since
+// that's the normal case), enter the ONE total received, submit as one MRV.
+function BulkReceiptModal({ accruals, onClose, onSaved }) {
+    const { notify } = useFeedback();
+    const [selected, setSelected] = useState(() => new Set(accruals.map(a => a.AccrualID)));
+    const [wht, setWht] = useState('0');
+    const [gst, setGst] = useState('0');
+    const [paymentMode, setPaymentMode] = useState('Bank');
+    const [bankAccountId, setBankAccountId] = useState('');
+    const [certRef, setCertRef] = useState('');
+    const [notes, setNotes] = useState('');
+    const [banks, setBanks] = useState([]);
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+        axios.get('/api/accounts/banks').then(r => setBanks(r.data || [])).catch(() => {});
+    }, []);
+
+    const picked = accruals.filter(a => selected.has(a.AccrualID));
+    const gross = picked.reduce((s, a) => s + Number(a.Outstanding || 0), 0);
+    const w = Number(wht) || 0;
+    const s = Number(gst) || 0;
+    const net = gross - w + s;
+
+    const toggle = (id) => setSelected(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+    const toggleAll = () => setSelected(prev =>
+        prev.size === accruals.length ? new Set() : new Set(accruals.map(a => a.AccrualID)));
+
+    const save = async () => {
+        if (picked.length === 0)   return notify('Pick at least one accrual', 'error');
+        if (gross <= 0)            return notify('Gross must be > 0', 'error');
+        if (paymentMode === 'Bank' && !bankAccountId) return notify('Pick a bank account', 'error');
+        setBusy(true);
+        try {
+            await axios.post('/api/sales/master-incentive/receipts/bulk', {
+                AccrualIDs: picked.map(a => a.AccrualID),
+                TotalGrossAmount: gross, TotalWHTAmount: w, TotalGSTOnIncentive: s,
+                TotalNetCashReceived: net,
+                PaymentMode: paymentMode,
+                BankAccountGLCAID: paymentMode === 'Bank' ? Number(bankAccountId) : null,
+                CertificateRef: certRef || null,
+                Notes: notes || null,
+            });
+            notify(`Master receipt posted — ${picked.length} accrual${picked.length===1?'':'s'} settled.`, 'success');
+            onSaved();
+        } catch (e) {
+            notify(e.response?.data?.error || e.message, 'error');
+        }
+        setBusy(false);
+    };
+
+    return (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+            <div style={{ background: 'white', borderRadius: 8, padding: 20, maxWidth: 680, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}><ShoppingCart size={18} /> Record Monthly Payment</h3>
+                    <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+                </div>
+                <p style={{ margin: '0 0 12px', color: '#64748b', fontSize: '0.82rem' }}>
+                    Pick which accruals this payment covers, then enter the one total Master actually sent.
+                </p>
+
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden', marginBottom: 14 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                        <thead>
+                            <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                                <th style={{ ...th, width: 32 }}>
+                                    <button onClick={toggleAll} title="Toggle all" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                                        <CheckBox checked={selected.size === accruals.length && accruals.length > 0} />
+                                    </button>
+                                </th>
+                                <th style={th}>Accrual</th>
+                                <th style={th}>Booking</th>
+                                <th style={th}>Chassis</th>
+                                <th style={{...th, textAlign:'right'}}>Outstanding</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {accruals.map(a => (
+                                <tr key={a.AccrualID}
+                                    onClick={() => toggle(a.AccrualID)}
+                                    style={{ borderTop: '1px solid #e2e8f0', cursor: 'pointer', background: selected.has(a.AccrualID) ? '#f0fdf4' : 'white' }}>
+                                    <td style={td}><CheckBox checked={selected.has(a.AccrualID)} /></td>
+                                    <td style={td}>#{a.AccrualID}</td>
+                                    <td style={td}>{a.BookingNo || '—'}</td>
+                                    <td style={{...td, fontFamily: 'monospace'}}>{a.ChasisNo || '—'}</td>
+                                    <td style={tdNum}>{fmt(a.Outstanding)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 14, fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{picked.length} of {accruals.length} accruals selected</span>
+                    <span>Gross <strong>PKR {fmt(gross)}</strong></span>
+                </div>
+
+                <Row label="Received Via *">
+                    <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)} style={input}>
+                        <option value="Bank">Bank Deposit</option>
+                        <option value="POS">POS</option>
+                    </select>
+                </Row>
+                {paymentMode === 'Bank' && (
+                    <Row label="Bank Account *">
+                        <SearchableSelect
+                            value={bankAccountId}
+                            onChange={setBankAccountId}
+                            placeholder="— Pick the bank that received the funds —"
+                            title="Pick Bank Account"
+                            options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))}
+                        />
+                    </Row>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <Row label="WHT withheld (total)">
+                        <input type="number" value={wht} onChange={e => setWht(e.target.value)} style={input} />
+                    </Row>
+                    <Row label="GST on incentive (total)">
+                        <input type="number" value={gst} onChange={e => setGst(e.target.value)} style={input} />
+                    </Row>
+                </div>
+                <Row label="Net Cash Received (auto)">
+                    <input type="number" value={net.toFixed(2)} disabled style={{...input, background: '#f1f5f9'}} />
+                </Row>
+                <Row label="WHT certificate ref (if any)">
+                    <input value={certRef} onChange={e => setCertRef(e.target.value)} placeholder="cert # or document ref" style={input} />
+                </Row>
+                <Row label="Notes">
+                    <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{...input, resize: 'vertical'}} />
+                </Row>
+                <div style={{ marginTop: 4, padding: 8, background: '#eff6ff', color: '#1e3a8a', borderRadius: 6, fontSize: '0.78rem' }}>
+                    Will post ONE voucher: <strong>Dr {paymentMode === 'POS' ? 'POS Clearing' : 'Bank'} PKR {fmt(net)}</strong>{w > 0 && <> + <strong>Dr WHT Recvbl PKR {fmt(w)}</strong></>}{s > 0 && <> + <strong>Cr GST Payable PKR {fmt(s)}</strong></>} / <strong>Cr Master Incentive Recvbl PKR {fmt(gross)}</strong> split across {picked.length || 0} accrual{picked.length===1?'':'s'}.
+                </div>
+                <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button onClick={onClose} className="btn-sm">Cancel</button>
+                    <button onClick={save} disabled={busy || picked.length === 0} style={{ padding: '8px 16px', background: '#15803d', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {busy ? <Loader2 size={14} className="spin" /> : <FileCheck2 size={14} />} Post Payment
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function CheckBox({ checked }) {
+    return (
+        <span style={{
+            width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${checked ? '#15803d' : '#cbd5e1'}`,
+            background: checked ? '#15803d' : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+            {checked && <Check size={12} color="white" strokeWidth={3} />}
+        </span>
     );
 }
 

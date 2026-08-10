@@ -129,6 +129,7 @@ router.get(   '/master-incentive/summary',           requireAny('sales_master_se
 router.get(   '/master-incentive/accruals',          requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'), mi.listAccruals);
 router.get(   '/master-incentive/receipts',          requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'), mi.listReceipts);
 router.post(  '/master-incentive/receipts',         requireAny('sales_master_settlement', 'sales_admin_settings'), mi.createReceipt);
+router.post(  '/master-incentive/receipts/bulk',     requireAny('sales_master_settlement', 'sales_admin_settings'), mi.createBulkReceipt);
 router.post(  '/master-incentive/receipts/:id/mark-cert-received', requireAny('sales_master_settlement', 'sales_admin_settings'), mi.markCertReceived);
 router.post(  '/master-incentive/receipts/:id/revoke',             requireAny('sales_master_settlement', 'sales_admin_settings'), mi.revokeReceipt);
 
