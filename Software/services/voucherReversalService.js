@@ -64,7 +64,7 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
         .input('remarks', sql.NVarChar(sql.MAX),reversalRemarks)
         .input('total',   sql.Decimal(18,2),    orig.TotalAmount)
         .input('rev',     sql.Int,              originalVoucherId)
-        .input('src',     sql.NVarChar(20),     orig.SourceDocType)
+        .input('src',     sql.NVarChar(50),     orig.SourceDocType)
         .input('srcId',   sql.Int,              orig.SourceDocID)
         .input('cby',     sql.Int,              userInfo?.userId || null)
         .input('cbyN',    sql.NVarChar(100),    userInfo?.userName || null)

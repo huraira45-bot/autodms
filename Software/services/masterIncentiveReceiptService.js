@@ -6,7 +6,11 @@
  * 1:1 to an accrual row in dms_SalesIncentiveAccruals (EarnerType='Master').
  *
  *   Cr MASTER_INCENTIVE_RECEIVABLE  (GrossAmount — closes the asset)
- *   Dr <Bank GL>                     (NetCashReceived)
+ *   Dr <Bank GL> or POS_CLEARING     (NetCashReceived — owner ask 2026-08-08:
+ *                                     incentive can be received via POS same
+ *                                     as any other receipt, same POS_CLEARING
+ *                                     role salesPaymentPostingService/
+ *                                     paymentController already use)
  *   Dr TRADE_DEBTORS                 (WHTAmount — temporary WHT-receivable bucket;
  *                                     a dedicated WHT_RECEIVABLE role is on the
  *                                     backlog per memory project_wht_receivable)
@@ -46,8 +50,12 @@ async function resolveBank(bankAccountGLCAID, tx) {
 /**
  * Posts the MRV voucher. Caller MUST be inside an open transaction. Returns
  * the new VoucherID and stamps it back onto the receipt row.
+ *
+ * @param {string} paymentMode - 'Bank' (default) or 'POS'. POS debits the
+ *   POS_CLEARING role account instead of a specific bank account — bankAccountGLCAID
+ *   is ignored/optional in that case.
  */
-async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, tx) {
+async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, tx, paymentMode = 'Bank') {
     const r = await loadReceipt(receiptId, tx);
     if (r.EarnerType !== 'Master') {
         throw new Error('Receipt is not tied to a Master accrual.');
@@ -64,7 +72,8 @@ async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, 
     }
 
     const recvGL = await resolveRole('MASTER_INCENTIVE_RECEIVABLE');
-    const bankGL = await resolveBank(bankAccountGLCAID, tx);
+    const isPOS  = paymentMode === 'POS';
+    const debitGL = isPOS ? await resolveRole('POS_CLEARING') : await resolveBank(bankAccountGLCAID, tx);
     const whtGL  = wht > 0 ? await resolveRole('TRADE_DEBTORS') : null;       // placeholder — WHT_RECEIVABLE role is backlog
     const gstGL  = gst > 0 ? await resolveRole('GST_PAYABLE')    : null;
 
@@ -83,7 +92,7 @@ async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, 
         .input('vtId', sql.Int,              voucherTypeId)
         .input('rem',  sql.NVarChar(sql.MAX),narration)
         .input('tot',  sql.Decimal(18,2),    gross + gst)   // total debit side
-        .input('src',  sql.NVarChar(20),     'MASTER_INCENTIVE_RECEIPT')
+        .input('src',  sql.NVarChar(50),     'MASTER_INCENTIVE_RECEIPT')
         .input('srcId',sql.Int,              receiptId)
         .input('cby',  sql.Int,              userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),    userInfo?.userName || null)
@@ -108,7 +117,7 @@ async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, 
                     VALUES (@vid, @gl, @nar, @dr, @cr, @bid)`);
     };
 
-    await insertLine(bankGL, net, 0, `MRV ${mrvNo} — bank deposit`, r.BookingID);
+    await insertLine(debitGL, net, 0, `MRV ${mrvNo} — ${isPOS ? 'POS receipt' : 'bank deposit'}`, r.BookingID);
     if (wht > 0) await insertLine(whtGL, wht, 0, `WHT withheld by Master (claimable)`, r.BookingID);
     if (gst > 0) await insertLine(gstGL, 0, gst, `Output GST on incentive`, r.BookingID);
     await insertLine(recvGL, 0, gross, `Closing Master incentive receivable (accrual #${r.AccrualID})`, r.BookingID);

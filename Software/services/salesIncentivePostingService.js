@@ -63,7 +63,7 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
         .input('vtId', sql.Int,          voucherTypeId)
         .input('rem',  sql.NVarChar(sql.MAX), narration)
         .input('tot',  sql.Decimal(18,2), amount)
-        .input('src',  sql.NVarChar(20), 'SALES_INCENTIVE_ACCRUAL')
+        .input('src',  sql.NVarChar(50), 'SALES_INCENTIVE_ACCRUAL')
         .input('srcId',sql.Int,          a.AccrualID)
         .input('cby',  sql.Int,          userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),userInfo?.userName || null)
