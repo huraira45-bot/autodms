@@ -261,10 +261,11 @@ export function LapsedCustomers() {
     };
     const excelExport = (data, params) => ({
         filename: `lapsed-customers-${params.minDays || 365}days-${todayISO()}.csv`,
-        headers: ['Chassis', 'Reg #', 'Customer', 'Phone', 'Vehicle Model', 'Last Visit', 'Days Since', 'Total Visits'],
+        headers: ['Chassis', 'Reg #', 'Customer', 'Phone', 'Vehicle Model', 'Last Job Card', 'Last Visit', 'Days Since', 'Total Visits'],
         rows: (data.rows || []).map(r => [
             r.Chassis, r.RegNo || '', r.CustomerName || '', r.CustomerPhone || '',
-            r.VehicleModel || '', r.LastVisitDate ? r.LastVisitDate.slice(0, 10) : '',
+            r.VehicleModel || '', r.LastJobCardNo ? `${r.LastJobCardNo}${r.LastVisitIsLegacy ? ' (legacy)' : ''}` : '',
+            r.LastVisitDate ? r.LastVisitDate.slice(0, 10) : '',
             r.DaysSinceLastVisit, r.TotalVisits,
         ]),
     });
@@ -309,13 +310,14 @@ export function LapsedCustomers() {
                             <tr style={trHeader}>
                                 <TH>Chassis</TH><TH>Reg #</TH><TH>Vehicle Model</TH>
                                 <TH>Customer</TH><TH>Phone</TH>
+                                <TH>Last Job Card</TH>
                                 <TH>Last Visit</TH>
                                 <TH align="right">Days Since</TH>
                                 <TH align="right">Total Visits</TH>
                             </tr>
                         </thead>
                         <tbody>
-                            {data.rows.length === 0 && <Empty cols={8}>No lapsed customers match this filter.</Empty>}
+                            {data.rows.length === 0 && <Empty cols={9}>No lapsed customers match this filter.</Empty>}
                             {data.rows.map(r => (
                                 <tr key={r.Chassis} style={trBody}>
                                     <TD mono>{r.Chassis}</TD>
@@ -323,6 +325,12 @@ export function LapsedCustomers() {
                                     <TD>{r.VehicleModel || '—'}</TD>
                                     <TD>{r.CustomerName || '—'}</TD>
                                     <TD>{r.CustomerPhone || '—'}</TD>
+                                    <TD mono>
+                                        {!r.LastJobCardNo ? '—'
+                                            : r.LastVisitIsLegacy
+                                                ? <>{r.LastJobCardNo} <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>(legacy)</span></>
+                                                : <a href={`/workshop/jobs/${r.LastJobCardId}`} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>{r.LastJobCardNo}</a>}
+                                    </TD>
                                     <TD>{r.LastVisitDate ? r.LastVisitDate.slice(0, 10) : '—'}</TD>
                                     <TD align="right" mono color={r.DaysSinceLastVisit > 730 ? '#b91c1c' : '#b45309'}>{fmtInt(r.DaysSinceLastVisit)}</TD>
                                     <TD align="right" mono>{fmtInt(r.TotalVisits)}</TD>

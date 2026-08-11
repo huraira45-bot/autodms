@@ -674,7 +674,8 @@ exports.lapsedCustomers = async (req, res) => {
                        j.VehicleRegNo AS RegNo, j.EngineNo AS Engine,
                        j.JobCardDate AS VisitDate,
                        c.endUserName AS CustomerName, c.PhoneNo AS CustomerPhone,
-                       j.VersionCode AS VehicleModel, j.VehicleColor AS Color
+                       j.VersionCode AS VehicleModel, j.VehicleColor AS Color,
+                       j.JobCardNo AS JobCardRef, j.JobCardId AS JobCardId, 0 AS IsLegacy
                 FROM Addata_JobCardInfo j
                 LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
                 WHERE NULLIF(LTRIM(RTRIM(j.ChasisNo)), '') IS NOT NULL
@@ -686,7 +687,8 @@ exports.lapsedCustomers = async (req, res) => {
                 SELECT UPPER(LTRIM(RTRIM(l.ChassisNumber))), l.RegistrationNumber, l.EngineNumber,
                        l.JobCardDate,
                        COALESCE(NULLIF(l.PartyName, ''), l.CustomerName), l.Mobile1,
-                       l.VehicleType, l.ColorName
+                       l.VehicleType, l.ColorName,
+                       l.WorkOrderNo, l.LegacyID, 1
                 FROM Legacy_JobCards l
                 WHERE NULLIF(LTRIM(RTRIM(l.ChassisNumber)), '') IS NOT NULL
                   AND l.JobCardDate IS NOT NULL
@@ -699,6 +701,7 @@ exports.lapsedCustomers = async (req, res) => {
                 FROM AllVisits
             )
             SELECT Chassis, RegNo, Engine, CustomerName, CustomerPhone, VehicleModel, Color,
+                   JobCardRef AS LastJobCardNo, JobCardId AS LastJobCardId, IsLegacy AS LastVisitIsLegacy,
                    VisitDate AS LastVisitDate, TotalVisits,
                    DATEDIFF(day, VisitDate, GETDATE()) AS DaysSinceLastVisit
             FROM Ranked
