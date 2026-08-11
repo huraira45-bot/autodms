@@ -639,3 +639,75 @@ exports.taxInvoiceLines = async (req, res) => {
         });
     } catch (err) { console.error('taxInvoiceLines:', err); res.status(500).json({ error: err.message }); }
 };
+
+/**
+ * GET /reports/service/lapsed-customers?minDays=365&search=
+ *
+ * Owner ask 2026-08-11: every vehicle we've ever serviced, current JCs AND
+ * legacy (Legacy_JobCards, migration 091) combined, whose LAST visit was
+ * more than minDays ago (default 365 = "hasn't been in for a year"). One
+ * row per chassis using its most recent visit's customer/vehicle snapshot.
+ * ?search= filters client-visible fields (vehicle model, reg#, chassis,
+ * customer name) so the front end can do "filter by car".
+ *
+ * Legacy shadow tables are optional (same detection pattern as
+ * getVehicleHistory) so this works before migration 091 too — current-JC
+ * data alone still answers the question, just without the older history.
+ */
+exports.lapsedCustomers = async (req, res) => {
+    try {
+        const minDaysParsed = Number(req.query.minDays);
+        const minDays = Number.isFinite(minDaysParsed) && minDaysParsed >= 0 ? minDaysParsed : 365;
+        const search = (req.query.search || '').trim();
+        const pool = await getPool();
+
+        const legacyCheck = await pool.request().query(
+            `SELECT CASE WHEN OBJECT_ID('dbo.Legacy_JobCards','U') IS NULL THEN 0 ELSE 1 END AS HasLegacy`);
+        const hasLegacy = legacyCheck.recordset[0].HasLegacy === 1;
+
+        const request = pool.request().input('minDays', sql.Int, minDays);
+        if (search) request.input('search', sql.NVarChar(200), `%${search}%`);
+
+        const r = await request.query(`
+            WITH AllVisits AS (
+                SELECT UPPER(LTRIM(RTRIM(j.ChasisNo))) AS Chassis,
+                       j.VehicleRegNo AS RegNo, j.EngineNo AS Engine,
+                       j.JobCardDate AS VisitDate,
+                       c.endUserName AS CustomerName, c.PhoneNo AS CustomerPhone,
+                       j.VersionCode AS VehicleModel, j.VehicleColor AS Color
+                FROM Addata_JobCardInfo j
+                LEFT JOIN addata_CustomerInfo c ON j.EndUserID = c.ProfileID
+                WHERE NULLIF(LTRIM(RTRIM(j.ChasisNo)), '') IS NOT NULL
+                  AND j.JobCardDate IS NOT NULL
+
+                ${hasLegacy ? `
+                UNION ALL
+
+                SELECT UPPER(LTRIM(RTRIM(l.ChassisNumber))), l.RegistrationNumber, l.EngineNumber,
+                       l.JobCardDate,
+                       COALESCE(NULLIF(l.PartyName, ''), l.CustomerName), l.Mobile1,
+                       l.VehicleType, l.ColorName
+                FROM Legacy_JobCards l
+                WHERE NULLIF(LTRIM(RTRIM(l.ChassisNumber)), '') IS NOT NULL
+                  AND l.JobCardDate IS NOT NULL
+                ` : ''}
+            ),
+            Ranked AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY Chassis ORDER BY VisitDate DESC) AS rn,
+                       COUNT(*)    OVER (PARTITION BY Chassis) AS TotalVisits
+                FROM AllVisits
+            )
+            SELECT Chassis, RegNo, Engine, CustomerName, CustomerPhone, VehicleModel, Color,
+                   VisitDate AS LastVisitDate, TotalVisits,
+                   DATEDIFF(day, VisitDate, GETDATE()) AS DaysSinceLastVisit
+            FROM Ranked
+            WHERE rn = 1
+              AND VisitDate < DATEADD(day, -@minDays, GETDATE())
+              ${search ? `AND (VehicleModel LIKE @search OR RegNo LIKE @search
+                               OR Chassis LIKE @search OR CustomerName LIKE @search)` : ''}
+            ORDER BY VisitDate ASC`);
+
+        res.json({ rows: r.recordset, hasLegacy, minDays });
+    } catch (err) { console.error('lapsedCustomers:', err); res.status(500).json({ error: err.message }); }
+};

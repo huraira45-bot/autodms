@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Wrench, Activity, ShieldCheck, UserCog } from 'lucide-react';
+import { Wrench, Activity, ShieldCheck, UserCog, UserX } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -243,6 +243,94 @@ export function JobCardRegister() {
                         </table>
                     </div>
                 </>
+            )}
+        </ReportShell>
+    );
+}
+
+// =====================================================================
+// Lapsed Customers — every vehicle (current JCs + legacy FIS history
+// combined) whose last visit was more than N days ago. Owner ask
+// 2026-08-11: retention/win-back list, filterable by car.
+// =====================================================================
+export function LapsedCustomers() {
+    const printFilterSummary = (params) => {
+        const parts = [`Hasn't visited in ${params.minDays || 365}+ days`];
+        if (params.search) parts.push(`Filter: "${params.search}"`);
+        return parts.join('  •  ');
+    };
+    const excelExport = (data, params) => ({
+        filename: `lapsed-customers-${params.minDays || 365}days-${todayISO()}.csv`,
+        headers: ['Chassis', 'Reg #', 'Customer', 'Phone', 'Vehicle Model', 'Last Visit', 'Days Since', 'Total Visits'],
+        rows: (data.rows || []).map(r => [
+            r.Chassis, r.RegNo || '', r.CustomerName || '', r.CustomerPhone || '',
+            r.VehicleModel || '', r.LastVisitDate ? r.LastVisitDate.slice(0, 10) : '',
+            r.DaysSinceLastVisit, r.TotalVisits,
+        ]),
+    });
+    return (
+        <ReportShell
+            title="Lapsed Customers"
+            subtitle="Vehicles (current + legacy service history) that haven't been in for the selected period — a win-back / retention list."
+            icon={UserX}
+            endpoint="service/lapsed-customers"
+            defaultParams={{ minDays: 365, search: '' }}
+            printFilterSummary={printFilterSummary}
+            excelExport={excelExport}
+            landscape
+            paginate={{ key: 'rows', size: 100 }}
+            controls={({ params, updateParam }) => (
+                <>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Hasn't visited in
+                        <input type="number" min={0} value={params.minDays}
+                            onChange={e => updateParam('minDays', e.target.value)}
+                            style={{ width: 80, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }} />
+                        days
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Filter by car
+                        <input value={params.search} onChange={e => updateParam('search', e.target.value)}
+                            placeholder="model, reg #, chassis, or customer"
+                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 220 }} />
+                    </label>
+                </>
+            )}
+        >
+            {(data) => (
+                <div className="card" style={{ overflowX: 'auto' }}>
+                    {!data.hasLegacy && (
+                        <div style={{ marginBottom: 12, padding: 8, background: '#fef3c7', color: '#92400e', borderRadius: 6, fontSize: '0.8rem' }}>
+                            Legacy vehicle history isn't loaded on this environment — this list only covers current job cards.
+                        </div>
+                    )}
+                    <table style={tableStyle}>
+                        <thead>
+                            <tr style={trHeader}>
+                                <TH>Chassis</TH><TH>Reg #</TH><TH>Vehicle Model</TH>
+                                <TH>Customer</TH><TH>Phone</TH>
+                                <TH>Last Visit</TH>
+                                <TH align="right">Days Since</TH>
+                                <TH align="right">Total Visits</TH>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.rows.length === 0 && <Empty cols={8}>No lapsed customers match this filter.</Empty>}
+                            {data.rows.map(r => (
+                                <tr key={r.Chassis} style={trBody}>
+                                    <TD mono>{r.Chassis}</TD>
+                                    <TD mono>{r.RegNo || '—'}</TD>
+                                    <TD>{r.VehicleModel || '—'}</TD>
+                                    <TD>{r.CustomerName || '—'}</TD>
+                                    <TD>{r.CustomerPhone || '—'}</TD>
+                                    <TD>{r.LastVisitDate ? r.LastVisitDate.slice(0, 10) : '—'}</TD>
+                                    <TD align="right" mono color={r.DaysSinceLastVisit > 730 ? '#b91c1c' : '#b45309'}>{fmtInt(r.DaysSinceLastVisit)}</TD>
+                                    <TD align="right" mono>{fmtInt(r.TotalVisits)}</TD>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             )}
         </ReportShell>
     );

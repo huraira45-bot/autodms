@@ -179,7 +179,7 @@ import SalesInquiryQueue from './pages/sales/SalesInquiryQueue';
 import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
 // Module-scoped reports
-import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity } from './pages/reports/Service';
+import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity, LapsedCustomers } from './pages/reports/Service';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
@@ -393,6 +393,11 @@ function LegacySidebar() {
                 {canReport('mechanic_productivity') && (
                     <NavLink to="/reports/service/mechanic-productivity" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Mechanic Productivity
+                    </NavLink>
+                )}
+                {canReport('lapsed_customers') && (
+                    <NavLink to="/reports/service/lapsed-customers" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Lapsed Customers
                     </NavLink>
                 )}
                 </NavSection>
@@ -1064,6 +1069,7 @@ function AppShell() {
                     <Route path="/reports/service/insurance-claims"      element={<ProtectedRoute><InsuranceClaims /></ProtectedRoute>} />
                     <Route path="/reports/service/mechanic-productivity" element={<ProtectedRoute><MechanicProductivity /></ProtectedRoute>} />
                     <Route path="/reports/service/tax-invoice-tracker"   element={<ProtectedRoute><TaxInvoiceTracker /></ProtectedRoute>} />
+                    <Route path="/reports/service/lapsed-customers"      element={<ProtectedRoute><LapsedCustomers /></ProtectedRoute>} />
 
                     {/* Parts reports */}
                     <Route path="/reports/parts/stock-movement"   element={<ProtectedRoute><StockMovement /></ProtectedRoute>} />

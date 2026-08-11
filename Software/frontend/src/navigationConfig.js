@@ -208,6 +208,7 @@ export const NAV_ITEMS = [
     { id: 'r-rev',       moduleGroup: 'reports', section: 'Workshop',              label: 'Revenue Summary',     path: '/reports/service/revenue-summary',     icon: ListChecks, permission: 'report:revenue_summary' },
     { id: 'r-ins',       moduleGroup: 'reports', section: 'Workshop',              label: 'Insurance Claims',    path: '/reports/service/insurance-claims',    icon: ListChecks, permission: 'report:insurance_claims' },
     { id: 'r-mech',      moduleGroup: 'reports', section: 'Workshop',              label: 'Mechanic Productivity',path: '/reports/service/mechanic-productivity', icon: ListChecks, permission: 'report:mechanic_productivity' },
+    { id: 'r-lapsed',    moduleGroup: 'reports', section: 'Workshop',              label: 'Lapsed Customers',    path: '/reports/service/lapsed-customers',    icon: ListChecks, permission: 'report:lapsed_customers' },
     { id: 'r-inv-val',   moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Inventory Valuation', path: '/reports/inventory-valuation', icon: ListChecks,   permission: 'report:inventory_valuation' },
     { id: 'r-stk-mvt',   moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Stock Movement',      path: '/reports/parts/stock-movement',icon: ListChecks,   permission: 'report:stock_movement' },
     { id: 'r-reord',     moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Reorder Alert',       path: '/reports/parts/reorder-alert', icon: ListChecks,   permission: 'report:reorder_alert' },

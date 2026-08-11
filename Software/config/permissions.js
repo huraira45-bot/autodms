@@ -173,6 +173,7 @@ const SECTIONS = [
             { key: 'report:insurance_claims',      label: 'Insurance Claims',      kind: 'report' },
             { key: 'report:mechanic_productivity', label: 'Mechanic Productivity', kind: 'report' },
             { key: 'report:tax_invoice_tracker',   label: 'Tax Invoice Tracker',   kind: 'report' },
+            { key: 'report:lapsed_customers',      label: 'Lapsed Customers',      kind: 'report' },
         ],
     },
     {

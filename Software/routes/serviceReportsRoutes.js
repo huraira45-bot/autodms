@@ -9,6 +9,7 @@ router.get('/revenue-summary',       requireAccess('report:revenue_summary'),   
 router.get('/insurance-claims',      requireAccess('report:insurance_claims'),      c.insuranceClaims);
 router.get('/mechanic-productivity', requireAccess('report:mechanic_productivity'), c.mechanicProductivity);
 router.get('/tax-invoice-tracker',   requireAccess('report:tax_invoice_tracker'),   c.taxInvoiceTracker);
+router.get('/lapsed-customers',      requireAccess('report:lapsed_customers'),      c.lapsedCustomers);
 router.get('/tax-invoice-tracker/:jobCardId/lines', requireAccess('report:tax_invoice_tracker'), c.taxInvoiceLines);
 router.patch('/tax-invoice-tracker/:jobCardId', requireAccess('report:tax_invoice_tracker'), c.saveTaxInvoice);
 
