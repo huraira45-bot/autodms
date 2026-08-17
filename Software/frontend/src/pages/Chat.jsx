@@ -56,6 +56,29 @@ export default function Chat() {
     const [showNewCh, setShowNewCh] = useState(false);
     const [showNewDM, setShowNewDM] = useState(false);
 
+    // ---- Admin audit mode: browse every channel in the system, not just
+    // the ones the current user is a member of (owner ask 2026-08-15 —
+    // the "Admins can audit any channel" banner was real on the backend
+    // but had no UI to actually reach it). Read-only: no compose box while
+    // auditing, so an admin can't accidentally post into someone else's DM.
+    const [auditMode, setAuditMode] = useState(false);
+    const [auditChannels, setAuditChannels] = useState([]);
+    const [auditActiveChannel, setAuditActiveChannel] = useState(null);
+    const loadAuditChannels = async () => {
+        try { const r = await axios.get(`${API}/audit/channels`); setAuditChannels(r.data); }
+        catch { setAuditChannels([]); }
+    };
+    const toggleAuditMode = () => {
+        setAuditMode(v => {
+            const next = !v;
+            setActiveId(null);
+            setAuditActiveChannel(null);
+            if (next) loadAuditChannels();
+            return next;
+        });
+    };
+    const openAuditChannel = (c) => { setAuditActiveChannel(c); setActiveId(c.ChannelID); };
+
     // ---- Channel list load / refresh ----
     const loadChannels = async () => {
         try { const r = await axios.get(`${API}/channels`); setChannels(r.data); }
@@ -71,7 +94,10 @@ export default function Chat() {
             try {
                 const r = await axios.get(`${API}/channels/${activeId}/messages?limit=100`);
                 setMessages(r.data);
-                if (r.data.length) {
+                // Skip the read-receipt POST while auditing -- a no-op on the
+                // backend for a channel the admin isn't a member of anyway,
+                // but there's no reason to fire it for a passive view.
+                if (r.data.length && !auditMode) {
                     await axios.post(`${API}/channels/${activeId}/read`, {
                         messageId: r.data[r.data.length - 1].MessageID,
                     });
@@ -111,7 +137,7 @@ export default function Chat() {
         };
     }, [sock, activeId, user?.userId]);
 
-    const activeChannel = channels.find(c => c.ChannelID === activeId);
+    const activeChannel = auditMode ? auditActiveChannel : channels.find(c => c.ChannelID === activeId);
 
     return (
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)', background: '#f8fafc' }}>
@@ -121,19 +147,48 @@ export default function Chat() {
                     <div style={{ fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <MessageSquare size={18} /> Chat
                     </div>
-                    <button title="Refresh" onClick={loadChannels}
+                    <button title="Refresh" onClick={auditMode ? loadAuditChannels : loadChannels}
                             style={ghostBtn}><RefreshCw size={14} /></button>
                 </div>
 
-                <div style={{ padding: '8px 12px', display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9' }}>
-                    <button style={primaryBtn} onClick={() => setShowNewCh(true)}>
-                        <Plus size={12} /> Channel
+                {isChatAdmin && (
+                    <button onClick={toggleAuditMode}
+                        style={{
+                            margin: '8px 12px 0', padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                            fontSize: '0.78rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+                            border: auditMode ? '1px solid #92400e' : '1px solid #cbd5e1',
+                            background: auditMode ? '#fef3c7' : 'white',
+                            color: auditMode ? '#92400e' : '#334155',
+                        }}>
+                        <ShieldAlert size={13} /> {auditMode ? 'Exit Audit Mode' : 'Audit All Channels'}
                     </button>
-                    <button style={primaryBtn} onClick={() => setShowNewDM(true)}>
-                        <Plus size={12} /> DM
-                    </button>
-                </div>
+                )}
 
+                {!auditMode && (
+                    <div style={{ padding: '8px 12px', display: 'flex', gap: 6, borderBottom: '1px solid #f1f5f9' }}>
+                        <button style={primaryBtn} onClick={() => setShowNewCh(true)}>
+                            <Plus size={12} /> Channel
+                        </button>
+                        <button style={primaryBtn} onClick={() => setShowNewDM(true)}>
+                            <Plus size={12} /> DM
+                        </button>
+                    </div>
+                )}
+
+                {auditMode ? (
+                <div style={{ overflowY: 'auto', flex: 1 }}>
+                    <SectionHeader title={`Every Conversation (${auditChannels.length})`} />
+                    {auditChannels.map(c => (
+                        <AuditChannelRow key={c.ChannelID} c={c} active={c.ChannelID === activeId}
+                                    onClick={() => openAuditChannel(c)} />
+                    ))}
+                    {auditChannels.length === 0 && (
+                        <div style={{ padding: 16, color: '#94a3b8', fontSize: '0.85rem', textAlign: 'center' }}>
+                            No conversations exist yet.
+                        </div>
+                    )}
+                </div>
+                ) : (
                 <div style={{ overflowY: 'auto', flex: 1 }}>
                     <SectionHeader title="Channels" />
                     {channels.filter(c => c.Kind !== 'dm').map(c => (
@@ -151,8 +206,9 @@ export default function Chat() {
                         </div>
                     )}
                 </div>
+                )}
 
-                {isChatAdmin && (
+                {isChatAdmin && !auditMode && (
                     <div style={{ padding: 10, borderTop: '1px solid #e2e8f0', background: '#fef3c7',
                                   color: '#92400e', fontSize: '0.72rem', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                         <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -166,6 +222,7 @@ export default function Chat() {
                 {activeChannel ? (
                     <ChannelPane channel={activeChannel} messages={messages}
                                  loading={loadingMsgs}
+                                 readOnly={auditMode}
                                  onSent={(msg) => setMessages(m =>
                                      m.some(x => x.MessageID === msg.MessageID) ? m : [...m, msg])}
                                  currentUserId={user?.userId} />
@@ -224,8 +281,36 @@ function ChannelRow({ c, active, onClick }) {
     );
 }
 
+// Audit-mode row — every channel in the system, not just the current user's.
+// DMs have no Name of their own, so this falls back to the joined member
+// names (owner ask 2026-08-15).
+function AuditChannelRow({ c, active, onClick }) {
+    const label = c.Kind === 'dm'
+        ? (c.MemberNames || 'Direct message')
+        : (c.Name || 'Channel');
+    const Icon = c.Kind === 'dm' ? Users : (c.Kind === 'private' ? Lock : Hash);
+    return (
+        <div onClick={onClick}
+             style={{
+                 padding: '8px 16px', cursor: 'pointer', fontSize: '0.85rem',
+                 background: active ? '#eef2ff' : 'transparent',
+                 color: active ? '#3730a3' : '#334155',
+                 borderLeft: active ? '3px solid #4f46e5' : '3px solid transparent',
+             }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: active ? 600 : 500 }}>
+                <Icon size={14} style={{ opacity: 0.75, flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+            </div>
+            <div style={{ marginLeft: 22, marginTop: 2, fontSize: '0.7rem', color: '#94a3b8' }}>
+                {c.MemberCount} member{c.MemberCount === 1 ? '' : 's'} · {c.MessageCount} message{c.MessageCount === 1 ? '' : 's'}
+                {c.LastMessageAt && <> · {fmtDay(c.LastMessageAt)} {fmtTime(c.LastMessageAt)}</>}
+            </div>
+        </div>
+    );
+}
+
 // ---------------------------------------------------------------------------
-function ChannelPane({ channel, messages, loading, onSent, currentUserId }) {
+function ChannelPane({ channel, messages, loading, onSent, currentUserId, readOnly }) {
     const [text, setText] = useState('');
     const [attach, setAttach] = useState(null);
     const [sending, setSending] = useState(false);
@@ -237,7 +322,7 @@ function ChannelPane({ channel, messages, loading, onSent, currentUserId }) {
     }, [messages]);
 
     const label = channel.Kind === 'dm'
-        ? (channel.DmPeerName || 'Direct message')
+        ? (channel.DmPeerName || channel.MemberNames || 'Direct message')
         : (channel.Name || 'Channel');
     const IconLead = channel.Kind === 'dm' ? Users : (channel.Kind === 'private' ? Lock : Hash);
 
@@ -283,8 +368,9 @@ function ChannelPane({ channel, messages, loading, onSent, currentUserId }) {
 
             <div style={{ padding: '6px 20px', background: '#fef9c3', color: '#854d0e',
                           fontSize: '0.72rem', borderBottom: '1px solid #fde68a' }}>
-                ⚠ Admins can audit every conversation. Do not share confidential
-                information you would not disclose to management.
+                {readOnly
+                    ? '🔒 Audit mode — read-only view of this conversation. Nothing you do here is visible to its participants.'
+                    : '⚠ Admins can audit every conversation. Do not share confidential information you would not disclose to management.'}
             </div>
 
             <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 20px', background: '#f8fafc' }}>
@@ -297,36 +383,38 @@ function ChannelPane({ channel, messages, loading, onSent, currentUserId }) {
                 {renderMessages(messages, currentUserId)}
             </div>
 
-            <form onSubmit={send} style={{ padding: 12, borderTop: '1px solid #e2e8f0', background: 'white',
-                                            display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                <button type="button" onClick={() => fileRef.current?.click()}
-                        style={{ ...ghostBtn, padding: '6px 10px' }} title="Attach a file">
-                    <Paperclip size={16} />
-                </button>
-                <input type="file" ref={fileRef} style={{ display: 'none' }}
-                       onChange={e => setAttach(e.target.files?.[0] || null)} />
-                <div style={{ flex: 1 }}>
-                    {attach && (
-                        <div style={{ fontSize: '0.75rem', color: '#475569', background: '#e2e8f0',
-                                      padding: '2px 8px', borderRadius: 4, display: 'inline-flex',
-                                      gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                            <Paperclip size={11} /> {attach.name} ({fmtSize(attach.size)})
-                            <button type="button" onClick={() => { setAttach(null); if (fileRef.current) fileRef.current.value=''; }}
-                                    style={{ ...ghostBtn, padding: 0 }}><X size={11} /></button>
-                        </div>
-                    )}
-                    <textarea rows={1} value={text}
-                              onChange={e => setText(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e); } }}
-                              placeholder="Message… (Enter to send, Shift+Enter for new line)"
-                              style={{ width: '100%', padding: '8px 10px', border: '1px solid #cbd5e1',
-                                       borderRadius: 6, resize: 'vertical', fontFamily: 'inherit', fontSize: '0.9rem' }} />
-                </div>
-                <button type="submit" disabled={sending || (!text.trim() && !attach)}
-                        style={{ ...primaryBtn, padding: '8px 14px' }}>
-                    <Send size={14} /> {sending ? 'Sending…' : 'Send'}
-                </button>
-            </form>
+            {!readOnly && (
+                <form onSubmit={send} style={{ padding: 12, borderTop: '1px solid #e2e8f0', background: 'white',
+                                                display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <button type="button" onClick={() => fileRef.current?.click()}
+                            style={{ ...ghostBtn, padding: '6px 10px' }} title="Attach a file">
+                        <Paperclip size={16} />
+                    </button>
+                    <input type="file" ref={fileRef} style={{ display: 'none' }}
+                           onChange={e => setAttach(e.target.files?.[0] || null)} />
+                    <div style={{ flex: 1 }}>
+                        {attach && (
+                            <div style={{ fontSize: '0.75rem', color: '#475569', background: '#e2e8f0',
+                                          padding: '2px 8px', borderRadius: 4, display: 'inline-flex',
+                                          gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                                <Paperclip size={11} /> {attach.name} ({fmtSize(attach.size)})
+                                <button type="button" onClick={() => { setAttach(null); if (fileRef.current) fileRef.current.value=''; }}
+                                        style={{ ...ghostBtn, padding: 0 }}><X size={11} /></button>
+                            </div>
+                        )}
+                        <textarea rows={1} value={text}
+                                  onChange={e => setText(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e); } }}
+                                  placeholder="Message… (Enter to send, Shift+Enter for new line)"
+                                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #cbd5e1',
+                                           borderRadius: 6, resize: 'vertical', fontFamily: 'inherit', fontSize: '0.9rem' }} />
+                    </div>
+                    <button type="submit" disabled={sending || (!text.trim() && !attach)}
+                            style={{ ...primaryBtn, padding: '8px 14px' }}>
+                        <Send size={14} /> {sending ? 'Sending…' : 'Send'}
+                    </button>
+                </form>
+            )}
         </>
     );
 }

@@ -353,7 +353,13 @@ exports.auditListChannels = async (req, res) => {
             SELECT c.ChannelID, c.Kind, c.Name, c.Description,
                    c.CreatedBy, c.CreatedAt, c.LastMessageAt,
                    (SELECT COUNT(*) FROM dms_ChatMembers WHERE ChannelID = c.ChannelID) AS MemberCount,
-                   (SELECT COUNT(*) FROM dms_ChatMessages WHERE ChannelID = c.ChannelID) AS MessageCount
+                   (SELECT COUNT(*) FROM dms_ChatMessages WHERE ChannelID = c.ChannelID) AS MessageCount,
+                   STUFF((SELECT ', ' + u.UserName
+                          FROM dms_ChatMembers cm
+                          JOIN GLUser u ON u.UserId = cm.UserID
+                          WHERE cm.ChannelID = c.ChannelID
+                          ORDER BY u.UserName
+                          FOR XML PATH('')), 1, 2, '') AS MemberNames
             FROM   dms_ChatChannels c
             ORDER  BY ISNULL(c.LastMessageAt, c.CreatedAt) DESC`);
         res.json(r.recordset);
