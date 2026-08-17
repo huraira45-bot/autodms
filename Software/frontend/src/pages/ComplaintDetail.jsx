@@ -78,6 +78,24 @@ export default function ComplaintDetail() {
         setTimeout(() => setMsg(null), 4000);
     };
 
+    // Owner report 2026-08-17: attachment thumbnails were plain <a href
+    // target="_blank"> links -- a raw browser tab-open never carries the
+    // JWT (it lives in localStorage and is only attached by the Axios
+    // interceptor), so the download endpoint's auth check rejected the
+    // request and the new tab just showed an error instead of the image.
+    // Fetching through Axios first (blob) picks up the token correctly.
+    const openAttachment = async (attachmentId) => {
+        try {
+            const res = await axios.get(
+                `${API}/cro/complaints/${id}/attachments/${attachmentId}/download`,
+                { responseType: 'blob' });
+            const url = URL.createObjectURL(res.data);
+            window.open(url, '_blank');
+        } catch (e) {
+            flash('err', e.response?.data?.error || 'Could not load attachment.');
+        }
+    };
+
     const doAddNote = async () => {
         if (!noteText.trim()) return;
         setBusy(true);
@@ -320,14 +338,13 @@ export default function ComplaintDetail() {
                         {data.attachments.length === 0 && <div style={{ color: '#94a3b8', fontSize: '0.85rem' }}>No screenshots yet.</div>}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
                             {data.attachments.map(a => (
-                                <a key={a.AttachmentID}
-                                   href={`${API}/cro/complaints/${id}/attachments/${a.AttachmentID}/download`}
-                                   target="_blank" rel="noreferrer"
-                                   style={{ display: 'block', border: '1px solid #e2e8f0', borderRadius: 6, padding: 8, textDecoration: 'none', color: 'inherit', fontSize: '0.75rem' }}>
+                                <button key={a.AttachmentID}
+                                   onClick={() => openAttachment(a.AttachmentID)}
+                                   style={{ display: 'block', width: '100%', border: '1px solid #e2e8f0', borderRadius: 6, padding: 8, textAlign: 'left', background: 'white', cursor: 'pointer', color: 'inherit', fontSize: '0.75rem', font: 'inherit' }}>
                                     <Camera size={20} color="#0891b2" />
                                     <div style={{ marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.OriginalFileName}</div>
                                     <div style={{ color: '#94a3b8', fontSize: '0.7rem' }}>by {a.UploadedByName}</div>
-                                </a>
+                                </button>
                             ))}
                         </div>
                     </div>
