@@ -119,6 +119,34 @@ export default function ReportShell({
         return { ...data, [pgCfg.key]: sourceRows.slice(start, start + pageSize) };
     }, [pgCfg, data, sourceRows, safePage, pageSize]);
 
+    // ---- Print: bypass pagination entirely ----
+    // Owner ask 2026-08-17: pagination (added 2026-07-18 so huge on-screen
+    // tables didn't crawl) had the side effect of only ever putting the
+    // CURRENT page's rows in the DOM at all -- Print just captured whatever
+    // was already rendered, so a paginated report only ever printed one
+    // page. Printing renders the FULL dataset for a moment, fires the
+    // browser print dialog once that's actually painted, then reverts to
+    // the paginated view for on-screen browsing.
+    const [printingAll, setPrintingAll] = useState(false);
+    const handlePrint = () => {
+        if (pgCfg && totalRows > pageSize) setPrintingAll(true);
+        else window.print();
+    };
+    useEffect(() => {
+        if (!printingAll) return;
+        // Double rAF: the first fires before the browser paints this frame's
+        // DOM changes, the second confirms the paint actually happened --
+        // needed since swapping in thousands of extra rows isn't instant.
+        let raf2;
+        const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => window.print()); });
+        return () => { cancelAnimationFrame(raf1); if (raf2) cancelAnimationFrame(raf2); };
+    }, [printingAll]);
+    useEffect(() => {
+        const onAfterPrint = () => setPrintingAll(false);
+        window.addEventListener('afterprint', onAfterPrint);
+        return () => window.removeEventListener('afterprint', onAfterPrint);
+    }, []);
+
     const printedAt = new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
     const filterSummary = typeof printFilterSummary === 'function'
         ? printFilterSummary(params)
@@ -170,17 +198,17 @@ export default function ReportShell({
                             <FileSpreadsheet size={14} /> Excel
                         </button>
                     )}
-                    <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
-                        disabled={loading || !data}>
-                        <Printer size={14} /> Print
+                    <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={handlePrint}
+                        disabled={loading || !data || printingAll}>
+                        <Printer size={14} /> {printingAll ? 'Preparing…' : 'Print'}
                     </button>
                 </div>
             </div>
             {err && (
                 <div className="erp-alert danger">{err}</div>
             )}
-            {data && children(pagedData, { params, updateParam, reload: load, loading, Icon })}
-            {pgCfg && totalRows > pageSize && (
+            {data && children(printingAll ? data : pagedData, { params, updateParam, reload: load, loading, Icon })}
+            {!printingAll && pgCfg && totalRows > pageSize && (
                 <Paginator
                     page={safePage}
                     pageSize={pageSize}
