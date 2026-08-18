@@ -1005,6 +1005,14 @@ exports.saveJobCard = async (req, res) => {
                         ConfirmByID=@confirmById, ConfirmByName=@confirmByName, WACResults=@wacResults,
                         ModifyDate=GETDATE() WHERE JobCardId=@id`);
 
+                // Same orphaning risk as the parts-issue delete fix above, via a
+                // different path: this wipes and re-inserts EVERY labour line on
+                // every save (not just changed ones), so any labour-tied
+                // depreciation row would be orphaned by the very next save,
+                // even without anyone actually deleting a line.
+                await transaction.request().input('id', sql.Int, JobCardId)
+                    .query('DELETE FROM dms_JobCardPartsDepreciation WHERE JobCardId = @id AND LabourDetailID IS NOT NULL');
+
                 await transaction.request().input('id', sql.Int, JobCardId)
                     .query('DELETE FROM Addata_JobCardInfoDetail WHERE JobCardId = @id');
 
@@ -1591,6 +1599,15 @@ exports.deletePartsIssueLine = async (req, res) => {
                     .input('itemId', sql.Int, line.ItemId)
                     .query('DELETE FROM data_StockInOutDetail WHERE StockIOID=@ioId AND ItemId=@itemId');
             }
+
+            // Drop any insurance depreciation tagged to this line first — owner
+            // report 2026-08-18 (JC B&P-1102): deleting a part left its
+            // dms_JobCardPartsDepreciation row orphaned (no FK enforces this),
+            // and finalize sums that table directly without checking the part
+            // still exists, silently over-billing the customer for a part no
+            // longer on the invoice.
+            await new sql.Request(tx).input('did', sql.Int, detailId)
+                .query('DELETE FROM dms_JobCardPartsDepreciation WHERE StockIssueDetailID=@did');
 
             // Drop the detail row itself.
             await new sql.Request(tx).input('did', sql.Int, detailId)
