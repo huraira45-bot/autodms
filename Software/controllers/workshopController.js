@@ -546,7 +546,15 @@ exports.getJobCards = async (req, res) => {
         const { search, status, finalized, businessType } = req.query;
         const pool = await getPool();
         const request = pool.request();
-        let query = 'SELECT * FROM vw_WorkshopJobCards';
+        // Owner report 2026-08-19: the list page took 3-4s to load. Root
+        // cause: no cap on this query — an unfiltered load returned every
+        // job card (1600+ rows through vw_WorkshopJobCards' 4-way join,
+        // SELECT *) to the browser at once. Cap to the most recent 300;
+        // search/filters narrow further for anything older. Typeahead
+        // callers (SubletRepair, PartsIssue) always pass a specific search
+        // term, so the cap doesn't affect them.
+        request.input('cap', sql.Int, 300);
+        let query = 'SELECT TOP (@cap) * FROM vw_WorkshopJobCards';
         const conditions = [];
         if (search) {
             request.input('search', sql.NVarChar(200), `%${search}%`);
@@ -570,6 +578,39 @@ exports.getJobCards = async (req, res) => {
         query += ' ORDER BY JobCardId DESC';
         const result = await request.query(query);
         res.json(result.recordset);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+// GET /api/workshop/job-cards/counts?search=&businessType=
+// True Draft/Finalized totals for the list page's filter chip badges,
+// computed separately from getJobCards so they stay accurate now that the
+// main listing is capped (a COUNT/GROUP BY over the view is far cheaper
+// than pulling every column of every row just to tally two numbers
+// client-side). Deliberately ignores `finalized` — both badges should
+// reflect the full set under the current search/business-unit filter
+// regardless of which one is currently toggled on.
+exports.getJobCardCounts = async (req, res) => {
+    try {
+        const { search, businessType } = req.query;
+        const pool = await getPool();
+        const request = pool.request();
+        let query = `SELECT
+                        SUM(CASE WHEN IsFinalized = 1 THEN 1 ELSE 0 END) AS Finalized,
+                        SUM(CASE WHEN IsFinalized IS NULL OR IsFinalized = 0 THEN 1 ELSE 0 END) AS Draft
+                      FROM vw_WorkshopJobCards`;
+        const conditions = [];
+        if (search) {
+            request.input('search', sql.NVarChar(200), `%${search}%`);
+            conditions.push('(JobCardNo LIKE @search OR jobCode LIKE @search OR CustomerName LIKE @search OR VehicleRegNo LIKE @search OR ChasisNo LIKE @search)');
+        }
+        if (businessType) {
+            request.input('bt', sql.Int, parseInt(businessType));
+            conditions.push('JobTypeId = @bt');
+        }
+        if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+        const result = await request.query(query);
+        const row = result.recordset[0] || {};
+        res.json({ draft: Number(row.Draft) || 0, finalized: Number(row.Finalized) || 0 });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 

@@ -31,6 +31,7 @@ router.delete('/order-types/:id',           requirePerm('workshop_settings', 'de
 
 // ── Job Cards (workshop_jobs) ──────────────────────────────────────────────
 router.get(   '/job-cards',                 requirePerm('workshop_jobs', 'view'),        wc.getJobCards);
+router.get(   '/job-cards/counts',          requirePerm('workshop_jobs', 'view'),        wc.getJobCardCounts);
 router.get(   '/vehicle-history',           requirePerm('workshop_jobs', 'view'),        wc.getVehicleHistory);
 // Cashier flows (Receive Payment / Depreciation payments) also need to
 // look up a JC by its RO number and read its insurance balance without

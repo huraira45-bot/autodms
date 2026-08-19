@@ -48,11 +48,18 @@ export default function JobCardList() {
         axios.get(url).then(r => setJobs(r.data || [])).catch(err => console.error(err));
     }, [debouncedSearch, finalizedFilter, businessType]);
 
-    const finCounts = useMemo(() => {
-        let f = 0, nf = 0;
-        for (const j of jobs) { if (j.IsFinalized) f++; else nf++; }
-        return { f, nf };
-    }, [jobs]);
+    // Draft/Finalized badge counts — fetched separately (lightweight
+    // COUNT query, no row cap) so they stay accurate regardless of the
+    // 300-row cap on the main list, and regardless of which chip is
+    // currently toggled. Deliberately excludes finalizedFilter from the
+    // request so both badges always reflect the full search/business-unit
+    // filtered set.
+    const [finCounts, setFinCounts] = useState({ f: 0, nf: 0 });
+    useEffect(() => {
+        let url = `${API}/job-cards/counts?search=${encodeURIComponent(debouncedSearch)}`;
+        if (businessType) url += `&businessType=${businessType}`;
+        axios.get(url).then(r => setFinCounts({ f: r.data?.finalized || 0, nf: r.data?.draft || 0 })).catch(() => {});
+    }, [debouncedSearch, businessType]);
 
     // ── Columns ────────────────────────────────────────────
     const columns = [
@@ -166,7 +173,7 @@ export default function JobCardList() {
                     rowKey="JobCardId"
                     onRowClick={r => navigate(`/workshop/jobs/${r.JobCardId}`)}
                     emptyLabel="No job cards match this search. Use Create to start a new RO."
-                    footerLeft={`${jobs.length} record${jobs.length === 1 ? '' : 's'}`}
+                    footerLeft={`${jobs.length} record${jobs.length === 1 ? '' : 's'}${jobs.length === 300 ? ' — showing most recent 300, search to find older ones' : ''}`}
                 />
             )}
         </div>
