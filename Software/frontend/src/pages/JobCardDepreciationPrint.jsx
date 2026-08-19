@@ -56,6 +56,8 @@ export default function JobCardDepreciationPrint() {
         dep:   a.dep   + Number(p.DepAmount || 0),
     }), { items: 0, qty: 0, total: 0, dep: 0 });
 
+    const insTotals = insurance.totals || {};
+
     // Vehicle description — vw_WorkshopJobCards stores the model text in
     // VersionCode (same field WorkOrderPrint uses on the Model row).
     const vehicleName = jc.VersionCode
@@ -204,6 +206,44 @@ export default function JobCardDepreciationPrint() {
                     </tr>
                 </tfoot>
             </table>
+
+            {/* Customer share summary — mirrors the Insurance tab's
+                "Customer Share Total (dep + under-ins + CV4)" breakdown.
+                Under-Insurance and CV4 don't live on the parts grid, so
+                without this block the slip only ever showed the
+                depreciation line and silently dropped the other two
+                (owner report 2026-08-19, JC B&P-1124: 10% under-insurance
+                on the slip showed nothing). */}
+            {(insTotals.underInsuranceAmount > 0 || insTotals.cv4Amount > 0) && (
+                <table className="summary">
+                    <colgroup>
+                        <col />
+                        <col style={{ width: '32mm' }}/>
+                    </colgroup>
+                    <tbody>
+                        <tr>
+                            <td>Depreciation Total</td>
+                            <td className="r">{fmt(totals.dep)}</td>
+                        </tr>
+                        {insTotals.underInsuranceAmount > 0 && (
+                            <tr>
+                                <td>Under-Insurance ({fmtQ(insTotals.underInsurancePct)}% of PKR {fmt(insTotals.underInsuranceBase)})</td>
+                                <td className="r">{fmt(insTotals.underInsuranceAmount)}</td>
+                            </tr>
+                        )}
+                        {insTotals.cv4Amount > 0 && (
+                            <tr>
+                                <td>CV4</td>
+                                <td className="r">{fmt(insTotals.cv4Amount)}</td>
+                            </tr>
+                        )}
+                        <tr className="tot">
+                            <td className="b">Customer Share Total</td>
+                            <td className="r b">{fmt(insTotals.customerShareTotal)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            )}
 
             {/* Footer glued to bottom of last page (via margin-top:auto on the flex column). */}
             <div className="footer">
@@ -382,6 +422,22 @@ export default function JobCardDepreciationPrint() {
                     font-size: 10.5pt;
                     color: #666;
                 }
+
+                /* ── Customer share summary ─────────────────────────── */
+                .summary { margin-bottom: 3mm; }
+                .summary td {
+                    padding: 1.8mm 3mm;
+                    vertical-align: top;
+                    line-height: 1.2;
+                    font-size: 9.5pt;
+                }
+                .summary td.r {
+                    text-align: right;
+                    font-variant-numeric: tabular-nums;
+                    white-space: nowrap;
+                }
+                .summary td.b { font-weight: 700; }
+                .summary tr.tot td { background: #ffedd5; border-top: 2px solid #111; }
 
                 /* ── Footer (terms + signature) ─────────────────────── */
                 .footer {
