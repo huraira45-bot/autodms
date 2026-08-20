@@ -61,6 +61,7 @@ const SECTIONS = [
         items: [
             { key: 'finance_coa',       label: 'Chart of Accounts',       kind: 'document' },
             { key: 'finance_vouchers',  label: 'Vouchers (CPV/CRV/BPV/BRV/JV)', kind: 'document' },
+            { key: 'finance_fixed_assets', label: 'Fixed Assets (Depreciation)', kind: 'document' },
             { key: 'finance_voucher_backdate', label: 'Edit posted CPV/CRV/BPV/BRV (within 30 days)', kind: 'workflow' },
             { key: 'chat_use',   label: 'Chat: send & receive messages', kind: 'workflow' },
             { key: 'chat_admin', label: 'Chat: audit all channels + delete',   kind: 'workflow' },
