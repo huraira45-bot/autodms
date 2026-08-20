@@ -21,6 +21,7 @@ const MODULES = [
     { key: 'settings_business_profile', label: 'Business Profile', section: 'FINANCE & ACCOUNTS' },
     { key: 'payments',            label: 'Receive / Make Payment', section: 'FINANCE & ACCOUNTS' },
     { key: 'finance_cheques',     label: 'Cheque Clearance',       section: 'FINANCE & ACCOUNTS' },
+    { key: 'finance_fixed_assets', label: 'Fixed Assets (Depreciation)', section: 'FINANCE & ACCOUNTS' },
     { key: 'reports',             label: 'Financial Reports',      section: 'FINANCE & ACCOUNTS' },
     { key: 'crm_parties',         label: 'Credit Parties',       section: 'ACCOUNTS & CRM' },
     { key: 'crm_party_access',    label: 'Party Business Access', section: 'ACCOUNTS & CRM' },

@@ -32,6 +32,8 @@ const POST_COMMIT_HOOKS = {
         if (!row?.SourceDocType || row.SourceDocID == null) return;
         const { handleSalesVoucherPosted } = require('../services/salesVoucherPostHookService');
         await handleSalesVoucherPosted(id, row.SourceDocType, row.SourceDocID, user);
+        const { handleFixedAssetVoucherPosted } = require('../services/fixedAssetDepreciationService');
+        await handleFixedAssetVoucherPosted(id, row.SourceDocType, row.SourceDocID, user);
     },
 };
 

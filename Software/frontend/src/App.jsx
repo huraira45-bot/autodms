@@ -99,6 +99,7 @@ import GRTN               from './pages/GRTN';
 import StoreSale          from './pages/StoreSale';
 import SSR                from './pages/SSR';
 import ChartOfAccounts    from './pages/ChartOfAccounts';
+import FixedAssetRegister from './pages/FixedAssetRegister';
 import BusinessProfile    from './pages/BusinessProfile';
 import CreditInvoicePrint from './pages/CreditInvoicePrint';
 import JobCardGSTPrint    from './pages/JobCardGSTPrint';
@@ -529,6 +530,11 @@ function LegacySidebar() {
                         <Landmark size={20} /> Chart of Accounts
                     </NavLink>
                 )}
+                {hasModule('finance_fixed_assets') && (
+                    <NavLink to="/fixed-assets" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <Percent size={20} /> Fixed Assets
+                    </NavLink>
+                )}
                 {hasModule('finance_vouchers') && (
                     <>
                         <NavLink to="/vouchers/cpv" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
@@ -939,6 +945,9 @@ function AppShell() {
 
                     <Route path="/coa" element={
                         <ProtectedRoute moduleKey="finance_coa"><ChartOfAccounts /></ProtectedRoute>
+                    } />
+                    <Route path="/fixed-assets" element={
+                        <ProtectedRoute moduleKey="finance_fixed_assets"><FixedAssetRegister /></ProtectedRoute>
                     } />
 
                     <Route path="/vouchers/cpv" element={

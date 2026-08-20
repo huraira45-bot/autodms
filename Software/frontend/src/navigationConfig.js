@@ -88,6 +88,7 @@ export const NAV_ITEMS = [
 
     // ── Finance ──────────────────────────────────────────────
     { id: 'f-coa',       moduleGroup: 'finance', label: 'Chart of Accounts',      path: '/coa',                     icon: Landmark,    moduleKey: 'finance_coa',       description: 'COA hierarchy master.', keywords: 'gl accounts' },
+    { id: 'f-fixed-assets', moduleGroup: 'finance', label: 'Fixed Assets',       path: '/fixed-assets',            icon: Percent,     moduleKey: 'finance_fixed_assets', description: 'IAS 16 non-current asset register and SLM depreciation runs.', keywords: 'depreciation asset ias16 slm' },
     { id: 'f-cpv',       moduleGroup: 'finance', label: 'Cash Payment (CPV)',     path: '/vouchers/cpv',            icon: Wallet,      moduleKey: 'finance_vouchers',  description: 'Cash-out voucher.', keywords: 'voucher' },
     { id: 'f-crv',       moduleGroup: 'finance', label: 'Cash Receipt (CRV)',     path: '/vouchers/crv',            icon: Receipt,     moduleKey: 'finance_vouchers',  description: 'Cash-in voucher.', keywords: 'voucher' },
     { id: 'f-bpv',       moduleGroup: 'finance', label: 'Bank Payment (BPV)',     path: '/vouchers/bpv',            icon: CreditCard,  moduleKey: 'finance_vouchers',  description: 'Bank payment voucher.', keywords: 'voucher' },
