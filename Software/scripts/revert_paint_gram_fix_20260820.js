@@ -24,7 +24,7 @@ const ITEMS = [
                 .input('id', sql.Int, it.paintItemID)
                 .query(`DELETE FROM paint_StockLedger
                         WHERE PaintItemID=@id AND SourceType='ADJUSTMENT'
-                          AND CreatedAt >= DATEADD(hour, -2, GETDATE())
+                          AND MovementAt >= DATEADD(hour, -2, GETDATE())
                           AND Note LIKE 'Correction:%received as cans instead of grams%';
                         SELECT @@ROWCOUNT AS n;`);
             await new sql.Request(tx)
