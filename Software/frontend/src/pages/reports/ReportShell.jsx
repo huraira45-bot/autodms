@@ -4,9 +4,11 @@ import { Loader2, RefreshCw, Printer, FileSpreadsheet } from 'lucide-react';
 import ReportPrintHeader from '../../components/ReportPrintHeader';
 import { Paginator } from './Paginator';
 
-// CSV downloader used by ReportShell's Excel button. Emits UTF-8 with BOM so
-// Excel handles non-ASCII characters (e.g. Urdu customer names) correctly.
-function downloadCsv(filename, headers, rows) {
+// CSV downloader used by ReportShell's Excel button (also used directly by
+// report pages that don't go through ReportShell, e.g. GLDetail.jsx). Emits
+// UTF-8 with BOM so Excel handles non-ASCII characters (e.g. Urdu customer
+// names) correctly.
+export function downloadCsv(filename, headers, rows) {
     const escape = (v) => {
         if (v === null || v === undefined) return '';
         const s = String(v);

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import { ListChecks, Loader2, RefreshCw, Search, ArrowLeft, Printer } from 'lucide-react';
-import { PrintHeader } from './reports/ReportShell';
+import { ListChecks, Loader2, RefreshCw, Search, ArrowLeft, Printer, FileSpreadsheet } from 'lucide-react';
+import { PrintHeader, downloadCsv } from './reports/ReportShell';
 import { usePagination, Paginator } from './reports/Paginator';
 import { ErpControlPanel } from '../components/erp';
 
@@ -153,6 +153,25 @@ export default function GLDetail() {
         setParams({ glcaid: String(a.GLCAID), from, to });
     };
 
+    const exportExcel = () => {
+        if (!data) return;
+        const headers = ['Date', 'Voucher', 'Type', 'Narration', 'Party / JC', 'Debit', 'Credit', 'Balance'];
+        const sign = data.account.Nature === 'Debit' ? 1 : -1;
+        const rows = [
+            ['', '', '', 'Opening Balance', '', '', '', fmt(data.openingBalance)],
+            ...data.lines.map(l => [
+                new Date(l.VoucherDate).toLocaleDateString(),
+                l.VoucherNo, l.VoucherType, l.Narration,
+                [l.PartyName, l.JobCardNo ? `JC: ${l.JobCardNo}` : null].filter(Boolean).join(' / '),
+                Number(l.Debit) ? fmt(l.Debit) : '',
+                Number(l.Credit) ? fmt(l.Credit) : '',
+                fmt((l.RunningNetDr * sign).toFixed(2)),
+            ]),
+            ['', '', '', 'Closing Balance', '', fmt(data.totals.debit), fmt(data.totals.credit), fmt(data.closingBalance)],
+        ];
+        downloadCsv(`GL-Detail-${data.account.GLCode}-${from}-to-${to}.csv`, headers, rows);
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <PrintHeader title="General Ledger Detail"
@@ -170,6 +189,10 @@ export default function GLDetail() {
                         <button type="button" className="erp-btn erp-btn-sm" onClick={load} disabled={loading || !glcaid}>
                             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                             Refresh
+                        </button>
+                        <button type="button" className="erp-btn erp-btn-sm" onClick={exportExcel}
+                            disabled={loading || !data}>
+                            <FileSpreadsheet size={14} /> Export to Excel
                         </button>
                         <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={paging.printAll}
                             disabled={loading || !data || paging.printingAll}>
