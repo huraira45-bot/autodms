@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 // Client-side pagination hook + control.
@@ -19,9 +19,16 @@ import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-r
 // user staring at an empty slice.
 const DEFAULT_SIZES = [25, 50, 100, 250, 500];
 
+// Print-all support (owner report 2026-08-21, General Ledger Detail): every
+// page built on this hook only ever rendered the current 50-row slice, so
+// window.print() only ever captured whatever page happened to be open.
+// printAll() switches displayRows to the FULL row set for one print pass,
+// using a double-RAF so the browser paints the full table before the print
+// dialog fires — same mechanism ReportShell.jsx uses for its own pagination.
 export function usePagination(rows, initialSize = 50) {
     const [page, setPage]         = useState(1);
     const [pageSize, setPageSize] = useState(initialSize);
+    const [printingAll, setPrintingAll] = useState(false);
     useEffect(() => { setPage(1); }, [rows]);
     const totalRows = Array.isArray(rows) ? rows.length : 0;
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
@@ -31,6 +38,26 @@ export function usePagination(rows, initialSize = 50) {
         const start = (safePage - 1) * pageSize;
         return rows.slice(start, start + pageSize);
     }, [rows, safePage, pageSize]);
+
+    const printAll = useCallback(() => {
+        if (totalRows > pageSize) setPrintingAll(true);
+        else window.print();
+    }, [totalRows, pageSize]);
+
+    useEffect(() => {
+        if (!printingAll) return;
+        let raf2;
+        const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => window.print()); });
+        return () => { cancelAnimationFrame(raf1); if (raf2) cancelAnimationFrame(raf2); };
+    }, [printingAll]);
+    useEffect(() => {
+        const onAfterPrint = () => setPrintingAll(false);
+        window.addEventListener('afterprint', onAfterPrint);
+        return () => window.removeEventListener('afterprint', onAfterPrint);
+    }, []);
+
+    const displayRows = printingAll ? (Array.isArray(rows) ? rows : []) : pagedRows;
+
     return {
         page: safePage,
         pageSize,
@@ -39,6 +66,9 @@ export function usePagination(rows, initialSize = 50) {
         pagedRows,
         totalRows,
         totalPages,
+        printingAll,
+        printAll,
+        displayRows,
     };
 }
 

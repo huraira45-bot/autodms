@@ -140,6 +140,15 @@ export default function GLDetail() {
 
     useEffect(() => { load(); }, [load]);
 
+    // Owner report 2026-08-21: printed GL Detail wasted pages on wide,
+    // large-text columns. Same landscape + shrink treatment ReportShell.jsx
+    // opts wide reports into (see index.css @media print rules) — this page
+    // doesn't go through ReportShell, so the toggle is applied directly.
+    useEffect(() => {
+        document.body.classList.add('print-landscape');
+        return () => document.body.classList.remove('print-landscape');
+    }, []);
+
     const pickAccount = (a) => {
         setParams({ glcaid: String(a.GLCAID), from, to });
     };
@@ -162,9 +171,9 @@ export default function GLDetail() {
                             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                             Refresh
                         </button>
-                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
-                            disabled={loading || !data}>
-                            <Printer size={14} /> Print
+                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={paging.printAll}
+                            disabled={loading || !data || paging.printingAll}>
+                            <Printer size={14} /> {paging.printingAll ? 'Preparing…' : 'Print'}
                         </button>
                     </>
                 }
@@ -258,7 +267,7 @@ export default function GLDetail() {
                                             <td colSpan={7} style={{ padding: '8px 12px', fontStyle: 'italic', color: '#64748b' }}>Opening Balance</td>
                                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(data.openingBalance)}</td>
                                         </tr>
-                                        {paging.pagedRows.map((l, i) => {
+                                        {paging.displayRows.map((l, i) => {
                                             // Display running per nature
                                             const sign = data.account.Nature === 'Debit' ? 1 : -1;
                                             const dispRun = (l.RunningNetDr * sign).toFixed(2);

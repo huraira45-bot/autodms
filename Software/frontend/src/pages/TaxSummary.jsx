@@ -58,9 +58,9 @@ export default function TaxSummary() {
                             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                             Refresh
                         </button>
-                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={() => window.print()}
-                            disabled={loading || !data}>
-                            <Printer size={14} /> Print
+                        <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={paging.printAll}
+                            disabled={loading || !data || paging.printingAll}>
+                            <Printer size={14} /> {paging.printingAll ? 'Preparing…' : 'Print'}
                         </button>
                     </>
                 }
@@ -133,7 +133,7 @@ export default function TaxSummary() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {paging.pagedRows.map((l, i) => (
+                                        {paging.displayRows.map((l, i) => (
                                             <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                 <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>{new Date(l.VoucherDate).toLocaleDateString()}</td>
                                                 <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#475569' }}>{l.VoucherNo}</td>
