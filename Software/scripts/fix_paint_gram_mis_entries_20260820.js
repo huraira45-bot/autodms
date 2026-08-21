@@ -95,12 +95,20 @@ const ITEMS = [
 
             const curQty = Number(row.StockQty);
             const curAvg = Number(row.AvgCost);
-            if (Math.abs(curQty - it.expectedCurrentQty) > 0.01 || Math.abs(curAvg - it.expectedCurrentAvg) > 0.01) {
+            // AvgCost only moves on a GRN -- if it's drifted from diagnosis, a NEW
+            // (possibly also-bad) GRN landed since we looked, so hard-stop.
+            // StockQty drifts constantly from ordinary issues -- that's expected
+            // and doesn't affect correctness, since the calc below uses the live
+            // curQty directly. Only warn if it moved by an implausibly large amount.
+            if (Math.abs(curAvg - it.expectedCurrentAvg) > 0.01) {
                 throw new Error(
-                    `${it.label} (${row.PaintCode}): current state changed since diagnosis -- ` +
-                    `expected StockQty=${it.expectedCurrentQty}/AvgCost=${it.expectedCurrentAvg}, ` +
-                    `found StockQty=${curQty}/AvgCost=${curAvg}. Stopping -- re-diagnose before correcting.`
+                    `${it.label} (${row.PaintCode}): AvgCost changed since diagnosis -- ` +
+                    `expected ${it.expectedCurrentAvg}, found ${curAvg}. A new GRN may have landed. ` +
+                    `Stopping -- re-diagnose before correcting.`
                 );
+            }
+            if (Math.abs(curQty - it.expectedCurrentQty) > 0.01) {
+                console.log(`  (note: ${it.label} StockQty drifted from ${it.expectedCurrentQty} to ${curQty} since diagnosis -- normal issue activity, using live value)`);
             }
 
             // Resolve warehouse from the first bad GRN.
