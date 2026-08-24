@@ -373,7 +373,14 @@ export default function PaintIssue() {
                                                 <SearchableSelect value={l.PaintItemID}
                                                     onChange={v => {
                                                         const it = items.find(x => x.PaintItemID === Number(v));
-                                                        patchLine(idx, { PaintItemID: v, PaintUOMID: it?.PaintUOMID || l.PaintUOMID || '' });
+                                                        // See PaintGRN.jsx's identical fix (owner report 2026-08-21):
+                                                        // defaulting straight to it.PaintUOMID bypasses uomOptsForItem's
+                                                        // filter, silently pre-filling the excluded raw weight UOM for
+                                                        // GramsPerUnit items anyway.
+                                                        const allowed = uomOptsForItem(v);
+                                                        const baseAllowed = it?.PaintUOMID && allowed.some(u => Number(u.id) === Number(it.PaintUOMID));
+                                                        const defaultUom = baseAllowed ? it.PaintUOMID : (allowed[0]?.id || '');
+                                                        patchLine(idx, { PaintItemID: v, PaintUOMID: defaultUom || l.PaintUOMID || '' });
                                                     }}
                                                     options={itemOpts}
                                                     placeholder="Pick paint…"

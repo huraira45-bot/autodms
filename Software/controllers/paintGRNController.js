@@ -128,6 +128,39 @@ async function writeDraft({ pool, paintGRNID, body, user }) {
     if (!Array.isArray(Lines) || Lines.length === 0) throw new Error('At least one line required');
 
     const computed = Lines.map((l) => ({ src: l, calc: computeLineAmounts(l) }));
+
+    // Defense-in-depth against the recurring "cans mis-entered as grams"
+    // mistake (PGRN-0057/0060/0063/0065/0068/0069 — owner report
+    // 2026-08-21). The frontend UOM picker excludes an item's raw weight
+    // base once it has a GramsPerUnit conversion, but a line can still
+    // arrive here with that excluded UOM (stale draft, direct API call,
+    // a future picker regression) — reject it server-side so it can never
+    // be persisted, regardless of how the client got there.
+    const itemIds = [...new Set(computed.map(x => Number(x.src.PaintItemID)).filter(n => Number.isInteger(n) && n > 0))];
+    if (itemIds.length) {
+        const itemInfo = await pool.request()
+            .query(`SELECT i.PaintItemID, i.PaintUOMID AS BaseUOMID, i.GramsPerUnit, i.PaintName,
+                           bu.Scale AS BaseScale, bu.UOMName AS BaseUOMName
+                    FROM paint_Item i
+                    JOIN paint_UOM bu ON bu.PaintUOMID = i.PaintUOMID
+                    WHERE i.PaintItemID IN (${itemIds.map(Number).join(',')})`);
+        const byId = new Map(itemInfo.recordset.map(r => [r.PaintItemID, r]));
+        computed.forEach((x, i) => {
+            const info = byId.get(Number(x.src.PaintItemID));
+            if (!info) return;
+            const gramsPerUnit = Number(info.GramsPerUnit) || 0;
+            const baseIsWeight = Number(info.BaseScale) > 0;
+            if (gramsPerUnit > 0 && baseIsWeight && Number(x.src.PaintUOMID) === Number(info.BaseUOMID)) {
+                throw new Error(
+                    `Line ${i + 1} (${info.PaintName}): this item is received by piece/box ` +
+                    `(${gramsPerUnit}g per unit), not by raw ${info.BaseUOMName}. Pick the ` +
+                    `"Piece (via ${gramsPerUnit}g/unit)" option instead — entering quantity ` +
+                    `against "${info.BaseUOMName} (base)" is read as literal grams and massively inflates cost.`
+                );
+            }
+        });
+    }
+
     const subTotal      = round2(computed.reduce((a, x) => a + x.calc.gross, 0));
     const discountTotal = round2(computed.reduce((a, x) => a + x.calc.discAmt, 0));
     const gstTotal      = round2(computed.reduce((a, x) => a + x.calc.gstAmt, 0));

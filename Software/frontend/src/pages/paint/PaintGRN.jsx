@@ -492,9 +492,21 @@ export default function PaintGRN() {
                                                 <SearchableSelect value={l.PaintItemID}
                                                     onChange={v => {
                                                         const it = items.find(x => x.PaintItemID === Number(v));
+                                                        // Default UOM must come from the FILTERED allowed list, not the
+                                                        // item's raw base UOM directly — for items with GramsPerUnit set,
+                                                        // the raw weight base is excluded from that list (see
+                                                        // uomOptsForItem), but defaulting straight to it.PaintUOMID here
+                                                        // bypassed that filter and silently pre-filled the excluded value
+                                                        // anyway. An operator who never touches the UOM field (it's
+                                                        // already showing something) then submits with the wrong unit —
+                                                        // this is how PGRN-0068/0069/0065 etc. kept recurring even after
+                                                        // the 2026-08-07 dropdown fix (owner report 2026-08-21).
+                                                        const allowed = uomOptsForItem(v);
+                                                        const baseAllowed = it?.PaintUOMID && allowed.some(u => Number(u.id) === Number(it.PaintUOMID));
+                                                        const defaultUom = baseAllowed ? it.PaintUOMID : (allowed[0]?.id || '');
                                                         patchLine(idx, {
                                                             PaintItemID: v,
-                                                            PaintUOMID: it?.PaintUOMID || l.PaintUOMID || '',
+                                                            PaintUOMID: defaultUom || l.PaintUOMID || '',
                                                             GSTOn: it ? !!it.GSTDefaultOn : l.GSTOn,
                                                             GSTRate: it && it.GSTDefaultOn ? gstRate : (l.GSTOn ? gstRate : 0),
                                                         });
