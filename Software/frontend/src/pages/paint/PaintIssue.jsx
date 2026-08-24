@@ -202,12 +202,19 @@ export default function PaintIssue() {
     const whOpts = useMemo(() => warehouses.map(w => ({ id: w.PaintWHID, label: w.WHDesc, sub: w.WHCode })), [warehouses]);
     const uomOpts = useMemo(() => uoms.map(u => ({ id: u.PaintUOMID, label: u.UOMName })), [uoms]);
     // Filter picker to the same family (weight/volume vs Piece) as the
-    // item's base UoM (paint_UOM.Scale > 0 = mass, Scale = 0 = counting) —
-    // UNLESS the item has a per-item GramsPerUnit factor set, in which case
-    // Piece is offered INSTEAD of the raw weight base (issue "1 box = 700g"
-    // etc. — owner ask 2026-07-30). The raw gram base is deliberately
-    // excluded once a GramsPerUnit conversion exists, to match the same fix
-    // on Paint GRN (owner ask 2026-08-07, after PGRN-0060's mis-entry).
+    // item's base UoM (paint_UOM.Scale > 0 = mass, Scale = 0 = counting).
+    //
+    // Unlike Paint GRN, this does NOT exclude the raw weight base for
+    // GramsPerUnit items. GRN receives whole commercial units (cans/boxes
+    // bought from a supplier), so forcing Piece entry there is correct.
+    // Issue draws an exact WEIGHT of material for a job's paint mix — an
+    // operator issuing "400" means 400 grams, never "400 cans" or a
+    // fraction of one. Applying the GRN exclusion here (owner report
+    // 2026-08-24) silently multiplied every issue quantity by
+    // GramsPerUnit (e.g. THINER LOCAL: 400 -> 320,000g, blowing past
+    // on-hand stock) and made the screen unusable for any item with a
+    // GramsPerUnit conversion. Both families still offer Piece as an
+    // alternative for items genuinely counted in whole units.
     const uomOptsForItem = React.useCallback((paintItemID) => {
         if (!paintItemID) return uomOpts;
         const it = items.find(x => Number(x.PaintItemID) === Number(paintItemID));
@@ -219,13 +226,14 @@ export default function PaintIssue() {
         return uoms
             .filter(u => {
                 const uIsCounting = !(Number(u.Scale) > 0);
-                if (!baseIsCounting && gramsPerUnit > 0) return uIsCounting;
-                return uIsCounting === baseIsCounting;
+                if (uIsCounting === baseIsCounting) return true; // same family as the item's base — always allowed
+                // Cross-family Piece alternative, only when a real conversion exists.
+                return !baseIsCounting && gramsPerUnit > 0 && uIsCounting;
             })
             .map(u => ({
                 id: u.PaintUOMID,
                 label: Number(u.PaintUOMID) === Number(it.PaintUOMID) ? `${u.UOMName} (base)`
-                     : (!(Number(u.Scale) > 0) && !baseIsCounting) ? `${u.UOMName} (via ${gramsPerUnit}g/unit)`
+                     : (!(Number(u.Scale) > 0) && !baseIsCounting && gramsPerUnit > 0) ? `${u.UOMName} (via ${gramsPerUnit}g/unit)`
                      : u.UOMName,
             }));
     }, [items, uoms, uomOpts]);

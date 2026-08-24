@@ -172,29 +172,17 @@ async function consumeLines(tx, issueId, paintWHID, lines, note, userInfo) {
         if (!l.PaintUOMID) throw new Error('Every line needs PaintUOMID');
 
         const itRes = await new sql.Request(tx).input('i', sql.Int, l.PaintItemID)
-            .query(`SELECT i.PaintCode, i.PaintName, i.StockQty, i.AvgCost, i.PaintUOMID AS BaseUOMID,
-                           i.GramsPerUnit, bu.Scale AS BaseScale, bu.UOMName AS BaseUOMName
-                    FROM paint_Item i WITH (UPDLOCK, HOLDLOCK)
-                    JOIN paint_UOM bu ON bu.PaintUOMID = i.PaintUOMID
-                    WHERE i.PaintItemID=@i`);
+            .query('SELECT PaintCode, PaintName, StockQty, AvgCost FROM paint_Item WITH (UPDLOCK, HOLDLOCK) WHERE PaintItemID=@i');
         if (!itRes.recordset.length) throw new Error(`Paint item ${l.PaintItemID} not found.`);
         const it = itRes.recordset[0];
         const oldQty = Number(it.StockQty) || 0;
         const oldAvg = Number(it.AvgCost) || 0;
 
-        // Same defense-in-depth as Paint GRN (owner report 2026-08-21):
-        // reject the raw weight UOM once GramsPerUnit makes it excluded, so
-        // a mis-picked line can't silently consume "5" as 5 grams when 5
-        // pieces was meant.
-        const gramsPerUnit = Number(it.GramsPerUnit) || 0;
-        const baseIsWeight = Number(it.BaseScale) > 0;
-        if (gramsPerUnit > 0 && baseIsWeight && Number(l.PaintUOMID) === Number(it.BaseUOMID)) {
-            throw new Error(
-                `${it.PaintName} (${it.PaintCode}): this item is issued by piece/box ` +
-                `(${gramsPerUnit}g per unit), not by raw ${it.BaseUOMName}. Pick the ` +
-                `"Piece (via ${gramsPerUnit}g/unit)" option instead.`
-            );
-        }
+        // Unlike Paint GRN, issuing against the item's own raw weight UOM is
+        // CORRECT and expected here — a job draws an exact weight of
+        // material, not whole cans — so there is no UOM to reject (owner
+        // report 2026-08-24; see PaintIssue.jsx's uomOptsForItem for the
+        // full explanation of why GRN and Issue differ here).
 
         // Convert issue-unit qty to base-unit qty via the item's factor.
         // Stock and AvgCost live in base units.
