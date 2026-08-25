@@ -107,7 +107,13 @@ export default function GRN() {
             const url = s ? `${API_BASE}/procurement/grn?search=${encodeURIComponent(s)}` : `${API_BASE}/procurement/grn`;
             const res = await axios.get(url);
             setGrns(res.data || []);
-        } catch (err) { /* silent */ }
+        } catch (err) {
+            // A silent catch here previously masked a real backend bug (owner
+            // report 2026-08-25): search errored every time, but the stale
+            // unfiltered list just stayed on screen with no indication
+            // anything was wrong. Surface it instead.
+            notify({ type: 'error', title: 'GRN search failed', message: err.response?.data?.error || err.message });
+        }
     };
 
     useEffect(() => { fetchFormData(); }, []);

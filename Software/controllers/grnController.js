@@ -290,13 +290,21 @@ exports.getGRNs = async (req, res) => {
     const pool = await getPool();
     const request = pool.request();
     // Owner ask 2026-07-03: also match on part no / name via detail table.
-    let query = 'SELECT TOP 100 * FROM vw_PurchaseGRNHeader h';
+    // vw_PurchaseGRNHeader has PartyID but not a resolved PartyName, and its
+    // GRN identifier column is PurchaseCode (what's actually shown/searched
+    // in the UI) — not PurchaseVoucherNo, which this view doesn't have at
+    // all. Both wrong references made every non-empty search 500 silently
+    // (owner report 2026-08-25: search always just showed the unfiltered
+    // recent list, since the frontend swallows the error and keeps stale
+    // data).
+    let query = `SELECT TOP 100 h.* FROM vw_PurchaseGRNHeader h
+                 LEFT JOIN gen_PartiesInfo p ON p.PartyID = h.PartyID`;
     if (search) {
       request.input('search', sql.NVarChar(200), `%${search}%`);
       query += ` WHERE (
-          h.PurchaseVoucherNo LIKE @search
+          h.PurchaseCode LIKE @search
           OR h.SupplierBillNo LIKE @search
-          OR h.PartyName LIKE @search
+          OR p.PartyName LIKE @search
           OR EXISTS (
               SELECT 1 FROM data_PurchaseDetail d
               LEFT JOIN InventItems i ON d.ItemID = i.ItemId
