@@ -524,10 +524,20 @@ exports.postDisbursement = async (req, res) => {
             throw new Error(`No paying bank chosen for: ${missingBank.slice(0, 5).map(r => r.Name).join(', ')}${missingBank.length > 5 ? ` + ${missingBank.length - 5} more` : ''}. Set 'Pay Bank' in Employee Salary Settings.`);
         }
 
+        // A reversed disbursement must not count as "already disbursed" —
+        // hr_SalaryPostings is insert-only (nothing ever deletes from it), so
+        // without the voucher-status check this guard blocked a redo forever,
+        // even though its own error message tells the user to reverse and try
+        // again (owner report 2026-09-07: all five August PAY vouchers were
+        // reversed and Pay Salary still refused). An orphaned posting with no
+        // voucher row still blocks — safer to stop than to double-pay.
         const already = await new sql.Request(tx).input('m', sql.Char(7), MonthID)
-            .query(`SELECT DISTINCT PostingType FROM hr_SalaryPostings
-                    WHERE MonthID=@m
-                      AND (PostingType IN ('PAY_CASH_NONEOBI','PAY_CASH_EOBI') OR PostingType LIKE 'PAY[_]BANK[_]%')`);
+            .query(`SELECT DISTINCT p.PostingType
+                    FROM hr_SalaryPostings p
+                    LEFT JOIN data_FinanceVoucherInfo v ON v.VoucherID = p.VoucherID
+                    WHERE p.MonthID=@m
+                      AND (p.PostingType IN ('PAY_CASH_NONEOBI','PAY_CASH_EOBI') OR p.PostingType LIKE 'PAY[_]BANK[_]%')
+                      AND ISNULL(v.Status, '') <> 'Reversed'`);
         const alreadyKeys = new Set(already.recordset.map(r => r.PostingType));
 
         const cashGL = await loadRoleOrThrow('CASH_BOOK');
