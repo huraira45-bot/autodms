@@ -140,7 +140,7 @@ import DailyCashBook      from './pages/DailyCashBook';
 import TaxSummary         from './pages/TaxSummary';
 import { PnL, PnLByDepartment, BalanceSheet, DayBook }      from './pages/reports/Financials';
 import { ReceivablesAging, PayablesAging, InsuranceAging, WalkInOutstanding }  from './pages/reports/Aging';
-import { PartyOpenInvoices, StoreSaleReceivables, StoreSaleReceivablesCustom } from './pages/reports/PartyReports';
+import { PartyOpenInvoices, PartyJobCards, StoreSaleReceivables, StoreSaleReceivablesCustom } from './pages/reports/PartyReports';
 import SSReceivablesHiddenPartiesAdmin from './pages/reports/SSReceivablesHiddenPartiesAdmin';
 import { POSPending, ChequesOnHand, BankBalances, TaxRateHistory } from './pages/reports/Operational';
 import { DiscountGiven, SalesRegister, GrossMargin, GenCustReconciliation } from './pages/reports/Workshop';
@@ -613,6 +613,7 @@ function LegacySidebar() {
                 {canReport('customer_statement')    && <NavLink to="/reports/customer-statement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><UserCog size={20} /> Customer Statement</NavLink>}
                 {canReport('supplier_statement')    && <NavLink to="/reports/supplier-statement" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Truck size={20} /> Supplier Statement</NavLink>}
                 {canReport('party_open_invoices')   && <NavLink to="/reports/party-open-invoices" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Users size={20} /> Party Open Invoices</NavLink>}
+                {canReport('party_job_cards')      && <NavLink to="/reports/party-job-cards" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ClipboardList size={20} /> Party Job Card History</NavLink>}
                 {canReport('store_sale_receivables') && <NavLink to="/reports/store-sale-receivables" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><Wallet size={20} /> Store Sale Receivables</NavLink>}
                 {canReport('receivables_aging')     && <NavLink to="/reports/receivables-aging"  className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Receivables Aging</NavLink>}
                 {canReport('payables_aging')        && <NavLink to="/reports/payables-aging"     className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Payables Aging</NavLink>}
@@ -1052,6 +1053,7 @@ function AppShell() {
                     <Route path="/reports/day-book"             element={<ProtectedRoute moduleKey="reports"><DayBook /></ProtectedRoute>} />
                     <Route path="/reports/receivables-aging"    element={<ProtectedRoute moduleKey="reports"><ReceivablesAging /></ProtectedRoute>} />
                     <Route path="/reports/party-open-invoices"  element={<ProtectedRoute moduleKey="reports"><PartyOpenInvoices /></ProtectedRoute>} />
+                    <Route path="/reports/party-job-cards"      element={<ProtectedRoute moduleKey="reports"><PartyJobCards /></ProtectedRoute>} />
                     <Route path="/reports/store-sale-receivables" element={<ProtectedRoute moduleKey="reports"><StoreSaleReceivables /></ProtectedRoute>} />
                     <Route path="/reports/store-sale-receivables-custom" element={
                         <ProtectedRoute moduleKey="report:store_sale_receivables_custom"><StoreSaleReceivablesCustom /></ProtectedRoute>

@@ -21,6 +21,7 @@ router.get('/parties',                requireAnyAccess(
                                           'report:receivables_aging',
                                           'report:payables_aging',
                                           'report:party_open_invoices',
+                                          'report:party_job_cards',
                                           'report:store_sale_receivables',
                                       ), reports.searchParties);
 router.get('/daily-cash-book',        requireAccess('report:daily_cash_book'),       reports.getDailyCashBook);
@@ -51,6 +52,7 @@ router.get('/walkin-outstanding',     requireAccess('report:walkin_outstanding')
 router.get('/voucher-audit',          requireAccess('report:voucher_audit'),          reports.getVoucherAudit);
 router.get('/system-account-audit',   requireAccess('report:system_account_audit'),   reports.getSystemAccountAudit);
 router.get('/party-open-invoices',    requireAccess('report:party_open_invoices'),    reports.getPartyOpenInvoices);
+router.get('/party-job-cards',        requireAccess('report:party_job_cards'),        reports.getPartyJobCards);
 router.get('/store-sale-receivables', requireAccess('report:store_sale_receivables'), reports.getStoreSaleReceivables);
 // Same report/working as above, minus whichever parties are hidden via the settings form below.
 router.get('/store-sale-receivables-custom',                requireAccess('report:store_sale_receivables_custom'), reports.getStoreSaleReceivablesCustom);

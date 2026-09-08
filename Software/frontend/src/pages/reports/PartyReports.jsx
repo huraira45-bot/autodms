@@ -205,6 +205,159 @@ export function PartyOpenInvoices() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Report: Party Job Card History (paid / unpaid)
+// Sister to Party Open Invoices above, but keeps the SETTLED job cards too —
+// the question here is "did they pay this job", not "what's still owed".
+// ─────────────────────────────────────────────────────────────────────────────
+export function PartyJobCards() {
+    const excelExport = (data, params) => ({
+        filename: `party-job-cards-${params.partyId || 'party'}-${params.from || ''}-to-${params.to || ''}.csv`,
+        headers: ['Job Card #', 'Job No', 'Date', 'Type', 'Vehicle', 'Customer',
+                  'Invoice Voucher', 'Invoice Date', 'Invoiced', 'Paid', 'Outstanding', 'Status'],
+        rows: (data.rows || []).map(r => [
+            r.JobCardNo, r.JobCode, r.JobCardDate || '', r.JobTypeName, r.VehicleRegNo, r.CustomerName,
+            r.InvVoucherNo, r.InvoiceDate || '',
+            Number(r.Invoiced), Number(r.Paid), Number(r.Outstanding), r.Status,
+        ]),
+    });
+    return (
+        <ReportShell
+            title="Party Job Card History"
+            subtitle="Pick a party — every Job Card raised for them, paid or unpaid, with what's still outstanding."
+            icon={Users}
+            endpoint="party-job-cards"
+            defaultParams={{ partyId: '', from: '2020-01-01', to: todayISO(), status: 'all' }}
+            excelExport={excelExport}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PartyPicker params={params} updateParam={updateParam} />
+                    <DateInput label="From" value={params.from} onChange={v => updateParam('from', v)} />
+                    <DateInput label="To"   value={params.to}   onChange={v => updateParam('to', v)} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Show:
+                        <select value={params.status || 'all'} onChange={e => updateParam('status', e.target.value)}
+                            style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+                            <option value="all">All</option>
+                            <option value="unpaid">Unpaid / Partial</option>
+                            <option value="paid">Paid only</option>
+                        </select>
+                    </label>
+                </>
+            )}
+        >
+            {(data) => {
+                if (!data.party) {
+                    return <div className="card" style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Pick a party to see their job card history.</div>;
+                }
+                return (
+                    <>
+                        <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: '1.15rem' }}>{data.party.PartyName}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                    {[data.party.PartyType, data.party.PhoneOne, data.party.CNIC].filter(Boolean).join(' · ')}
+                                    {data.party.PartyGLCode && ` · GL ${data.party.PartyGLCode} (${data.party.PartyGLTitle})`}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: '#334155', marginTop: 6 }}>
+                                    <strong>{data.totals.count}</strong> job cards ·{' '}
+                                    <span style={{ color: '#166534' }}>{data.totals.paidCount} paid</span> ·{' '}
+                                    <span style={{ color: '#854d0e' }}>{data.totals.partialCount} partial</span> ·{' '}
+                                    <span style={{ color: '#991b1b' }}>{data.totals.unpaidCount} unpaid</span>
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                                <div style={{ background: '#f1f5f9', padding: '8px 12px', borderRadius: 6, minWidth: 120 }}>
+                                    <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Invoiced</div>
+                                    <div style={{ fontWeight: 700 }}>{fmt(data.totals.invoiced)}</div>
+                                </div>
+                                <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: 6, minWidth: 120 }}>
+                                    <div style={{ fontSize: '0.7rem', color: '#166534', textTransform: 'uppercase' }}>Paid</div>
+                                    <div style={{ fontWeight: 700, color: '#166534' }}>{fmt(data.totals.paid)}</div>
+                                </div>
+                                <div style={{ background: '#1e40af', color: 'white', padding: '8px 12px', borderRadius: 6, minWidth: 130 }}>
+                                    <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>Outstanding</div>
+                                    <div style={{ fontWeight: 700, fontSize: '1rem' }}>PKR {fmt(data.totals.outstanding)}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {data.unallocatedCredit > 0.005 && (
+                            <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#854d0e', fontSize: '0.85rem' }}>
+                                <strong>PKR {fmt(data.unallocatedCredit)}</strong> received from this party is sitting on-account —
+                                not matched to any particular invoice. Job cards below can still show as unpaid even though this
+                                money came in; allocate those receipts against their invoices to clear them.
+                            </div>
+                        )}
+
+                        <div className="card" style={{ overflowX: 'auto' }}>
+                            {data.rows.length === 0 ? (
+                                <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>
+                                    No job cards for this party in the selected period.
+                                </div>
+                            ) : (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                                    <thead>
+                                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                                            <TH>Job Card #</TH><TH>Date</TH><TH>Type</TH>
+                                            <TH>Vehicle</TH><TH>Customer</TH><TH>Invoice</TH>
+                                            <TH align="right">Invoiced</TH>
+                                            <TH align="right">Paid</TH>
+                                            <TH align="right">Outstanding</TH>
+                                            <TH align="center">Status</TH>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {data.rows.map(r => (
+                                            <tr key={r.JobCardId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                <TD mono><strong>{r.JobCardNo}</strong></TD>
+                                                <TD>{r.JobCardDate || '—'}</TD>
+                                                <TD>{r.JobTypeName}</TD>
+                                                <TD mono>{r.VehicleRegNo}</TD>
+                                                <TD>{r.CustomerName}</TD>
+                                                <TD mono color="#64748b">{r.InvVoucherNo || '—'}</TD>
+                                                <TD align="right" mono>{fmt(r.Invoiced)}</TD>
+                                                <TD align="right" mono color={r.Paid > 0 ? '#15803d' : undefined}>{fmt(r.Paid)}</TD>
+                                                <TD align="right" mono bold>{fmt(r.Outstanding)}</TD>
+                                                <TD align="center"><PayStatusBadge s={r.Status} /></TD>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
+                                            <td colSpan={6} style={{ padding: 12, fontWeight: 700 }}>Totals — {data.rows.length} job cards</td>
+                                            <TD align="right" bold>{fmt(data.totals.invoiced)}</TD>
+                                            <TD align="right" bold>{fmt(data.totals.paid)}</TD>
+                                            <TD align="right" bold>{fmt(data.totals.outstanding)}</TD>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            )}
+                        </div>
+                    </>
+                );
+            }}
+        </ReportShell>
+    );
+}
+
+function PayStatusBadge({ s }) {
+    const colors = {
+        'Paid':            { bg: '#dcfce7', fg: '#166534' },
+        'Partial':         { bg: '#fef3c7', fg: '#854d0e' },
+        'Unpaid':          { bg: '#fecaca', fg: '#991b1b' },
+        'Not Invoiced':    { bg: '#e2e8f0', fg: '#475569' },
+        'No Party Charge': { bg: '#e0e7ff', fg: '#3730a3' },
+    };
+    const c = colors[s] || colors['Not Invoiced'];
+    return (
+        <span style={{ background: c.bg, color: c.fg, padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            {s}
+        </span>
+    );
+}
+
 function BucketBadge({ b }) {
     const labels = { current: '0–30', b31_60: '31–60', b61_90: '61–90', b90plus: '90+' };
     const colors = {

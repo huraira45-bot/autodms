@@ -2067,6 +2067,164 @@ exports.getPartyOpenInvoices = async (req, res) => {
 };
 
 /**
+ * Party Job Card History — owner ask 2026-09-08: pick a credit party, see
+ * every Job Card ever raised for them and whether it's been paid.
+ *
+ * Deliberately different from getPartyOpenInvoices above, which only lists
+ * what's still OWED (Outstanding > 0) and mixes in Store Sales. This one is
+ * Job-Card-only and keeps the settled ones, since the question being asked
+ * is "did they pay this job or not".
+ *
+ * Payment is measured exactly the way the open-invoices report measures it —
+ * party-ledger credits allocated against the invoice voucher — so the two
+ * reports can never disagree about the same job card. Receipts taken
+ * on-account (Credit with no AllocatedToVoucherID) are NOT counted against
+ * any single job card, because there's nothing saying which job they settle;
+ * they're returned separately as `unallocatedCredit` so a big on-account
+ * balance can't be silently misread as "customer hasn't paid".
+ */
+exports.getPartyJobCards = async (req, res) => {
+    try {
+        const partyId = parseInt(req.query.partyId);
+        if (!partyId) return res.status(400).json({ error: 'partyId is required.' });
+        const status = (req.query.status || 'all').toLowerCase();
+        const from = req.query.from ? new Date(req.query.from) : null;
+        const to   = req.query.to   ? new Date(req.query.to)   : null;
+
+        const pool = await getPool();
+
+        const partyRes = await pool.request()
+            .input('id', sql.Int, partyId)
+            .query(`SELECT p.PartyID, p.PartyName, p.PartyType, p.PhoneOne, p.CNIC,
+                           p.PartyGLID, g.GLCode AS PartyGLCode, g.GLTitle AS PartyGLTitle
+                    FROM   gen_PartiesInfo p
+                    LEFT   JOIN GLChartOFAccount g ON g.GLCAID = p.PartyGLID
+                    WHERE  p.PartyID = @id`);
+        if (!partyRes.recordset.length) return res.status(404).json({ error: 'Party not found.' });
+        const party = partyRes.recordset[0];
+
+        const r = await pool.request()
+            .input('pid',  sql.Int,  partyId)
+            .input('from', sql.Date, from)
+            .input('to',   sql.Date, to)
+            .query(`
+                WITH InvoiceDrs AS (
+                    SELECT v.SourceDocID  AS JobCardId,
+                           v.VoucherID    AS InvVoucherID,
+                           v.VoucherNo    AS InvVoucherNo,
+                           v.VoucherDate  AS InvDate,
+                           SUM(l.Debit)   AS Invoiced
+                    FROM   dms_PartyLedger l
+                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                    WHERE  l.PartyID = @pid AND l.Debit > 0
+                      AND  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+                      AND  v.SourceDocType = 'JOBCARD'
+                    GROUP BY v.SourceDocID, v.VoucherID, v.VoucherNo, v.VoucherDate
+                ),
+                Allocations AS (
+                    SELECT l.AllocatedToVoucherID AS InvVoucherID,
+                           SUM(l.Credit)          AS Paid
+                    FROM   dms_PartyLedger l
+                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                    WHERE  l.PartyID = @pid AND l.Credit > 0
+                      AND  l.AllocatedToVoucherID IS NOT NULL
+                      AND  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+                    GROUP BY l.AllocatedToVoucherID
+                ),
+                PerJC AS (
+                    SELECT i.JobCardId,
+                           SUM(i.Invoiced)              AS Invoiced,
+                           SUM(ISNULL(a.Paid, 0))       AS Paid,
+                           MIN(i.InvDate)               AS InvDate,
+                           MIN(i.InvVoucherNo)          AS InvVoucherNo,
+                           COUNT(*)                     AS InvVoucherCount
+                    FROM   InvoiceDrs i
+                    LEFT   JOIN Allocations a ON a.InvVoucherID = i.InvVoucherID
+                    GROUP BY i.JobCardId
+                )
+                SELECT jc.JobCardId, jc.JobCardNo, jc.jobCode, jc.JobCardDate,
+                       jc.VehicleRegNo, jc.ChasisNo, jc.IsFinalized,
+                       t.Title            AS JobTypeName,
+                       cust.endUserName   AS CustomerName,
+                       p.InvVoucherNo, p.InvDate, p.InvVoucherCount,
+                       ISNULL(p.Invoiced, 0)                        AS Invoiced,
+                       ISNULL(p.Paid, 0)                            AS Paid,
+                       ISNULL(p.Invoiced, 0) - ISNULL(p.Paid, 0)    AS Outstanding
+                FROM   Addata_JobCardInfo jc
+                LEFT   JOIN gen_JobCardType     t    ON t.JobCardTypeId = jc.JobTypeId
+                LEFT   JOIN addata_CustomerInfo cust ON cust.ProfileID  = jc.EndUserID
+                LEFT   JOIN PerJC               p    ON p.JobCardId     = jc.JobCardId
+                WHERE  jc.PartyID = @pid
+                  AND  (@from IS NULL OR jc.JobCardDate >= @from)
+                  AND  (@to   IS NULL OR jc.JobCardDate <  DATEADD(day, 1, @to))
+                ORDER BY jc.JobCardDate DESC, jc.JobCardId DESC`);
+
+        // On-account receipts sitting against the party but not matched to any
+        // one invoice — surfaced so an "Unpaid" row can be read in context.
+        const unallocRes = await pool.request()
+            .input('pid', sql.Int, partyId)
+            .query(`SELECT ISNULL(SUM(l.Credit), 0) AS Unallocated
+                    FROM   dms_PartyLedger l
+                    JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                    WHERE  l.PartyID = @pid AND l.Credit > 0
+                      AND  l.AllocatedToVoucherID IS NULL
+                      AND  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL`);
+
+        const classify = (row) => {
+            const inv = Number(row.Invoiced || 0);
+            const out = Number(row.Outstanding || 0);
+            const paid = Number(row.Paid || 0);
+            if (inv <= 0.005) return row.IsFinalized ? 'No Party Charge' : 'Not Invoiced';
+            if (out <= 0.005) return 'Paid';
+            if (paid > 0.005) return 'Partial';
+            return 'Unpaid';
+        };
+
+        let rows = r.recordset.map(x => ({
+            JobCardId:    x.JobCardId,
+            JobCardNo:    x.JobCardNo,
+            JobCode:      x.jobCode || '',
+            JobCardDate:  x.JobCardDate ? x.JobCardDate.toISOString().slice(0, 10) : null,
+            JobTypeName:  x.JobTypeName || '',
+            CustomerName: x.CustomerName || '',
+            VehicleRegNo: x.VehicleRegNo || '',
+            ChasisNo:     x.ChasisNo || '',
+            IsFinalized:  !!x.IsFinalized,
+            InvVoucherNo: x.InvVoucherNo || '',
+            InvoiceDate:  x.InvDate ? x.InvDate.toISOString().slice(0, 10) : null,
+            Invoiced:     +Number(x.Invoiced || 0).toFixed(2),
+            Paid:         +Number(x.Paid || 0).toFixed(2),
+            Outstanding:  +Number(x.Outstanding || 0).toFixed(2),
+            Status:       classify(x),
+        }));
+
+        if (status === 'paid')        rows = rows.filter(x => x.Status === 'Paid');
+        else if (status === 'unpaid') rows = rows.filter(x => x.Status === 'Unpaid' || x.Status === 'Partial');
+
+        const totals = rows.reduce((t, x) => {
+            t.invoiced    += x.Invoiced;
+            t.paid        += x.Paid;
+            t.outstanding += x.Outstanding;
+            t.count       += 1;
+            if (x.Status === 'Paid')    t.paidCount++;
+            if (x.Status === 'Unpaid')  t.unpaidCount++;
+            if (x.Status === 'Partial') t.partialCount++;
+            return t;
+        }, { count: 0, invoiced: 0, paid: 0, outstanding: 0,
+             paidCount: 0, unpaidCount: 0, partialCount: 0 });
+        for (const k of ['invoiced', 'paid', 'outstanding']) totals[k] = +totals[k].toFixed(2);
+
+        res.json({
+            party, rows, totals, status,
+            unallocatedCredit: +Number(unallocRes.recordset[0].Unallocated || 0).toFixed(2),
+        });
+    } catch (err) {
+        console.error('Party job cards error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
  * Shared core of the Store Sale Receivables report. Extracted (behavior-
  * preserving — no logic changes) so a second endpoint can reuse the exact
  * same computation with an added party-exclusion filter, instead of
