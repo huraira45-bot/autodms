@@ -60,7 +60,8 @@ export function JobCardRegister() {
         filename: `job-card-register-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
         headers: [
             'Card #', 'Finalized Date', 'Finalized By', 'Customer', 'Customer Code',
-            'Credit Party', 'Vehicle Reg', 'Chassis', 'Advisor', 'Job Type', 'Payment Type',
+            'Credit Party', 'Vehicle Reg', 'Vehicle Type / Model', 'Year / Variant',
+            'Chassis', 'Advisor', 'Job Type', 'Payment Type',
             'Status', 'Labour', 'Sublet', 'PST', 'Parts', 'GST', 'Total',
         ],
         rows: (data.rows || []).map(r => [
@@ -71,6 +72,8 @@ export function JobCardRegister() {
             r.CustomerCode || '',
             r.CreditPartyName || '',
             r.VehicleRegNo || '',
+            r.VehicleModel || '',
+            r.VehicleYear || '',
             r.ChasisNo || '',
             r.ServiceAdvisor || '',
             r.JobTypeName || r.JobTypeCode || '',
@@ -180,6 +183,7 @@ export function JobCardRegister() {
                             <thead>
                                 <tr style={trHeader}>
                                     <TH>Card #</TH><TH>Finalized Date</TH><TH>Customer</TH><TH>Credit Party</TH><TH>Vehicle</TH>
+                                    <TH>Type / Model</TH>
                                     <TH>Advisor</TH><TH>Status</TH>
                                     <TH align="right">Labour</TH>
                                     <TH align="right">Sublet</TH>
@@ -190,7 +194,7 @@ export function JobCardRegister() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={13}>No job cards in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={14}>No job cards in this period.</Empty>}
                                 {data.rows.map(r => (
                                     <tr key={r.JobCardId} style={trBody}>
                                         <TD mono><strong>{r.JobCardNo}</strong></TD>
@@ -201,6 +205,10 @@ export function JobCardRegister() {
                                         <TD>{r.CustomerName}<div style={subText}>{r.CustomerCode}</div></TD>
                                         <TD>{r.CreditPartyName || '—'}</TD>
                                         <TD mono>{r.VehicleRegNo}<div style={subText}>{r.ChasisNo}</div></TD>
+                                        <TD>
+                                            {r.VehicleModel || '—'}
+                                            {r.VehicleYear && <div style={subText}>{r.VehicleYear}</div>}
+                                        </TD>
                                         <TD>{r.ServiceAdvisor}</TD>
                                         <TD><StatusPill v={r.Status} finalized={r.IsFinalized} /></TD>
                                         <TD align="right" mono>{fmt(r.LabourAmount)}</TD>
@@ -228,7 +236,13 @@ export function JobCardRegister() {
                             {data.rows.length > 0 && (
                                 <tfoot>
                                     <tr style={{ borderTop: '2px solid #0f172a', background: '#f8fafc' }}>
-                                        <td colSpan={6} style={{ padding: 12, fontWeight: 700 }}>
+                                        {/* 8 label columns (Card #, Finalized Date, Customer,
+                                            Credit Party, Vehicle, Type/Model, Advisor, Status)
+                                            then the 6 amount columns. This was colSpan={6}
+                                            against 7 label columns, so every total sat one
+                                            column left of its heading — Labour under Status,
+                                            and the Total column with nothing above it. */}
+                                        <td colSpan={8} style={{ padding: 12, fontWeight: 700 }}>
                                             Totals — {fmtInt(data.totals.count)} cards
                                         </td>
                                         <TD align="right" bold>{fmt(data.totals.labour)}</TD>

@@ -98,6 +98,11 @@ exports.jobCardRegister = async (req, res) => {
         const r = await rq.query(`
             SELECT j.JobCardId, j.JobCardNo, j.JobCardDate, j.Status,
                    j.VehicleRegNo, j.ChasisNo, j.EngineNo, j.KiloMeter,
+                   -- Owner ask 2026-09-10: Vehicle Type / Model on the
+                   -- register. On the Job Card form that field binds to
+                   -- VersionCode (e.g. "KARVAAN PLUS 1.2"); VehicleCode is
+                   -- the year / variant box beside it.
+                   j.VersionCode, j.VehicleCode, j.BrandCode,
                    j.ReceiptDate, j.PromisedDate, j.DeliveryDate,
                    j.ServiceAdvisor, j.JobResult, j.IsFinalized,
                    j.FinalizedAt      AS FinalizedAt,
@@ -143,6 +148,9 @@ exports.jobCardRegister = async (req, res) => {
                 PhoneNo:      x.PhoneNo || '',
                 VehicleRegNo: x.VehicleRegNo || '',
                 ChasisNo:     x.ChasisNo || '',
+                VehicleModel: x.VersionCode || '',
+                VehicleYear:  x.VehicleCode || '',
+                VehicleMake:  x.BrandCode || '',
                 KiloMeter:    Number(x.KiloMeter || 0),
                 JobType:      x.JobType || '',
                 ServiceAdvisor: x.ServiceAdvisor || '',
