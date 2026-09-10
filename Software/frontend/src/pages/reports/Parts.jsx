@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput, Wrench, BookOpen, Search } from 'lucide-react';
+import { Package, ArrowDownUp, AlertTriangle, ShoppingCart, FileInput, Wrench, BookOpen, Search, Coins } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls, DateInput } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -511,6 +511,256 @@ export function PartsIssuedToJc() {
                     </div>
                 </>
             )}
+        </ReportShell>
+    );
+}
+
+// =====================================================================
+// Job Card Parts Cost & Margin (owner ask 2026-09-09)
+// "part cost job cardwise for each business each item with there
+//  purchase price and sale price"
+//
+// Purchase price is UnitLandedCost, snapshotted on the issue line — NOT
+// StockRate, which the issue routine writes as a duplicate of the sale
+// rate. Lines predating that snapshot fall back to the item's current
+// cost and are marked "est."; the count is surfaced in a banner so the
+// number is judged rather than trusted blindly.
+// Margin is net of discount and excludes GST.
+// =====================================================================
+const FinPill = ({ finalized }) => (
+    <span style={{ background: finalized ? '#dcfce7' : '#fef3c7',
+                   color:      finalized ? '#166534' : '#92400e',
+                   padding: '1px 7px', borderRadius: 12,
+                   fontSize: '0.68rem', fontWeight: 700 }}>
+        {finalized ? 'Finalized' : 'Draft'}
+    </span>
+);
+
+const marginColor = (v) => (v < 0 ? '#b91c1c' : v > 0 ? '#166534' : '#64748b');
+
+export function JcPartsCostMargin() {
+    const excelExport = (data, params) => ({
+        filename: `jc-parts-cost-margin-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
+        headers: ['BU Code', 'Business Unit', 'Job Card', 'JC Date', 'Vehicle', 'Customer',
+                  'Slip #', 'Issue Date', 'Part #', 'Item', 'Qty',
+                  'Purchase Price', 'Sale Price', 'Cost', 'Discount', 'GST',
+                  'Sale (Net)', 'Margin', 'Margin %', 'Cost Basis'],
+        rows: (data.rows || []).map(r => [
+            r.BusinessUnitCode, r.BusinessUnitName, `JC-${r.JobCardNo}`, r.JobCardDate,
+            r.VehicleRegNo, r.Customer, r.SlipNo, r.IssueDate, r.ItemCode, r.ItemName,
+            Number(r.Quantity), Number(r.PurchasePrice), Number(r.SalePrice),
+            Number(r.CostTotal), Number(r.Discount), Number(r.Tax),
+            Number(r.SaleNet), Number(r.Margin), Number(r.MarginPct),
+            r.CostEstimated ? 'Estimated (current cost)' : 'Actual (at issue)',
+        ]),
+    });
+
+    return (
+        <ReportShell
+            title="Job Card Parts Cost & Margin"
+            subtitle="Every part issued to a job card with its purchase price and sale price — grouped job-card-wise under each Business Unit."
+            icon={Coins}
+            endpoint="parts/jc-cost-margin"
+            landscape
+            defaultParams={{ from: firstOfMonthISO(), to: todayISO(), search: '', businessType: '', onlyFinalized: '' }}
+            excelExport={excelExport}
+            controls={({ params, updateParam }) => (
+                <>
+                    <PeriodControls params={params} updateParam={updateParam} />
+                    <BusinessUnitPicker params={params} updateParam={updateParam} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        <input type="checkbox"
+                               checked={params.onlyFinalized === '1'}
+                               onChange={e => updateParam('onlyFinalized', e.target.checked ? '1' : '')} />
+                        Finalized job cards only
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                        Search:
+                        <input value={params.search || ''}
+                               onChange={e => updateParam('search', e.target.value)}
+                               placeholder="Job No, Vehicle, Part No, Item, Customer"
+                               style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem', minWidth: 260 }} />
+                    </label>
+                </>
+            )}
+        >
+            {(data) => {
+                const t = data.totals || {};
+                const units = t.byBusinessUnit || [];
+
+                // Rows arrive ordered by BU code, job card, line — bucket them
+                // so each job card renders under its own sub-header.
+                const byJc = new Map();
+                for (const r of (data.rows || [])) {
+                    const k = r.BusinessUnitCode + ' ' + r.JobCardNo;
+                    if (!byJc.has(k)) byJc.set(k, []);
+                    byJc.get(k).push(r);
+                }
+
+                return (
+                    <>
+                        <SummaryBar items={[
+                            { label: 'Job Cards',  value: fmtInt(t.jobCards || 0) },
+                            { label: 'Lines',      value: fmtInt(t.lines || 0) },
+                            { label: 'Qty',        value: fmt(t.quantity || 0) },
+                            { label: 'Cost',       value: 'PKR ' + fmt(t.cost || 0) },
+                            { label: 'Sale (Net)', value: 'PKR ' + fmt(t.saleNet || 0) },
+                            { label: 'Margin',     value: 'PKR ' + fmt(t.margin || 0), strong: true },
+                            { label: 'Margin %',   value: fmt(t.marginPct || 0) + ' %' },
+                        ]} />
+
+                        {t.estimatedCostLines > 0 && (
+                            <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
+                                                           padding: 12, background: '#fffbeb', border: '1px solid #fde68a' }}>
+                                <AlertTriangle size={16} color="#b45309" style={{ marginTop: 2, flexShrink: 0 }} />
+                                <div style={{ fontSize: '0.8rem', color: '#78350f' }}>
+                                    <strong>{fmtInt(t.estimatedCostLines)}</strong> of {fmtInt(t.lines || 0)} lines were issued
+                                    before landed cost was recorded on the slip. Those use the item's <em>current</em> cost
+                                    and are marked <strong>est.</strong> — their margin is indicative, not the historic figure.
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Business Unit roll-up */}
+                        {units.length > 0 && (
+                            <div className="card" style={{ overflowX: 'auto' }}>
+                                <div style={{ padding: '10px 12px', fontWeight: 700, color: '#334155',
+                                              borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
+                                              fontSize: '0.85rem' }}>
+                                    By Business Unit
+                                </div>
+                                <table style={tableStyle}>
+                                    <thead>
+                                        <tr style={trHeader}>
+                                            <TH>Code</TH><TH>Business Unit</TH>
+                                            <TH align="right">Job Cards</TH><TH align="right">Lines</TH>
+                                            <TH align="right">Qty</TH><TH align="right">Cost</TH>
+                                            <TH align="right">Sale (Net)</TH><TH align="right">Margin</TH>
+                                            <TH align="right">Margin %</TH>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {units.map(b => (
+                                            <tr key={b.Code} style={trBody}>
+                                                <TD mono bold>{b.Code}</TD>
+                                                <TD>{b.Name}</TD>
+                                                <TD align="right" mono>{fmtInt(b.JobCards)}</TD>
+                                                <TD align="right" mono>{fmtInt(b.Lines)}</TD>
+                                                <TD align="right" mono>{fmt(b.Quantity)}</TD>
+                                                <TD align="right" mono color="#b45309">{fmt(b.Cost)}</TD>
+                                                <TD align="right" mono>{fmt(b.SaleNet)}</TD>
+                                                <TD align="right" mono bold color={marginColor(b.Margin)}>{fmt(b.Margin)}</TD>
+                                                <TD align="right" mono color={marginColor(b.Margin)}>{fmt(b.MarginPct)} %</TD>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
+                                            <td colSpan={2} style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right' }}>Total:</td>
+                                            <TD align="right" mono bold>{fmtInt(t.jobCards || 0)}</TD>
+                                            <TD align="right" mono bold>{fmtInt(t.lines || 0)}</TD>
+                                            <TD align="right" mono bold>{fmt(t.quantity || 0)}</TD>
+                                            <TD align="right" mono bold color="#b45309">{fmt(t.cost || 0)}</TD>
+                                            <TD align="right" mono bold>{fmt(t.saleNet || 0)}</TD>
+                                            <TD align="right" mono bold color={marginColor(t.margin || 0)}>{fmt(t.margin || 0)}</TD>
+                                            <TD align="right" mono bold color={marginColor(t.margin || 0)}>{fmt(t.marginPct || 0)} %</TD>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        )}
+
+                        {units.length === 0 && (
+                            <div className="card" style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>
+                                No parts were issued to job cards in this period.
+                            </div>
+                        )}
+
+                        {/* Job-card-wise detail, one card per Business Unit */}
+                        {units.map(b => (
+                            <div className="card" key={'d-' + b.Code} style={{ overflowX: 'auto', breakInside: 'avoid' }}>
+                                <div style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0',
+                                              background: '#eff6ff', display: 'flex', justifyContent: 'space-between',
+                                              alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                                    <div style={{ fontWeight: 700, color: '#1e3a8a', fontSize: '0.9rem' }}>
+                                        {b.Code} — {b.Name}
+                                    </div>
+                                    <div style={{ fontSize: '0.78rem', color: '#334155' }}>
+                                        Cost <strong>{fmt(b.Cost)}</strong>
+                                        {' · '}Sale <strong>{fmt(b.SaleNet)}</strong>
+                                        {' · '}Margin <strong style={{ color: marginColor(b.Margin) }}>
+                                            {fmt(b.Margin)} ({fmt(b.MarginPct)} %)
+                                        </strong>
+                                    </div>
+                                </div>
+                                <table style={tableStyle}>
+                                    <thead>
+                                        <tr style={trHeader}>
+                                            <TH>Slip #</TH><TH>Issue Date</TH>
+                                            <TH>Part #</TH><TH>Item</TH>
+                                            <TH align="right">Qty</TH>
+                                            <TH align="right">Purchase Price</TH>
+                                            <TH align="right">Sale Price</TH>
+                                            <TH align="right">Cost</TH>
+                                            <TH align="right">Disc</TH>
+                                            <TH align="right">Sale (Net)</TH>
+                                            <TH align="right">Margin</TH>
+                                            <TH align="right">Margin %</TH>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {(b.jobCardRows || []).map(jc => (
+                                            <React.Fragment key={b.Code + '-' + jc.JobCardNo}>
+                                                <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0' }}>
+                                                    <td colSpan={12} style={{ padding: '7px 12px' }}>
+                                                        <div style={{ display: 'flex', gap: 12, alignItems: 'center',
+                                                                      flexWrap: 'wrap', fontSize: '0.8rem' }}>
+                                                            <strong style={{ fontFamily: 'monospace' }}>JC-{jc.JobCardNo}</strong>
+                                                            <FinPill finalized={jc.IsFinalized} />
+                                                            <span style={{ color: '#475569' }}>{jc.JobCardDate}</span>
+                                                            <span style={{ fontFamily: 'monospace', color: '#475569' }}>{jc.VehicleRegNo}</span>
+                                                            <span style={{ color: '#475569' }}>{jc.Customer}</span>
+                                                            <span style={{ marginLeft: 'auto', color: '#334155' }}>
+                                                                Cost <strong>{fmt(jc.Cost)}</strong>
+                                                                {' · '}Sale <strong>{fmt(jc.SaleNet)}</strong>
+                                                                {' · '}Margin <strong style={{ color: marginColor(jc.Margin) }}>
+                                                                    {fmt(jc.Margin)} ({fmt(jc.MarginPct)} %)
+                                                                </strong>
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {(byJc.get(b.Code + ' ' + jc.JobCardNo) || []).map((r, ri) => (
+                                                    <tr key={jc.JobCardNo + '-' + ri} style={trBody}>
+                                                        <TD mono>{r.SlipNo}</TD>
+                                                        <TD>{r.IssueDate}</TD>
+                                                        <TD mono>{r.ItemCode}</TD>
+                                                        <TD>{r.ItemName}</TD>
+                                                        <TD align="right" mono>{fmt(r.Quantity)}</TD>
+                                                        <TD align="right" mono color="#b45309">
+                                                            {fmt(r.PurchasePrice)}
+                                                            {r.CostEstimated && (
+                                                                <span title="Landed cost was not recorded on this slip - item's current cost used"
+                                                                      style={{ marginLeft: 4, fontSize: '0.65rem', color: '#b45309', fontWeight: 700 }}>est.</span>
+                                                            )}
+                                                        </TD>
+                                                        <TD align="right" mono>{fmt(r.SalePrice)}</TD>
+                                                        <TD align="right" mono color="#b45309">{fmt(r.CostTotal)}</TD>
+                                                        <TD align="right" mono>{fmt(r.Discount)}</TD>
+                                                        <TD align="right" mono>{fmt(r.SaleNet)}</TD>
+                                                        <TD align="right" mono bold color={marginColor(r.Margin)}>{fmt(r.Margin)}</TD>
+                                                        <TD align="right" mono color={marginColor(r.Margin)}>{fmt(r.MarginPct)} %</TD>
+                                                    </tr>
+                                                ))}
+                                            </React.Fragment>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ))}
+                    </>
+                );
+            }}
         </ReportShell>
     );
 }

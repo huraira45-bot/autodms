@@ -183,7 +183,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity, LapsedCustomers } from './pages/reports/Service';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
-import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
+import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, JcPartsCostMargin, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
@@ -439,6 +439,11 @@ function LegacySidebar() {
                 {canReport('parts_issued_to_jc') && (
                     <NavLink to="/reports/parts/issued-to-jc" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Parts Issued to Job Cards
+                    </NavLink>
+                )}
+                {canReport('jc_parts_cost_margin') && (
+                    <NavLink to="/reports/parts/jc-cost-margin" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Job Card Parts Cost &amp; Margin
                     </NavLink>
                 )}
                 {canReport('item_ledger') && (
@@ -1088,6 +1093,7 @@ function AppShell() {
                     <Route path="/reports/parts/sales-register"   element={<ProtectedRoute><PartsSalesRegister /></ProtectedRoute>} />
                     <Route path="/reports/parts/purchase-summary" element={<ProtectedRoute><PartsPurchaseSummary /></ProtectedRoute>} />
                     <Route path="/reports/parts/issued-to-jc"     element={<ProtectedRoute><PartsIssuedToJc /></ProtectedRoute>} />
+                    <Route path="/reports/parts/jc-cost-margin"   element={<ProtectedRoute><JcPartsCostMargin /></ProtectedRoute>} />
                     <Route path="/reports/parts/sold-finalized"   element={<ProtectedRoute><PartsSoldFinalized /></ProtectedRoute>} />
                     <Route path="/reports/parts/item-ledger"      element={<ProtectedRoute><ItemLedger /></ProtectedRoute>} />
                     <Route path="/reports/parts/tax-invoice-tracker" element={<ProtectedRoute><StoreSaleTaxInvoiceTracker /></ProtectedRoute>} />

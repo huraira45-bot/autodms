@@ -479,6 +479,192 @@ exports.partsIssuedToJc = async (req, res) => {
 };
 
 /**
+ * GET /reports/parts/jc-cost-margin?from&to&businessType&search&onlyFinalized
+ *
+ * Owner ask 2026-09-08: part cost job-card-wise, per business unit, each
+ * item with its purchase price AND sale price.
+ *
+ * Sibling of partsIssuedToJc above, which only carries the SALE side — no
+ * cost, so it can't show margin. Two things worth knowing about where the
+ * cost comes from:
+ *
+ *  - It is NOT StockRate. saveJobCardPartsIssue writes StockRate and
+ *    ItemRate from the same @rate variable, so StockRate is a duplicate of
+ *    the sale rate — using it would show zero margin on every line.
+ *  - The real cost is UnitLandedCost, snapshotted at issue time from
+ *    InventItems (WeightedRate, falling back to ItemPurchasePrice). Being a
+ *    snapshot, it stays historically correct even after the item's weighted
+ *    average moves later.
+ *
+ * UnitLandedCost is nullable, so lines issued before it was captured fall
+ * back to the item's CURRENT cost and are flagged CostEstimated — those
+ * margins are indicative, not historical, and the count is returned as
+ * `estimatedCostLines` so the number can be judged rather than trusted
+ * blindly.
+ *
+ * Margin is computed on revenue NET of GST and discount: tax collected is
+ * not revenue, so including it would overstate every margin.
+ */
+exports.jcPartsCostMargin = async (req, res) => {
+    try {
+        const { from, to } = parseRange(req);
+        const search = (req.query.search || '').trim();
+        const businessType = req.query.businessType ? parseInt(req.query.businessType) : null;
+        const onlyFinalized = String(req.query.onlyFinalized || '') === '1';
+
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+
+        let where = 'si.IssueDate BETWEEN @from AND @to';
+        if (businessType)  { rq.input('bt', sql.Int, businessType); where += ' AND j.JobTypeId = @bt'; }
+        if (onlyFinalized) { where += ' AND j.IsFinalized = 1'; }
+        if (search) {
+            rq.input('s', sql.NVarChar(200), `%${search}%`);
+            where += ` AND (
+                j.JobCardNo LIKE @s
+                OR j.VehicleRegNo LIKE @s
+                OR i.ItenName LIKE @s
+                OR i.ManualNumber LIKE @s
+                OR CAST(i.ItemNumber AS NVARCHAR(50)) LIKE @s
+                OR ISNULL(c.endUserName, '') LIKE @s
+                OR ISNULL(p.PartyName, '')   LIKE @s
+            )`;
+        }
+
+        const r = await rq.query(`
+            SELECT si.IssueNo, si.IssueDate,
+                   j.JobCardId, j.JobCardNo, j.JobCardDate, j.VehicleRegNo, j.IsFinalized,
+                   ISNULL(t.CardCode, '—') AS BusinessUnitCode,
+                   ISNULL(t.Title,    '—') AS BusinessUnitName,
+                   ISNULL(c.endUserName, p.PartyName) AS CustomerName,
+                   p.PartyName,
+                   sid.StockIssueDetailID,
+                   i.ItenName AS ItemName, i.ItemNumber, i.ManualNumber,
+                   sid.IssueQuantity, sid.ItemRate, sid.DiscAmt, sid.TaxAmount,
+                   sid.UnitLandedCost,
+                   i.WeightedRate, i.ItemPurchasePrice
+            FROM   data_StockIssuetoJobCardDetail sid
+            JOIN   data_StockIssuetoJobCard si ON si.StockIssueID = sid.StockIssueID
+            LEFT   JOIN Addata_JobCardInfo  j ON j.JobCardId     = sid.JobCardId
+            LEFT   JOIN gen_JobCardType     t ON t.JobCardTypeId = j.JobTypeId
+            LEFT   JOIN InventItems         i ON i.ItemId        = sid.ItemId
+            LEFT   JOIN addata_CustomerInfo c ON c.ProfileID     = j.EndUserID
+            LEFT   JOIN gen_PartiesInfo     p ON p.PartyID       = j.PartyID
+            WHERE  ${where}
+            ORDER  BY ISNULL(t.CardCode, '—'), j.JobCardNo, sid.StockIssueDetailID`);
+
+        const rows = r.recordset.map(x => {
+            const qty       = Number(x.IssueQuantity || 0);
+            const salePrice = Number(x.ItemRate || 0);
+            const captured  = x.UnitLandedCost !== null && x.UnitLandedCost !== undefined;
+            const purchase  = captured
+                ? Number(x.UnitLandedCost)
+                : Number(x.WeightedRate ?? x.ItemPurchasePrice ?? 0);
+            const discount  = Number(x.DiscAmt || 0);
+            const tax       = Number(x.TaxAmount || 0);
+            const saleNet   = salePrice * qty - discount;   // net of discount, excl. GST
+            const costTotal = purchase * qty;
+            const margin    = saleNet - costTotal;
+            return {
+                BusinessUnitCode: x.BusinessUnitCode || '—',
+                BusinessUnitName: x.BusinessUnitName || '—',
+                JobCardId:     x.JobCardId,
+                JobCardNo:     x.JobCardNo || '',
+                JobCardDate:   x.JobCardDate ? x.JobCardDate.toISOString().slice(0, 10) : null,
+                IsFinalized:   !!x.IsFinalized,
+                VehicleRegNo:  x.VehicleRegNo || '',
+                Customer:      x.CustomerName || '',
+                SlipNo:        'PI-' + String(x.IssueNo || 0).padStart(4, '0'),
+                IssueDate:     x.IssueDate ? x.IssueDate.toISOString().slice(0, 10) : null,
+                ItemCode:      x.ManualNumber || (x.ItemNumber != null ? String(x.ItemNumber) : ''),
+                ItemName:      x.ItemName || '',
+                Quantity:      +qty.toFixed(2),
+                PurchasePrice: +purchase.toFixed(2),
+                SalePrice:     +salePrice.toFixed(2),
+                CostTotal:     +costTotal.toFixed(2),
+                Discount:      +discount.toFixed(2),
+                Tax:           +tax.toFixed(2),
+                SaleNet:       +saleNet.toFixed(2),
+                Margin:        +margin.toFixed(2),
+                MarginPct:     saleNet > 0 ? +(margin / saleNet * 100).toFixed(1) : 0,
+                CostEstimated: !captured,
+            };
+        });
+
+        // Roll up per business unit, then per job card inside it, so the page
+        // can render "job card wise, grouped by business".
+        const buMap = new Map();
+        for (const row of rows) {
+            let b = buMap.get(row.BusinessUnitCode);
+            if (!b) {
+                b = { Code: row.BusinessUnitCode, Name: row.BusinessUnitName,
+                      Lines: 0, Quantity: 0, Cost: 0, SaleNet: 0, Margin: 0, jobCards: new Map() };
+                buMap.set(row.BusinessUnitCode, b);
+            }
+            b.Lines += 1;
+            b.Quantity += row.Quantity;
+            b.Cost     += row.CostTotal;
+            b.SaleNet  += row.SaleNet;
+            b.Margin   += row.Margin;
+
+            let jc = b.jobCards.get(row.JobCardNo);
+            if (!jc) {
+                jc = { JobCardId: row.JobCardId, JobCardNo: row.JobCardNo,
+                       JobCardDate: row.JobCardDate, VehicleRegNo: row.VehicleRegNo,
+                       Customer: row.Customer, IsFinalized: row.IsFinalized,
+                       Lines: 0, Quantity: 0, Cost: 0, SaleNet: 0, Margin: 0 };
+                b.jobCards.set(row.JobCardNo, jc);
+            }
+            jc.Lines += 1;
+            jc.Quantity += row.Quantity;
+            jc.Cost     += row.CostTotal;
+            jc.SaleNet  += row.SaleNet;
+            jc.Margin   += row.Margin;
+        }
+        const fin = (o) => ({
+            ...o,
+            Quantity: +o.Quantity.toFixed(2),
+            Cost:     +o.Cost.toFixed(2),
+            SaleNet:  +o.SaleNet.toFixed(2),
+            Margin:   +o.Margin.toFixed(2),
+            MarginPct: o.SaleNet > 0 ? +(o.Margin / o.SaleNet * 100).toFixed(1) : 0,
+        });
+        const byBusinessUnit = Array.from(buMap.values())
+            .map(b => {
+                const { jobCards, ...rest } = b;
+                return {
+                    ...fin(rest),
+                    JobCards: jobCards.size,
+                    jobCardRows: Array.from(jobCards.values()).map(fin)
+                        .sort((x, y) => (x.JobCardNo || '').localeCompare(y.JobCardNo || '')),
+                };
+            })
+            .sort((a, b) => b.Margin - a.Margin);
+
+        const sum = (f) => +rows.reduce((s, x) => s + f(x), 0).toFixed(2);
+        const saleNetTotal = sum(x => x.SaleNet);
+        const marginTotal  = sum(x => x.Margin);
+        const totals = {
+            lines:     rows.length,
+            jobCards:  new Set(rows.map(r => r.JobCardNo)).size,
+            quantity:  sum(x => x.Quantity),
+            cost:      sum(x => x.CostTotal),
+            discount:  sum(x => x.Discount),
+            tax:       sum(x => x.Tax),
+            saleNet:   saleNetTotal,
+            margin:    marginTotal,
+            marginPct: saleNetTotal > 0 ? +(marginTotal / saleNetTotal * 100).toFixed(1) : 0,
+            estimatedCostLines: rows.filter(x => x.CostEstimated).length,
+            byBusinessUnit,
+        };
+
+        res.json({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), rows, totals });
+    } catch (err) { console.error('jcPartsCostMargin:', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
  * GET /reports/parts/item-search?q=
  *
  * Typeahead helper for the Item Ledger. Returns up to 50 items whose

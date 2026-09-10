@@ -186,6 +186,7 @@ const SECTIONS = [
             { key: 'report:parts_sales_register',  label: 'Parts Sales Register',  kind: 'report' },
             { key: 'report:purchase_summary',      label: 'Purchase Summary',      kind: 'report' },
             { key: 'report:parts_issued_to_jc',    label: 'Parts Issued to JC',    kind: 'report' },
+            { key: 'report:jc_parts_cost_margin',  label: 'Job Card Parts Cost & Margin', kind: 'report' },
             { key: 'report:parts_sold_finalized',  label: 'Parts Sold (Finalized)', kind: 'report' },
             { key: 'report:item_ledger',           label: 'Item Ledger',           kind: 'report' },
             { key: 'report:store_sale_tax_invoice_tracker', label: 'Store Sale Tax Invoice Tracker', kind: 'report' },
