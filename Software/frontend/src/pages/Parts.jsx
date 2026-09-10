@@ -80,7 +80,14 @@ export default function Parts() {
     return items.filter(i =>
       (i.ItemNumber != null && String(i.ItemNumber).toLowerCase().includes(q)) ||
       (i.ManualNumber       && String(i.ManualNumber).toLowerCase().includes(q)) ||
-      (i.ItenName           && i.ItenName.toLowerCase().includes(q))
+      (i.ItenName           && i.ItenName.toLowerCase().includes(q)) ||
+      // Owner ask 2026-09-10: searching the supersede number must find the part
+      // too. Someone holding a parts manual usually has the NEW number and needs
+      // to find what it replaced — matching only the old number is the wrong way
+      // round. SupersededByCode is the resolved code from a linked part;
+      // SupersededByNumber is the typed one.
+      (i.SupersededByCode   && String(i.SupersededByCode).toLowerCase().includes(q)) ||
+      (i.SupersededByNumber && String(i.SupersededByNumber).toLowerCase().includes(q))
     );
   }, [items, search]);
 
@@ -373,7 +380,16 @@ export default function Parts() {
                   pick the replacement from the catalog when it is stocked, or
                   type the number from the parts manual when it is not yet. */}
               <div className="form-group">
-                <label>Superseded By</label>
+                <label>Supersede Number</label>
+                <input type="text" value={formData.SupersededByNumber}
+                       placeholder="e.g. 8511112-Y02 — the number that replaces this one"
+                       onChange={e => setFormData({ ...formData, SupersededByNumber: e.target.value })} />
+                <p className="field-hint" style={{ marginTop: 4 }}>
+                  The new part number from the parts manual. Searchable — typing the old
+                  or the new number finds this part.
+                </p>
+
+                <label style={{ marginTop: 10, display: 'block' }}>Replacement Part in Catalog <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span></label>
                 <SearchableSelect
                   value={formData.SupersededByItemId || ''}
                   onChange={v => setFormData({ ...formData, SupersededByItemId: v || '' })}
@@ -384,15 +400,12 @@ export default function Parts() {
                       label: String(p.ManualNumber ?? p.ItemNumber ?? '—'),
                       sub: p.ItenName || '',
                     }))}
-                  placeholder="Search the replacement part…"
+                  placeholder="Link it to the stocked part…"
                   title="Superseded by which part?"
                 />
-                <input type="text" value={formData.SupersededByNumber}
-                       style={{ marginTop: 6 }}
-                       placeholder="…or type the new part number if it isn't catalogued yet"
-                       onChange={e => setFormData({ ...formData, SupersededByNumber: e.target.value })} />
                 <p className="field-hint" style={{ marginTop: 4 }}>
-                  Marks this number as replaced by a newer one. Leave both blank if the part is current.
+                  Link it once the replacement is stocked, and the catalog will always show
+                  that part's current number. Leave both blank if this part is current.
                 </p>
               </div>
 
