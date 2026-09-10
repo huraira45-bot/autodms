@@ -141,12 +141,14 @@ export default function GLDetail() {
     useEffect(() => { load(); }, [load]);
 
     // Owner report 2026-08-21: printed GL Detail wasted pages on wide,
-    // large-text columns. Same landscape + shrink treatment ReportShell.jsx
-    // opts wide reports into (see index.css @media print rules) — this page
-    // doesn't go through ReportShell, so the toggle is applied directly.
+    // large-text columns, so it was shrunk AND turned landscape. Owner ask
+    // 2026-09-10: keep the shrink, but print ledgers on portrait paper.
+    // .print-compact is the same 8pt/tight-padding treatment as
+    // .print-landscape minus the @page orientation (see index.css). This
+    // page doesn't go through ReportShell, so the toggle is applied directly.
     useEffect(() => {
-        document.body.classList.add('print-landscape');
-        return () => document.body.classList.remove('print-landscape');
+        document.body.classList.add('print-compact');
+        return () => document.body.classList.remove('print-compact');
     }, []);
 
     const pickAccount = (a) => {

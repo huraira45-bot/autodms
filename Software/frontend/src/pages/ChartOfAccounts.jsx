@@ -8,6 +8,22 @@ import { ErpControlPanel, ErpSearchBar, ErpPanel } from '../components/erp';
 
 const API_BASE = '/api';
 
+// Single source for the two pick-lists on the create form, so the confirmation
+// dialog can name back exactly what the selects offered rather than restating
+// the labels and drifting from them.
+const CLASS_ROOTS = [
+  { id: 1, label: 'ASSETS' },
+  { id: 2, label: 'LIABILITIES' },
+  { id: 3, label: 'EQUITY' },
+  { id: 4, label: 'REVENUE' },
+  { id: 5, label: 'EXPENSES' },
+];
+
+const LEVEL_LABELS = {
+  1: 'Root Class', 2: 'Control Account', 3: 'Detail Account',
+  4: 'Sub-Detail', 5: 'Leaf Account',
+};
+
 const BankToggle = ({ acc }) => {
   const { notify } = useFeedback();
   const [isBank, setIsBank] = useState(!!acc.IsBank);
@@ -167,7 +183,7 @@ const AccountNode = ({ acc }) => {
 };
 
 export default function ChartOfAccounts() {
-  const { notify } = useFeedback();
+  const { notify, confirm } = useFeedback();
   const [roots, setRoots] = useState([]);
   const [allParents, setAllParents] = useState([]);
   const [search, setSearch] = useState('');
@@ -232,8 +248,36 @@ export default function ChartOfAccounts() {
     }
   };
 
+  // Owner ask 2026-09-10: creating a GL account is easy to do by accident and
+  // awkward to undo once it carries postings, so confirm first. The dialog
+  // echoes back what is about to be created — a rubber-stamp "are you sure"
+  // that shows nothing would just train people to click through it.
   const handleAdd = async (e) => {
     e.preventDefault();
+
+    const ok = await confirm({
+      title: 'Create this account?',
+      message: 'A new account joins the Chart of Accounts permanently and cannot simply be deleted once it has postings against it.',
+      details: (
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: '0.82rem' }}>
+          <span style={{ color: '#64748b' }}>Title</span>
+          <strong>{newAcc.GLTitle || '—'}</strong>
+          <span style={{ color: '#64748b' }}>Level</span>
+          <span>{newAcc.GLLevel} — {LEVEL_LABELS[newAcc.GLLevel] || ''}{newAcc.isParent ? ' (parent)' : ''}</span>
+          <span style={{ color: '#64748b' }}>Nature</span>
+          <span>{newAcc.GLNature}</span>
+          <span style={{ color: '#64748b' }}>{newAcc.GLLevel === 1 ? 'Class' : 'Parent'}</span>
+          <span>{newAcc.GLLevel === 1
+            ? (CLASS_ROOTS.find(c => c.id === Number(newAcc.ClassRoot))?.label || newAcc.ClassRoot)
+            : (parentSearch || newAcc.ParentCode || '—')}</span>
+        </div>
+      ),
+      confirmLabel: 'Yes, create it',
+      cancelLabel: 'Go back',
+      tone: 'warning',
+    });
+    if (!ok) return;
+
     try {
       await axios.post(`${API_BASE}/accounts/coa`, newAcc);
       setShowModal(false);
@@ -301,11 +345,7 @@ export default function ChartOfAccounts() {
                 <div className="form-group">
                   <label>Select Account Class</label>
                   <select value={newAcc.ClassRoot} onChange={e => setNewAcc({...newAcc, ClassRoot: parseInt(e.target.value)})}>
-                    <option value={1}>1 - ASSETS</option>
-                    <option value={2}>2 - LIABILITIES</option>
-                    <option value={3}>3 - EQUITY</option>
-                    <option value={4}>4 - REVENUE</option>
-                    <option value={5}>5 - EXPENSES</option>
+                    {CLASS_ROOTS.map(c => <option key={c.id} value={c.id}>{c.id} - {c.label}</option>)}
                   </select>
                 </div>
               ) : (

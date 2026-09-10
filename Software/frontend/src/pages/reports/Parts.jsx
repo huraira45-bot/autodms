@@ -1053,7 +1053,7 @@ export function ItemLedger() {
             endpoint="parts/item-ledger"
             defaultParams={{ itemId: '', from: firstOfMonthISO(), to: todayISO() }}
             excelExport={excelExport}
-            landscape
+            landscape={false}   /* owner ask 2026-09-10: ledgers print portrait */
             controls={({ params, updateParam }) => (
                 <>
                     <ItemPicker params={params} updateParam={updateParam} />

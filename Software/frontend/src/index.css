@@ -2426,20 +2426,31 @@ textarea:disabled,
     max-width: none !important;
     width: auto !important;
   }
-  /* Landscape defaults: 8pt tables with tight padding. Column headers
-     rarely wrap at this size. */
-  body.print-landscape table { font-size: 8pt !important; table-layout: auto !important; }
-  body.print-landscape th, body.print-landscape td { padding: 2.5pt 4pt !important; }
+  /* Compact table treatment: 8pt with tight padding. Column headers rarely
+     wrap at this size. Shared by BOTH print modes — .print-landscape (wide
+     reports) and .print-compact (portrait reports that still want the
+     page-saving shrink without turning the paper sideways; owner ask
+     2026-09-10 for the ledger prints). The only difference between the two
+     classes is the @page binding above; the shrink is identical. */
+  body.print-landscape table,
+  body.print-compact table { font-size: 8pt !important; table-layout: auto !important; }
+  body.print-landscape th, body.print-landscape td,
+  body.print-compact th,   body.print-compact td { padding: 2.5pt 4pt !important; }
   /* Report-super-wide auto-shrink for 12+ column reports (Stock Movement,
      JC Register with all metrics, etc.). Opt-in via `report-super-wide` on
      the ReportShell wrapper. Not strictly required — the general 8pt
-     landscape rules above are already enough for 10-11 columns. */
-  body.print-landscape .report-super-wide table { font-size: 7.5pt !important; }
+     rules above are already enough for 10-11 columns. */
+  body.print-landscape .report-super-wide table,
+  body.print-compact   .report-super-wide table { font-size: 7.5pt !important; }
   body.print-landscape .report-super-wide th,
-  body.print-landscape .report-super-wide td { padding: 2pt 3pt !important; }
+  body.print-landscape .report-super-wide td,
+  body.print-compact   .report-super-wide th,
+  body.print-compact   .report-super-wide td { padding: 2pt 3pt !important; }
   /* Long text columns (item names, party names) may wrap to avoid pushing
-     numeric columns off the right edge. */
-  body.print-landscape table { word-break: normal; overflow-wrap: anywhere; }
+     numeric columns off the right edge. Matters more in portrait, where
+     there is less room to begin with. */
+  body.print-landscape table,
+  body.print-compact table { word-break: normal; overflow-wrap: anywhere; }
 
   /* Table page-break defaults. tfoot uses table-row-group (further down)
      so grand totals appear once at the end, not repeated per page. */

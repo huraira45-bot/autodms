@@ -157,10 +157,13 @@ export default function ReportShell({
     // Toggle the page-orientation class on <body> while this report is mounted.
     // We do it on body (not the wrapper) because @page bindings resolve at the
     // root document element in most browsers.
+    // Portrait reports still get the compact 8pt table treatment — only the
+    // paper orientation differs. Without this a `landscape={false}` report
+    // would print at full screen font size and waste pages.
     useEffect(() => {
-        if (!landscape) return;
-        document.body.classList.add('print-landscape');
-        return () => document.body.classList.remove('print-landscape');
+        const cls = landscape ? 'print-landscape' : 'print-compact';
+        document.body.classList.add(cls);
+        return () => document.body.classList.remove(cls);
     }, [landscape]);
 
     const wrapperClass = [
