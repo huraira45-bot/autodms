@@ -592,7 +592,7 @@ export function JcPartsCostMargin() {
                 // so each job card renders under its own sub-header.
                 const byJc = new Map();
                 for (const r of (data.rows || [])) {
-                    const k = r.BusinessUnitCode + ' ' + r.JobCardNo;
+                    const k = JSON.stringify([r.BusinessUnitCode, r.JobCardNo]);
                     if (!byJc.has(k)) byJc.set(k, []);
                     byJc.get(k).push(r);
                 }
@@ -738,7 +738,7 @@ export function JcPartsCostMargin() {
                                                         </div>
                                                     </td>
                                                 </tr>
-                                                {(byJc.get(b.Code + ' ' + jc.JobCardNo) || []).map((r, ri) => (
+                                                {(byJc.get(JSON.stringify([b.Code, jc.JobCardNo])) || []).map((r, ri) => (
                                                     <tr key={jc.JobCardNo + '-' + ri} style={trBody}>
                                                         <TD mono>{r.SlipNo}</TD>
                                                         <TD>{r.IssueDate}</TD>

@@ -4,6 +4,7 @@ import { Package, Plus, Search, Pencil, X } from 'lucide-react';
 import { useCan } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
 import { ErpControlPanel } from '../components/erp';
+import SearchableSelect from '../components/SearchableSelect';
 
 const API_BASE = '/api';
 
