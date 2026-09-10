@@ -86,7 +86,9 @@ exports.createItem = async (req, res) => {
     // / ManualNumber — set via follow-up UPDATE.
     const newId = result.recordset?.[0]?.NewItemId || result.recordset?.[0]?.ItemId;
     const ReOrderLevel = req.body.ReOrderLevel;
-    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation || ReOrderLevel || ManualNumber)) {
+    const { SupersededByItemId, SupersededByNumber } = req.body;
+    if (newId && (DepartmentID || req.body.JobTypeID || BinLocation || ReOrderLevel || ManualNumber
+                  || SupersededByItemId || SupersededByNumber)) {
       await pool.request()
         .input('id', sql.Int, newId)
         .input('deptId', sql.Int, DepartmentID || null)
@@ -94,10 +96,13 @@ exports.createItem = async (req, res) => {
         .input('bin', sql.NVarChar(50), BinLocation || null)
         .input('reorder', sql.Int, ReOrderLevel ? parseInt(ReOrderLevel) : null)
         .input('manNo', sql.NVarChar(100), ManualNumber || null)
+        .input('supId', sql.Int, SupersededByItemId ? parseInt(SupersededByItemId) : null)
+        .input('supNo', sql.NVarChar(100), SupersededByNumber || null)
         .query(`UPDATE InventItems
                 SET DepartmentID=@deptId, JobTypeID=@jobTypeId,
                     BinLocation=@bin, ReOrderLevel=@reorder,
-                    ManualNumber=@manNo
+                    ManualNumber=@manNo,
+                    SupersededByItemId=@supId, SupersededByNumber=@supNo
                 WHERE ItemId=@id`);
     }
 
@@ -111,7 +116,8 @@ exports.createItem = async (req, res) => {
 exports.updateItem = async (req, res) => {
   try {
     const { ItenName, ItemSalesPrice, ItemPurchasePrice, DepartmentID, JobTypeID,
-            CategoryID, BinLocation, UOMId, ItemBrandId, ManualNumber, ReOrderLevel } = req.body;
+            CategoryID, BinLocation, UOMId, ItemBrandId, ManualNumber, ReOrderLevel,
+            SupersededByItemId, SupersededByNumber } = req.body;
     const pool = await getPool();
 
     // Owner ask 2026-08-01: never let a part's sale price undercut its
@@ -170,6 +176,17 @@ exports.updateItem = async (req, res) => {
     if (ReOrderLevel !== undefined) {
       sets.push('ReOrderLevel=@reorder');
       r.input('reorder', sql.Int, ReOrderLevel === '' || ReOrderLevel === null ? null : parseInt(ReOrderLevel));
+    }
+    // Supersession (owner ask 2026-09-10). Both are clearable — sending '' must
+    // null the column, otherwise a part wrongly marked superseded could never
+    // be marked current again.
+    if (SupersededByItemId !== undefined) {
+      sets.push('SupersededByItemId=@supId');
+      r.input('supId', sql.Int, SupersededByItemId === '' || SupersededByItemId === null ? null : parseInt(SupersededByItemId));
+    }
+    if (SupersededByNumber !== undefined) {
+      sets.push('SupersededByNumber=@supNo');
+      r.input('supNo', sql.NVarChar(100), SupersededByNumber || null);
     }
     sets.push('DepartmentID=@deptId', 'JobTypeID=@jobTypeId');
     r.input('deptId', sql.Int, DepartmentID || null);

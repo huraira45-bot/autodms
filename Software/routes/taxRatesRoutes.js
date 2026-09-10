@@ -10,6 +10,9 @@ router.get( '/',                  requireAnyAccess(
                                       'sales_store:view', 'sales_ssr:view',
                                       'procurement_grn:view', 'procurement_grtn:view',
                                       'workshop_jobs:view',
+                                      // Spare Parts Catalog shows tax and the
+                                      // after-tax sale price per item.
+                                      'parts_spare:view',
                                       // Paint Lab needs GST rate for Paint GRN.
                                       'paint_lab_grn:view', 'paint_lab_issue:view',
                                   ), c.getCurrent);

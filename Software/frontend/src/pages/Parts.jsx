@@ -13,7 +13,10 @@ const emptyForm = {
   ItemType: 'Part',
   ItemSalesPrice: '', ItemPurchasePrice: '',
   ReOrderLevel: '',
+  SupersededByItemId: '', SupersededByNumber: '',
 };
+
+const money = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function Parts() {
   const { canInsert, canEdit } = useCan('parts_spare');
@@ -27,6 +30,11 @@ export default function Parts() {
   // Owner ask 2026-07-03: read-only "Total Issued" column, sourced from
   // /api/items/issued-summary. Keyed by ItemId.
   const [issuedByItem, setIssuedByItem] = useState({});
+  // Owner ask 2026-09-10: show tax and the after-tax sale price per item.
+  // GST is a per-line decision at transaction time (the issue/sale screens
+  // carry an IsGST toggle), so what the catalog shows is the current standard
+  // rate applied to the list price — a price-list figure, not a posted one.
+  const [gstRate, setGstRate] = useState(null);
 
   const [search, setSearch]   = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -35,13 +43,14 @@ export default function Parts() {
 
   const fetchData = async () => {
     try {
-      const [res, cat, uom, wh, br, iss] = await Promise.all([
+      const [res, cat, uom, wh, br, iss, tax] = await Promise.all([
         axios.get(`${API_BASE}/items`),
         axios.get(`${API_BASE}/inventory-config/categories`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/inventory-config/uoms`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/inventory-config/warehouses`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/inventory-config/brands`).catch(() => ({ data: [] })),
         axios.get(`${API_BASE}/items/issued-summary`).catch(() => ({ data: [] })),
+        axios.get(`${API_BASE}/tax-rates`).catch(() => ({ data: [] })),
       ]);
       setItems((res.data || []).filter(i => i.ItemType === 'Part'));
       setCategories(cat.data || []);
@@ -52,6 +61,12 @@ export default function Parts() {
       const idx = {};
       for (const row of (iss.data || [])) idx[row.ItemId] = row;
       setIssuedByItem(idx);
+      // /api/tax-rates answers { current: [...], scheduled: [...] } — not a
+      // flat array. Leave null (not 0) when GST isn't configured or the user
+      // can't read rates, so the columns say "not set" rather than quietly
+      // showing 0.00 tax as though it were a real zero-rated price.
+      const g = (tax.data?.current || []).find(t => t.TaxType === 'GST');
+      setGstRate(g ? Number(g.Rate) : null);
     } catch (err) { console.error(err); }
   };
 
@@ -88,6 +103,8 @@ export default function Parts() {
       ItemSalesPrice:    item.ItemSalesPrice ?? '',
       ItemPurchasePrice: item.ItemPurchasePrice ?? '',
       ReOrderLevel:      item.ReOrderLevel ?? '',
+      SupersededByItemId: item.SupersededByItemId ?? '',
+      SupersededByNumber: item.SupersededByNumber ?? '',
     });
     setShowForm(true);
   };
@@ -165,31 +182,61 @@ export default function Parts() {
                   <th>Category</th>
                   <th>Bin</th>
                   <th>UOM</th>
-                  <th style={{ textAlign: 'right' }}>Sale Price</th>
+                  <th style={{ textAlign: 'right' }} title="List price excluding sales tax">
+                    Sale Price<br /><small style={{ fontWeight: 400, color: '#94a3b8' }}>excl. tax</small>
+                  </th>
+                  <th style={{ textAlign: 'right' }}
+                      title={gstRate != null ? `GST at the current ${gstRate}% rate` : 'No GST rate configured'}>
+                    Tax<br /><small style={{ fontWeight: 400, color: '#94a3b8' }}>
+                      {gstRate != null ? `GST ${gstRate}%` : 'not set'}
+                    </small>
+                  </th>
+                  <th style={{ textAlign: 'right' }} title="What the customer pays — sale price plus sales tax">
+                    Sale Price<br /><small style={{ fontWeight: 400, color: '#94a3b8' }}>incl. tax</small>
+                  </th>
                   <th style={{ textAlign: 'right' }} title="Total quantity issued to job cards (read-only)">Issued</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={canEdit ? 8 : 7} className="table-empty-row">No parts match this search.</td></tr>
+                  <tr><td colSpan={canEdit ? 11 : 10} className="table-empty-row">No parts match this search.</td></tr>
                 ) : filtered.map(i => {
                   const iss = issuedByItem[i.ItemId];
+                  const sale = Number(i.ItemSalesPrice || 0);
+                  const taxAmt = (gstRate != null && sale > 0) ? sale * gstRate / 100 : null;
                   return (
                   <tr key={i.ItemId} onClick={() => canEdit && startEdit(i)} style={{ cursor: canEdit ? 'pointer' : 'default' }}>
-                    <td><code>{i.ManualNumber ?? i.ItemNumber ?? '—'}</code></td>
+                    <td>
+                      <code>{i.ManualNumber ?? i.ItemNumber ?? '—'}</code>
+                      {i.SupersededByCode && (
+                        <div style={{ marginTop: 2, fontSize: '0.7rem', color: '#b45309', whiteSpace: 'nowrap' }}
+                             title={i.SupersededByName ? `Superseded by ${i.SupersededByCode} — ${i.SupersededByName}` : `Superseded by ${i.SupersededByCode}`}>
+                          → <code style={{ color: '#b45309' }}>{i.SupersededByCode}</code>
+                        </div>
+                      )}
+                    </td>
                     <td>{i.ItenName}</td>
                     <td>{catName(i.CategoryID)}</td>
                     <td>{i.BinLocation || '—'}</td>
                     <td>{uomName(i.UOMId)}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {(() => {
-                        const sale = Number(i.ItemSalesPrice || 0);
                         const purchase = Number(i.ItemPurchasePrice || 0);
                         if (sale <= 0) return <span style={{ color: '#b45309', fontStyle: 'italic' }} title="No sale price set yet">Not set</span>;
-                        if (purchase > 0 && sale < purchase) return <span style={{ color: '#b91c1c', fontWeight: 700 }} title={`Below purchase price (${purchase.toFixed(2)})`}>{sale.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
-                        return sale.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        if (purchase > 0 && sale < purchase) return <span style={{ color: '#b91c1c', fontWeight: 700 }} title={`Below purchase price (${purchase.toFixed(2)})`}>{money(sale)}</span>;
+                        return money(sale);
                       })()}
+                    </td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#64748b' }}>
+                      {taxAmt == null
+                        ? <span style={{ color: '#cbd5e1' }}>—</span>
+                        : money(taxAmt)}
+                    </td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                      {taxAmt == null
+                        ? <span style={{ color: '#cbd5e1', fontWeight: 400 }}>—</span>
+                        : money(sale + taxAmt)}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: iss ? '#0f172a' : '#94a3b8', fontWeight: iss ? 600 : 400 }}
                         title={iss ? `Across ${iss.IssueCount} slip(s) — PKR ${Number(iss.TotalIssuedValue || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'No issues yet'}>
@@ -296,11 +343,56 @@ export default function Parts() {
                 </div>
               </div>
 
+              {/* Live tax preview, so the person setting the price sees what
+                  the customer will actually be charged without doing the sum. */}
+              {(() => {
+                const sp = Number(formData.ItemSalesPrice) || 0;
+                if (!(sp > 0) || gstRate == null) return null;
+                const t = sp * gstRate / 100;
+                return (
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6,
+                                padding: '8px 10px', fontSize: '0.78rem', color: '#475569',
+                                display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span>GST @ {gstRate}%</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      + {money(t)} &nbsp;=&nbsp; <strong style={{ color: '#0f172a' }}>{money(sp + t)}</strong>
+                    </span>
+                  </div>
+                );
+              })()}
+
               <div className="form-group">
                 <label>Reorder Level</label>
                 <input type="number" min="0" step="1" value={formData.ReOrderLevel}
                        placeholder="Alert when on-hand stock drops to this many units"
                        onChange={e => setFormData({ ...formData, ReOrderLevel: e.target.value })} />
+              </div>
+
+              {/* Supersession (owner ask 2026-09-10). Two ways to record it:
+                  pick the replacement from the catalog when it is stocked, or
+                  type the number from the parts manual when it is not yet. */}
+              <div className="form-group">
+                <label>Superseded By</label>
+                <SearchableSelect
+                  value={formData.SupersededByItemId || ''}
+                  onChange={v => setFormData({ ...formData, SupersededByItemId: v || '' })}
+                  options={items
+                    .filter(p => p.ItemId !== editingId)
+                    .map(p => ({
+                      id: p.ItemId,
+                      label: String(p.ManualNumber ?? p.ItemNumber ?? '—'),
+                      sub: p.ItenName || '',
+                    }))}
+                  placeholder="Search the replacement part…"
+                  title="Superseded by which part?"
+                />
+                <input type="text" value={formData.SupersededByNumber}
+                       style={{ marginTop: 6 }}
+                       placeholder="…or type the new part number if it isn't catalogued yet"
+                       onChange={e => setFormData({ ...formData, SupersededByNumber: e.target.value })} />
+                <p className="field-hint" style={{ marginTop: 4 }}>
+                  Marks this number as replaced by a newer one. Leave both blank if the part is current.
+                </p>
               </div>
 
               {editingId && (
