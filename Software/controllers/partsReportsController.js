@@ -544,7 +544,13 @@ exports.jcPartsCostMargin = async (req, res) => {
                    i.ItenName AS ItemName, i.ItemNumber, i.ManualNumber,
                    sid.IssueQuantity, sid.ItemRate, sid.DiscAmt, sid.TaxAmount,
                    sid.UnitLandedCost,
-                   i.WeightedRate, i.ItemPurchasePrice
+                   i.WeightedRate, i.ItemPurchasePrice,
+                   (SELECT TOP 1 pd.UnitLandedCost
+                    FROM   data_PurchaseDetail pd
+                    JOIN   data_PurchaseInfo   pi ON pi.PurchaseID = pd.PurchaseID
+                    WHERE  pd.ItemId = sid.ItemId
+                      AND  ISNULL(pd.UnitLandedCost, 0) > 0
+                    ORDER  BY pi.PurchaseDate DESC, pd.PurchaseDetailID DESC) AS LastGrnCost
             FROM   data_StockIssuetoJobCardDetail sid
             JOIN   data_StockIssuetoJobCard si ON si.StockIssueID = sid.StockIssueID
             LEFT   JOIN Addata_JobCardInfo  j ON j.JobCardId     = sid.JobCardId
@@ -558,10 +564,18 @@ exports.jcPartsCostMargin = async (req, res) => {
         const rows = r.recordset.map(x => {
             const qty       = Number(x.IssueQuantity || 0);
             const salePrice = Number(x.ItemRate || 0);
-            const captured  = x.UnitLandedCost !== null && x.UnitLandedCost !== undefined;
+            // A stored 0 is NOT a real cost. Until 2026-09-10 the issue routine
+            // resolved cost with ISNULL(WeightedRate, ItemPurchasePrice), which
+            // returns 0 whenever WeightedRate is 0 rather than NULL — and
+            // nothing ever maintained WeightedRate. Those lines were written
+            // with UnitLandedCost = 0, so treating "not null" as captured let
+            // them through as genuine zero-cost sales with no warning.
+            const captured  = Number(x.UnitLandedCost) > 0;
             const purchase  = captured
                 ? Number(x.UnitLandedCost)
-                : Number(x.WeightedRate ?? x.ItemPurchasePrice ?? 0);
+                : Number(x.WeightedRate || 0)
+                  || Number(x.ItemPurchasePrice || 0)
+                  || Number(x.LastGrnCost || 0);
             const discount  = Number(x.DiscAmt || 0);
             const tax       = Number(x.TaxAmount || 0);
             const saleNet   = salePrice * qty - discount;   // net of discount, excl. GST
@@ -590,6 +604,9 @@ exports.jcPartsCostMargin = async (req, res) => {
                 Margin:        +margin.toFixed(2),
                 MarginPct:     saleNet > 0 ? +(margin / saleNet * 100).toFixed(1) : 0,
                 CostEstimated: !captured,
+                // No cost anywhere: not on the line, not on the item, and the
+                // item was never received on a GRN. Margin here is meaningless.
+                CostMissing:   !captured && !(purchase > 0),
             };
         });
 
@@ -657,6 +674,11 @@ exports.jcPartsCostMargin = async (req, res) => {
             margin:    marginTotal,
             marginPct: saleNetTotal > 0 ? +(marginTotal / saleNetTotal * 100).toFixed(1) : 0,
             estimatedCostLines: rows.filter(x => x.CostEstimated).length,
+            missingCostLines:   rows.filter(x => x.CostMissing).length,
+            // Sale value of lines whose cost had to be recovered rather than
+            // read off the slip — the exposure if the recovered figure is wrong.
+            estimatedSaleValue: +rows.filter(x => x.CostEstimated)
+                                     .reduce((s, x) => s + x.SaleNet, 0).toFixed(2),
             byBusinessUnit,
         };
 

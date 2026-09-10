@@ -614,9 +614,17 @@ export function JcPartsCostMargin() {
                                                            padding: 12, background: '#fffbeb', border: '1px solid #fde68a' }}>
                                 <AlertTriangle size={16} color="#b45309" style={{ marginTop: 2, flexShrink: 0 }} />
                                 <div style={{ fontSize: '0.8rem', color: '#78350f' }}>
-                                    <strong>{fmtInt(t.estimatedCostLines)}</strong> of {fmtInt(t.lines || 0)} lines were issued
-                                    before landed cost was recorded on the slip. Those use the item's <em>current</em> cost
-                                    and are marked <strong>est.</strong> — their margin is indicative, not the historic figure.
+                                    <strong>{fmtInt(t.estimatedCostLines)}</strong> of {fmtInt(t.lines || 0)} lines
+                                    {t.estimatedSaleValue > 0 && <> (PKR <strong>{fmt(t.estimatedSaleValue)}</strong> of sales)</>}
+                                    {' '}carry no cost on the issue slip. Cost for these has been recovered from the item
+                                    record or its last GRN and is marked <strong>est.</strong> — indicative, not the historic figure.
+                                    {' '}<strong>These job cards posted no COGS to the GL and relieved no inventory</strong>,
+                                    so profit on them is currently overstated.
+                                    {t.missingCostLines > 0 && (
+                                        <> {' '}<strong>{fmtInt(t.missingCostLines)}</strong> line(s) have no cost anywhere —
+                                        never received on a GRN and no purchase price on the item — so their margin is meaningless
+                                        until someone sets a cost.</>
+                                    )}
                                 </div>
                             </div>
                         )}

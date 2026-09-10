@@ -1495,11 +1495,40 @@ exports.issuePartsToJobCard = async (req, res) => {
             try { gstRate = await resolveRate('GST'); } catch (e) { console.warn('GST rate not configured:', e.message); }
 
             for (const item of Items) {
-                // Resolve unit landed cost from InventItems (WeightedRate fallback to ItemPurchasePrice)
+                // Resolve unit landed cost for the COGS snapshot.
+                //
+                // This used to be ISNULL(WeightedRate, ItemPurchasePrice), which
+                // had two failures found 2026-09-10: ISNULL only falls back on
+                // NULL, so a WeightedRate of 0 returned 0 and never consulted
+                // ItemPurchasePrice; and nothing in AutoDMS ever maintains
+                // WeightedRate, so items created after the original import sit
+                // at 0 forever. Result: 400 issue lines (PKR 10.1M of parts)
+                // booked at zero cost, and because jobCardJournalBuilder only
+                // emits COGS/Inventory lines when partsCOGS > 0, 251 finalized
+                // job cards relieved no inventory at all.
+                //
+                // NULLIF(...,0) makes each step actually fall through, and the
+                // last resort is the real purchase cost off the most recent GRN
+                // line for the item (data_PurchaseDetail.UnitLandedCost, which
+                // grnController writes from the received ItemRate).
                 const costRes = await new sql.Request(transaction)
                     .input('iid', sql.Int, item.ItemId)
-                    .query('SELECT ISNULL(WeightedRate, ItemPurchasePrice) AS cost FROM InventItems WHERE ItemId=@iid');
+                    .query(`SELECT COALESCE(
+                                NULLIF(i.WeightedRate, 0),
+                                NULLIF(i.ItemPurchasePrice, 0),
+                                NULLIF((SELECT TOP 1 pd.UnitLandedCost
+                                        FROM   data_PurchaseDetail pd
+                                        JOIN   data_PurchaseInfo   pi ON pi.PurchaseID = pd.PurchaseID
+                                        WHERE  pd.ItemId = @iid
+                                          AND  ISNULL(pd.UnitLandedCost, 0) > 0
+                                        ORDER  BY pi.PurchaseDate DESC, pd.PurchaseDetailID DESC), 0),
+                                0) AS cost
+                            FROM InventItems i WHERE i.ItemId = @iid`);
                 const unitCost = costRes.recordset[0]?.cost ?? 0;
+                if (!(Number(unitCost) > 0)) {
+                    console.warn(`Parts issue: no cost could be resolved for ItemId=${item.ItemId} — ` +
+                                 `this line will post no COGS. Set a purchase price on the item.`);
+                }
 
                 const qty = Number(item.Quantity) || 0;
                 const rate = Number(item.Rate) || 0;
