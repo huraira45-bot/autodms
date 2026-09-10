@@ -183,6 +183,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity, LapsedCustomers } from './pages/reports/Service';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
+import { ReceivablesSubLedger } from './pages/reports/ReceivablesSubLedger';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, JcPartsCostMargin, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
@@ -608,6 +609,7 @@ function LegacySidebar() {
                 {canReport('trial_balance')         && <NavLink to="/reports/trial-balance"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> Trial Balance</NavLink>}
                 {canReport('trial_balance_extract') && <NavLink to="/reports/trial-balance-extract" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> TB Extract</NavLink>}
                 {canReport('gl_detail')             && <NavLink to="/reports/gl-detail"          className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> GL Detail</NavLink>}
+                {canReport('receivables_subledger') && <NavLink to="/reports/receivables-subledger" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><FileBarChart size={20} /> Receivables Sub-Ledger</NavLink>}
                 {canReport('pnl')                   && <NavLink to="/reports/pnl"                className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Profit &amp; Loss</NavLink>}
                 {canReport('pnl_department')        && <NavLink to="/reports/pnl-department"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> P&amp;L by Department</NavLink>}
                 {canReport('balance_sheet')         && <NavLink to="/reports/balance-sheet"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Balance Sheet</NavLink>}
@@ -1008,6 +1010,7 @@ function AppShell() {
                     <Route path="/reports/trial-balance-extract" element={
                         <ProtectedRoute moduleKey="reports"><TrialBalanceExtract /></ProtectedRoute>
                     } />
+                    <Route path="/reports/receivables-subledger" element={<ProtectedRoute><ReceivablesSubLedger /></ProtectedRoute>} />
                     <Route path="/reports/gl-detail" element={
                         <ProtectedRoute moduleKey="reports"><GLDetail /></ProtectedRoute>
                     } />

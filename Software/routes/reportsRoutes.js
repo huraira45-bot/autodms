@@ -10,6 +10,13 @@ const { requireAccess, requireAnyAccess } = require('../middleware/permissions')
 
 router.get('/trial-balance',          requireAccess('report:trial_balance'),         reports.getTrialBalance);
 router.get('/trial-balance-extract',  requireAccess('report:trial_balance_extract'), reports.getTrialBalanceExtract);
+// Trade Receivables Sub-Ledger — a deliberately narrow alternative to
+// granting the whole Trial Balance Extract / GL Detail. Scope is enforced in
+// the controller, not here.
+const rsl = require('../controllers/receivablesSubLedgerController');
+router.get('/receivables-subledger/groups', requireAccess('report:receivables_subledger'), rsl.getGroups);
+router.get('/receivables-subledger/ledger', requireAccess('report:receivables_subledger'), rsl.getPartyLedger);
+router.get('/receivables-subledger',        requireAccess('report:receivables_subledger'), rsl.getExtract);
 router.get('/gl-detail',              requireAccess('report:gl_detail'),             reports.getGLDetail);
 router.get('/customer-statement',     requireAccess('report:customer_statement'),    reports.getCustomerStatement);
 router.get('/supplier-statement',     requireAccess('report:supplier_statement'),    reports.getSupplierStatement);

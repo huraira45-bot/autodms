@@ -130,6 +130,9 @@ const SECTIONS = [
             { key: 'report:trial_balance',         label: 'Trial Balance',         kind: 'report' },
             { key: 'report:trial_balance_extract', label: 'Trial Balance Extract', kind: 'report' },
             { key: 'report:gl_detail',             label: 'GL Detail',             kind: 'report' },
+            // Safe to give a manager: covers only the trade-receivable groups,
+            // never the rest of the ledger. See receivablesSubLedgerController.
+            { key: 'report:receivables_subledger', label: 'Trade Receivables Sub-Ledger', kind: 'report' },
             { key: 'report:customer_statement',    label: 'Customer Statement',    kind: 'report' },
             { key: 'report:supplier_statement',    label: 'Supplier Statement',    kind: 'report' },
             { key: 'report:daily_cash_book',       label: 'Daily Cash Book',       kind: 'report' },
