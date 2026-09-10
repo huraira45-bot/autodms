@@ -28,7 +28,9 @@ export function InventoryValuation() {
         headers: [
             '#', 'Item Code', 'Part #', 'Item Name', 'Category', 'Location',
             'Warehouse', 'UOM', 'On Hand', 'Unit Price (PKR)',
-            'Total Amount (PKR)', 'Reorder Level',
+            'Total Amount (PKR)',
+            'Sale Price (PKR)', 'Sale Tax (PKR)', 'Sale Price incl. Tax (PKR)',
+            'Sale Value incl. Tax (PKR)', 'Reorder Level',
         ],
         rows: (data.rows || []).map((r, i) => [
             i + 1,
@@ -42,12 +44,18 @@ export function InventoryValuation() {
             Number(r.OnHand || 0),
             Number(r.Rate || 0),
             Number(r.Value || 0),
+            Number(r.SalePrice || 0),
+            Number(r.SaleTax || 0),
+            Number(r.SaleWithTax || 0),
+            Number(r.SaleValueWithTax || 0),
             Number(r.ReOrderLevel || 0),
         ]).concat([
             // Grand totals footer row
             ['', '', '', '', '', '', '', 'TOTAL',
              Number(data.totals?.totalQty || 0), '',
-             Number(data.totals?.totalValue || 0), ''],
+             Number(data.totals?.totalValue || 0),
+             '', Number(data.totals?.totalSaleTaxValue || 0),
+             '', Number(data.totals?.totalSaleWithTax || 0), ''],
         ]),
     });
 
@@ -98,6 +106,23 @@ export function InventoryValuation() {
                         <SummaryCard label="Total Stock Value (PKR)" value={fmt(data.totals.totalValue)} highlight />
                     </div>
 
+                    {/* Owner ask 2026-09-10: what the stock is worth at retail,
+                        alongside what it cost. GST is decided per line at sale
+                        time, so this is realisable value, not a tax liability. */}
+                    <div className="report-summary-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                        <SummaryCard label={`Sale Tax Rate`} value={data.totals.gstRate != null ? `GST ${data.totals.gstRate}%` : 'Not configured'} />
+                        <SummaryCard label="Sale Value excl. Tax (PKR)" value={fmt(data.totals.totalSaleValue)} />
+                        <SummaryCard label="Sale Tax (PKR)" value={fmt(data.totals.totalSaleTaxValue)} />
+                        <SummaryCard label="Sale Value incl. Tax (PKR)" value={fmt(data.totals.totalSaleWithTax)} highlight />
+                    </div>
+
+                    {data.totals.noSalePrice > 0 && (
+                        <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#78350f', display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.82rem' }}>
+                            <AlertTriangle size={16} />
+                            <span><strong>{fmtInt(data.totals.noSalePrice)}</strong> item(s) have no sale price set, so they contribute nothing to the sale-value totals above.</span>
+                        </div>
+                    )}
+
                     {data.totals.belowReorder > 0 && (
                         <div className="card" style={{ background: '#fef3c7', border: '1px solid #fbbf24', color: '#78350f', display: 'flex', gap: 8, alignItems: 'center' }}>
                             <AlertTriangle size={16} />
@@ -129,6 +154,9 @@ export function InventoryValuation() {
                                         <TH align="right">On Hand</TH>
                                         <TH align="right">Unit Price</TH>
                                         <TH align="right">Total Amount (PKR)</TH>
+                                        <TH align="right">Sale Price</TH>
+                                        <TH align="right">Sale Tax</TH>
+                                        <TH align="right">Sale Price incl. Tax</TH>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -151,6 +179,12 @@ export function InventoryValuation() {
                                                 </TD>
                                                 <TD align="right" color="#64748b">{fmt(r.Rate)}</TD>
                                                 <TD align="right" bold>{fmt(r.Value)}</TD>
+                                                <TD align="right" color="#64748b">
+                                                    {r.SalePrice > 0 ? fmt(r.SalePrice)
+                                                        : <span style={{ color: '#b45309', fontStyle: 'italic' }} title="No sale price set on this item">not set</span>}
+                                                </TD>
+                                                <TD align="right" color="#64748b">{r.SalePrice > 0 ? fmt(r.SaleTax) : '—'}</TD>
+                                                <TD align="right" bold color="#0f766e">{r.SalePrice > 0 ? fmt(r.SaleWithTax) : '—'}</TD>
                                             </tr>
                                         );
                                     })}
@@ -163,6 +197,9 @@ export function InventoryValuation() {
                                         <TD align="right" bold>{fmt(data.totals.totalQty)}</TD>
                                         <td></td>
                                         <TD align="right" bold>{fmt(data.totals.totalValue)}</TD>
+                                        <TD align="right" bold title="Stock at sale price, excluding tax">{fmt(data.totals.totalSaleValue)}</TD>
+                                        <TD align="right" bold title="Tax on that sale value">{fmt(data.totals.totalSaleTaxValue)}</TD>
+                                        <TD align="right" bold color="#0f766e" title="Stock at sale price including tax">{fmt(data.totals.totalSaleWithTax)}</TD>
                                     </tr>
                                 </tfoot>
                             </table>

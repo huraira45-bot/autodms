@@ -8,7 +8,7 @@ exports.saveStoreSale = async (req, res) => {
       SaleDate, PartyID, CustomerName, VehicleName, Variant, PaymentMode,
       NICNo, NTNNo, MobileNo, Remarks, City, FBRInvoiceNo, TotalBillAmount,
       TotalTaxAmount, TotalDiscount, NetPayable, WHID, Items,
-      PaymentBankID, DeliveryExpense,
+      PaymentBankID, DeliveryExpense, CareOff,
     } = req.body;
 
     const pool = await getPool();
@@ -68,9 +68,10 @@ exports.saveStoreSale = async (req, res) => {
           .input('pbi', sql.Int, PaymentBankID ? parseInt(PaymentBankID) : null)
           .input('ntn', sql.NVarChar(50), NTNNo || null)
           .input('de',  sql.Decimal(18,2), parseFloat(DeliveryExpense) || 0)
+          .input('co',  sql.NVarChar(200), CareOff || null)
           .query(`UPDATE data_StoreSaleInfo
                   SET CreatedBy=@by, CreatedByName=@byName, PaymentBankID=@pbi,
-                      NTNNo=@ntn, DeliveryExpense=@de
+                      NTNNo=@ntn, DeliveryExpense=@de, CareOff=@co
                   WHERE SaleID=@id`);
 
         // Bulk landed-cost snapshot in a single UPDATE...FROM (no N+1 loop).
@@ -233,7 +234,7 @@ exports.updateStoreSale = async (req, res) => {
             SaleDate, PartyID, CustomerName, VehicleName, Variant, PaymentMode,
             NICNo, NTNNo, MobileNo, Remarks, City, FBRInvoiceNo,
             TotalBillAmount, TotalTaxAmount, TotalDiscount, NetPayable, WHID, PaymentBankID,
-            DeliveryExpense, Items,
+            DeliveryExpense, CareOff, Items,
         } = req.body;
 
         await new sql.Request(tx)
@@ -257,6 +258,7 @@ exports.updateStoreSale = async (req, res) => {
             .input('pbid', sql.Int,           PaymentBankID ? parseInt(PaymentBankID) : null)
             .input('ntn',  sql.NVarChar(50),  NTNNo || null)
             .input('de',   sql.Decimal(18,2), parseFloat(DeliveryExpense) || 0)
+            .input('co',   sql.NVarChar(200), CareOff || null)
             .query(`UPDATE data_StoreSaleInfo
                     SET SaleDate=@sd, PartyID=@pid, CustomerName=@cn,
                         VehicleName=@vn, Variant=@var, PaymentMode=@pm,
@@ -264,7 +266,8 @@ exports.updateStoreSale = async (req, res) => {
                         FBRInvoiceNo=@fbr,
                         TotalBillAmount=@tba, TotalTaxAmount=@tta,
                         TotalDiscount=@td, NetPayable=@np,
-                        WHID=@whid, PaymentBankID=@pbid, DeliveryExpense=@de
+                        WHID=@whid, PaymentBankID=@pbid, DeliveryExpense=@de,
+                        CareOff=@co
                     WHERE SaleID=@id`);
 
         await new sql.Request(tx)

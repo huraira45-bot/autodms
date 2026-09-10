@@ -37,6 +37,40 @@ exports.getItemsIssuedSummary = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/items/stock-on-hand
+ * Owner ask 2026-09-10: the part pickers on Store Sale and Parts Issue should
+ * show how many are actually in stock, so the counter finds out before adding
+ * the line rather than at save time via "Insufficient stock".
+ *
+ * Same formula as services/stockBalanceService.getOnHand — arrivals plus the
+ * signed in/out ledger — but aggregated for every item in one pass instead of
+ * one query per item. Returns [{ ItemId, OnHand }].
+ *
+ * This is a display hint only. The authoritative check stays assertEnoughStock
+ * inside the save transaction, because stock can move between the picker
+ * rendering and the save.
+ */
+exports.getStockOnHand = async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query(`
+      SELECT i.ItemId,
+             ISNULL(a.Qty, 0) + ISNULL(io.Qty, 0) AS OnHand
+      FROM InventItems i
+      LEFT JOIN (SELECT ItemId, SUM(ISNULL(Quantity,0)) AS Qty
+                 FROM data_StockArrivalDetail GROUP BY ItemId) a  ON a.ItemId  = i.ItemId
+      LEFT JOIN (SELECT ItemId, SUM(ISNULL(Quantity,0)) AS Qty
+                 FROM data_StockInOutDetail   GROUP BY ItemId) io ON io.ItemId = i.ItemId
+      WHERE ISNULL(i.ItemType, 'Part') = 'Part'
+    `);
+    res.json(r.recordset.map(x => ({ ItemId: x.ItemId, OnHand: Number(x.OnHand) || 0 })));
+  } catch (err) {
+    console.error('getStockOnHand:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.createItem = async (req, res) => {
   try {
     const {

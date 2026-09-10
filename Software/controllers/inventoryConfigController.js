@@ -147,3 +147,107 @@ exports.deleteWarehouse = async (req, res) => {
     res.json({ message: 'Warehouse archived' });
   } catch (err) { res.status(400).json({ error: err.message }); }
 };
+
+// ---------------------------------------------------------------------------
+// UPDATES — owner ask 2026-09-10: "in inventory setting there must be an
+// option to edit the values". Until now these four lists could only be created
+// and deleted, so fixing a typo in a category or warehouse name meant deleting
+// it — which refuseIfInUse blocks the moment anything references it, leaving
+// the bad name stuck permanently.
+//
+// Renaming is safe in a way deleting is not: every reference is by id, so the
+// label can change without touching a single transaction row.
+// ---------------------------------------------------------------------------
+
+// Rejects blank/whitespace names before they reach the database, and rejects a
+// name already used by a DIFFERENT row so the lists stay unambiguous.
+async function assertNameFree(pool, { table, nameCol, idCol, id, value, label }) {
+    const trimmed = (value || '').trim();
+    if (!trimmed) {
+        const e = new Error(`${label} name cannot be empty.`); e.status = 400; throw e;
+    }
+    const dup = await pool.request()
+        .input('n', sql.NVarChar(200), trimmed)
+        .input('id', sql.Int, id)
+        .query(`SELECT TOP 1 ${idCol} FROM ${table} WHERE ${nameCol} = @n AND ${idCol} <> @id`);
+    if (dup.recordset.length) {
+        const e = new Error(`Another ${label.toLowerCase()} is already called "${trimmed}".`);
+        e.status = 409; throw e;
+    }
+    return trimmed;
+}
+
+exports.updateCategory = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const pool = await getPool();
+        const name = await assertNameFree(pool, {
+            table: 'InventCategory', nameCol: 'CategoryName', idCol: 'CategoryID',
+            id, value: req.body.CategoryName, label: 'Category',
+        });
+        const r = await pool.request().input('id', sql.Int, id)
+            .input('n', sql.NVarChar(100), name)
+            .query('UPDATE InventCategory SET CategoryName=@n WHERE CategoryID=@id');
+        if (r.rowsAffected[0] === 0) return res.status(404).json({ error: 'Category not found' });
+        res.json({ message: 'Category updated', CategoryName: name });
+    } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};
+
+exports.updateBrand = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const pool = await getPool();
+        const name = await assertNameFree(pool, {
+            table: 'InventItemBrands', nameCol: 'BrandName', idCol: 'ItemBrandId',
+            id, value: req.body.BrandName, label: 'Brand',
+        });
+        const r = await pool.request().input('id', sql.Int, id)
+            .input('n', sql.NVarChar(100), name)
+            .query('UPDATE InventItemBrands SET BrandName=@n WHERE ItemBrandId=@id');
+        if (r.rowsAffected[0] === 0) return res.status(404).json({ error: 'Brand not found' });
+        res.json({ message: 'Brand updated', BrandName: name });
+    } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};
+
+exports.updateUOM = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const pool = await getPool();
+        const name = await assertNameFree(pool, {
+            table: 'InventUOM', nameCol: 'UOMName', idCol: 'UOMId',
+            id, value: req.body.UOMName, label: 'Unit of measure',
+        });
+        // Scale is intentionally NOT editable here. It converts between a unit
+        // and the item's base unit, and historic GRN / issue quantities were
+        // converted with the OLD scale -- changing it silently rewrites what
+        // every past document meant. (Precisely the gram/piece class of bug
+        // that corrupted the paint stock in Aug 2026.)
+        const r = await pool.request().input('id', sql.Int, id)
+            .input('n', sql.NVarChar(100), name)
+            .query('UPDATE InventUOM SET UOMName=@n WHERE UOMId=@id');
+        if (r.rowsAffected[0] === 0) return res.status(404).json({ error: 'Unit of measure not found' });
+        res.json({ message: 'Unit of measure updated', UOMName: name });
+    } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};
+
+exports.updateWarehouse = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const { WhCode, PhoneNo, LocationAddress } = req.body;
+        const pool = await getPool();
+        const name = await assertNameFree(pool, {
+            table: 'InventWareHouse', nameCol: 'WHDesc', idCol: 'WHID',
+            id, value: req.body.WHDesc, label: 'Warehouse',
+        });
+        const r = await pool.request().input('id', sql.Int, id)
+            .input('n',    sql.NVarChar(200), name)
+            .input('code', sql.NVarChar(50),  WhCode || null)
+            .input('ph',   sql.NVarChar(50),  PhoneNo || null)
+            .input('addr', sql.NVarChar(sql.MAX), LocationAddress || null)
+            .query(`UPDATE InventWareHouse
+                    SET WHDesc=@n, WhCode=@code, PhoneNo=@ph, LocationAddress=@addr
+                    WHERE WHID=@id`);
+        if (r.rowsAffected[0] === 0) return res.status(404).json({ error: 'Warehouse not found' });
+        res.json({ message: 'Warehouse updated', WHDesc: name });
+    } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+};

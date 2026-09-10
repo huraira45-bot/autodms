@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Plus, Warehouse, Trash2 } from 'lucide-react';
+import { Plus, Warehouse, Trash2, Pencil, Check, X } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import { PageHeader } from '../components/UXPrimitives';
 import { ErpControlPanel } from '../components/erp';
@@ -83,6 +83,61 @@ export default function InventorySettings() {
   // Owner ask 2026-07-03: allow deleting config rows. Categories / brands /
   // UOMs are hard-deleted if unused; the backend returns 409 with a hint
   // if the row is still referenced by any part. Warehouses are archived.
+  // Owner ask 2026-09-10: "in inventory setting there must be an option to
+  // edit the values". These lists could only be created and deleted, and
+  // deleting is refused the moment anything references the row -- so a typo in
+  // a category or warehouse name was stuck for good. Renaming is safe where
+  // deleting is not: everything references these by id, so the label can change
+  // without touching a single transaction row.
+  //
+  // editing = { endpoint, id, field, value, extra? } -- one row at a time.
+  const [editing, setEditing] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const beginEdit = (endpoint, id, field, value, extra = {}) =>
+    setEditing({ endpoint, id, field, value: value || '', extra });
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    const value = (editing.value || '').trim();
+    if (!value) {
+      notify({ type: 'warning', title: 'Name required', message: 'Enter a name before saving.' });
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await axios.put(`${API_BASE}/inventory-config/${editing.endpoint}/${editing.id}`,
+                      { [editing.field]: value, ...editing.extra });
+      notify({ type: 'success', title: 'Saved', message: value });
+      setEditing(null);
+      fetchData();
+    } catch (err) {
+      notify({ type: 'error', title: 'Could not save', message: err.response?.data?.error || err.message });
+    } finally { setSavingEdit(false); }
+  };
+
+  // Inline name editor shared by all four lists.
+  const EditRow = ({ children }) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flex: 1 }}>{children}</span>
+  );
+
+  const editControls = (endpoint, id, field, value, extra) => {
+    const isEditing = editing && editing.endpoint === endpoint && editing.id === id;
+    if (isEditing) {
+      return (
+        <EditRow>
+          <input autoFocus value={editing.value}
+                 onChange={e => setEditing({ ...editing, value: e.target.value })}
+                 onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null); }}
+                 style={{ flex: 1, padding: '4px 8px', border: '1px solid #cbd5e1', borderRadius: 4, fontSize: '0.9rem' }} />
+          <button style={{ ...iconBtn, color: '#16a34a', marginLeft: 0 }} title="Save" disabled={savingEdit} onClick={saveEdit}><Check size={15} /></button>
+          <button style={{ ...iconBtn, color: '#64748b', marginLeft: 0 }} title="Cancel" disabled={savingEdit} onClick={() => setEditing(null)}><X size={15} /></button>
+        </EditRow>
+      );
+    }
+    return null;
+  };
+
   const handleDelete = async (kind, endpoint, id, label) => {
     const ok = await confirm({
       title: `Delete ${kind}?`,
@@ -118,9 +173,12 @@ export default function InventorySettings() {
           </form>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {categories.map(c => (
-              <li key={c.CategoryID} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-                <span>{c.CategoryName} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>(ID: {c.CategoryID})</span></span>
-                <button style={iconBtn} title="Delete category" onClick={() => handleDelete('category', 'categories', c.CategoryID, c.CategoryName)}><Trash2 size={15} /></button>
+              <li key={c.CategoryID} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {editControls('categories', c.CategoryID, 'CategoryName') || (<>
+                  <span>{c.CategoryName} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>(ID: {c.CategoryID})</span></span>
+                  <button style={{ ...iconBtn, color: '#2563eb' }} title="Rename category" onClick={() => beginEdit('categories', c.CategoryID, 'CategoryName', c.CategoryName)}><Pencil size={15} /></button>
+                  <button style={{ ...iconBtn, marginLeft: 0 }} title="Delete category" onClick={() => handleDelete('category', 'categories', c.CategoryID, c.CategoryName)}><Trash2 size={15} /></button>
+                </>)}
               </li>
             ))}
           </ul>
@@ -134,9 +192,12 @@ export default function InventorySettings() {
           </form>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {uoms.map(u => (
-              <li key={u.UOMId} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-                <span>{u.UOMName} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>(ID: {u.UOMId})</span></span>
-                <button style={iconBtn} title="Delete unit" onClick={() => handleDelete('unit of measure', 'uoms', u.UOMId, u.UOMName)}><Trash2 size={15} /></button>
+              <li key={u.UOMId} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {editControls('uoms', u.UOMId, 'UOMName') || (<>
+                  <span>{u.UOMName} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>(ID: {u.UOMId})</span></span>
+                  <button style={{ ...iconBtn, color: '#2563eb' }} title="Rename unit (the conversion scale is not editable)" onClick={() => beginEdit('uoms', u.UOMId, 'UOMName', u.UOMName)}><Pencil size={15} /></button>
+                  <button style={{ ...iconBtn, marginLeft: 0 }} title="Delete unit" onClick={() => handleDelete('unit of measure', 'uoms', u.UOMId, u.UOMName)}><Trash2 size={15} /></button>
+                </>)}
               </li>
             ))}
           </ul>
@@ -151,9 +212,13 @@ export default function InventorySettings() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {brands.map(b => (
               <span key={b.ItemBrandId} style={{ background: '#f1f5f9', padding: '4px 6px 4px 12px', borderRadius: '16px', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                {b.BrandName}
-                <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2, display: 'inline-flex' }}
-                        title="Delete brand" onClick={() => handleDelete('brand', 'brands', b.ItemBrandId, b.BrandName)}><Trash2 size={13} /></button>
+                {editControls('brands', b.ItemBrandId, 'BrandName') || (<>
+                  {b.BrandName}
+                  <button style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', padding: 2, display: 'inline-flex' }}
+                          title="Rename brand" onClick={() => beginEdit('brands', b.ItemBrandId, 'BrandName', b.BrandName)}><Pencil size={13} /></button>
+                  <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2, display: 'inline-flex' }}
+                          title="Delete brand" onClick={() => handleDelete('brand', 'brands', b.ItemBrandId, b.BrandName)}><Trash2 size={13} /></button>
+                </>)}
               </span>
             ))}
           </div>
@@ -176,11 +241,14 @@ export default function InventorySettings() {
             {warehouses.map(w => (
               <li key={w.WHID} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Warehouse size={16} color="var(--text-muted)" />
-                <div>
-                  <div style={{ fontWeight: '500' }}>{w.WHDesc}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{w.WhCode}</div>
-                </div>
-                <button style={iconBtn} title="Archive warehouse" onClick={() => handleDelete('warehouse', 'warehouses', w.WHID, w.WHDesc)}><Trash2 size={15} /></button>
+                {editControls('warehouses', w.WHID, 'WHDesc', w.WHDesc, { WhCode: w.WhCode, PhoneNo: w.PhoneNo, LocationAddress: w.LocationAddress }) || (<>
+                  <div>
+                    <div style={{ fontWeight: '500' }}>{w.WHDesc}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{w.WhCode}</div>
+                  </div>
+                  <button style={{ ...iconBtn, color: '#2563eb' }} title="Rename warehouse" onClick={() => beginEdit('warehouses', w.WHID, 'WHDesc', w.WHDesc, { WhCode: w.WhCode, PhoneNo: w.PhoneNo, LocationAddress: w.LocationAddress })}><Pencil size={15} /></button>
+                  <button style={{ ...iconBtn, marginLeft: 0 }} title="Archive warehouse" onClick={() => handleDelete('warehouse', 'warehouses', w.WHID, w.WHDesc)}><Trash2 size={15} /></button>
+                </>)}
               </li>
             ))}
           </ul>

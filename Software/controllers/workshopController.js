@@ -1631,6 +1631,135 @@ exports.issuePartsToJobCard = async (req, res) => {
  * If the line was the only one in its parent issue, the issue header + the
  * stock-out header are deleted too so we don't leave empty parents.
  */
+/**
+ * PATCH /api/workshop/parts-issue/line/:detailId
+ * Owner ask 2026-09-10: "when i issue part if the job card is not finalized it
+ * should be able to edit it". Until now a wrong quantity or rate could only be
+ * deleted and re-issued, which burns a new slip line and loses the original.
+ *
+ * Accepts any of { Quantity, ItemRate, Discount, DiscAmt, IsGST }.
+ *
+ * Quantity is the delicate one: the issue already moved stock, so a change has
+ * to move the difference too. data_StockInOutDetail holds ONE signed row per
+ * (issue, item) — negative for an issue — so the edit adjusts that row rather
+ * than writing a second movement, keeping one row per issued part exactly as
+ * the original issue and deletePartsIssueLine both assume.
+ *
+ * Tax is always recomputed rather than trusted from the client, so the line's
+ * GST can never drift from its own quantity, rate and discount.
+ */
+exports.updatePartsIssueLine = async (req, res) => {
+    const detailId = parseInt(req.params.detailId);
+    if (!detailId) return res.status(400).json({ error: 'Invalid id.' });
+
+    try {
+        const pool = await getPool();
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            const lineRes = await new sql.Request(tx)
+                .input('did', sql.Int, detailId)
+                .query(`SELECT d.StockIssueDetailID, d.StockIssueID, d.ItemId,
+                               d.Quantity, d.IssueQuantity, d.ItemRate,
+                               d.Discount, d.DiscAmt, d.TaxRate, d.TaxAmount,
+                               i.JobCardId, ISNULL(jc.IsFinalized, 0) AS IsFinalized,
+                               it.ItenName
+                        FROM data_StockIssuetoJobCardDetail d
+                        INNER JOIN data_StockIssuetoJobCard i ON i.StockIssueID = d.StockIssueID
+                        LEFT  JOIN Addata_JobCardInfo jc      ON jc.JobCardId   = i.JobCardId
+                        LEFT  JOIN InventItems it             ON it.ItemId      = d.ItemId
+                        WHERE d.StockIssueDetailID = @did`);
+            if (!lineRes.recordset.length) throw new Error('Issued line not found.');
+            const line = lineRes.recordset[0];
+            if (line.IsFinalized) {
+                const e = new Error('Job Card is finalized — cannot edit this line. Unfinalize the JC first.');
+                e.statusCode = 423; throw e;
+            }
+
+            const oldQty = Number(line.IssueQuantity ?? line.Quantity ?? 0);
+            const newQty = req.body.Quantity !== undefined ? Number(req.body.Quantity) : oldQty;
+            const newRate = req.body.ItemRate !== undefined ? Number(req.body.ItemRate) : Number(line.ItemRate || 0);
+            const newDiscPct = req.body.Discount !== undefined ? Number(req.body.Discount) : Number(line.Discount || 0);
+            const newDiscAmt = req.body.DiscAmt !== undefined ? Number(req.body.DiscAmt) : Number(line.DiscAmt || 0);
+
+            if (!(newQty > 0)) throw new Error('Quantity must be greater than zero. Delete the line instead.');
+            if (newRate < 0)   throw new Error('Rate cannot be negative.');
+            if (newDiscAmt < 0) throw new Error('Discount cannot be negative.');
+            if (newDiscAmt > newQty * newRate) {
+                throw new Error(`Discount (${newDiscAmt.toFixed(2)}) cannot exceed the line value (${(newQty * newRate).toFixed(2)}).`);
+            }
+
+            // Only an INCREASE needs a stock check, and only for the delta —
+            // the units already on this line are ours to keep.
+            const delta = newQty - oldQty;
+            if (delta > 0) {
+                await assertEnoughStock(tx, [{ ItemId: line.ItemId, Quantity: delta, ItenName: line.ItenName }]);
+            }
+
+            if (delta !== 0) {
+                // Issues are stored as NEGATIVE quantities in the in/out ledger,
+                // so issuing more makes the row more negative.
+                const ioRes = await new sql.Request(tx)
+                    .input('iid', sql.Int, line.StockIssueID)
+                    .query('SELECT StockIOID FROM data_StockInOutInfo WHERE IssuanceID=@iid');
+                let adjusted = 0;
+                for (const r of ioRes.recordset) {
+                    const upd = await new sql.Request(tx)
+                        .input('ioId', sql.Int, r.StockIOID)
+                        .input('itemId', sql.Int, line.ItemId)
+                        .input('delta', sql.Numeric(18, 2), delta)
+                        .query(`UPDATE data_StockInOutDetail
+                                SET Quantity = Quantity - @delta
+                                WHERE StockIOID=@ioId AND ItemId=@itemId`);
+                    adjusted += upd.rowsAffected[0] || 0;
+                }
+                if (adjusted === 0) {
+                    // No movement row to adjust means stock would silently drift.
+                    throw new Error('Could not find the stock movement for this line, so the quantity was not changed. Delete the line and re-issue it instead.');
+                }
+            }
+
+            let gstRate = 0;
+            try { gstRate = await resolveRate('GST'); } catch (e) { console.warn('GST rate not configured:', e.message); }
+            const isTaxable = req.body.IsGST === undefined
+                ? Number(line.TaxRate || 0) > 0
+                : !!req.body.IsGST;
+            const tax = isTaxable
+                ? snapshotTax(newRate * newQty, newDiscAmt, gstRate)
+                : { taxRate: 0, taxAmount: 0 };
+
+            await new sql.Request(tx)
+                .input('did',  sql.Int,            detailId)
+                .input('qty',  sql.Numeric(18, 2), newQty)
+                .input('rate', sql.Numeric(18, 2), newRate)
+                .input('disc', sql.Decimal(18, 3), newDiscPct)
+                .input('da',   sql.Decimal(18, 3), newDiscAmt)
+                .input('tr',   sql.Decimal(8, 4),  tax.taxRate)
+                .input('ta',   sql.Decimal(18, 2), tax.taxAmount)
+                .query(`UPDATE data_StockIssuetoJobCardDetail
+                        SET Quantity=@qty, IssueQuantity=@qty,
+                            ItemRate=@rate, StockRate=@rate,
+                            Discount=@disc, DiscAmt=@da,
+                            TaxRate=@tr, TaxAmount=@ta
+                        WHERE StockIssueDetailID=@did`);
+
+            await tx.commit();
+            res.json({
+                message: 'Line updated',
+                StockIssueDetailID: detailId,
+                Quantity: newQty, ItemRate: newRate,
+                DiscAmt: newDiscAmt, TaxAmount: tax.taxAmount,
+            });
+        } catch (inner) {
+            await tx.rollback();
+            throw inner;
+        }
+    } catch (err) {
+        console.error('updatePartsIssueLine:', err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
 exports.deletePartsIssueLine = async (req, res) => {
     const detailId = parseInt(req.params.detailId);
     if (!detailId) return res.status(400).json({ error: 'Invalid id.' });

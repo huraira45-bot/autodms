@@ -16,6 +16,17 @@ router.get( '/',     requireAnyAccess(
 router.get('/issued-summary', requireAnyAccess('parts_spare:view'),
           itemController.getItemsIssuedSummary);
 
+// On-hand quantity per part, shown in the Store Sale / Parts Issue pickers.
+// Same read audience as the item list itself — anyone who can pick a part
+// needs to see how many are left.
+router.get('/stock-on-hand', requireAnyAccess(
+                       'parts_spare:view',
+                       'procurement_grn:view', 'procurement_grtn:view',
+                       'sales_store:view',     'sales_ssr:view',
+                       'workshop_parts_issue:view', 'workshop_jobs:view',
+                       'inventory_settings:view',
+                     ), itemController.getStockOnHand);
+
 // The same /api/items endpoint creates BOTH parts (ItemType='Part') and
 // labour services (ItemType='Service'). Workshop managers who own the labour
 // catalog have workshop_labour:insert but not parts_spare:insert, so a narrow

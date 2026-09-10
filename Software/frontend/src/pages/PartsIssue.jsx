@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   Package, Search, Plus, Trash2, Save, Loader2, Printer,
-  Percent, DollarSign, CheckCircle2, Circle, ClipboardList,
+  Percent, DollarSign, CheckCircle2, Circle, ClipboardList, Pencil,
 } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
 import { useCan } from '../context/AuthContext';
@@ -25,10 +25,14 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigit
  */
 export default function PartsIssue() {
   const { notify, confirm } = useFeedback();
-  const { canDelete } = useCan('workshop_parts_issue');
+  const { canDelete, canEdit } = useCan('workshop_parts_issue');
 
   const [jobCards, setJobCards]         = useState([]);
   const [items, setItems]               = useState([]);
+  const [stockByItem, setStockByItem]   = useState({});
+  const [jobBoxOpen, setJobBoxOpen]     = useState(false);
+  const [editIssued, setEditIssued]     = useState(null);   // issued line being edited in place
+  const [savingEdit, setSavingEdit]     = useState(false);
   const [issuedParts, setIssuedParts]   = useState([]);   // saved lines on the selected JC
   const [jobSearch, setJobSearch]       = useState('');
   const [selectedJob, setSelectedJob]   = useState(null);
@@ -53,11 +57,17 @@ export default function PartsIssue() {
   useEffect(() => {
     (async () => {
       try {
-        const [it, tx] = await Promise.all([
+        const [it, tx, soh] = await Promise.all([
           axios.get(`${API}/items`),
           axios.get(`${API}/tax-rates`).catch(() => ({ data: { current: [] } })),
+          axios.get(`${API}/items/stock-on-hand`).catch(() => ({ data: [] })),
         ]);
         setItems(it.data || []);
+        // Owner ask 2026-09-10: show on-hand qty while picking, so a short
+        // part is obvious before the line is added rather than at save time.
+        const m = {};
+        for (const r of (soh.data || [])) m[r.ItemId] = Number(r.OnHand) || 0;
+        setStockByItem(m);
         const gst = (tx.data?.current || []).find(r => (r.TaxType || '').toUpperCase() === 'GST');
         const rate = gst ? parseFloat(gst.Rate) : 18;
         setGstRate(rate);
@@ -82,14 +92,39 @@ export default function PartsIssue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectJobCardId]);
 
-  const searchJobs = async (val) => {
-    setJobSearch(val);
-    if (val.length < 2) { setJobCards([]); return; }
+  // Owner ask 2026-09-10: "make the job card finding easy".
+  //
+  // Three things were making it hard: nothing showed until you typed 2
+  // characters (so you had to already know what you were looking for),
+  // finalized job cards came back in the results even though parts cannot be
+  // issued to them, and every keystroke fired its own request so results
+  // arrived out of order on a slow link.
+  //
+  // Now: open job cards are listed as soon as the box is focused, finalized
+  // ones are filtered out, and the lookup is debounced with a sequence guard
+  // so only the newest response is allowed to land.
+  const jobSeq = useRef(0);
+
+  const runJobSearch = useCallback(async (val) => {
+    const seq = ++jobSeq.current;
     try {
-      const res = await axios.get(`${API}/workshop/job-cards?search=${val}`);
-      setJobCards(res.data);
-    } catch (err) { console.error(err); }
-  };
+      const res = await axios.get(`${API}/workshop/job-cards`, {
+        params: { ...(val ? { search: val } : {}), finalized: 'not_finalized' },
+      });
+      if (seq !== jobSeq.current) return;   // a newer search already answered
+      // Belt and braces: the endpoint is asked for open cards, but filter
+      // here too so a finalized JC can never be offered for issuing.
+      setJobCards((res.data || []).filter(j => !j.IsFinalized).slice(0, 25));
+    } catch (err) { if (seq === jobSeq.current) setJobCards([]); }
+  }, []);
+
+  useEffect(() => {
+    if (!jobBoxOpen) return;
+    const t = setTimeout(() => runJobSearch(jobSearch.trim()), jobSearch.trim() ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [jobSearch, jobBoxOpen, runJobSearch]);
+
+  const searchJobs = (val) => setJobSearch(val);
 
   const selectJob = async (job) => {
     setSelectedJob(job);
@@ -189,6 +224,46 @@ export default function PartsIssue() {
     const rate = Number(p.ItemRate || 0);
     return s + (qty * rate - Number(p.DiscAmt || 0) + Number(p.TaxAmount || 0));
   }, 0);
+
+  // Owner ask 2026-09-10: edit an already-issued line while the JC is open,
+  // instead of deleting and re-issuing. The server re-derives GST and moves
+  // the stock difference, so only qty / rate / discount are sent.
+  const startEditIssued = (line) => {
+    setEditIssued({
+      StockIssueDetailID: line.StockIssueDetailID,
+      ItemName: line.ItemName,
+      Quantity: Number(line.IssueQuantity || 0),
+      ItemRate: Number(line.ItemRate || 0),
+      DiscAmt:  Number(line.DiscAmt || 0),
+    });
+  };
+
+  const saveEditIssued = async () => {
+    if (!editIssued) return;
+    const qty = Number(editIssued.Quantity) || 0;
+    const rate = Number(editIssued.ItemRate) || 0;
+    const disc = Number(editIssued.DiscAmt) || 0;
+    if (qty <= 0)  return notify({ type: 'warning', title: 'Quantity required', message: 'Use delete to remove the line entirely.' });
+    if (disc > qty * rate) return notify({ type: 'warning', title: 'Discount too high', message: `Discount cannot exceed ${fmt(qty * rate)}.` });
+    setSavingEdit(true);
+    try {
+      await axios.patch(`${API}/workshop/parts-issue/line/${editIssued.StockIssueDetailID}`, {
+        Quantity: qty, ItemRate: rate, DiscAmt: disc,
+      });
+      notify({ type: 'success', title: 'Line updated', message: editIssued.ItemName });
+      setEditIssued(null);
+      selectJob(selectedJob);
+      // Stock moved, so the picker's on-hand figures are now stale.
+      try {
+        const soh = await axios.get(`${API}/items/stock-on-hand`);
+        const m = {};
+        for (const r of (soh.data || [])) m[r.ItemId] = Number(r.OnHand) || 0;
+        setStockByItem(m);
+      } catch { /* display hint only */ }
+    } catch (err) {
+      notify({ type: 'error', title: 'Update failed', message: err.response?.data?.error || err.message });
+    } finally { setSavingEdit(false); }
+  };
 
   const handleDeleteLine = async (line) => {
     const ok = await confirm({
@@ -306,13 +381,28 @@ export default function PartsIssue() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: 'var(--primary)', marginBottom: 12 }}><Search size={18} /> Find Job Card</div>
         <div style={{ position: 'relative' }}>
           <input type="text" value={jobSearch} onChange={e => searchJobs(e.target.value)}
-                 placeholder="Search by Job No, Customer, Reg No..."
+                 onFocus={() => setJobBoxOpen(true)}
+                 /* Delayed so a click on a result registers before the list closes. */
+                 onBlur={() => setTimeout(() => setJobBoxOpen(false), 180)}
+                 placeholder="Click to see open job cards, or search by Job No, Customer, Reg No…"
                  style={{ width: '100%', padding: '10px 14px', border: '2px solid var(--primary)', borderRadius: 8, fontSize: '0.95rem' }} />
-          {jobCards.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, maxHeight: 250, overflow: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              {jobCards.map(j => (
-                <div key={j.JobCardId} onClick={() => selectJob(j)} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div><strong>JC-{j.JobCardNo}</strong> — {j.CustomerName || 'N/A'}</div>
+          {jobBoxOpen && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, maxHeight: 300, overflow: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+              <div style={{ padding: '6px 16px', fontSize: '0.72rem', color: '#64748b', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                {jobSearch.trim() ? `Open job cards matching “${jobSearch.trim()}”` : 'Open job cards — most recent first'}
+              </div>
+              {jobCards.length === 0 ? (
+                <div style={{ padding: '14px 16px', color: '#94a3b8', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                  {jobSearch.trim()
+                    ? 'No open job card matches. Finalized ones are hidden — parts cannot be issued to them.'
+                    : 'No open job cards.'}
+                </div>
+              ) : jobCards.map(j => (
+                <div key={j.JobCardId} onMouseDown={() => selectJob(j)} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>JC-{j.JobCardNo}</strong> — {j.CustomerName || 'N/A'}
+                    {j.JobCardDate && <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{new Date(j.JobCardDate).toLocaleDateString()}</div>}
+                  </div>
                   <div style={{ textAlign: 'right' }}><span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)' }}>{j.VehicleRegNo}</span><br /><span style={{ fontSize: '0.8rem', color: '#64748b' }}>{j.JobStatusText}</span></div>
                 </div>
               ))}
@@ -343,7 +433,7 @@ export default function PartsIssue() {
                       <th>Part #</th><th>Part Name</th><th style={{ textAlign: 'right' }}>Qty</th>
                       <th style={{ textAlign: 'right' }}>Rate</th><th style={{ textAlign: 'right' }}>Disc</th>
                       <th style={{ textAlign: 'right' }}>GST</th><th style={{ textAlign: 'right' }}>Total</th>
-                      {canDelete && <th className="no-print" style={{ width: 48 }}></th>}
+                      {(canDelete || canEdit) && <th className="no-print" style={{ width: 84 }}></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -351,6 +441,39 @@ export default function PartsIssue() {
                       const qty = Number(p.IssueQuantity || 0), rate = Number(p.ItemRate || 0);
                       const disc = Number(p.DiscAmt || 0), tax = Number(p.TaxAmount || 0);
                       const net = qty * rate - disc + tax;
+                      const editing = editIssued?.StockIssueDetailID === p.StockIssueDetailID;
+                      const cell = { width: '100%', padding: '4px 6px', border: '1px solid #cbd5e1',
+                                     borderRadius: 4, textAlign: 'right', fontSize: '0.85rem' };
+                      if (editing) {
+                        const eQty = Number(editIssued.Quantity) || 0;
+                        const eRate = Number(editIssued.ItemRate) || 0;
+                        const eDisc = Number(editIssued.DiscAmt) || 0;
+                        const eTax = (eQty * eRate - eDisc) * (Number(gstRate) || 0) / 100;
+                        return (
+                          <tr key={p.StockIssueDetailID} style={{ background: '#fffbeb' }}>
+                            <td style={{ fontFamily: 'monospace', color: '#64748b' }}>{p.ManualNumber || p.ItemNumber || '—'}</td>
+                            <td><strong>{p.ItemName}</strong></td>
+                            <td><input type="number" style={cell} value={editIssued.Quantity}
+                                       onChange={e => setEditIssued({ ...editIssued, Quantity: e.target.value })} /></td>
+                            <td><input type="number" style={cell} value={editIssued.ItemRate}
+                                       onChange={e => setEditIssued({ ...editIssued, ItemRate: e.target.value })} /></td>
+                            <td><input type="number" style={cell} value={editIssued.DiscAmt}
+                                       onChange={e => setEditIssued({ ...editIssued, DiscAmt: e.target.value })} /></td>
+                            <td style={{ textAlign: 'right', color: '#1d4ed8' }}>+{fmt(eTax)}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(eQty * eRate - eDisc + eTax)}</td>
+                            <td className="no-print" style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              <button onClick={saveEditIssued} disabled={savingEdit} title="Save changes"
+                                      style={{ background: 'none', border: 'none', color: '#16a34a', cursor: 'pointer', padding: 4 }}>
+                                {savingEdit ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                              </button>
+                              <button onClick={() => setEditIssued(null)} disabled={savingEdit} title="Cancel"
+                                      style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4 }}>
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      }
                       return (
                         <tr key={p.StockIssueDetailID}>
                           <td style={{ fontFamily: 'monospace', color: '#64748b' }}>{p.ManualNumber || p.ItemNumber || '—'}</td>
@@ -360,12 +483,20 @@ export default function PartsIssue() {
                           <td style={{ textAlign: 'right', color: '#059669' }}>-{fmt(disc)}</td>
                           <td style={{ textAlign: 'right', color: '#1d4ed8' }}>+{fmt(tax)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(net)}</td>
-                          {canDelete && (
-                            <td className="no-print" style={{ textAlign: 'center' }}>
-                              <button onClick={() => handleDeleteLine(p)} title="Delete this line and restore stock"
-                                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}>
-                                <Trash2 size={16} />
-                              </button>
+                          {(canDelete || canEdit) && (
+                            <td className="no-print" style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              {canEdit && (
+                                <button onClick={() => startEditIssued(p)} title="Edit this issued line"
+                                        style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', padding: 4 }}>
+                                  <Pencil size={16} />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button onClick={() => handleDeleteLine(p)} title="Delete this line and restore stock"
+                                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}>
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
                             </td>
                           )}
                         </tr>
@@ -404,7 +535,13 @@ export default function PartsIssue() {
                     options={items.filter(i => i.ItemType === 'Part').map(p => {
                       const code = p.ManualNumber ?? p.ItemNumber ?? '';
                       const alt  = (p.ManualNumber && p.ItemNumber) ? ' · ' + p.ItemNumber : '';
-                      return { id: p.ItemId, label: p.ItenName, sub: code ? `#${code}${alt}` : '' };
+                      const oh = stockByItem[p.ItemId];
+                      const stockTxt = oh === undefined ? '' : (oh > 0 ? `${oh} in stock` : 'OUT OF STOCK');
+                      return {
+                        id: p.ItemId,
+                        label: p.ItenName,
+                        sub: [code ? `#${code}${alt}` : '', stockTxt].filter(Boolean).join('  ·  '),
+                      };
                     })}
                   />
                 </div>

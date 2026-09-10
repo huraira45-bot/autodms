@@ -16,12 +16,14 @@ export default function StoreSale() {
   const [parties, setParties] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [parts, setParts] = useState([]);
+  const [stockByItem, setStockByItem] = useState({});
   const [banks, setBanks] = useState([]);
 
   const [header, setHeader] = useState({
     SaleDate: new Date().toISOString().split('T')[0],
     PartyID: '',
     CustomerName: '',
+    CareOff: '',
     VehicleName: '',
     Variant: '',
     PaymentMode: 'Cash',
@@ -79,7 +81,7 @@ export default function StoreSale() {
     const defaultWhid = warehouses[0]?.WHID || '';
     setHeader(h => ({
       SaleDate: new Date().toISOString().split('T')[0],
-      PartyID: '', CustomerName: '', VehicleName: '', Variant: '',
+      PartyID: '', CustomerName: '', VehicleName: '', Variant: '', CareOff: '',
       PaymentMode: 'Cash', PaymentBankID: '',
       NICNo: '', NTNNo: '', MobileNo: '', SODONO: '', Remarks: '',
       City: 'MULTAN', FBRInvoiceNo: '0000000000',
@@ -100,6 +102,7 @@ export default function StoreSale() {
         SaleDate:      d.SaleDate ? new Date(d.SaleDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         PartyID:       d.PartyID || '',
         CustomerName:  d.CustomerName || '',
+        CareOff:       d.CareOff || '',
         VehicleName:   d.VehicleName || '',
         Variant:       d.Variant || '',
         PaymentMode:   d.PaymentMode || 'Cash',
@@ -154,13 +157,19 @@ export default function StoreSale() {
     // reject and warehouses stayed empty, then the sale posted with WHID=null
     // and sp_SaveStoreSale crashed with "Cannot insert NULL into WHID".
     const empty = { data: [] };
-    const [pRes, wRes, itRes, bRes, txRes] = await Promise.all([
+    const [pRes, wRes, itRes, bRes, txRes, sohRes] = await Promise.all([
       axios.get(`${API_BASE}/parties?business=SALES`).catch(() => empty),
       axios.get(`${API_BASE}/inventory-config/warehouses`).catch(() => empty),
       axios.get(`${API_BASE}/items`).catch(() => empty),
       axios.get(`${API_BASE}/accounts/banks`).catch(() => empty),
       axios.get(`${API_BASE}/tax-rates`).catch(() => ({ data: { current: [] } })),
+      axios.get(`${API_BASE}/items/stock-on-hand`).catch(() => empty),
     ]);
+    // Owner ask 2026-09-10: show on-hand quantity while picking a part, so an
+    // out-of-stock line is obvious before it is added rather than at save time.
+    const soh = {};
+    for (const r of (sohRes.data || [])) soh[r.ItemId] = Number(r.OnHand) || 0;
+    setStockByItem(soh);
     setParties(pRes.data);
     setWarehouses(wRes.data);
     setParts((itRes.data || []).filter(i => i.ItemType?.trim().toLowerCase() === 'part'));
@@ -323,6 +332,16 @@ export default function StoreSale() {
         const res = await axios.post(`${API_BASE}/sales/store-sale`, payload);
         setSuccess(`Invoice ${res.data.InvoiceNo} Saved Successfully!`);
         notify({ type: 'success', title: 'Sale finalized', message: `Invoice ${res.data.InvoiceNo} was saved.` });
+        // Owner ask 2026-09-10: the counter needs the invoice in hand the
+        // moment the sale is finalized, so open the print view straight away.
+        // Opened before startNew() clears the form, since the id is needed.
+        // If the browser blocks the popup the Print button is still there —
+        // say so rather than letting the sale look like it failed to print.
+        const printWin = window.open(`/store-sale/${res.data.SaleID}/print`, '_blank');
+        if (!printWin) {
+          notify({ type: 'warning', title: 'Invoice saved, print blocked',
+                   message: 'Your browser blocked the print window. Open the sale from Previous Sales and press Print.' });
+        }
         setLastSale({ saleId: res.data.SaleID, invoiceNo: res.data.InvoiceNo,
                       voucherId: res.data.VoucherID,
                       gross: Number((totals.bill - totals.discount).toFixed(2)),
@@ -485,6 +504,16 @@ export default function StoreSale() {
             />
           </div>
           <div className="form-group"><label>Customer Name *</label><input type="text" value={header.CustomerName} onChange={e => setHeader({...header, CustomerName: e.target.value})} /></div>
+          {/* Owner ask 2026-09-10: free-text "care of" — who the invoice is
+              being handled through (a driver, a workshop, a company rep).
+              Deliberately unvalidated; it exists for the cases the structured
+              fields do not cover. */}
+          <div className="form-group">
+            <label>Care Off</label>
+            <input type="text" value={header.CareOff}
+                   placeholder="Anything — collected by, on behalf of, reference…"
+                   onChange={e => setHeader({...header, CareOff: e.target.value})} />
+          </div>
           <div className="grid-2">
             <div className="form-group"><label>Vehicle</label><input type="text" value={header.VehicleName} onChange={e => setHeader({...header, VehicleName: e.target.value})} /></div>
             <div className="form-group"><label>Variant</label><input type="text" value={header.Variant} onChange={e => setHeader({...header, Variant: e.target.value})} /></div>
@@ -574,11 +603,35 @@ export default function StoreSale() {
                   // ManualNumber; fall back to legacy ItemNumber for old rows.
                   const code = p.ManualNumber ?? p.ItemNumber ?? '';
                   const alt  = (p.ManualNumber && p.ItemNumber) ? ' · ' + p.ItemNumber : '';
-                  return { id: p.ItemId, label: p.ItenName, sub: code ? `#${code}${alt}` : '' };
+                  // Owner ask 2026-09-10: on-hand qty in the picker.
+                  const oh = stockByItem[p.ItemId];
+                  const stockTxt = oh === undefined ? '' : (oh > 0 ? `${oh} in stock` : 'OUT OF STOCK');
+                  return {
+                    id: p.ItemId,
+                    label: p.ItenName,
+                    sub: [code ? `#${code}${alt}` : '', stockTxt].filter(Boolean).join('  ·  '),
+                  };
                 })}
               />
             </div>
-            <div className="form-group" style={{ flex: 1 }}><label>Qty</label><input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({...currentItem, Qty: e.target.value})} /></div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Qty</label>
+              <input type="number" value={currentItem.Qty} onChange={e => setCurrentItem({...currentItem, Qty: e.target.value})} />
+              {/* Live stock check on the selected part. A hint only — the
+                  binding check is assertEnoughStock inside the save. */}
+              {(() => {
+                if (!currentItem.ItemID) return null;
+                const oh = stockByItem[currentItem.ItemID];
+                if (oh === undefined) return null;
+                const want = Number(currentItem.Qty) || 0;
+                const short = want > oh;
+                return (
+                  <small style={{ fontSize: '0.7rem', color: short ? '#b91c1c' : '#64748b' }}>
+                    {oh > 0 ? `${oh} in stock` : 'Out of stock'}{short ? ' — not enough' : ''}
+                  </small>
+                );
+              })()}
+            </div>
             <div className="form-group" style={{ flex: 1 }}><label>Price</label><input type="number" value={currentItem.SaleRate} onChange={e => setCurrentItem({...currentItem, SaleRate: e.target.value})} /></div>
             <div className="form-group" style={{ flex: 1 }}>
               <label>GST ({gstRate}%)</label>

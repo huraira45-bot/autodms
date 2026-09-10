@@ -82,6 +82,7 @@ router.post(  '/parts-issue',               requirePerm('workshop_parts_issue', 
 // Delete a single line from an issue (and reverse just that line's stock-out)
 // — only allowed while the underlying Job Card is NOT finalized. The issue
 // header is also removed if its last line is deleted.
+router.patch( '/parts-issue/line/:detailId', requirePerm('workshop_parts_issue', 'edit'),   wc.updatePartsIssueLine);
 router.delete('/parts-issue/line/:detailId', requirePerm('workshop_parts_issue', 'delete'), wc.deletePartsIssueLine);
 
 // ── RO & Doc Counters (workshop_settings — admin tweak) ────────────────────

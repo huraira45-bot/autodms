@@ -1588,6 +1588,12 @@ exports.getInventoryValuation = async (req, res) => {
 
         const pool = await getPool();
 
+        // Null (not 0) when GST isn't configured, so the report can show a dash
+        // rather than a 0.00 tax that reads like a genuine zero-rated price.
+        let gstRate = null;
+        try { gstRate = await require('./taxRatesController').resolveRate('GST'); }
+        catch (e) { console.warn('Inventory Valuation: no GST rate configured —', e.message); }
+
         // We've learned the hard way: a single CTE query joining all the lookups
         // pathologically slow under msnodesqlv8 (25s for 1k items). Splitting
         // into 3 simple queries — items master, inflow agg, outflow agg — and
@@ -1607,7 +1613,7 @@ exports.getInventoryValuation = async (req, res) => {
         const [items, inflow, outflow] = await Promise.all([
             itemsReq.query(`
                 SELECT i.ItemId, i.ItemNumber, i.ItenName, i.ManualNumber, i.BinLocation,
-                       i.WeightedRate, i.ReOrderLevel,
+                       i.WeightedRate, i.ReOrderLevel, i.ItemSalesPrice,
                        w.WHDesc, c.CategoryName, b.BrandName, u.UOMName
                 FROM InventItems i
                 LEFT JOIN InventWareHouse  w ON i.WHID        = w.WHID
@@ -1637,6 +1643,13 @@ exports.getInventoryValuation = async (req, res) => {
             // so it's added, not subtracted. data_StockArrival is opening stock + manual arrivals.
             const onHand = (inMap.get(x.ItemId) || 0) + (outMap.get(x.ItemId) || 0);
             const rate = Number(x.WeightedRate || 0);
+            // Owner ask 2026-09-10: alongside stock value at cost, show what
+            // the stock is worth at retail -- sale price, the tax on it, and
+            // the tax-inclusive total. GST is a per-line decision at sale
+            // time, so this applies the current standard rate as an
+            // indication of realisable value, not a tax liability.
+            const salePrice = Number(x.ItemSalesPrice || 0);
+            const saleTax   = gstRate != null ? salePrice * gstRate / 100 : 0;
             return {
                 ItemId:      x.ItemId,
                 ItemCode:    x.ItemNumber != null ? String(x.ItemNumber) : '',
@@ -1651,12 +1664,22 @@ exports.getInventoryValuation = async (req, res) => {
                 OnHand:      +onHand.toFixed(2),
                 Rate:        +rate.toFixed(2),
                 Value:       +(onHand * rate).toFixed(2),
+                SalePrice:      +salePrice.toFixed(2),
+                SaleTax:        +saleTax.toFixed(2),
+                SaleWithTax:    +(salePrice + saleTax).toFixed(2),
+                SaleValue:      +(onHand * salePrice).toFixed(2),
+                SaleTaxValue:   +(onHand * saleTax).toFixed(2),
+                SaleValueWithTax: +(onHand * (salePrice + saleTax)).toFixed(2),
             };
         });
         if (!includeZero) rows = rows.filter(r => r.OnHand > 0);
         rows.sort((a, b) => b.Value - a.Value);
         const totalQty   = rows.reduce((s, x) => s + x.OnHand, 0);
         const totalValue = rows.reduce((s, x) => s + x.Value,  0);
+        const totalSaleValue      = rows.reduce((s, x) => s + x.SaleValue, 0);
+        const totalSaleTaxValue   = rows.reduce((s, x) => s + x.SaleTaxValue, 0);
+        const totalSaleWithTax    = rows.reduce((s, x) => s + x.SaleValueWithTax, 0);
+        const noSalePrice         = rows.filter(x => !(x.SalePrice > 0)).length;
         const belowReorder = rows.filter(x => x.ReOrderLevel > 0 && x.OnHand <= x.ReOrderLevel).length;
 
         res.json({
@@ -1666,6 +1689,11 @@ exports.getInventoryValuation = async (req, res) => {
                 items:        rows.length,
                 totalQty:     +totalQty.toFixed(2),
                 totalValue:   +totalValue.toFixed(2),
+                totalSaleValue:    +totalSaleValue.toFixed(2),
+                totalSaleTaxValue: +totalSaleTaxValue.toFixed(2),
+                totalSaleWithTax:  +totalSaleWithTax.toFixed(2),
+                gstRate,
+                noSalePrice,
                 belowReorder,
             },
         });
