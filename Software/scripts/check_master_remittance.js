@@ -75,7 +75,22 @@ async function main() {
                             - SUM(CASE WHEN d.Credit>0 THEN d.Credit ELSE 0 END)
                        FROM data_FinanceVoucherDetail d
                        JOIN data_FinanceVoucherInfo   fv ON fv.VoucherID = d.VoucherID
-                       WHERE fv.Status='Posted' AND d.GLCAID=@bvr AND d.BookingID=b.BookingID), 0) AS Remitted
+                       WHERE fv.Status='Posted' AND d.GLCAID=@bvr AND d.BookingID=b.BookingID), 0) AS Remitted,
+               -- The customer's ACTUAL posted balance for this booking, on
+               -- their own GL leaf. Credit means they have paid more than has
+               -- been settled against them.
+               --
+               -- This replaced a (customerPaid - remitted) proxy, which gave a
+               -- false all-clear: if the delivery voucher settled a smaller
+               -- figure and the balance was remitted to Master afterwards, the
+               -- proxy nets to zero while the customer's account is still
+               -- carrying the difference. Only the leaf balance shows that.
+               ISNULL((SELECT SUM(CASE WHEN d.Credit>0 THEN d.Credit ELSE 0 END)
+                            - SUM(CASE WHEN d.Debit >0 THEN d.Debit  ELSE 0 END)
+                       FROM data_FinanceVoucherDetail d
+                       JOIN data_FinanceVoucherInfo   fv ON fv.VoucherID = d.VoucherID
+                       WHERE fv.Status='Posted' AND d.GLCAID=p.PartyGLID
+                         AND d.BookingID=b.BookingID), 0) AS CustomerNetCredit
         FROM   dms_SalesBookings b
         LEFT   JOIN dms_VehicleVariant v   ON v.VariantID  = b.VehicleVariantID
         LEFT   JOIN dms_Vehicle        veh ON veh.VehicleID = b.AllocatedVehicleID
@@ -98,15 +113,17 @@ async function main() {
         const custPaid = Number(b.AmountPaidToDate) || 0;
         const delivered = ['Closed', 'GatePassIssued', 'Delivered'].includes(b.Status);
 
-        // After delivery the customer is settled only for what reached Master,
-        // so anything they paid beyond that is still sitting on their account.
-        const stranded = delivered ? Math.round((custPaid - remitted) * 100) / 100 : 0;
+        // Measured from the customer's own GL leaf, not inferred. A leftover
+        // credit after delivery is money they have paid that nothing has been
+        // settled against.
+        const netCredit = Math.round((Number(b.CustomerNetCredit) || 0) * 100) / 100;
+        const stranded  = delivered && netCredit > 0.01 ? netCredit : 0;
 
         // When one booking is named explicitly the caller is verifying it, so
         // show the numbers even when they reconcile — "nothing to report" is
         // not the same as seeing the figures line up.
         if (short > 0.01 || stranded > 0.01 || ONE) {
-            bad.push({ ...b, defined, remitted, short, custPaid, stranded, delivered });
+            bad.push({ ...b, defined, remitted, short, custPaid, stranded, netCredit, delivered });
         }
     }
 
@@ -122,10 +139,13 @@ async function main() {
         console.log(`   Defined rate (owed to Master) : PKR ${money(b.defined).padStart(16)}`);
         console.log(`   Reached Master               : PKR ${money(b.remitted).padStart(16)}`);
         console.log(`   Customer has paid us         : PKR ${money(b.custPaid).padStart(16)}`);
+        console.log(`   Customer a/c balance now     : PKR ${money(b.netCredit).padStart(16)}  ${b.netCredit > 0.01 ? 'credit' : ''}`);
         if (b.short > 0.01)
             console.log(`   >> STILL TO SEND MASTER      : PKR ${money(b.short).padStart(16)}`);
         if (b.stranded > 0.01)
             console.log(`   >> STRANDED on customer a/c  : PKR ${money(b.stranded).padStart(16)}  (delivered already)`);
+        if (b.short <= 0.01 && b.stranded <= 0.01)
+            console.log(`   >> Reconciled - nothing outstanding.`);
     }
 
     console.log('');
