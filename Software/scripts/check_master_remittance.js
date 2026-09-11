@@ -148,6 +148,33 @@ async function main() {
             console.log(`   >> Reconciled - nothing outstanding.`);
     }
 
+    // When one booking is named, list its vouchers too. A stranded balance can
+    // mean the delivery voucher was never finalized (still Draft) rather than
+    // that it settled the wrong figure — and those need different fixes.
+    if (ONE && bad.length) {
+        const v = await pool.request().input('bid', sql.Int, bad[0].BookingID).query(`
+            SELECT DISTINCT fv.VoucherID, fv.VoucherNo, fv.Status, fv.Posted,
+                   CONVERT(CHAR(10), fv.VoucherDate, 120) AS VoucherDate,
+                   fv.SourceDocType,
+                   CAST(fv.TotalAmount AS DECIMAL(18,2)) AS TotalAmount
+            FROM   data_FinanceVoucherInfo   fv
+            JOIN   data_FinanceVoucherDetail d ON d.VoucherID = fv.VoucherID
+            WHERE  d.BookingID = @bid
+            ORDER  BY fv.VoucherID`);
+        console.log('');
+        console.log('   Vouchers tagged to this booking:');
+        if (!v.recordset.length) console.log('     (none)');
+        for (const x of v.recordset) {
+            console.log(`     ${String(x.VoucherNo).padEnd(12)} ${String(x.Status).padEnd(9)} `
+                      + `${x.VoucherDate}  PKR ${money(x.TotalAmount).padStart(16)}  ${x.SourceDocType || ''}`);
+        }
+        console.log('');
+        console.log('   A Draft here has NOT reached the ledger. If the delivery voucher is still');
+        console.log('   Draft, the whole customer balance stays unsettled — and if it was built');
+        console.log('   before the last remittance, its amount is stale too. Check the figure');
+        console.log('   against the defined rate above before finalizing it.');
+    }
+
     console.log('');
     console.log('='.repeat(78));
     console.log(`${bad.length} booking(s) do not reconcile.`);
