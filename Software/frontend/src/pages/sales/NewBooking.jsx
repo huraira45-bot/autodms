@@ -418,16 +418,23 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
                 </div>
             ) : (
                 <Field label="Existing GL Account">
-                    <select value={glId} onChange={e => { setGlId(e.target.value); setErr(null); }} style={inputStyle}>
-                        <option value="">
-                            {glAccounts.length ? 'Select an account…' : 'Loading accounts…'}
-                        </option>
-                        {glAccounts.map(a => (
-                            <option key={a.GLCAID} value={a.GLCAID}>
-                                {a.GLCode} — {a.GLTitle}
-                            </option>
-                        ))}
-                    </select>
+                    {/* Hundreds of accounts qualify, so a plain <select> meant
+                        scrolling blind. SearchableSelect filters as you type and
+                        keeps the parent group as a section header, so it is clear
+                        whether you are picking a receivable or something else. */}
+                    <SearchableSelect
+                        value={glId}
+                        onChange={id => { setGlId(id || ''); setErr(null); }}
+                        options={glAccounts.map(a => ({
+                            id: a.GLCAID,
+                            label: a.GLTitle,
+                            sub: a.GLCode,
+                            group: a.group,
+                        }))}
+                        placeholder={glAccounts.length ? 'Search by account code or name…' : 'Loading accounts…'}
+                        title="Which GL account does this customer post against?"
+                        disabled={!glAccounts.length}
+                    />
                 </Field>
             )}
 
