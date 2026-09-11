@@ -1,9 +1,11 @@
 /**
- * Shared Gate Pass print.
+ * Shared Gate Pass print — used by both the Gate Pass screen and the
+ * vehicle-sales booking flow, so there is one A5 slip rather than two copies
+ * drifting apart (owner ask 2026-09-11).
  *
- * Lifted out of pages/GatePass.jsx unchanged (owner ask 2026-09-11) so the
- * vehicle-sales booking flow prints the very same slip instead of growing a
- * second, drifting copy of an 80-line A5 template.
+ * Carries no money. The slip goes to the customer and to the gate, and the
+ * invoice value belongs on neither; the reason band says Paid in Full or
+ * Credit Party, which is what security actually acts on.
  */
 import { fmtDTLong as dt } from './datetime';
 import { getBusinessProfile, businessHeaderHtml, BUSINESS_HEADER_INLINE_CSS } from './businessProfile';
@@ -15,8 +17,6 @@ export const REASON_LABEL = {
     FREE_SERVICE:       'Free / Zero-Charge',
     VEHICLE_DELIVERY:   'Vehicle Delivery',
 };
-
-const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export async function printGatePass(gp) {
     const w = window.open('', '_blank', 'width=560,height=800');
@@ -53,13 +53,6 @@ export async function printGatePass(gp) {
             .cell .lbl{color:#64748b;font-size:7.5pt;text-transform:uppercase;letter-spacing:0.3px;}
             .cell .val{font-weight:600;font-size:9.5pt;color:#0f172a;}
             .reason{margin:8px 0;padding:6px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:700;text-align:center;font-size:10pt;}
-            .money{display:grid;grid-template-columns:repeat(2, 1fr);gap:6px;margin-top:6px;}
-            .money .box{padding:4px 8px;background:#f1f5f9;border-radius:4px;text-align:center;}
-            .money .box .lbl{font-size:7.5pt;color:#64748b;text-transform:uppercase;letter-spacing:0.3px;}
-            .money .box .val{font-size:10.5pt;font-weight:800;color:#1e293b;margin-top:1px;}
-            .modes{grid-column:1 / -1;background:#f1f5f9;padding:4px 8px;border-radius:4px;text-align:center;}
-            .modes .lbl{font-size:7.5pt;color:#64748b;text-transform:uppercase;letter-spacing:0.3px;}
-            .modes .val{font-weight:700;font-size:9.5pt;color:#1e293b;margin-top:1px;}
             .sig{margin-top:14px;display:flex;justify-content:space-between;gap:14px;}
             .sig div{flex:1;border-top:1px solid #475569;text-align:center;padding-top:4px;font-size:8pt;color:#475569;}
         </style></head><body>
@@ -86,12 +79,12 @@ export async function printGatePass(gp) {
             <div class="cell full"><span class="lbl">Issued By</span><span class="val">${gp.IssuedByName || '—'}</span></div>
         </div>
 
-        <div class="money">
-            <div class="box"><div class="lbl">Amount Invoiced</div><div class="val">PKR ${fmt(gp.AmountInvoiced)}</div></div>
-            <div class="box"><div class="lbl">Amount Received</div><div class="val">PKR ${fmt(gp.AmountReceived)}</div></div>
-            <div class="modes"><div class="lbl">Modes Used</div><div class="val">${gp.PaymentModes || '—'}</div></div>
-        </div>
-
+        <!-- Owner ask 2026-09-11: no amounts on the gate pass. The slip is
+             handed to the customer and shown at the gate, and the invoice
+             value has no business being on either. The reason band below still
+             tells security what they actually need — Paid in Full / Credit
+             Party — so nothing is lost by dropping the figures. The amounts
+             remain on the gate pass record and the Gate Pass screen. -->
         <div class="reason">${REASON_LABEL[gp.PassReason] || gp.PassReason}</div>
 
         <div class="sig"><div>Customer</div><div>Security / Gate</div><div>Authorized</div></div>
