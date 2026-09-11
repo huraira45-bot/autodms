@@ -19,6 +19,7 @@ import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
+import { printGatePass } from '../../utils/gatePassPrint';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -738,10 +739,27 @@ function GatePassModal({ booking, onClose, onSaved }) {
     const save = async () => {
         setBusy(true); setErr(null);
         try {
-            await axios.post(`${API}/sales/bookings/${booking.BookingID}/issue-gate-pass`, {
+            const r = await axios.post(`${API}/sales/bookings/${booking.BookingID}/issue-gate-pass`, {
                 GatePassNumber: gatePassNo || undefined,
                 Notes: notes || undefined,
             });
+            // Owner ask 2026-09-11: print the pass the moment it is issued —
+            // the gate needs the slip in hand, not a trip to the Gate Pass
+            // screen to hunt for it. Same A5 template that screen prints.
+            if (r.data?.GatePass) {
+                try {
+                    await printGatePass({
+                        ...r.data.GatePass,
+                        RONumber:          booking.BookingNo,
+                        BusinessUnit:      'Vehicle Sales',
+                        CustomerCell:      booking.PhoneOne,
+                        VehicleColour:     booking.AllocatedColor,
+                        ServiceAdvisorName: booking.SalesExecutiveName,
+                        PaymentMode:       r.data.FullyPaid ? 'Paid in Full' : 'Partial',
+                        TimeIn:            booking.CreatedAt,
+                    });
+                } catch { /* the pass IS issued — a failed print must not look like a failed delivery */ }
+            }
             onSaved();
         } catch (e) { setErr(e.response?.data?.error || e.message); }
         setBusy(false);

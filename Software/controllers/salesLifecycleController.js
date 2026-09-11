@@ -727,10 +727,79 @@ exports.issueGatePass = async (req, res) => {
                 await createRecoveryPlanIfNeeded(tx, id, b, fullyPaid, req.user);
             }
 
+            // Write the actual gate pass (owner ask 2026-09-11: "issue gate
+            // pass should be a print"). This flow closed the booking and marked
+            // the vehicle Sold but never created a dms_GatePasses row — so
+            // there was nothing to print, and vehicle deliveries never appeared
+            // on the Gate Pass screen, which lists that table. Inside the same
+            // transaction, so a pass can never exist for a delivery that rolled
+            // back.
+            const gpRes = await new sql.Request(tx)
+                .query('SELECT NEXT VALUE FOR dbo.seq_GatePassNo AS n');
+            const gatePassNo = 'GP-' + String(gpRes.recordset[0].n).padStart(5, '0');
+
+            // A new vehicle has no registration number yet — it is chassis and
+            // engine that identify it at the gate, so that is what goes on the
+            // pass. dms_Vehicle carries no registration column at all.
+            const veh = await new sql.Request(tx)
+                .input('vid', sql.Int, b.AllocatedVehicleID)
+                .query(`SELECT ChasisNo, EngineNo, Color FROM dms_Vehicle WHERE VehicleID=@vid`);
+            const party = await new sql.Request(tx)
+                .input('id', sql.Int, id)
+                .query(`SELECT TOP 1 p.PartyName
+                        FROM dms_SalesBookings bk
+                        LEFT JOIN gen_PartiesInfo p ON p.PartyID = bk.PartyID
+                        WHERE bk.BookingID=@id`);
+
+            const gpIns = await new sql.Request(tx)
+                .input('no',    sql.NVarChar(50),  gatePassNo)
+                .input('dt',    sql.NVarChar(20),  'BOOKING')
+                .input('did',   sql.Int,           id)
+                .input('cust',  sql.NVarChar(200), party.recordset[0]?.PartyName || null)
+                .input('reg',   sql.NVarChar(50),  veh.recordset[0]?.EngineNo || null)
+                .input('ch',    sql.NVarChar(100), veh.recordset[0]?.ChasisNo || null)
+                .input('reason',sql.NVarChar(40),  fullyPaid ? 'PAID_FULL' : 'CREDIT_PARTY')
+                .input('inv',   sql.Decimal(18,2), Number(b.NegotiatedPrice) || 0)
+                .input('rcv',   sql.Decimal(18,2), Number(b.AmountPaidToDate) || 0)
+                .input('notes', sql.NVarChar(sql.MAX),
+                       (req.body?.Notes || '') +
+                       (fullyPaid ? '' : ` Partial delivery — ${paidPct.toFixed(1)}% paid.`))
+                .input('by',    sql.Int,           req.user?.employeeId || req.user?.userId || 0)
+                .input('byN',   sql.NVarChar(100), req.user?.userName || 'system')
+                .query(`INSERT INTO dms_GatePasses
+                            (GatePassNo, DocType, DocID, CustomerName, VehicleRegNo, VehicleChassis,
+                             PassReason, AmountInvoiced, AmountReceived, Notes,
+                             IssuedAt, IssuedBy, IssuedByName)
+                        OUTPUT INSERTED.GatePassID
+                        VALUES (@no, @dt, @did, @cust, @reg, @ch,
+                                @reason, @inv, @rcv, @notes,
+                                GETDATE(), @by, @byN)`);
+
             await tx.commit();
             res.json({
                 message: responseMessage || 'Gate pass issued — booking closed',
                 BookingID: id,
+                GatePassID: gpIns.recordset[0].GatePassID,
+                GatePassNo: gatePassNo,
+                // Returned in full so the caller can print immediately without a
+                // second round trip to /gate-pass/:id — which lives behind
+                // workshop_gatepass:view, a permission the sales managers who
+                // issue these passes do not necessarily hold.
+                GatePass: {
+                    GatePassID:     gpIns.recordset[0].GatePassID,
+                    GatePassNo:     gatePassNo,
+                    DocType:        'BOOKING',
+                    DocID:          id,
+                    CustomerName:   party.recordset[0]?.PartyName || null,
+                    VehicleRegNo:   veh.recordset[0]?.EngineNo || null,
+                    VehicleChassis: veh.recordset[0]?.ChasisNo || null,
+                    VehicleColour:  veh.recordset[0]?.Color || null,
+                    PassReason:     fullyPaid ? 'PAID_FULL' : 'CREDIT_PARTY',
+                    AmountInvoiced: Number(b.NegotiatedPrice) || 0,
+                    AmountReceived: Number(b.AmountPaidToDate) || 0,
+                    IssuedAt:       new Date().toISOString(),
+                    IssuedByName:   req.user?.userName || 'system',
+                },
                 FullyPaid: fullyPaid,
                 DeliveryVoucherID: deliveryVoucherId,
                 BookingClosed: bookingClosedNow,
