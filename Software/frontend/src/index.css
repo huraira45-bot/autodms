@@ -1488,7 +1488,10 @@ textarea:disabled,
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 110;
+  /* Above the confirm dialog (4000), so a toast raised while a confirm or a
+     modal is open is still readable. Was 110 — below .modal-overlay (1000),
+     which silently hid every success/error toast fired from inside a modal. */
+  z-index: 4100;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1548,7 +1551,12 @@ textarea:disabled,
 .confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  /* Must sit above every other layer that can raise it. Was 100, which put it
+     BEHIND .modal-overlay (1000) — so a confirm asked for from inside a modal
+     (e.g. Chart of Accounts "Create this account?") rendered under the modal's
+     own backdrop: invisible and unclickable, leaving the form stuck.
+     Ceiling to clear: GLAccountPicker 2000, SearchableSelect 1200. */
+  z-index: 4000;
   background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
