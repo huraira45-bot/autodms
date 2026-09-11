@@ -330,18 +330,38 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
 
-    // NOTE: every party requires a PartyGLID, and 201002 itself is a
-    // parent/group account (can't be posted against directly) -- each of
-    // the 336 existing vehicle customers has their OWN leaf sub-account
-    // under it (201002001, 201002002, ...) inherited from the legacy
-    // system. There's no defined convention yet for provisioning a new
-    // leaf for a brand-new customer created here, so this still hits the
-    // backend's "PartyGLID is required" error -- pre-existing gap (this
-    // form was already marked "quick-create deferred to v2"), not
-    // introduced by the 2026-08-07 picker fix. Needs an owner decision on
-    // how new customers should be GL-provisioned before this can work.
+    // Every party posts against its OWN L4 leaf under a party group; the group
+    // itself (201002 CUSTOMER ADVANCES - VEHICLE PARTIES) cannot be posted
+    // against directly, which is why each of the legacy vehicle customers has
+    // its own 201002NNN account. This form used to send no PartyGLID at all and
+    // so failed every save with "PartyGLID is required" while offering nothing
+    // to fill in (owner report 2026-09-11).
+    //
+    // Default is now to open the next free sub-account under the vehicle-parties
+    // group -- the same thing that was being done by hand in Chart of Accounts
+    // before every booking -- with the option to point at an existing account
+    // instead, for a customer who already has one.
+    const VEHICLE_PARTY_GROUP = '201002';
+    const [glMode, setGlMode] = useState('auto');   // 'auto' | 'existing'
+    const [glAccounts, setGlAccounts] = useState([]);
+    const [glId, setGlId] = useState('');
+
+    useEffect(() => {
+        if (glMode !== 'existing' || glAccounts.length) return;
+        axios.get(`${API}/parties/coa-pickable`)
+            .then(r => {
+                const flat = [];
+                for (const [group, list] of Object.entries(r.data?.groups || {})) {
+                    for (const a of list) flat.push({ ...a, group });
+                }
+                setGlAccounts(flat);
+            })
+            .catch(() => setGlAccounts([]));
+    }, [glMode, glAccounts.length]);
+
     const save = async () => {
         if (!name.trim()) { setErr('Name is required'); return; }
+        if (glMode === 'existing' && !glId) { setErr('Pick the GL account this customer posts against, or switch back to opening a new one.'); return; }
         setBusy(true); setErr(null);
         try {
             const r = await axios.post(`${API}/parties`, {
@@ -351,6 +371,9 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
                 CNIC: cnic || null,
                 NTNNO: ntn || null,
                 AddressOne: address || null,
+                ...(glMode === 'existing'
+                    ? { PartyGLID: glId }
+                    : { GLParentCode: VEHICLE_PARTY_GROUP }),
             });
             const partyId = r.data?.PartyID;
             if (!partyId) throw new Error('Created but server did not return a PartyID.');
@@ -377,6 +400,37 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
             </div>
             <Field label="NTN (for corporates)"><input value={ntn} onChange={e => setNtn(e.target.value)} style={inputStyle} /></Field>
             <Field label="Address"><textarea rows={2} value={address} onChange={e => setAddress(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
+
+            {/* GL account. Every party posts against its own leaf; without this
+                the save was rejected with no way to answer it. */}
+            <Field label="GL Account *">
+                <select value={glMode} onChange={e => { setGlMode(e.target.value); setErr(null); }} style={inputStyle}>
+                    <option value="auto">Open a new sub-account under {VEHICLE_PARTY_GROUP} — Customer Advances, Vehicle Parties</option>
+                    <option value="existing">Use an account that already exists</option>
+                </select>
+            </Field>
+
+            {glMode === 'auto' ? (
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: -6, marginBottom: 10 }}>
+                    The next free code under {VEHICLE_PARTY_GROUP} is assigned automatically and
+                    named after the customer — the same account you would otherwise open by hand
+                    in Chart of Accounts.
+                </div>
+            ) : (
+                <Field label="Existing GL Account">
+                    <select value={glId} onChange={e => { setGlId(e.target.value); setErr(null); }} style={inputStyle}>
+                        <option value="">
+                            {glAccounts.length ? 'Select an account…' : 'Loading accounts…'}
+                        </option>
+                        {glAccounts.map(a => (
+                            <option key={a.GLCAID} value={a.GLCAID}>
+                                {a.GLCode} — {a.GLTitle}
+                            </option>
+                        ))}
+                    </select>
+                </Field>
+            )}
+
             <Actions onCancel={onClose} onConfirm={save} confirmLabel="Create Customer" busy={busy} disabled={!name.trim()} />
         </Shell>
     );

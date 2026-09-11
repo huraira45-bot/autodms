@@ -73,6 +73,79 @@ async function validatePartyGLID(pool, partyGLID) {
     return acct;
 }
 
+/**
+ * Opens a new L4 leaf under an L3 party group and returns its GLCAID.
+ *
+ * Mirrors the allocation in accountController.addAccount: take the smallest
+ * FREE suffix under the parent rather than MAX+1, so gaps left by deletes get
+ * reused and 999 does not silently overflow into a 4-digit suffix. Retries on
+ * a unique-key collision, which is how two people creating a customer at the
+ * same moment are resolved.
+ *
+ * The leaf inherits the parent's GLNature — a customer under CUSTOMER ADVANCES
+ * (credit) must not be opened as a debit account, or its balance would read
+ * backwards everywhere.
+ */
+async function provisionPartyLeaf(pool, { parentCode, title }) {
+    if (!/^\d{6}$/.test(parentCode || '')) {
+        throw new Error(`"${parentCode}" is not a valid 6-digit party group code.`);
+    }
+    if (!PICKABLE_PARENT_PREFIXES.includes(parentCode.substring(0, 3))) {
+        throw new Error(`Group ${parentCode} is not under Current Assets or Current Liabilities — parties must post against receivables, payables or advances.`);
+    }
+
+    const parent = await pool.request()
+        .input('pc', sql.NVarChar(50), parentCode)
+        .query(`SELECT GLCAID, GLCode, GLTitle, GLNature, GLLevel, isParent, Status
+                FROM GLChartOFAccount WHERE GLCode = @pc`);
+    if (!parent.recordset.length) throw new Error(`Party group ${parentCode} not found in the Chart of Accounts.`);
+    const p = parent.recordset[0];
+    if (!p.Status)  throw new Error(`Party group ${parentCode} is inactive.`);
+    if (!p.isParent) throw new Error(`${parentCode} ${p.GLTitle} is a detail account, not a group — pick it directly instead of opening a sub-account under it.`);
+
+    const cleanTitle = String(title || '').trim().slice(0, 200);
+    if (!cleanTitle) throw new Error('A name is needed to open the GL account.');
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+        const gap = await pool.request()
+            .input('parent', sql.NVarChar(50), parentCode)
+            .input('skip',   sql.Int,          attempt)
+            .query(`
+                SELECT v.number AS FreeSuffix
+                FROM   master.dbo.spt_values v
+                WHERE  v.type = 'P'
+                  AND  v.number BETWEEN 1 AND 999
+                  AND  NOT EXISTS (
+                        SELECT 1 FROM GLChartOFAccount c
+                        WHERE c.GLLevel = 4
+                          AND c.GLCode = @parent + RIGHT('000' + CAST(v.number AS VARCHAR(4)), 3))
+                ORDER BY v.number
+                OFFSET @skip ROWS FETCH NEXT 1 ROWS ONLY`);
+        if (!gap.recordset.length) {
+            throw new Error(`Group ${parentCode} is full — all 999 sub-accounts are used. Create another group.`);
+        }
+        const code = parentCode + String(gap.recordset[0].FreeSuffix).padStart(3, '0');
+
+        try {
+            const ins = await pool.request()
+                .input('GLTitle',  sql.NVarChar(200), cleanTitle)
+                .input('GLCode',   sql.NVarChar(50),  code)
+                .input('GLNature', sql.TinyInt,       p.GLNature)
+                .query(`INSERT INTO GLChartOFAccount
+                            (GLTitle, GLCode, GLLevel, GLNature, GLType, isParent,
+                             Companyid, Status, AccountLevelOne, ReadOnly)
+                        OUTPUT INSERTED.GLCAID
+                        VALUES (@GLTitle, @GLCode, 4, @GLNature, 0, 0, 1, 1, '01', 0)`);
+            return ins.recordset[0].GLCAID;
+        } catch (e) {
+            // 2601 / 2627 = someone took this code between the scan and the
+            // insert; loop on to the next free suffix.
+            if (e.number !== 2601 && e.number !== 2627) throw e;
+        }
+    }
+    throw new Error(`Could not allocate a free GL code under ${parentCode} after 20 attempts.`);
+}
+
 exports.getParties = async (req, res) => {
     try {
         const { type, search, business, glCode } = req.query;
@@ -259,7 +332,6 @@ exports.createParty = async (req, res) => {
         const ntn  = normaliseNTN(b.NTNNO);
 
         const pool = await getPool();
-        const control = await validatePartyGLID(pool, b.PartyGLID);
 
         // Duplicate checks — phone (legacy SP behavior), CNIC, NTN
         const dup = await pool.request()
@@ -281,6 +353,25 @@ exports.createParty = async (req, res) => {
             const d = dup.recordset[0];
             return res.status(409).json({ error: `${d.Conflict.toUpperCase()} already used by "${d.PartyName}".` });
         }
+
+        // Owner report 2026-09-11: the quick-create customer form rejected every
+        // save with "PartyGLID is required" while offering no way to supply one.
+        // Every party posts against its own L4 leaf, and the group account (e.g.
+        // 201002 CUSTOMER ADVANCES - VEHICLE PARTIES) cannot be posted against
+        // directly — which is why each legacy vehicle customer carries a leaf of
+        // its own (201002001, 201002002, …).
+        //
+        // The caller may now either pick an existing leaf (PartyGLID) or name the
+        // group to open a new one under (GLParentCode) — which is exactly what
+        // was being done by hand in Chart of Accounts before each customer.
+        let partyGLID = b.PartyGLID;
+        if (!partyGLID && b.GLParentCode) {
+            partyGLID = await provisionPartyLeaf(pool, {
+                parentCode: String(b.GLParentCode).trim(),
+                title: b.PartyName.trim(),
+            });
+        }
+        const control = await validatePartyGLID(pool, partyGLID);
 
         const r = await pool.request()
             .input('PartyName',           sql.VarChar(100),    b.PartyName.trim())
