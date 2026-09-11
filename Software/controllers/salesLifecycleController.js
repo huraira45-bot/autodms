@@ -147,8 +147,16 @@ exports.allocationReadiness = async (req, res) => {
         if (minAmt > 0 && paid < minAmt) reasons.push(`Minimum booking payment of PKR ${minAmt.toLocaleString()} not yet received (paid: PKR ${paid.toLocaleString()})`);
         if (minAmt <= 0 && paid <= 0)   reasons.push('No payment received yet');
 
-        const missingDocs = await docs.missingRequiredDocs(pool, id, ['PBO', 'CNIC']);
+        // This preflight runs BEFORE a vehicle is picked, so it cannot know
+        // whether the allocation will be against a Booked unit (PBO required)
+        // or an OpenAllocation one (no PBO exists — see allocateVehicle).
+        // CNIC therefore blocks; a missing PBO is reported as conditional so
+        // the page can say "only if you allocate a booked unit" rather than
+        // declaring the booking not ready when it may well be.
+        const missingDocs = await docs.missingRequiredDocs(pool, id, ['CNIC']);
         for (const t of missingDocs) reasons.push(`Required document missing: ${t}`);
+
+        const missingPBO = (await docs.missingRequiredDocs(pool, id, ['PBO'])).length > 0;
 
         res.json({
             ready: reasons.length === 0,
@@ -156,6 +164,10 @@ exports.allocationReadiness = async (req, res) => {
             paidAmount: paid,
             minimumRequired: minAmt,
             missingDocuments: missingDocs,
+            // Not blocking on its own — only bites if a Booked vehicle is chosen.
+            conditionalDocuments: missingPBO
+                ? [{ DocType: 'PBO', requiredWhen: 'Allocating a Booked vehicle. Not needed for an open-allocation unit.' }]
+                : [],
         });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -194,16 +206,26 @@ exports.allocateVehicle = async (req, res) => {
             return res.status(412).json({ error: 'At least one payment must be received before a vehicle can be allocated.' });
         }
 
-        // DOCUMENT GATE — PBO + CNIC required
-        const missing = await docs.missingRequiredDocs(pool, bookingId, ['PBO', 'CNIC']);
-        if (missing.length) {
-            return res.status(412).json({ error: `Required customer documents missing: ${missing.join(', ')}. Upload them on the booking page before allocating a vehicle.` });
-        }
-
         const vh = await pool.request().input('vid', sql.Int, vehicleId)
             .query(`SELECT VehicleID, VariantID, Status, AllocationType, CurrentBookingID, ChasisNo FROM dms_Vehicle WHERE VehicleID=@vid`);
         if (!vh.recordset.length) return res.status(404).json({ error: 'Vehicle not found' });
         const vehicle = vh.recordset[0];
+
+        // DOCUMENT GATE — CNIC always; PBO only for a Booked vehicle.
+        //
+        // Owner 2026-09-11: a PBO is the Purchase Booking Order raised with
+        // Master to bring in a specific unit for a specific customer. A vehicle
+        // held as OpenAllocation was never ordered against a customer, so no
+        // PBO exists for it and demanding one blocked the allocation outright.
+        // CNIC stays mandatory either way — that is customer KYC, not order
+        // paperwork.
+        const requiredDocs = vehicle.AllocationType === 'OpenAllocation'
+            ? ['CNIC']
+            : ['PBO', 'CNIC'];
+        const missing = await docs.missingRequiredDocs(pool, bookingId, requiredDocs);
+        if (missing.length) {
+            return res.status(412).json({ error: `Required customer documents missing: ${missing.join(', ')}. Upload them on the booking page before allocating a vehicle.` });
+        }
 
         if (vehicle.VariantID !== booking.VehicleVariantID) {
             return res.status(409).json({ error: 'Vehicle variant does not match the booking variant.' });

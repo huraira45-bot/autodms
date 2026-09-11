@@ -54,6 +54,7 @@ export default function BookingDetail() {
     const [showPayMaster, setShowPayMaster] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
     const [showGatePass, setShowGatePass] = useState(false);
+    const [showExecutive, setShowExecutive] = useState(false);
 
     const flash = (kind, text) => { setMsg({ kind, text }); setTimeout(() => setMsg(null), 4000); };
 
@@ -102,6 +103,13 @@ export default function BookingDetail() {
     const canPostMasterInvoice = data.AllocatedVehicleID
         && !['Closed', 'Cancelled'].includes(data.Status)
         && hasModule('sales_master_settlement');
+
+    // Owner ask 2026-09-11: the executive is stamped from whoever created the
+    // booking and was never changeable. It drives "my bookings" and the
+    // incentive workings, so a booking entered by the wrong person paid the
+    // wrong person. Managers can reassign while the booking is live.
+    const canChangeExecutive = !['Closed', 'Cancelled'].includes(data.Status)
+        && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
 
     // Gate Pass available immediately after allocation — no Master Invoice prerequisite.
     const canIssueGatePass = data.AllocatedVehicleID
@@ -161,6 +169,13 @@ export default function BookingDetail() {
                     <Block icon={Briefcase} title="Sales Executive">
                         <div style={{ fontWeight: 600 }}>{(data.SalesExecutiveName || '').trim() || '—'}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Created {new Date(data.CreatedAt).toLocaleString()}</div>
+                        {canChangeExecutive && (
+                            <button type="button" onClick={() => setShowExecutive(true)}
+                                style={{ marginTop: 6, background: 'none', border: 'none', padding: 0,
+                                         color: '#1d4ed8', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                                Change executive
+                            </button>
+                        )}
                     </Block>
                 </div>
 
@@ -227,16 +242,31 @@ export default function BookingDetail() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                     {['ProofOfPayment', 'PBO', 'CNIC', 'AuthorityLetter'].map(t => {
                         const has = hasDoc(t);
-                        const required = t === 'PBO' || t === 'CNIC';   // for allocation gate
+                        // CNIC is always required to allocate (customer KYC).
+                        // PBO is CONDITIONAL — it is the order raised with Master
+                        // for a specific unit, so an open-allocation vehicle has
+                        // none and does not need one (owner 2026-09-11).
+                        const required    = t === 'CNIC';
+                        const conditional = t === 'PBO';
+                        const tone = has ? 'ok' : required ? 'bad' : conditional ? 'warn' : 'idle';
+                        const sty = {
+                            ok:   { bg: '#dcfce7', col: '#15803d', bd: '#bbf7d0', mark: '✓' },
+                            bad:  { bg: '#fef2f2', col: '#b91c1c', bd: '#fecaca', mark: '✕' },
+                            warn: { bg: '#fffbeb', col: '#b45309', bd: '#fde68a', mark: '!' },
+                            idle: { bg: '#f1f5f9', col: '#64748b', bd: '#e2e8f0', mark: '○' },
+                        }[tone];
                         return (
-                            <div key={t} style={{
+                            <div key={t} title={conditional && !has
+                                    ? 'Needed only when allocating a Booked vehicle — an open-allocation unit has no PBO.'
+                                    : undefined}
+                                 style={{
                                 padding: '6px 10px', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600,
-                                background: has ? '#dcfce7' : (required ? '#fef2f2' : '#f1f5f9'),
-                                color:      has ? '#15803d' : (required ? '#b91c1c' : '#64748b'),
-                                border: '1px solid ' + (has ? '#bbf7d0' : (required ? '#fecaca' : '#e2e8f0')),
+                                background: sty.bg, color: sty.col, border: '1px solid ' + sty.bd,
                                 display: 'flex', alignItems: 'center', gap: 6,
                             }}>
-                                {has ? '✓' : (required ? '✕' : '○')} {t} {required && !has && <span style={{ fontSize: '0.7rem' }}>(required for allocation)</span>}
+                                {sty.mark} {t}
+                                {!has && required    && <span style={{ fontSize: '0.7rem' }}>(required for allocation)</span>}
+                                {!has && conditional && <span style={{ fontSize: '0.7rem' }}>(only for booked units)</span>}
                             </div>
                         );
                     })}
@@ -404,6 +434,11 @@ export default function BookingDetail() {
                 <GatePassModal booking={data}
                     onClose={() => setShowGatePass(false)}
                     onSaved={() => { setShowGatePass(false); flash('ok', 'Gate pass issued — booking closed'); load(); }} />
+            )}
+            {showExecutive && (
+                <ChangeExecutiveModal booking={data}
+                    onClose={() => setShowExecutive(false)}
+                    onSaved={(name) => { setShowExecutive(false); flash('ok', `Sales executive changed to ${name}`); load(); }} />
             )}
             {showUploadDoc && (
                 <UploadDocModal bookingId={id}
@@ -1084,6 +1119,63 @@ function CoaLinkModal({ partyId, partyName, onClose, onSaved }) {
                     <Actions onCancel={onClose} onConfirm={createAndLink} confirmLabel="Create & Link" busy={busy} disabled={!title.trim()} />
                 </>
             )}
+        </Shell>
+    );
+}
+
+/**
+ * Reassign the sales executive on a live booking (owner ask 2026-09-11).
+ * CreatedBy_SalesExecutiveID drives the "my bookings" filter and the incentive
+ * workings, so getting it wrong pays the wrong person — but it could only ever
+ * be set from whoever happened to create the booking.
+ */
+function ChangeExecutiveModal({ booking, onClose, onSaved }) {
+    const [people, setPeople] = useState([]);
+    const [exeId, setExeId] = useState(booking.CreatedBy_SalesExecutiveID || '');
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+
+    useEffect(() => {
+        axios.get(`${API}/employees`)
+            .then(r => setPeople((r.data || []).filter(e => (e.IsActive === undefined || e.IsActive) && !e.IsResigned)))
+            .catch(() => setPeople([]));
+    }, []);
+
+    const save = async () => {
+        if (!exeId) { setErr('Pick an executive.'); return; }
+        setBusy(true); setErr(null);
+        try {
+            const r = await axios.patch(`${API}/sales/bookings/${booking.BookingID}/executive`,
+                                        { SalesExecutiveID: Number(exeId) });
+            onSaved(r.data?.SalesExecutiveName || 'the selected executive');
+        } catch (e) { setErr(e.response?.data?.error || e.message); }
+        setBusy(false);
+    };
+
+    return (
+        <Shell title={`Sales executive — ${booking.BookingNo}`} onClose={onClose}>
+            {err && <Err>{err}</Err>}
+            <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: '0.85rem' }}>
+                Currently: <strong>{(booking.SalesExecutiveName || '').trim() || '—'}</strong>
+            </div>
+            <Field label="Sales Executive *">
+                <SearchableSelect
+                    value={exeId}
+                    onChange={id => { setExeId(id || ''); setErr(null); }}
+                    options={people.map(p => ({
+                        id: p.EmployeeID,
+                        label: p.EmployeeName,
+                        sub: p.Designation || p.DepartmentName || '',
+                    }))}
+                    placeholder={people.length ? 'Search by name…' : 'Loading employees…'}
+                    title="Pick the sales executive"
+                    disabled={!people.length}
+                />
+            </Field>
+            <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: 10 }}>
+                This is who the booking counts towards for targets and incentives.
+            </div>
+            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Save" busy={busy} disabled={!exeId} />
         </Shell>
     );
 }

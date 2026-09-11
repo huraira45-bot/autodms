@@ -795,3 +795,71 @@ exports.listPayments = async (req, res) => {
         res.json(r.recordset);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
+
+/**
+ * PATCH /api/sales/bookings/:id/executive   { SalesExecutiveID }
+ *
+ * Owner ask 2026-09-11: "let me pick the sales executive at any time".
+ * The executive was stamped once from whoever happened to be logged in when
+ * the booking was created, with no way to correct it afterwards — so a
+ * booking entered by a colleague, or by the CRO desk, stayed credited to the
+ * wrong person for good.
+ *
+ * This is not cosmetic: CreatedBy_SalesExecutiveID is what the bookings list
+ * filters "my bookings" on and what the incentive workings read, so the wrong
+ * name means the wrong person is paid.
+ *
+ * Allowed while the booking is live. Refused once it is Closed or Cancelled —
+ * by then incentives may already be accrued against the current holder, and
+ * silently moving that is a decision for whoever handles the reversal, not a
+ * side effect of an edit.
+ */
+exports.changeSalesExecutive = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const execId = parseInt(req.body?.SalesExecutiveID);
+        if (!id)      return res.status(400).json({ error: 'Invalid booking id.' });
+        if (!execId)  return res.status(400).json({ error: 'SalesExecutiveID is required.' });
+
+        const pool = await getPool();
+
+        const bk = await pool.request().input('id', sql.Int, id)
+            .query(`SELECT BookingID, BookingNo, Status, CreatedBy_SalesExecutiveID
+                    FROM dms_SalesBookings WHERE BookingID=@id`);
+        if (!bk.recordset.length) return res.status(404).json({ error: 'Booking not found.' });
+        const b = bk.recordset[0];
+        if (['Closed', 'Cancelled'].includes(b.Status)) {
+            return res.status(409).json({
+                error: `Booking is ${b.Status} — the sales executive can no longer be changed. Incentives may already be settled against the current one.`,
+            });
+        }
+
+        const emp = await pool.request().input('e', sql.Int, execId)
+            .query(`SELECT TOP 1 EmployeeID, EmployeeName FROM gen_EmployeeInfo WHERE EmployeeID=@e`);
+        if (!emp.recordset.length) return res.status(404).json({ error: 'Employee not found.' });
+        const e = emp.recordset[0];
+
+        if (b.CreatedBy_SalesExecutiveID === execId) {
+            return res.json({ message: 'No change — already assigned to this executive.',
+                              SalesExecutiveID: execId, SalesExecutiveName: e.EmployeeName });
+        }
+
+        await pool.request()
+            .input('id',   sql.Int,          id)
+            .input('exe',  sql.Int,          execId)
+            .input('exeN', sql.NVarChar(100), e.EmployeeName)
+            .query(`UPDATE dms_SalesBookings
+                    SET CreatedBy_SalesExecutiveID=@exe, CreatedByName=@exeN
+                    WHERE BookingID=@id`);
+
+        res.json({
+            message: 'Sales executive updated',
+            BookingID: id,
+            SalesExecutiveID: execId,
+            SalesExecutiveName: e.EmployeeName,
+        });
+    } catch (err) {
+        console.error('changeSalesExecutive:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

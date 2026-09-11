@@ -64,6 +64,10 @@ router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       b
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
 router.post(  '/bookings/:id/cancel',      requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing'), bk.cancelBooking);
 
+// Reassign the sales executive on a live booking (owner ask 2026-09-11).
+// Managers only: this drives 'my bookings' and the incentive workings.
+router.patch('/bookings/:id/executive',    requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), bk.changeSalesExecutive);
+
 // Payments against a booking — Direct or PayOrder path. Multipart: file field 'proof' required.
 router.get(   '/bookings/:id/payments',    requireAny(...SALES_READERS),       bk.listPayments);
 router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_agm', 'sales_gm'),
