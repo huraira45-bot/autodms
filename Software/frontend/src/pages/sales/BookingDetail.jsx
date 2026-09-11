@@ -751,6 +751,7 @@ function PaymentModal({ booking, onClose, onSaved }) {
     const [bankAccountId, setBankAccountId] = useState('');
     // The customer's issuing bank — free text, not one of our COA accounts.
     const [payOrderBank, setPayOrderBank] = useState('');
+    const [bankLoadErr, setBankLoadErr] = useState(null);
     const [banks, setBanks] = useState([]);
     const [proofFile, setProofFile] = useState(null);
     const [proofDescription, setProofDescription] = useState('');
@@ -763,11 +764,22 @@ function PaymentModal({ booking, onClose, onSaved }) {
     const modeOptions = path === 'Direct' ? ['Cash', 'BankTransfer', 'Cheque', 'POS'] : ['PayOrder'];
     useEffect(() => { if (!modeOptions.includes(mode)) setMode(modeOptions[0]); }, [path]);
 
-    // Load active banks once for the bank dropdown (BankTransfer / Cheque / POS / PayOrder all hit a bank account)
+    // Load active banks once for the bank dropdown (BankTransfer / Cheque / POS).
+    // The failure used to be swallowed, so a 403 looked identical to "no banks
+    // are configured" — which sent the 2026-09-11 report chasing the wrong
+    // thing. Keep the reason and show it.
     useEffect(() => {
         (async () => {
-            try { const r = await axios.get(`${API}/accounts/banks`); setBanks(r.data || []); }
-            catch { /* dropdown will just be empty; admin must mark banks in Accounting > Banks */ }
+            try {
+                const r = await axios.get(`${API}/accounts/banks`);
+                setBanks(r.data || []);
+                setBankLoadErr(null);
+            } catch (e) {
+                setBanks([]);
+                setBankLoadErr(e.response?.status === 403
+                    ? 'Your role is not allowed to read the bank list. Ask an admin to grant it.'
+                    : (e.response?.data?.error || 'Could not load bank accounts.'));
+            }
         })();
     }, []);
 
@@ -848,7 +860,9 @@ function PaymentModal({ booking, onClose, onSaved }) {
                     />
                     {banks.length === 0 && (
                         <div style={{ fontSize: '0.72rem', color: '#b45309', marginTop: 4 }}>
-                            No active bank accounts. Admin must mark COA leaf accounts as banks under <strong>Accounting › Banks</strong> first.
+                            {bankLoadErr
+                                ? bankLoadErr
+                                : <>No active bank accounts. Admin must mark COA leaf accounts as banks under <strong>Accounting › Banks</strong> first.</>}
                         </div>
                     )}
                 </Field>

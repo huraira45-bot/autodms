@@ -16,11 +16,19 @@ router.patch('/coa/:glcaid/title', requirePerm('finance_coa', 'edit'), accountCo
 
 // Banks (under accounting_setup). GET is also needed by Store Sale / SSR
 // forms (Bank Transfer payment mode picker) and the workshop side.
+// Owner report 2026-09-11: the bank picker on a booking payment came up
+// empty ("0 of 0"). The list itself was fine — the vehicle-sales roles that
+// record those payments simply were not allowed to read it, so the request
+// 403'd and the frontend's catch left the dropdown blank. Because a bank is
+// mandatory for Direct bank/cheque/POS, that made those payments
+// unrecordable with no visible reason. sales_executive / sales_agm /
+// sales_gm are exactly the roles POST /sales/bookings/:id/payments accepts.
 router.get(  '/banks',          requireAnyAccess(
                                     'accounting_setup:view', 'finance_vouchers:view',
                                     'payments', 'finance_cheques',
                                     'sales_store:view', 'sales_ssr:view',
                                     'workshop_jobs:view',
+                                    'sales_executive', 'sales_agm', 'sales_gm',
                                 ), accountController.getBanks);
 router.get(  '/bank-configs',   requirePerm('accounting_setup', 'view'),  accountController.getBankConfigs);
 router.patch('/banks/:glcaid/toggle',  requirePerm('accounting_setup', 'edit'), accountController.toggleBank);
