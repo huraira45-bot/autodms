@@ -87,6 +87,20 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     // What we actually paid Master against this booking (sum of BVR Dr legs).
     const masterPaid = await loadMasterPaid(bookingId, acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, transaction);
 
+    // Backstop for the gate in issueGatePass (owner decision 2026-09-11).
+    // This voucher settles the customer against what reached Master, so if
+    // Master is short the difference silently strands as a credit on the
+    // customer's account — which is exactly what happened on BK-2026-0002.
+    // Refuse rather than post a settlement that cannot reconcile. The caller
+    // is inside a transaction, so this rolls the delivery back whole.
+    const definedRate = Number(b.WholesalePrice) > 0 ? Number(b.WholesalePrice) : negotiated;
+    if (definedRate - masterPaid > 0.01) {
+        throw new Error(
+            `Cannot settle delivery for ${b.BookingNo}: PKR ${(definedRate - masterPaid).toLocaleString('en-PK')} `
+            + `of the defined rate (PKR ${definedRate.toLocaleString('en-PK')}) has not been remitted to Master. `
+            + `Pay Master the balance first.`);
+    }
+
     // Use JV voucher type — agency model has no internal sales invoice
     const vt = await new sql.Request(transaction).query("SELECT Voucherid FROM GLVoucherType WHERE Title='JV'");
     if (!vt.recordset.length) throw new Error('JV voucher type missing');

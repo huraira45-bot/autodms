@@ -93,7 +93,15 @@ export default function BookingDetail() {
     // Pay Master: shown whenever there's vehicle-money pending forward to Master.
     // Premium is additive on top of the set price and stays with the dealer,
     // so wholesale due = NegotiatedPrice (the set price itself).
-    const wholesaleDue   = Math.max(0, data.NegotiatedPrice || 0);
+    // Owner decision 2026-09-11: what Master is owed is the VARIANT'S defined
+    // rate, not the booking's negotiated price. Master's price for a chassis is
+    // Master's price; a discount given to the customer comes out of our own
+    // premium, never out of Master's amount. Falls back to the negotiated price
+    // only when the variant carries no rate.
+    const definedRate    = Number(data.WholesalePrice) > 0
+        ? Number(data.WholesalePrice)
+        : Number(data.NegotiatedPrice || 0);
+    const wholesaleDue   = Math.max(0, definedRate);
     const masterPaidSoFar = Number(data.AmountPaidToMaster || 0);
     const masterStillOwed = Math.round((wholesaleDue - masterPaidSoFar) * 100) / 100;
     const canPayMaster = (data.AmountPaidToDate || 0) > 0
@@ -781,6 +789,32 @@ function GatePassModal({ booking, onClose, onSaved }) {
                                 {readiness.blockingReasons.map((r, i) => <li key={i}>{r}</li>)}
                             </ul>
                             <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 8 }}>Paid: {readiness.paidPercentage}%. For partial delivery: GM Sales must enable + Finance must co-sign (use the API directly for now; UI in a follow-up).</div>
+                        </div>
+                    )}
+
+                    {/* Master remittance position — the reconciliation that must
+                        balance chassis-wise before the vehicle can leave. */}
+                    {readiness.masterRemittance?.enforceable && (
+                        <div style={{ padding: 10, borderRadius: 6, fontSize: '0.82rem', marginBottom: 12,
+                                      background: readiness.masterRemittance.shortfall > 0 ? '#fffbeb' : '#f0fdf4',
+                                      border: '1px solid ' + (readiness.masterRemittance.shortfall > 0 ? '#fde68a' : '#bbf7d0'),
+                                      color: readiness.masterRemittance.shortfall > 0 ? '#78350f' : '#15803d' }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                                Master remittance{readiness.masterRemittance.ChasisNo ? ` — chassis ${readiness.masterRemittance.ChasisNo}` : ''}
+                            </div>
+                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                                <span>Defined rate: <strong>PKR {fmtN(readiness.masterRemittance.definedRate)}</strong></span>
+                                <span>Sent to Master: <strong>PKR {fmtN(readiness.masterRemittance.remitted)}</strong></span>
+                                {readiness.masterRemittance.shortfall > 0
+                                    ? <span>Still to send: <strong>PKR {fmtN(readiness.masterRemittance.shortfall)}</strong></span>
+                                    : <span><strong>Reconciled ✓</strong></span>}
+                            </div>
+                            {readiness.masterRemittance.shortfall > 0 && (
+                                <div style={{ marginTop: 6 }}>
+                                    Pay Master the balance first — otherwise this amount is left stranded
+                                    on the customer&rsquo;s account after delivery.
+                                </div>
+                            )}
                         </div>
                     )}
                     <Field label="Gate Pass # (optional — auto-generated if blank)">

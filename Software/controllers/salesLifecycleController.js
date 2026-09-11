@@ -500,6 +500,72 @@ exports.postMasterInvoice = async (req, res) => {
 // =========================================================================
 
 // GET /api/sales/bookings/:id/delivery-readiness — preflight check for the UI
+/**
+ * Master remittance position for a booking.
+ *
+ * Owner decision 2026-09-11. Two payment routes exist — the customer pays us
+ * and we forward it, or the customer pays Master directly by pay order — and
+ * both must add up to the VARIANT'S DEFINED RATE before the vehicle leaves.
+ *
+ * The reconciliation target is the variant's wholesale rate, NOT the booking's
+ * negotiated price: Master's price for a chassis is Master's price, and any
+ * discount given to the customer comes out of our own premium, never out of
+ * what Master is owed.
+ *
+ * `remitted` is the net Dr on BOOKING_VARIANT_RECEIVABLE tagged to the
+ * booking — the same figure salesDeliveryPostingService settles against, so
+ * the gate and the posting can never disagree.
+ */
+async function masterRemittancePosition(pool, bookingId) {
+    const r = await pool.request().input('id', sql.Int, bookingId).query(`
+        SELECT b.BookingID, b.NegotiatedPrice, v.WholesalePrice, v.VariantCode, v.VariantName,
+               veh.ChasisNo, veh.EngineNo
+        FROM   dms_SalesBookings b
+        LEFT   JOIN dms_VehicleVariant v   ON v.VariantID = b.VehicleVariantID
+        LEFT   JOIN dms_Vehicle        veh ON veh.VehicleID = b.AllocatedVehicleID
+        WHERE  b.BookingID = @id`);
+    if (!r.recordset.length) return null;
+    const row = r.recordset[0];
+
+    // Fall back to the negotiated price only if the variant carries no rate —
+    // better than silently reconciling to zero and waving everything through.
+    const definedRate = Number(row.WholesalePrice) > 0
+        ? Number(row.WholesalePrice)
+        : Number(row.NegotiatedPrice || 0);
+
+    let remitted = 0;
+    try {
+        // Local resolveRole takes (executor, roleKey) and returns null when the
+        // role is unmapped — it does not throw.
+        const bvrGL = await resolveRole(pool, 'BOOKING_VARIANT_RECEIVABLE');
+        if (!bvrGL) throw new Error('BOOKING_VARIANT_RECEIVABLE unmapped');
+        const q = await pool.request()
+            .input('gl',  sql.Int, bvrGL)
+            .input('bid', sql.Int, bookingId)
+            .query(`SELECT ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0)
+                         - ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Net
+                    FROM   data_FinanceVoucherDetail d
+                    JOIN   data_FinanceVoucherInfo   v ON v.VoucherID = d.VoucherID
+                    WHERE  v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=@bid`);
+        remitted = Number(q.recordset[0]?.Net) || 0;
+    } catch (e) {
+        // BVR unmapped — GL posting is disabled anyway; don't block on it.
+        return { definedRate, remitted: 0, shortfall: 0, enforceable: false,
+                 ChasisNo: row.ChasisNo, EngineNo: row.EngineNo,
+                 VariantCode: row.VariantCode, VariantName: row.VariantName };
+    }
+
+    const shortfall = Math.round((definedRate - remitted) * 100) / 100;
+    return {
+        definedRate, remitted,
+        shortfall: shortfall > 0.01 ? shortfall : 0,
+        enforceable: definedRate > 0,
+        ChasisNo: row.ChasisNo, EngineNo: row.EngineNo,
+        VariantCode: row.VariantCode, VariantName: row.VariantName,
+    };
+}
+exports.masterRemittancePosition = masterRemittancePosition;
+
 exports.deliveryReadiness = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
@@ -533,6 +599,15 @@ exports.deliveryReadiness = async (req, res) => {
                 if (!b.PartialDeliveryApprovedByFinance) reasons.push('Partial delivery needs Finance Head approval');
             }
         }
+        // Master must have the full defined rate before the chassis leaves.
+        const mr = await masterRemittancePosition(pool, id);
+        if (mr && mr.enforceable && mr.shortfall > 0) {
+            reasons.push(
+                `PKR ${mr.shortfall.toLocaleString('en-PK')} still to be remitted to Master — ` +
+                `defined rate PKR ${mr.definedRate.toLocaleString('en-PK')}, sent so far PKR ${mr.remitted.toLocaleString('en-PK')}. ` +
+                `Use "Pay Master Motors" first.`);
+        }
+
         res.json({
             ready: reasons.length === 0,
             blockingReasons: reasons,
@@ -541,6 +616,7 @@ exports.deliveryReadiness = async (req, res) => {
             partialDeliveryEnabled: !!b.AllowPartialDelivery,
             gmApproved: !!b.PartialDeliveryApprovedByGM,
             financeApproved: !!b.PartialDeliveryApprovedByFinance,
+            masterRemittance: mr,
         });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -648,6 +724,33 @@ exports.issueGatePass = async (req, res) => {
             if (!b.PartialDeliveryApprovedByGM || !b.PartialDeliveryApprovedByFinance) {
                 return res.status(409).json({ error: 'Partial delivery needs both GM Sales and Finance Head co-sign.' });
             }
+        }
+
+        // Owner decision 2026-09-11: the vehicle cannot leave until Master has
+        // the full defined rate for the variant.
+        //
+        // BK-2026-0002 is why. The customer paid 8,617,980 in total — 50,000
+        // into our bank and 8,567,980 straight to Master by pay order — but
+        // only the pay order had reached Master. The gate pass checked the
+        // CUSTOMER had paid, never that MASTER had been paid, so the car went
+        // out while we still held 50,000. The delivery voucher settles what was
+        // actually remitted, so that 50,000 stranded on the customer's account
+        // with nothing to clear it against.
+        //
+        // Enforced here as well as in deliveryReadiness because the UI can be
+        // stale, and this is the request that actually releases the vehicle.
+        const mrGate = await masterRemittancePosition(pool, id);
+        if (mrGate && mrGate.enforceable && mrGate.shortfall > 0) {
+            return res.status(412).json({
+                error: `PKR ${mrGate.shortfall.toLocaleString('en-PK')} has not been remitted to Master yet. `
+                     + `The defined rate for ${mrGate.VariantCode || 'this variant'} is PKR ${mrGate.definedRate.toLocaleString('en-PK')} `
+                     + `and PKR ${mrGate.remitted.toLocaleString('en-PK')} has been sent`
+                     + (mrGate.ChasisNo ? ` against chassis ${mrGate.ChasisNo}` : '')
+                     + `. Pay Master the balance before issuing the gate pass, otherwise the difference is left stranded on the customer's account.`,
+                MasterShortfall: mrGate.shortfall,
+                DefinedRate: mrGate.definedRate,
+                RemittedToMaster: mrGate.remitted,
+            });
         }
 
         // Resolve roles for delivery voucher posting (gated)
