@@ -749,6 +749,8 @@ function PaymentModal({ booking, onClose, onSaved }) {
     const [refField, setRefField] = useState('');
     const [chequeDate, setChequeDate] = useState('');
     const [bankAccountId, setBankAccountId] = useState('');
+    // The customer's issuing bank — free text, not one of our COA accounts.
+    const [payOrderBank, setPayOrderBank] = useState('');
     const [banks, setBanks] = useState([]);
     const [proofFile, setProofFile] = useState(null);
     const [proofDescription, setProofDescription] = useState('');
@@ -770,7 +772,15 @@ function PaymentModal({ booking, onClose, onSaved }) {
     }, []);
 
     // Modes that require a bank to be selected
-    const needsBank = ['BankTransfer', 'Cheque', 'POS'].includes(mode) || path === 'PayOrder';
+    // Owner report 2026-09-11: the Pay Order path demanded one of OUR bank
+    // accounts, which is wrong twice over. The pay order is made out to Master,
+    // so the money never reaches a dealership bank — postDirectPayOrderVoucher
+    // debits BOOKING_VARIANT_RECEIVABLE and never reads BankAccountID at all.
+    // And the bank that actually matters here is the CUSTOMER'S issuing bank,
+    // which is not in our chart of accounts. That belongs in PayOrderBankName,
+    // free text the backend already accepts but which this form never sent — so
+    // that half of the voucher narration has always come out blank.
+    const needsBank = ['BankTransfer', 'Cheque', 'POS'].includes(mode) && path !== 'PayOrder';
 
     // Reset bank when switching to Cash
     useEffect(() => { if (!needsBank) setBankAccountId(''); }, [needsBank]);
@@ -786,7 +796,10 @@ function PaymentModal({ booking, onClose, onSaved }) {
             if (needsBank && bankAccountId) fd.append('BankAccountID', String(Number(bankAccountId)));
             if (mode === 'Cheque')   { fd.append('ChequeNumber', refField); fd.append('ChequeDate', chequeDate); }
             if (mode === 'POS')      fd.append('POSTransactionRef', refField);
-            if (path === 'PayOrder') fd.append('PayOrderNumber', refField);
+            if (path === 'PayOrder') {
+                fd.append('PayOrderNumber', refField);
+                if (payOrderBank.trim()) fd.append('PayOrderBankName', payOrderBank.trim());
+            }
             if (proofDescription)    fd.append('ProofDescription', proofDescription);
             fd.append('proof', proofFile);
             await axios.post(`${API}/sales/bookings/${booking.BookingID}/payments`, fd, {
@@ -856,6 +869,16 @@ function PaymentModal({ booking, onClose, onSaved }) {
             {(mode === 'Cheque' || mode === 'POS' || path === 'PayOrder') && (
                 <Field label={mode === 'Cheque' ? 'Cheque number *' : path === 'PayOrder' ? 'Pay Order #' : 'POS transaction ref'}>
                     <input value={refField} onChange={e => setRefField(e.target.value)} style={inputStyle} />
+                </Field>
+            )}
+            {path === 'PayOrder' && (
+                <Field label="Issuing bank (optional)">
+                    <input value={payOrderBank} onChange={e => setPayOrderBank(e.target.value)}
+                           style={inputStyle} placeholder="e.g. HBL — the bank the customer's pay order is drawn on" />
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
+                        Recorded on the voucher narration. The pay order is made out to Master,
+                        so no dealership bank account is involved.
+                    </div>
                 </Field>
             )}
             {mode === 'Cheque' && (
