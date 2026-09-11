@@ -102,7 +102,10 @@ async function main() {
         // so anything they paid beyond that is still sitting on their account.
         const stranded = delivered ? Math.round((custPaid - remitted) * 100) / 100 : 0;
 
-        if (short > 0.01 || stranded > 0.01) {
+        // When one booking is named explicitly the caller is verifying it, so
+        // show the numbers even when they reconcile — "nothing to report" is
+        // not the same as seeing the figures line up.
+        if (short > 0.01 || stranded > 0.01 || ONE) {
             bad.push({ ...b, defined, remitted, short, custPaid, stranded, delivered });
         }
     }
