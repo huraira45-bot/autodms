@@ -939,6 +939,16 @@ exports.saveJobCard = async (req, res) => {
 
         const pool = await getPool();
 
+        // Owner report 2026-09-14: an over-long field made the save fail with
+        // "String or binary data would be truncated". SQL Server 2017 on the
+        // live server never says WHICH field, so check against the real
+        // column widths first and name it. See services/jobCardFieldLimits.js.
+        const { findOverlongFields, describeOverlong } = require('../services/jobCardFieldLimits');
+        const overlong = await findOverlongFields(pool, req.body);
+        if (overlong.length) {
+            return res.status(400).json({ error: describeOverlong(overlong), fields: overlong });
+        }
+
         if (CareOffID && LabourItems?.length > 0) {
             const coRes = await pool.request()
                 .input('coId', sql.Int, CareOffID)
@@ -993,7 +1003,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('chassis', sql.NVarChar(150), ChasisNo)
                     .input('engine', sql.NVarChar(150), EngineNo)
                     .input('brand', sql.Int, BrandCode || null)
-                    .input('version', sql.NVarChar(150), VersionCode || null)
+                    .input('version', sql.NVarChar(300), VersionCode || null)
                     .input('vehicle', sql.NVarChar(150), VehicleCode || null)
                     .input('km', sql.Decimal(18,2), KiloMeter || 0)
                     .input('millage', sql.Decimal(18,2), Millage || 0)
@@ -1156,7 +1166,7 @@ exports.saveJobCard = async (req, res) => {
                     .input('chassis', sql.NVarChar(150), ChasisNo)
                     .input('engine', sql.NVarChar(150), EngineNo)
                     .input('brand', sql.Int, BrandCode || null)
-                    .input('version', sql.NVarChar(150), VersionCode)
+                    .input('version', sql.NVarChar(300), VersionCode)
                     .input('vehicle', sql.NVarChar(150), VehicleCode)
                     .input('km', sql.Decimal(18,2), KiloMeter || 0)
                     .input('millage', sql.Decimal(18,2), Millage || 0)
