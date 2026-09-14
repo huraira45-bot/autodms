@@ -6,7 +6,7 @@
   "scripts": {
     "build:web": "npm --prefix ../frontend run build",
     "sync": "npm run build:web && npx cap sync android",
-    "apk:debug": "npm run sync && cd android && gradlew.bat assembleDebug",
+    "apk:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File build-apk.ps1",
     "doctor": "npx cap doctor"
   },
   "dependencies": {

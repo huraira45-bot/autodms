@@ -1,25 +1,32 @@
 /**
- * DealerDesk Service — tablet app shell (plan 2026-09-14, Phase 0).
+ * DealerDesk Service — tablet app shell (plan 2026-09-14).
  *
  * Everything under /tablet renders here instead of the desktop ERP shell:
  * touch-sized controls, no sidebar. Inside the Android app this is the only
  * part of DealerDesk shown.
  *
- * Phase 0 proves three things on the real tablet before anything is built on
- * top of them: that it reaches the server, that a walk-around video uploads
- * over the workshop Wi-Fi, and that it can print.
+ * Phase 0: server address, sign-in, and the Tablet tests (reach the server,
+ *          upload a walk-around video, print).
+ * Phase 1: intake at the vehicle and the estimate — video, customer and
+ *          vehicle, jobs and parts, estimate print.
  */
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Routes, Route, Navigate, useNavigate, Link } from 'react-router-dom';
-import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench } from 'lucide-react';
+import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
+import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, Video } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isNativeApp, getServerUrl, setServerUrl, normalizeServerUrl } from '../../tablet/serverConfig';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
 import TabletDiagnostics from './TabletDiagnostics';
+import TabletEstimates, { NewIntakeButton } from './TabletEstimates';
+import TabletEstimateEditor from './TabletEstimateEditor';
+import TabletEstimatePrint from './TabletEstimatePrint';
+
+const PRINT_ROUTE = /^\/tablet\/estimates\/\d+\/print\/?$/;
 
 export default function TabletApp() {
     const { user, loading, logout, hasPermission } = useAuth();
+    const location = useLocation();
     const native = isNativeApp();
     const [serverUrl, setServerUrlState] = useState(getServerUrl());
 
@@ -42,6 +49,15 @@ export default function TabletApp() {
         return <NoAccess user={user} onSignOut={logout} />;
     }
 
+    // Print pages fill the screen with the A4 sheet — no app bar.
+    if (PRINT_ROUTE.test(location.pathname)) {
+        return (
+            <Routes>
+                <Route path="/tablet/estimates/:id/print" element={<TabletEstimatePrint />} />
+            </Routes>
+        );
+    }
+
     return (
         <div style={S.page}>
             <div style={S.bar}>
@@ -60,6 +76,8 @@ export default function TabletApp() {
             </div>
             <Routes>
                 <Route path="/tablet" element={<TabletHome user={user} />} />
+                <Route path="/tablet/estimates" element={<TabletEstimates />} />
+                <Route path="/tablet/estimates/:id" element={<TabletEstimateEditor />} />
                 <Route path="/tablet/diagnostics" element={<TabletDiagnostics />} />
                 <Route path="/tablet/settings" element={<ServerSettings onSaved={setServerUrlState} />} />
                 <Route path="*" element={<Navigate to="/tablet" replace />} />
@@ -68,18 +86,33 @@ export default function TabletApp() {
     );
 }
 
+const tile = {
+    ...S.card, marginBottom: 0, minHeight: 170, width: '100%', boxSizing: 'border-box', cursor: 'pointer',
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 8,
+    textAlign: 'left', textDecoration: 'none', color: T.ink, font: 'inherit',
+};
+const tileTitle = { fontSize: 21, fontWeight: 700 };
+const tileSub = { fontSize: 15, color: T.muted, fontWeight: 400 };
+
 function TabletHome({ user }) {
     return (
         <div style={S.body}>
-            <div style={S.card}>
-                <h1 style={S.h1}>Hello, {user.userName}</h1>
-                <p style={S.p}>
-                    This is the first build of the service tablet app. Before the intake, estimate,
-                    signature and bay screens are added, it has to pass three tests on this tablet:
-                    reaching the server, uploading a walk-around video over the workshop Wi-Fi, and printing.
-                </p>
-                <Link to="/tablet/diagnostics" style={{ ...S.btn, textDecoration: 'none', width: '100%', boxSizing: 'border-box' }}>
-                    <Stethoscope size={20} /> Run the tablet tests
+            <h1 style={{ ...S.h1, margin: '4px 0 16px' }}>Hello, {user.userName}</h1>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+                <NewIntakeButton style={{ ...tile, background: T.brand, borderColor: T.brand, color: '#fff' }}>
+                    <Video size={34} />
+                    <span style={tileTitle}>New intake</span>
+                    <span style={{ ...tileSub, color: 'rgba(255,255,255,0.85)' }}>Video, customer, jobs and parts, estimate</span>
+                </NewIntakeButton>
+                <Link to="/tablet/estimates" style={tile}>
+                    <ClipboardList size={34} color={T.brand} />
+                    <span style={tileTitle}>Estimates</span>
+                    <span style={tileSub}>Continue, print or cancel an estimate</span>
+                </Link>
+                <Link to="/tablet/diagnostics" style={tile}>
+                    <Stethoscope size={34} color={T.brand} />
+                    <span style={tileTitle}>Tablet tests</span>
+                    <span style={tileSub}>Wi-Fi, video upload speed, printing</span>
                 </Link>
             </div>
         </div>

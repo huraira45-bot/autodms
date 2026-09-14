@@ -20,6 +20,10 @@ const app = express();
 app.use(cors());
 app.use(express.json()); // Parses incoming JSON requests
 app.use(express.urlencoded({ extended: false })); // Twilio webhook form posts
+// Service tablet walk-around videos and photos are customer vehicle evidence.
+// Everything else under /uploads is served publicly with no login, so this
+// folder is carved out of that mount before it (plan 2026-09-14, Phase 1).
+app.use('/uploads/service-media', (req, res) => res.status(404).end());
 app.use('/uploads', express.static('uploads'));
 
 // Serve the built frontend (single-port deploy on the LAN).

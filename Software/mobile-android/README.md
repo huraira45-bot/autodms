@@ -7,35 +7,56 @@ tablet screens is a change in `frontend/src/pages/tablet/`.
 
 Plan: `C:\Users\ServerDeskop\.claude\plans\do-you-have-database-glowing-crayon.md`
 
-**Current stage: Phase 0.** The app signs in and runs the *Tablet tests*
-(server connection, walk-around video upload, printing). Intake, estimates,
-signatures, bay screens and parts requisitions come after those tests pass on
-the real tablet.
+**Current stage: Phase 1 (code).** Intake at the vehicle and the estimate:
+walk-around video, find or add the customer and vehicle, jobs from the labour
+catalog and parts with live stock, and the estimate print. The Phase 0 *Tablet
+tests* (server connection, video upload, printing) still have to be run on the
+real tablet, and how estimates print inside the app depends on them.
+Signatures, bay screens and parts requisitions come next.
+
+**Do not build the APK on the DealerDesk server** (owner, 2026-09-14). The
+tablet screens can be tried in any browser at `http://192.168.3.10:5000/tablet`
+without an APK. Build the APK on a separate PC; see *To set this up on another
+machine* below.
 
 ---
 
-## What the build machine needs
+## Build toolchain (set up 2026-09-14)
 
-Building the APK needs tools this server does **not** have yet:
+The build server's C: drive is nearly full, so the whole Android toolchain
+lives in one folder on F: — no Android Studio, nothing installed system-wide:
 
-| Tool | Notes |
+| Folder | What |
 |---|---|
-| Node.js 22 or newer | already installed (v24) |
-| JDK 21 | the JDK bundled with Android Studio works |
-| Android SDK | install **Android Studio**; open `android/` once and accept the SDK components it asks for |
+| `F:\android-build\jdk-21` | Java 21 (Microsoft OpenJDK 21.0.12) |
+| `F:\android-build\sdk` | Android SDK: command-line tools, platform-tools (adb), Android 36 platform |
+| `F:\android-build\gradle-home` | Gradle + its dependency cache (filled by the first build) |
+| `F:\android-build\android-user-home` | Android per-user settings |
+| `F:\android-build\tmp` | build temp files |
+| `F:\android-build\downloads` | the original Java / SDK zips (safe to delete) |
 
-The Android SDK is several GB. It can live on any Windows PC on the network,
-not necessarily the server. Once the tools are in, run `npm run doctor` here
-to confirm Capacitor is happy.
+`android\local.properties` (gitignored) points Gradle at `F:\android-build\sdk`.
+
+To set this up on another machine: unzip Microsoft OpenJDK 21 into
+`<folder>\jdk-21`, unzip Google's `commandlinetools-win-*_latest.zip` into
+`<folder>\sdk\cmdline-tools\latest`, then with `JAVA_HOME` pointing at that JDK run
+`<folder>\sdk\cmdline-tools\latest\bin\sdkmanager "platform-tools" "platforms;android-36"`.
+Build with `-Toolchain <folder>`.
 
 ## Build a test APK
 
 From `Software/mobile-android`:
 
 ```powershell
-npm install          # first time only
-npm run apk:debug    # builds the frontend, copies it into android/, builds the APK
+npm install                                              # first time only
+powershell -ExecutionPolicy Bypass -File .\build-apk.ps1  # or: npm run apk:debug
 ```
+
+`build-apk.ps1` builds the web app, copies it into `android/` and runs Gradle,
+with Java, the SDK, Gradle's cache and temp files all redirected into the
+toolchain folder for that run only. Add `-SkipWebBuild` when the web app is
+already built. The first build downloads Gradle and its dependencies; later
+builds are much faster.
 
 The APK lands at:
 
@@ -61,7 +82,7 @@ Either:
    network only (plain HTTP to the server), not from outside.
 2. **Sign in** with a DealerDesk account whose role has **Service Tablet App**
    ticked in Role Permissions (admin has it by default).
-3. Tap **Run the tablet tests**.
+3. Tap **Tablet tests** on the home screen and run all three before first use.
 
 ## Phase 0 — what to test, at the reception area
 
