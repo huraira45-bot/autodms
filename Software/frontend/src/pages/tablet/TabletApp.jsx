@@ -9,11 +9,14 @@
  *          upload a walk-around video, print).
  * Phase 1: intake at the vehicle and the estimate — video, customer and
  *          vehicle, jobs and parts, estimate print.
+ * Phase 2: the customer's signature opens the job card.
+ * Phase 3: bay screens (/tablet/bay); the parts counter is a desk screen.
+ * Phase 4: job cards — progress, additional work, finalize, final print.
  */
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
-import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, Video, MonitorSmartphone } from 'lucide-react';
+import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, ClipboardCheck, Video, MonitorSmartphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isNativeApp, getServerUrl, setServerUrl, normalizeServerUrl } from '../../tablet/serverConfig';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
@@ -23,8 +26,10 @@ import TabletEstimateEditor from './TabletEstimateEditor';
 import TabletEstimatePrint from './TabletEstimatePrint';
 import TabletEstimateSign from './TabletEstimateSign';
 import BayScreen, { hasBayDevice } from './BayScreen';
+import TabletJobCards from './TabletJobCards';
+import TabletJobCard, { TabletJobCardPrint } from './TabletJobCard';
 
-const PRINT_ROUTE = /^\/tablet\/estimates\/\d+\/print\/?$/;
+const PRINT_ROUTE = /^\/tablet\/(estimates|job-cards)\/\d+\/print\/?$/;
 
 export default function TabletApp() {
     const { user, loading, logout, hasPermission } = useAuth();
@@ -61,6 +66,7 @@ export default function TabletApp() {
         return (
             <Routes>
                 <Route path="/tablet/estimates/:id/print" element={<TabletEstimatePrint />} />
+                <Route path="/tablet/job-cards/:id/print" element={<TabletJobCardPrint />} />
             </Routes>
         );
     }
@@ -86,6 +92,8 @@ export default function TabletApp() {
                 <Route path="/tablet/estimates" element={<TabletEstimates />} />
                 <Route path="/tablet/estimates/:id" element={<TabletEstimateEditor />} />
                 <Route path="/tablet/estimates/:id/sign" element={<TabletEstimateSign />} />
+                <Route path="/tablet/job-cards" element={<TabletJobCards />} />
+                <Route path="/tablet/job-cards/:id" element={<TabletJobCard />} />
                 <Route path="/tablet/diagnostics" element={<TabletDiagnostics />} />
                 <Route path="/tablet/bay" element={<BayScreen />} />
                 <Route path="/tablet/settings" element={<ServerSettings onSaved={setServerUrlState} />} />
@@ -119,6 +127,11 @@ function TabletHome({ user }) {
                     <ClipboardList size={34} color={T.brand} />
                     <span style={tileTitle}>Estimates</span>
                     <span style={tileSub}>Continue, print or cancel an estimate</span>
+                </Link>
+                <Link to="/tablet/job-cards" style={tile}>
+                    <ClipboardCheck size={34} color={T.brand} />
+                    <span style={tileTitle}>Job cards</span>
+                    <span style={tileSub}>Jobs and parts progress, add work, finalize, print</span>
                 </Link>
                 {canSetUpBays && (
                     <Link to="/tablet/bay" style={tile}>

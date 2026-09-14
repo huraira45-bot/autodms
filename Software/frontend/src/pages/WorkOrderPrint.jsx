@@ -7,7 +7,9 @@ const fmt = n => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits:
 const d   = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
 
 
-export default function WorkOrderPrint() {
+// apiBase: the service tablet feeds this same print through /api/service-intake,
+// which serves only job cards opened on the tablet (plan 2026-09-14, Phase 4).
+export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) {
     const { id } = useParams();
     const [jc, setJc] = useState(null);
     const [ins, setIns] = useState(null);
@@ -20,12 +22,12 @@ export default function WorkOrderPrint() {
         // most Work Orders aren't insurance claims, so a 404/empty result
         // here is normal, not an error.
         Promise.all([
-            axios.get(`/api/workshop/job-cards/${id}/print-data`),
-            axios.get(`/api/workshop/job-cards/${id}/insurance`).catch(() => ({ data: null })),
+            axios.get(`${apiBase}/${id}/print-data`),
+            axios.get(`${apiBase}/${id}/insurance`).catch(() => ({ data: null })),
         ])
             .then(([jcRes, insRes]) => { setJc(jcRes.data); setIns(insRes.data); setTimeout(() => window.print(), 400); })
             .catch(e => setErr(e.response?.data?.error || e.message));
-    }, [id]);
+    }, [id, apiBase]);
 
     if (err) return <div style={{ padding: 40, color: '#b91c1c', fontFamily: 'Arial' }}>Cannot print: {err}</div>;
     if (!jc) return <div style={{ padding: 40, fontFamily: 'Arial' }}>Loading…</div>;

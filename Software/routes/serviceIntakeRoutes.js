@@ -4,6 +4,7 @@ const c = require('../controllers/serviceIntakeController');
 const workshop = require('../controllers/workshopController');
 const requisitions = require('../controllers/partsRequisitionController');
 const bayScreens = require('../controllers/bayScreenController');
+const jobCards = require('../controllers/serviceJobCardsController');
 const { requireAccess } = require('../middleware/permissions');
 const { uploadDiagnostic, uploadServiceMedia, withUploadErrors } = require('../middleware/serviceMediaUpload');
 
@@ -64,5 +65,15 @@ router.get(   '/bay-devices/bays',                bayAdmin, workshop.getBays);
 router.get(   '/bay-devices',                     bayAdmin, bayScreens.listDevices);
 router.post(  '/bay-devices',                     bayAdmin, bayScreens.registerDevice);
 router.post(  '/bay-devices/:id/revoke',          bayAdmin, bayScreens.revokeDevice);
+
+// Phase 4 — job cards opened on the tablet. Only job cards that came from a
+// signed tablet estimate are reachable (tabletJobCardOnly).
+const tabletJobCard = [tablet, jobCards.tabletJobCardOnly];
+router.get(   '/job-cards',                       tablet, jobCards.listJobCards);
+router.get(   '/job-cards/:id',                   ...tabletJobCard, jobCards.getJobCard);
+router.post(  '/job-cards/:id/additional-work',   ...tabletJobCard, jobCards.startAdditionalWork);
+router.post(  '/job-cards/:id/finalize',          tablet, requireAccess('finalize'), jobCards.tabletJobCardOnly, jobCards.finalizeJobCard);
+router.get(   '/job-cards/:id/print-data',        ...tabletJobCard, workshop.getJobCardPrintData);
+router.get(   '/job-cards/:id/insurance',         ...tabletJobCard, workshop.getJobCardInsurance);
 
 module.exports = router;

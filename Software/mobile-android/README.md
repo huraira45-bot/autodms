@@ -7,12 +7,13 @@ tablet screens is a change in `frontend/src/pages/tablet/`.
 
 Plan: `C:\Users\ServerDeskop\.claude\plans\do-you-have-database-glowing-crayon.md`
 
-**Current stage: Phase 1 (code).** Intake at the vehicle and the estimate:
-walk-around video, find or add the customer and vehicle, jobs from the labour
-catalog and parts with live stock, and the estimate print. The Phase 0 *Tablet
-tests* (server connection, video upload, printing) still have to be run on the
-real tablet, and how estimates print inside the app depends on them.
-Signatures, bay screens and parts requisitions come next.
+**Current stage: Phases 1–4 built (code).** Intake and estimate (walk-around
+video, customer and vehicle, jobs and parts, estimate print); customer
+signature opening the job card; bay screens at `/tablet/bay` with Start and
+Finish; the parts counter on the desk (Parts > Parts Counter); and job cards on
+the tablet with additional work, finalize and the final print. The Phase 0
+*Tablet tests* (server connection, video upload, printing) still have to be run
+on the real tablet, and how prints work inside the app depends on them.
 
 **Do not build the APK on the DealerDesk server** (owner, 2026-09-14). The
 tablet screens can be tried in any browser at `http://192.168.3.10:5000/tablet`
