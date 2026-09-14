@@ -26,6 +26,7 @@ const SECTIONS = [
             { key: 'workshop_accessories',   label: 'Accessories Master',      kind: 'document' },
             { key: 'workshop_gatepass',      label: 'Gate Pass',               kind: 'document' },
             { key: 'workshop_controller',    label: 'Job Controller',          kind: 'workflow' },
+            { key: 'workshop_tablet',        label: 'Service Tablet App',      kind: 'workflow' },
         ],
     },
     {

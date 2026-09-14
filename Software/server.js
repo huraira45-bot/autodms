@@ -45,6 +45,15 @@ app.use('/api/cro', require('./routes/croPublicRoutes'));
 // before authMiddleware so a lobby TV can render it on a bare browser.
 app.use('/api/kiosk', require('./routes/kioskRoutes'));
 
+// Service tablet app — public reachability check (plan 2026-09-14, Phase 0).
+// Must answer before anyone signs in, so the tablet can confirm it reached
+// THIS server rather than a Wi-Fi login page or its own bundled page. Returns
+// a marker and the server clock only — no data.
+app.get('/api/service-intake/ping', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ app: 'DealerDesk', ok: true, serverTime: new Date().toISOString() });
+});
+
 // Protect all remaining API routes
 app.use('/api', authMiddleware);
 
@@ -96,6 +105,9 @@ app.use('/api/sales', require('./routes/salesRoutes'));
 app.use('/api/chat', require('./routes/chatRoutes'));
 app.use('/api/charity', require('./routes/charityRoutes'));
 app.use('/api/fixed-assets', require('./routes/fixedAssetRoutes'));
+// Service tablet app (plan 2026-09-14). Its public /ping is registered above
+// the auth middleware; these routes require a signed-in user.
+app.use('/api/service-intake', require('./routes/serviceIntakeRoutes'));
 
 // SPA fallback — anything that isn't an API route or a static asset returns
 // index.html so React Router takes over client-side. Must come AFTER all

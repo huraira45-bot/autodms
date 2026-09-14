@@ -1,0 +1,12 @@
+{
+  "appId": "com.changanmultan.dealerdesk.service",
+  "appName": "DealerDesk Service",
+  "webDir": "../frontend/dist",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

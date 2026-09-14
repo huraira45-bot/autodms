@@ -184,6 +184,7 @@ import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceCl
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
 import { ReceivablesSubLedger } from './pages/reports/ReceivablesSubLedger';
+import TabletApp from './pages/tablet/TabletApp';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, JcPartsCostMargin, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import SurveyPublic         from './pages/SurveyPublic';
@@ -878,7 +879,13 @@ function AppShell() {
     // Whitelist every print suffix explicitly.
     const isPrintRoute = /\/(print|credit-invoice|gst-invoice|pst-invoice|dep-print|depreciation-print)(?:\/|$|\?)/.test(location.pathname);
 
-    if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Loading…</div>;
+    // Service tablet app (plan 2026-09-14): /tablet renders its own touch
+    // shell and sign-in, never the desktop ERP. Checked before the login gate
+    // because the tablet has its own sign-in screen.
+    const isTabletRoute = location.pathname === '/tablet' || location.pathname.startsWith('/tablet/');
+
+    if (loading && !isTabletRoute) return <div style={{ padding: 40, textAlign: 'center' }}>Loading…</div>;
+    if (isTabletRoute) return <FeedbackProvider><TabletApp /></FeedbackProvider>;
     if (!user) return <Login />;
 
     if (isPrintRoute) {

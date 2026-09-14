@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealerDesk Service — Print Test</title>
+<!--
+  Service tablet app, Phase 0 (plan 2026-09-14).
+  A static page with no login and no data, so the tablet can open it in Chrome
+  and prove printing works before estimates and job cards depend on it.
+  Deliberately self-contained: no scripts or styles from elsewhere.
+-->
+<style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 16px; }
+    .bar { background: #fffbeb; border: 1px solid #fde68a; color: #78350f; padding: 12px 14px;
+           border-radius: 8px; margin-bottom: 16px; font-size: 16px; }
+    .bar button { font-size: 16px; padding: 10px 18px; margin-left: 8px; border-radius: 8px;
+                  border: none; background: #714b67; color: #fff; }
+    @media print { .bar { display: none; } body { padding: 0; } }
+    h1 { font-size: 20px; margin: 0 0 2px; }
+    .meta { font-size: 12px; color: #475569; margin-bottom: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; font-size: 13px; margin-bottom: 12px; }
+    .grid b { display: inline-block; min-width: 90px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #94a3b8; padding: 6px 8px; text-align: left; }
+    th { background: #f1f5f9; }
+    td.n, th.n { text-align: right; }
+    tfoot td { font-weight: bold; }
+    .sig { margin-top: 48px; display: flex; gap: 48px; }
+    .sig div { flex: 1; border-top: 1px solid #0f172a; padding-top: 4px; font-size: 12px; text-align: center; }
+    .check { margin-top: 24px; font-size: 12px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+</style>
+</head>
+<body>
+<div class="bar">If the print dialog did not open by itself, tap <button onclick="window.print()">Print</button></div>
+
+<h1>DealerDesk Service — Print Test</h1>
+<div class="meta">Test page only — not a real estimate. Printed <span id="ts"></span></div>
+
+<div class="grid">
+    <div><b>Customer:</b> TEST CUSTOMER</div>
+    <div><b>Estimate #:</b> TEST-0001</div>
+    <div><b>Vehicle:</b> ABC-123 · Test model</div>
+    <div><b>Advisor:</b> Tablet test</div>
+</div>
+
+<table>
+    <thead>
+        <tr><th>#</th><th>Description</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td>Periodic maintenance service (labour)</td><td class="n">1</td><td class="n">4,500.00</td><td class="n">4,500.00</td></tr>
+        <tr><td>2</td><td>Wheel alignment (labour)</td><td class="n">1</td><td class="n">1,500.00</td><td class="n">1,500.00</td></tr>
+        <tr><td>3</td><td>Engine oil 4L (part)</td><td class="n">1</td><td class="n">6,200.00</td><td class="n">6,200.00</td></tr>
+        <tr><td>4</td><td>Oil filter (part)</td><td class="n">1</td><td class="n">950.00</td><td class="n">950.00</td></tr>
+    </tbody>
+    <tfoot>
+        <tr><td colspan="4" class="n">Total</td><td class="n">13,150.00</td></tr>
+    </tfoot>
+</table>
+
+<div class="sig">
+    <div>Customer signature</div>
+    <div>Service advisor</div>
+</div>
+
+<div class="check">
+    PASS if this came out of the printer on a single A4 sheet with the full table and both signature lines.
+</div>
+
+<script>
+    document.getElementById('ts').textContent = new Date().toLocaleString();
+    window.addEventListener('load', function () {
+        setTimeout(function () { window.print(); }, 400);
+    });
+</script>
+</body>
+</html>
