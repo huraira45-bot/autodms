@@ -19,6 +19,7 @@ import { useServiceEvents } from '../../tablet/useServiceEvents';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
 import { API, money, errText, fmtDateTime, statusStyle, pill } from '../../tablet/estimateFormat';
 import WorkOrderPrint from '../WorkOrderPrint';
+import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 
 const qty = (n) => String(+Number(n || 0).toFixed(2));
 
@@ -147,6 +148,7 @@ export default function TabletJobCard() {
                 <div style={S.card}>
                     <h2 style={S.h2}>Job card</h2>
                     {kv('Job number', jc.jobCode)}
+                    {kv('DMS job card no', jc.DMSJobCardNo)}
                     {kv('Job type', jc.JobTypeName)}
                     {kv('Advisor', jc.ServiceAdvisor)}
                     {kv('Opened', fmtDateTime(jc.OpenedAt))}
@@ -266,7 +268,8 @@ export default function TabletJobCard() {
                         <Printer size={20} /> {jc.IsFinalized ? 'Print job card for the customer' : 'Print work order'}
                     </Link>
                     {canFinalize && (
-                        <button type="button" style={S.btn} onClick={finalize} disabled={busy === 'finalize' || jc.Finalize.blockers.length > 0}>
+                        <button type="button" style={S.btn} onClick={finalize}
+                                disabled={busy === 'finalize' || jc.Finalize.blockers.length > 0 || jc.Finalize.customerMissing.length > 0}>
                             {busy === 'finalize' ? <Loader2 size={20} className="animate-spin" /> : <Lock size={20} />} Finalize
                         </button>
                     )}
@@ -274,12 +277,49 @@ export default function TabletJobCard() {
                 {!jc.IsFinalized && jc.Finalize.blockers.map(b => (
                     <div key={b} style={{ ...S.result('bad'), marginTop: 10 }}><AlertTriangle size={16} style={{ verticalAlign: -3 }} /> {b}</div>
                 ))}
+                {!jc.IsFinalized && (
+                    <MissingCustomerDetails customerId={jc.CustomerID} hasCNIC={!!jc.HasCNIC} hasDOB={!!jc.HasDOB} onSaved={load} />
+                )}
+                {jc.Finalize.dmsMissing && <DmsNumberForm jobCardId={id} jobCardNo={jc.JobCardNo} onSaved={load} />}
                 {!jc.IsFinalized && jc.Finalize.warnings.map(w => (
                     <div key={w} style={{ ...S.result('warn'), marginTop: 10 }}>{w}</div>
                 ))}
                 {!jc.IsFinalized && !hasPermission('finalize') && (
                     <div style={{ fontSize: 14, color: T.muted, marginTop: 10 }}>Your role cannot finalize job cards; ask someone who can.</div>
                 )}
+            </div>
+        </div>
+    );
+}
+
+function DmsNumberForm({ jobCardId, jobCardNo, onSaved }) {
+    const { error, success } = useFeedback();
+    const [value, setValue] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    const save = async () => {
+        setBusy(true);
+        try {
+            await axios.post(`${API}/job-cards/${jobCardId}/dms-number`, { DMSJobCardNo: value.trim() });
+            success('DMS job card number saved', jobCardNo);
+            setValue('');
+            onSaved?.();
+        } catch (err) {
+            error('Could not save', errText(err));
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div style={{ ...S.result('warn'), marginTop: 10 }}>
+            <strong>The DMS job card number is empty.</strong> Enter it now, or finalize without it.
+            <div style={{ ...S.row, marginTop: 10 }}>
+                <input style={{ ...S.input, flex: 1, minWidth: 200 }} value={value} maxLength={50}
+                       onChange={e => setValue(e.target.value)} placeholder="DMS job card number" />
+                <button type="button" style={S.btn} onClick={save} disabled={busy || !value.trim()}>
+                    {busy ? <Loader2 size={20} className="animate-spin" /> : 'Save'}
+                </button>
             </div>
         </div>
     );

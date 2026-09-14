@@ -111,6 +111,80 @@ const tooLong = (fields) => fields
     .filter(([, value, max]) => value != null && String(value).length > max)
     .map(([label, , max]) => `${label} can be at most ${max} characters.`);
 
+// CNIC as the desk stores it: 13 digits written 36302-1234567-1.
+// Returns null when empty, otherwise the formatted CNIC; throws a 400.
+function normaliseCnic(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length !== 13) {
+        throw Object.assign(new Error('The CNIC must have 13 digits, for example 36302-1234567-1.'), { statusCode: 400 });
+    }
+    return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+}
+
+// Date of birth as "YYYY-MM-DD". Returns null when empty; throws a 400.
+function normaliseDob(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+    const d = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    const real = d && d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+    if (!real || +m[1] < 1900 || d > new Date()) {
+        throw Object.assign(new Error('Enter a real date of birth.'), { statusCode: 400 });
+    }
+    return raw;
+}
+
+/**
+ * POST /api/service-intake/customers/:id/missing-details   { CNIC, DOB }
+ * A job card can't be finalized without the customer's CNIC and date of
+ * birth, so the advisor can add whichever is missing from the tablet. Only
+ * empty fields are filled; one already on file is changed at the desk.
+ */
+exports.fillMissingCustomerDetails = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const cnic = normaliseCnic(req.body?.CNIC);
+        const dob = normaliseDob(req.body?.DOB);
+        if (!cnic && !dob) return res.status(400).json({ error: 'Enter the CNIC or the date of birth.' });
+
+        const pool = await getPool();
+        const cur = (await pool.request().input('id', sql.Int, id)
+            .query('SELECT CNIC, DOB FROM addata_CustomerInfo WHERE ProfileID = @id')).recordset[0];
+        if (!cur) return res.status(404).json({ error: 'Customer not found.' });
+        if (cnic && String(cur.CNIC || '').trim()) {
+            return res.status(409).json({ error: 'This customer already has a CNIC on file. If it is wrong, change it at the desk.' });
+        }
+        if (dob && cur.DOB) {
+            return res.status(409).json({ error: 'This customer already has a date of birth on file. If it is wrong, change it at the desk.' });
+        }
+
+        const rq = pool.request().input('id', sql.Int, id);
+        const sets = [];
+        const stillEmpty = [];
+        if (cnic) { rq.input('cnic', sql.NVarChar(150), cnic); sets.push('CNIC = @cnic'); stillEmpty.push(`ISNULL(CNIC, '') = ''`); }
+        if (dob)  { rq.input('dob', sql.NVarChar(10), dob); sets.push('DOB = CAST(@dob AS DATE)'); stillEmpty.push('DOB IS NULL'); }
+        const upd = await rq.query(`
+            UPDATE addata_CustomerInfo
+            SET    ${sets.join(', ')}, ModifyUserDateTime = GETDATE()
+            WHERE  ProfileID = @id AND ${stillEmpty.join(' AND ')}`);
+        if (!upd.rowsAffected[0]) {
+            return res.status(409).json({ error: 'Someone has just filled these in. Reload to see them.' });
+        }
+
+        const now = (await pool.request().input('id', sql.Int, id).query(`
+            SELECT CASE WHEN ISNULL(CNIC, '') <> '' THEN 1 ELSE 0 END AS HasCNIC,
+                   CASE WHEN DOB IS NOT NULL THEN 1 ELSE 0 END AS HasDOB
+            FROM   addata_CustomerInfo WHERE ProfileID = @id`)).recordset[0];
+        res.json({ HasCNIC: !!now.HasCNIC, HasDOB: !!now.HasDOB });
+    } catch (err) {
+        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+        console.error('fillMissingCustomerDetails:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 /** GET /api/service-intake/lookups/job-types */
 exports.lookupJobTypes = async (req, res) => {
     try {
@@ -193,7 +267,8 @@ exports.createCustomer = async (req, res) => {
         const b = req.body || {};
         const name  = String(b.CustomerName || '').trim();
         const phone = String(b.PhoneNo || '').trim();
-        const cnic  = String(b.CNIC || '').trim();
+        const cnic  = normaliseCnic(b.CNIC) || '';
+        const dob   = normaliseDob(b.DOB);
         const email = String(b.Email || '').trim();
         const addr  = String(b.Address || '').trim();
 
@@ -208,7 +283,9 @@ exports.createCustomer = async (req, res) => {
             const pool = await getPool();
             const dup = await pool.request()
                 .input('last10', sql.NVarChar(10), digits.slice(-10))
-                .query(`SELECT TOP 5 ProfileID, endUserName AS CustomerName, PhoneNo
+                .query(`SELECT TOP 5 ProfileID, endUserName AS CustomerName, PhoneNo,
+                               CASE WHEN ISNULL(CNIC, '') <> '' THEN 1 ELSE 0 END AS HasCNIC,
+                               CASE WHEN DOB IS NOT NULL THEN 1 ELSE 0 END AS HasDOB
                         FROM   addata_CustomerInfo
                         WHERE  RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(PhoneNo, '-', ''), ' ', ''), '+', ''), '.', ''), 10) = @last10`);
             if (dup.recordset.length) {
@@ -220,9 +297,10 @@ exports.createCustomer = async (req, res) => {
         }
 
         req.body = { CustomerName: name, PhoneNo: phone, CNIC: cnic || null, Email: email || null,
-                     Address: addr || null, DOB: null };
+                     Address: addr || null, DOB: dob };
         return workshop.saveCustomer(req, res);
     } catch (err) {
+        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
         console.error('createCustomer:', err);
         res.status(500).json({ error: err.message });
     }
@@ -297,6 +375,8 @@ async function loadEstimate(pool, id) {
                c.endUserName  AS CustomerName,
                c.PhoneNo      AS CustomerPhone,
                c.CNIC         AS CustomerCNIC,
+               CASE WHEN ISNULL(c.CNIC, '') <> '' THEN 1 ELSE 0 END AS CustomerHasCNIC,
+               CASE WHEN c.DOB IS NOT NULL THEN 1 ELSE 0 END AS CustomerHasDOB,
                c.Address      AS CustomerAddress,
                t.CardCode     AS JobTypeCode,
                t.Title        AS JobTypeName,

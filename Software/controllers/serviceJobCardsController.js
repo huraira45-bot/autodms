@@ -46,13 +46,14 @@ exports.tabletJobCardOnly = async (req, res, next) => {
 };
 
 async function tabletBlockers(executor, jobCardId) {
+    // Only requisitions still Open count: one the parts counter has cancelled
+    // no longer holds the job card up.
     const waiting = (await executor.request().input('id', sql.Int, jobCardId).query(`
-        SELECT r.RequisitionNo
+        SELECT r.RequisitionNo, l.Description, l.QtyRequested - ${ISSUED_SQL} AS Waiting
         FROM   dms_PartsRequisitions r
-        WHERE  r.JobCardID = @id AND r.Status = 'Open'
-          AND  EXISTS (SELECT 1 FROM dms_PartsRequisitionLines l
-                       WHERE l.RequisitionID = r.RequisitionID AND ${ISSUED_SQL} < l.QtyRequested)
-        ORDER  BY r.RequisitionID`)).recordset.map(x => x.RequisitionNo);
+        JOIN   dms_PartsRequisitionLines l ON l.RequisitionID = r.RequisitionID
+        WHERE  r.JobCardID = @id AND r.Status = 'Open' AND ${ISSUED_SQL} < l.QtyRequested
+        ORDER  BY r.RequisitionID, l.LineSeq`)).recordset;
     const unsigned = (await executor.request().input('id', sql.Int, jobCardId).query(`
         SELECT EstimateNo FROM dms_ServiceEstimates
         WHERE  JobCardID = @id AND Status = 'Draft'
@@ -60,7 +61,8 @@ async function tabletBlockers(executor, jobCardId) {
 
     const blockers = [];
     if (waiting.length) {
-        blockers.push(`Parts are still waiting at the counter on ${waiting.join(', ')}. Issue them, or have the counter cancel what isn't needed.`);
+        const list = waiting.map(w => `${w.Description} × ${+Number(w.Waiting).toFixed(2)} (${w.RequisitionNo})`).join(', ');
+        blockers.push(`Not issued yet: ${list}. The parts counter has to issue ${waiting.length === 1 ? 'it' : 'them'}, or cancel the request if ${waiting.length === 1 ? "it isn't" : "they aren't"} needed.`);
     }
     if (unsigned.length) {
         blockers.push(`Additional work ${unsigned.join(', ')} has not been signed. Get it signed or cancel it.`);
@@ -130,7 +132,8 @@ exports.getJobCard = async (req, res) => {
         const id = req.tabletJobCard.JobCardId;
         const pool = await getPool();
         const head = (await pool.request().input('id', sql.Int, id).query(`
-            SELECT j.JobCardId, j.JobCardNo, j.jobCode, j.DMSJobCardNo, j.VehicleRegNo, j.ChasisNo, j.VersionCode AS VehicleModel,
+            SELECT j.JobCardId, j.JobCardNo, j.jobCode, j.DMSJobCardNo, j.EndUserID AS CustomerID,
+                   j.VehicleRegNo, j.ChasisNo, j.VersionCode AS VehicleModel,
                    j.KiloMeter, ISNULL(j.WorkshopStatus, 'Waiting For Service') AS WorkshopStatus,
                    ISNULL(j.IsFinalized, 0) AS IsFinalized, j.FinalizedAt, j.FinalizedByName,
                    j.EntryUserDateTime AS OpenedAt, j.PromisedDate, j.ServiceAdvisor, j.CreatedByName, j.VOCRemarks,
@@ -187,14 +190,14 @@ exports.getJobCard = async (req, res) => {
 
         const blockers = head.IsFinalized ? [] : await tabletBlockers(pool, id);
         const warnings = [];
+        // Missing CNIC / date of birth and an empty DMS number are things the
+        // advisor can fix on the tablet, so they are reported separately and
+        // the screen shows a form for each instead of a message.
+        let customerMissing = [];
         if (!head.IsFinalized) {
-            const missing = [!head.HasCNIC && 'CNIC', !head.HasDOB && 'date of birth'].filter(Boolean);
-            if (missing.length) {
-                blockers.push(`The customer's ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} missing. It has to be filled in at the desk before finalizing.`);
-            }
+            customerMissing = [!head.HasCNIC && 'CNIC', !head.HasDOB && 'date of birth'].filter(Boolean);
             const open = labour.filter(l => l.State !== 'done').length;
             if (open) warnings.push(`${open} job${open === 1 ? ' is' : 's are'} not marked finished on the bay screen.`);
-            if (!head.DMSJobCardNo) warnings.push('The DMS job card number is empty.');
         }
 
         res.json({
@@ -204,7 +207,7 @@ exports.getJobCard = async (req, res) => {
             Requisitions: requisitions,
             Estimates: estimates,
             Totals: { labourNet, labourTax, partsNet, partsTax, total: r2(labourNet + labourTax + partsNet + partsTax) },
-            Finalize: { blockers, warnings },
+            Finalize: { blockers, warnings, customerMissing, dmsMissing: !head.IsFinalized && !head.DMSJobCardNo },
         });
     } catch (err) {
         console.error('getJobCard:', err);
@@ -275,6 +278,32 @@ exports.startAdditionalWork = async (req, res) => {
     } catch (err) {
         if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
         console.error('startAdditionalWork:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * POST /api/service-intake/job-cards/:id/dms-number   { DMSJobCardNo }
+ * Lets the advisor enter the DMS job card number on the tablet instead of
+ * finalizing without it. Refused once the job card is finalized.
+ */
+exports.setDmsNumber = async (req, res) => {
+    try {
+        const jc = req.tabletJobCard;
+        const value = String(req.body?.DMSJobCardNo ?? '').trim();
+        if (!value) return res.status(400).json({ error: 'Enter the DMS job card number.' });
+        if (value.length > 50) return res.status(400).json({ error: 'The DMS job card number can be at most 50 characters.' });
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('id', sql.Int, jc.JobCardId)
+            .input('v', sql.NVarChar(50), value)
+            .query(`UPDATE Addata_JobCardInfo SET DMSJobCardNo = @v, ModifyDate = GETDATE()
+                    WHERE JobCardId = @id AND ISNULL(IsFinalized, 0) = 0`);
+        if (!r.rowsAffected[0]) return res.status(423).json({ error: `${jc.JobCardNo} is finalized.` });
+        events.advisorJobCardChanged(req.user?.userId, { JobCardId: jc.JobCardId });
+        res.json({ DMSJobCardNo: value });
+    } catch (err) {
+        console.error('setDmsNumber:', err);
         res.status(500).json({ error: err.message });
     }
 };

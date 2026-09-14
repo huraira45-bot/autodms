@@ -21,6 +21,7 @@ import {
     ChevronLeft, ChevronRight, Printer, AlertTriangle, CheckCircle2, RefreshCw, Package, Wrench, ClipboardList, PenLine,
 } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
+import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
 import {
     API, MAX_MEDIA_BYTES, money, mb, rateLabel, errText, fmtDateTime, statusStyle, pill,
@@ -39,7 +40,10 @@ let keySeq = 0;
 const newKey = () => `n${++keySeq}`;
 
 const fromEstimate = (e) => ({
-    customer: e.EndUserID ? { ProfileID: e.EndUserID, CustomerName: e.CustomerName, PhoneNo: e.CustomerPhone } : null,
+    customer: e.EndUserID
+        ? { ProfileID: e.EndUserID, CustomerName: e.CustomerName, PhoneNo: e.CustomerPhone,
+            HasCNIC: !!e.CustomerHasCNIC, HasDOB: !!e.CustomerHasDOB }
+        : null,
     vehicleId: e.VehicleID || null,
     KiloMeter: e.KiloMeter == null ? '' : String(Number(e.KiloMeter)),
     JobTypeId: e.JobTypeId ? String(e.JobTypeId) : '',
@@ -416,7 +420,7 @@ function VideoStep({ est, setEst, editable }) {
 // ---------------------------------------------------------------------------
 // Step 2 — customer, vehicle and visit details
 // ---------------------------------------------------------------------------
-const EMPTY_CUSTOMER = { CustomerName: '', PhoneNo: '', CNIC: '', Address: '' };
+const EMPTY_CUSTOMER = { CustomerName: '', PhoneNo: '', CNIC: '', DOB: '', Address: '' };
 const EMPTY_VEHICLE = { RegistrationNo: '', ChasisNo: '', EngineNo: '', BrandName: 'CHANGAN', VehicleModel: '', VehicleColor: '' };
 
 function CustomerStep({ draft, change, editable }) {
@@ -477,7 +481,15 @@ function CustomerStep({ draft, change, editable }) {
 
     const pickCustomer = (c) => {
         justPicked.current = true;
-        change(d => ({ ...d, customer: { ProfileID: c.ProfileID, CustomerName: c.CustomerName, PhoneNo: c.PhoneNo }, vehicleId: null }));
+        change(d => ({
+            ...d,
+            customer: {
+                ProfileID: c.ProfileID, CustomerName: c.CustomerName, PhoneNo: c.PhoneNo,
+                HasCNIC: c.HasCNIC !== undefined ? !!c.HasCNIC : !!String(c.CNIC || '').trim(),
+                HasDOB: c.HasDOB !== undefined ? !!c.HasDOB : !!c.DOB,
+            },
+            vehicleId: null,
+        }));
         setNewCust(null);
         setCustDup(null);
         setQ('');
@@ -494,7 +506,10 @@ function CustomerStep({ draft, change, editable }) {
         setBusy(true);
         try {
             const { data } = await axios.post(`${API}/customers`, { ...newCust, force });
-            pickCustomer({ ProfileID: data.ProfileID, CustomerName: newCust.CustomerName.trim(), PhoneNo: newCust.PhoneNo.trim() });
+            pickCustomer({
+                ProfileID: data.ProfileID, CustomerName: newCust.CustomerName.trim(), PhoneNo: newCust.PhoneNo.trim(),
+                HasCNIC: !!newCust.CNIC.trim(), HasDOB: !!newCust.DOB,
+            });
             setNewVeh({ ...EMPTY_VEHICLE });   // a new customer's car is never on file yet
         } catch (err) {
             const body = err.response?.data;
@@ -553,6 +568,14 @@ function CustomerStep({ draft, change, editable }) {
                         {editable && <button type="button" style={S.btnGhost} onClick={clearCustomer}>Change</button>}
                     </div>
                 )}
+                {customer && (
+                    <MissingCustomerDetails
+                        customerId={customer.ProfileID} hasCNIC={customer.HasCNIC} hasDOB={customer.HasDOB}
+                        title="Add these now, or the job card can't be finalized later:"
+                        onSaved={(flags) => change(d => (d.customer?.ProfileID === customer.ProfileID
+                            ? { ...d, customer: { ...d.customer, ...flags } }
+                            : d))} />
+                )}
 
                 {!customer && !newCust && (
                     <>
@@ -594,7 +617,8 @@ function CustomerStep({ draft, change, editable }) {
                     <>
                         {field(newCust, setNewCust, 'CustomerName', 'Name *', { autoFocus: true })}
                         {field(newCust, setNewCust, 'PhoneNo', 'Mobile *', { inputMode: 'tel' })}
-                        {field(newCust, setNewCust, 'CNIC', 'CNIC', { inputMode: 'numeric' })}
+                        {field(newCust, setNewCust, 'CNIC', 'CNIC', { inputMode: 'numeric', placeholder: '36302-1234567-1' })}
+                        {field(newCust, setNewCust, 'DOB', 'Date of birth', { type: 'date', max: new Date().toISOString().slice(0, 10) })}
                         {field(newCust, setNewCust, 'Address', 'Address')}
 
                         {custDup && (

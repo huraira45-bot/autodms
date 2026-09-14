@@ -36,6 +36,7 @@ router.get(   '/customers',                       tablet, workshop.getCustomers)
 router.post(  '/customers',                       tablet, c.createCustomer);
 router.get(   '/customers/:id/vehicles',          tablet, workshop.getCustomerVehicles);
 router.post(  '/customers/:id/vehicles',          tablet, c.addVehicle);
+router.post(  '/customers/:id/missing-details',   tablet, c.fillMissingCustomerDetails);
 
 // Phase 1 — estimates
 router.get(   '/estimates',                       tablet, c.listEstimates);
@@ -73,6 +74,7 @@ router.get(   '/job-cards',                       tablet, jobCards.listJobCards)
 router.get(   '/job-cards/:id',                   ...tabletJobCard, jobCards.getJobCard);
 router.post(  '/job-cards/:id/additional-work',   ...tabletJobCard, jobCards.startAdditionalWork);
 router.post(  '/job-cards/:id/finalize',          tablet, requireAccess('finalize'), jobCards.tabletJobCardOnly, jobCards.finalizeJobCard);
+router.post(  '/job-cards/:id/dms-number',        ...tabletJobCard, jobCards.setDmsNumber);
 router.get(   '/job-cards/:id/print-data',        ...tabletJobCard, workshop.getJobCardPrintData);
 router.get(   '/job-cards/:id/insurance',         ...tabletJobCard, workshop.getJobCardInsurance);
 
