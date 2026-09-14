@@ -118,6 +118,7 @@ import GRTNPrint          from './pages/GRTNPrint';
 import SSRPrint           from './pages/SSRPrint';
 import VoucherPrint       from './pages/VoucherPrint';
 import PartsIssue         from './pages/PartsIssue';
+import PartsRequisitions  from './pages/PartsRequisitions';
 import SubletRepair       from './pages/SubletRepair';
 import LabourServices     from './pages/LabourServices';
 import WorkshopSettings   from './pages/WorkshopSettings';
@@ -1195,6 +1196,9 @@ function AppShell() {
                         <ProtectedRoute moduleKey="workshop_gatepass"><GatePass /></ProtectedRoute>
                     } />
 
+                    <Route path="/parts-requisitions" element={
+                        <ProtectedRoute moduleKey="parts_requisition"><PartsRequisitions /></ProtectedRoute>
+                    } />
                     <Route path="/parts-issue" element={
                         <ProtectedRoute moduleKey="workshop_parts_issue"><PartsIssue /></ProtectedRoute>
                     } />

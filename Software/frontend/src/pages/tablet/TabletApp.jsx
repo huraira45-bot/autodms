@@ -13,7 +13,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
-import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, Video } from 'lucide-react';
+import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, Video, MonitorSmartphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isNativeApp, getServerUrl, setServerUrl, normalizeServerUrl } from '../../tablet/serverConfig';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
@@ -22,6 +22,7 @@ import TabletEstimates, { NewIntakeButton } from './TabletEstimates';
 import TabletEstimateEditor from './TabletEstimateEditor';
 import TabletEstimatePrint from './TabletEstimatePrint';
 import TabletEstimateSign from './TabletEstimateSign';
+import BayScreen, { hasBayDevice } from './BayScreen';
 
 const PRINT_ROUTE = /^\/tablet\/estimates\/\d+\/print\/?$/;
 
@@ -35,6 +36,10 @@ export default function TabletApp() {
     if (native && !serverUrl) {
         return <ServerSettings firstRun onSaved={setServerUrlState} />;
     }
+    // A registered bay screen runs on its device token, with nobody signed in.
+    if (location.pathname === '/tablet/bay' && hasBayDevice()) {
+        return <BayScreen />;
+    }
     if (loading) {
         return <div style={{ ...S.page, display: 'grid', placeItems: 'center' }}><Loader2 className="animate-spin" /></div>;
     }
@@ -46,7 +51,8 @@ export default function TabletApp() {
             </Routes>
         );
     }
-    if (!hasPermission('workshop_tablet')) {
+    const bayScreenSetup = location.pathname === '/tablet/bay' && hasPermission('workshop_bay_screen');
+    if (!hasPermission('workshop_tablet') && !bayScreenSetup) {
         return <NoAccess user={user} onSignOut={logout} />;
     }
 
@@ -81,6 +87,7 @@ export default function TabletApp() {
                 <Route path="/tablet/estimates/:id" element={<TabletEstimateEditor />} />
                 <Route path="/tablet/estimates/:id/sign" element={<TabletEstimateSign />} />
                 <Route path="/tablet/diagnostics" element={<TabletDiagnostics />} />
+                <Route path="/tablet/bay" element={<BayScreen />} />
                 <Route path="/tablet/settings" element={<ServerSettings onSaved={setServerUrlState} />} />
                 <Route path="*" element={<Navigate to="/tablet" replace />} />
             </Routes>
@@ -97,6 +104,8 @@ const tileTitle = { fontSize: 21, fontWeight: 700 };
 const tileSub = { fontSize: 15, color: T.muted, fontWeight: 400 };
 
 function TabletHome({ user }) {
+    const { hasPermission } = useAuth();
+    const canSetUpBays = hasPermission('workshop_bay_screen');
     return (
         <div style={S.body}>
             <h1 style={{ ...S.h1, margin: '4px 0 16px' }}>Hello, {user.userName}</h1>
@@ -111,6 +120,13 @@ function TabletHome({ user }) {
                     <span style={tileTitle}>Estimates</span>
                     <span style={tileSub}>Continue, print or cancel an estimate</span>
                 </Link>
+                {canSetUpBays && (
+                    <Link to="/tablet/bay" style={tile}>
+                        <MonitorSmartphone size={34} color={T.brand} />
+                        <span style={tileTitle}>Bay screens</span>
+                        <span style={tileSub}>Make this device a bay screen, or unregister one</span>
+                    </Link>
+                )}
                 <Link to="/tablet/diagnostics" style={tile}>
                     <Stethoscope size={34} color={T.brand} />
                     <span style={tileTitle}>Tablet tests</span>

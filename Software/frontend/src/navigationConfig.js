@@ -75,6 +75,7 @@ export const NAV_ITEMS = [
     { id: 'p-store',     moduleGroup: 'parts', label: 'Store Sale',               path: '/store-sale',   icon: Store,   moduleKey: 'sales_store',           description: 'Counter parts sale (SS invoice).', keywords: 'counter sale', priority: 7 },
     { id: 'p-ssr',       moduleGroup: 'parts', label: 'Store Sale Returns (SSR)', path: '/ssr',          icon: RotateCcw, moduleKey: 'sales_ssr',           description: 'Customer returns from Store Sale.', keywords: 'return customer' },
     { id: 'p-issue',     moduleGroup: 'parts', label: 'Parts Issue to JC',        path: '/parts-issue', icon: Package, moduleKey: 'workshop_parts_issue', description: 'Issue parts against a Job Card.', keywords: 'sir', priority: 8 },
+    { id: 'p-requisitions', moduleGroup: 'parts', label: 'Parts Counter (Tablet Requests)', path: '/parts-requisitions', icon: Package, moduleKey: 'parts_requisition', description: 'Issue the parts customers signed for on the service tablet.', keywords: 'requisition tablet counter pr', priority: 9 },
     { id: 'p-settings',  moduleGroup: 'parts', label: 'Inventory Settings',       path: '/inventory-settings', icon: SlidersHorizontal, moduleKey: 'inventory_settings', description: 'Tax rates, warehouses, brands.', keywords: 'config setup' },
 
     // ── Paint Lab ────────────────────────────────────────────

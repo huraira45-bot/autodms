@@ -19,6 +19,7 @@ const { UPLOAD_DIR } = require('../middleware/serviceMediaUpload');
 const workshop = require('./workshopController');
 const { createJobCardInTx, insertLabourLine } = require('../services/jobCardSaveService');
 const { findOverlongFields, describeOverlong } = require('../services/jobCardFieldLimits');
+const events = require('../services/serviceEvents');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -861,6 +862,9 @@ exports.signEstimate = async (req, res) => {
         }
 
         filePath = null;   // committed: the signature file stays
+        events.bayJobsChanged({ JobCardId: result.JobCardId });
+        if (result.RequisitionNo) events.requisitionsChanged({ JobCardId: result.JobCardId });
+        events.advisorJobCardChanged(req.user?.userId, { JobCardId: result.JobCardId });
         res.status(201).json({ ...result, estimate: await loadEstimate(pool, id) });
     } catch (err) {
         if (filePath) fs.unlink(filePath, () => {});

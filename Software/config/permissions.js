@@ -27,6 +27,8 @@ const SECTIONS = [
             { key: 'workshop_gatepass',      label: 'Gate Pass',               kind: 'document' },
             { key: 'workshop_controller',    label: 'Job Controller',          kind: 'workflow' },
             { key: 'workshop_tablet',        label: 'Service Tablet App',      kind: 'workflow' },
+            { key: 'workshop_bay_screen',    label: 'Bay Screens (register devices)', kind: 'workflow' },
+            { key: 'parts_requisition',      label: 'Parts Counter: tablet requisitions', kind: 'workflow' },
         ],
     },
     {

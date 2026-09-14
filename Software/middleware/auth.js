@@ -19,6 +19,11 @@ module.exports = async function (req, res, next) {
     } catch {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
+    // A scoped token — a bay screen's device token — works only on its own
+    // routes, which check it separately (plan 2026-09-14, Phase 3). Never here.
+    if (decoded.scope) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+    }
     try {
         const pool = await getPool();
         const r = await pool.request()

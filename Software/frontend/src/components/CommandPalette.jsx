@@ -30,6 +30,7 @@ const COMMANDS = [
     { label: 'Store Sale', path: '/store-sale', section: 'Parts & Inventory', moduleKey: 'sales_store', keywords: ['counter sale'] },
     { label: 'Sale Returns (SSR)', path: '/ssr', section: 'Parts & Inventory', moduleKey: 'sales_ssr', keywords: ['sale return'] },
     { label: 'Parts Issue', path: '/parts-issue', section: 'Parts & Inventory', moduleKey: 'workshop_parts_issue', keywords: ['job card parts'], priority: true },
+    { label: 'Parts Counter (Tablet Requests)', path: '/parts-requisitions', section: 'Parts & Inventory', moduleKey: 'parts_requisition', keywords: ['requisition', 'tablet', 'counter'] },
     { label: 'Parts Config', path: '/inventory-settings', section: 'Parts & Inventory', moduleKey: 'inventory_settings', keywords: ['brand', 'category', 'warehouse'] },
 
     { label: 'Chart of Accounts', path: '/coa', section: 'Finance', moduleKey: 'finance_coa', keywords: ['coa', 'ledger'] },

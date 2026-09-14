@@ -58,6 +58,11 @@ app.get('/api/service-intake/ping', (req, res) => {
     res.json({ app: 'DealerDesk', ok: true, serverTime: new Date().toISOString() });
 });
 
+// Bay screens (plan 2026-09-14, Phase 3). They hold a device token, not a user
+// login, so they mount before the auth middleware; routes/bayScreenRoutes.js
+// accepts device tokens only, and the auth middleware refuses them.
+app.use('/api/bay-screen', require('./routes/bayScreenRoutes'));
+
 // Protect all remaining API routes
 app.use('/api', authMiddleware);
 
@@ -128,7 +133,10 @@ const PORT = process.env.PORT || 5000;
 // (the chat feature requires WebSockets). The `.listen` semantics are the
 // same as app.listen — the raw server just makes the shared handle explicit.
 const httpServer = http.createServer(app);
-chatSocket.attach(httpServer);
+const io = chatSocket.attach(httpServer);
+// Live updates for the service tablet, the parts counter and bay screens
+// (plan 2026-09-14, Phase 3) share the socket.io server with chat.
+require('./services/serviceEvents').attach(io);
 // Bind to 0.0.0.0 so the server is reachable from other machines on the LAN
 // (Express defaults to 0.0.0.0 already, but stating it explicitly is clearer).
 httpServer.listen(PORT, '0.0.0.0', async () => {

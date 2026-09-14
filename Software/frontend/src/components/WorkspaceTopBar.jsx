@@ -18,6 +18,7 @@ const EXACT_TITLES = {
     '/workshop/controller': 'Job Controller',
     '/parts': 'Spare Parts',
     '/parts-issue': 'Parts Issue',
+    '/parts-requisitions': 'Parts Counter',
     '/grn': 'Receiving (GRN)',
     '/grtn': 'Returns (GRTN)',
     '/store-sale': 'Store Sale',

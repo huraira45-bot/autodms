@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const c = require('../controllers/serviceIntakeController');
 const workshop = require('../controllers/workshopController');
+const requisitions = require('../controllers/partsRequisitionController');
+const bayScreens = require('../controllers/bayScreenController');
 const { requireAccess } = require('../middleware/permissions');
 const { uploadDiagnostic, uploadServiceMedia, withUploadErrors } = require('../middleware/serviceMediaUpload');
 
@@ -47,5 +49,20 @@ router.delete('/estimates/:id/media/:mediaId',    tablet, c.deleteEstimateMedia)
 // Phase 2 — the customer's signature opens the job card
 router.post(  '/estimates/:id/sign',              tablet, signatureUpload, c.signEstimate);
 router.get(   '/estimates/:id/signature',         tablet, c.getSignatureImage);
+
+// Phase 3 — parts counter: requisitions from signed estimates
+const counter = requireAccess('parts_requisition');
+router.get(   '/requisitions',                    counter, requisitions.listRequisitions);
+router.get(   '/requisitions/:id',                counter, requisitions.getRequisition);
+router.post(  '/requisitions/:id/issue',          counter, requisitions.issueRequisition);
+router.post(  '/requisitions/:id/cancel',         counter, requisitions.cancelRequisition);
+
+// Phase 3 — bay screen devices. The screens themselves call /api/bay-screen
+// with a device token (routes/bayScreenRoutes.js).
+const bayAdmin = requireAccess('workshop_bay_screen');
+router.get(   '/bay-devices/bays',                bayAdmin, workshop.getBays);
+router.get(   '/bay-devices',                     bayAdmin, bayScreens.listDevices);
+router.post(  '/bay-devices',                     bayAdmin, bayScreens.registerDevice);
+router.post(  '/bay-devices/:id/revoke',          bayAdmin, bayScreens.revokeDevice);
 
 module.exports = router;
