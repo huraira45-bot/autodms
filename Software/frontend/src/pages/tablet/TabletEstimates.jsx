@@ -106,6 +106,11 @@ export default function TabletEstimates() {
                                 <strong style={{ fontSize: 18 }}>{r.EstimateNo}</strong>
                                 <span style={pill(st)}>{st.label}</span>
                                 {r.VehicleRegNo && <span style={{ fontSize: 17, fontWeight: 600 }}>{r.VehicleRegNo}</span>}
+                                {r.JobCardNo && (
+                                    <span style={{ fontSize: 15, color: T.muted }}>
+                                        {r.Status === 'Draft' ? 'Additional work' : 'Job card'} · {r.JobCardNo}
+                                    </span>
+                                )}
                             </div>
                             <div style={{ fontSize: 15, color: T.muted, marginTop: 4 }}>
                                 {r.CustomerName || 'No customer yet'}{r.CustomerPhone ? ` · ${r.CustomerPhone}` : ''}

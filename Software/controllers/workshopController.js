@@ -5,27 +5,12 @@ const { getEffectiveCapForJC } = require('./careOffElevationController');
 const { resolveRate } = require('./taxRatesController');
 const { assertEnoughStock } = require('../services/stockBalanceService');
 
-// Pure helper: snapshot tax for a labour/sublet line per §14.4 (discount before tax).
-// Returns { taxRate, taxAmount }.
-const snapshotTax = (gross, discAmt, rate) => {
-    const net = Math.max(0, (Number(gross) || 0) - (Number(discAmt) || 0));
-    const taxAmount = Math.round((net * (rate / 100)) * 100) / 100;
-    return { taxRate: rate, taxAmount };
-};
-
-// Frontend datetime-local inputs send "YYYY-MM-DDTHH:MM" with no timezone.
-// If we hand that raw string to mssql it gets re-interpreted as server-local
-// (Asia/Karachi) and shifts -5h before storage — combined with the frontend's
-// old toISOString() shift that gave rows a 10-hour drift (owner report
-// 2026-07-27). Wrap the string in a Date whose UTC face matches the intended
-// wall clock, so mssql writes the literal HH:MM the operator picked.
-const parseWallDateTime = (v) => {
-    if (v == null || v === '') return null;
-    if (v instanceof Date) return v;
-    const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(v));
-    if (!m) return new Date(v);
-    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
-};
+// snapshotTax and parseWallDateTime moved to services/jobCardSaveService.js,
+// shared with the service tablet (plan 2026-09-14, Phase 2).
+const {
+    snapshotTax, parseWallDateTime, insertLabourLine, floorFieldCarrier, createJobCardInTx,
+} = require('../services/jobCardSaveService');
+const { issuePartsInTx } = require('../services/partsIssueService');
 
 // ============== CUSTOMERS ==============
 exports.getCustomers = async (req, res) => {
@@ -1064,27 +1049,18 @@ exports.saveJobCard = async (req, res) => {
                 await transaction.request().input('id', sql.Int, JobCardId)
                     .query('DELETE FROM dms_JobCardPartsDepreciation WHERE JobCardId = @id AND LabourDetailID IS NOT NULL');
 
+                // Every labour line is deleted and re-inserted below, and the
+                // form never sends bay, technician or start/finish times — so
+                // read them first and put them back on the matching lines.
+                // Without this a desk save erased what the Job Controller or a
+                // bay screen had recorded (plan 2026-09-14, Phase 3).
+                const carryFloorFields = await floorFieldCarrier(transaction, JobCardId);
+
                 await transaction.request().input('id', sql.Int, JobCardId)
                     .query('DELETE FROM Addata_JobCardInfoDetail WHERE JobCardId = @id');
 
                 for (const item of effectiveItems) {
-                    const discAmtVal = computeLineDiscAmt(item);
-                    const tax = snapshotTax(item.Price, discAmtVal, pstRate);
-                    await new sql.Request(transaction)
-                        .input('jcId', sql.Int, JobCardId)
-                        .input('remarks', sql.NVarChar(sql.MAX), item.WorkDescription)
-                        .input('price', sql.Decimal(18, 2), item.Price || 0)
-                        .input('discount', sql.Decimal(18, 3), Number(item.Discount) || 0)
-                        .input('discAmt', sql.Decimal(18, 3), discAmtVal)
-                        .input('discType', sql.NVarChar(10), item.DiscType || null)
-                        .input('taxRate', sql.Decimal(8, 4), tax.taxRate)
-                        .input('taxAmount', sql.Decimal(18, 2), tax.taxAmount)
-                        // JobInfoId = the InventItems.ItemId of the labour service
-                        // (the labour catalog lives in InventItems with ItemType='Service').
-                        // Stored so campaign matching can detect which labour services
-                        // are on this JC, and so service-history reports can group by code.
-                        .input('jobInfoId', sql.Int, item.JobInfoId ? parseInt(item.JobInfoId) : null)
-                        .query('INSERT INTO Addata_JobCardInfoDetail (JobCardId, Remarks, Price, Discount, DiscAmt, DiscType, TaxRate, TaxAmount, JobInfoId) VALUES (@jcId, @remarks, @price, @discount, @discAmt, @discType, @taxRate, @taxAmount, @jobInfoId)');
+                    await insertLabourLine(transaction, JobCardId, carryFloorFields(item), pstRate);
                 }
 
                 if (Accessories && Array.isArray(Accessories)) {
@@ -1126,156 +1102,11 @@ exports.saveJobCard = async (req, res) => {
                     .catch(e => console.error('Audit log error:', e));
                 res.json({ message: 'Job Card updated', JobCardId });
             } else {
-                const typeRes = await transaction.request()
-                    .input('jobTypeId', sql.Int, JobTypeId)
-                    .query('SELECT CardCode FROM gen_JobCardType WHERE JobCardTypeId = @jobTypeId');
-                const cardCode = typeRes.recordset.length > 0 ? typeRes.recordset[0].CardCode : 'JC';
-
-                const checkRes = await transaction.request()
-                    .input('jobCode', sql.NVarChar(50), jobCode)
-                    .query('SELECT JobCardId FROM Addata_JobCardInfo WHERE jobCode = @jobCode');
-
-                if (checkRes.recordset.length > 0) {
-                    await transaction.rollback();
-                    return res.status(400).json({ error: 'Job Number already exists. Please use a unique Job Number.' });
-                }
-
-                const counterRes = await transaction.request()
-                    .input('cardCode', sql.NVarChar(10), cardCode)
-                    .query('UPDATE dms_ROCounters SET CurrentCounter = CurrentCounter + 1 OUTPUT INSERTED.CurrentCounter WHERE CardCode = @cardCode');
-                if (!counterRes.recordset.length) {
-                    await transaction.rollback();
-                    return res.status(400).json({ error: `No RO counter found for type "${cardCode}". Check Workshop Settings.` });
-                }
-                const counter = counterRes.recordset[0].CurrentCounter;
-                const generatedRoNumber = `${cardCode}-${String(counter).padStart(4, '0')}`;
-
-                const receiptDt = parseWallDateTime(ReceiptDate) || new Date();
-
-                const insertRes = await transaction.request()
-                    .input('no', sql.NVarChar(100), generatedRoNumber)
-                    .input('jobCode', sql.NVarChar(50), jobCode)
-                    .input('dmsJobCardNo', sql.NVarChar(50), DMSJobCardNo || null)
-                    .input('jobCardDate', sql.DateTime, receiptDt)
-                    .input('createdBy', sql.Int, req.user?.userId || null)
-                    .input('createdByName', sql.NVarChar(100), req.user?.userName || '')
-                    .input('jobTypeId', sql.Int, JobTypeId)
-                    .input('orderTypeId', sql.Int, OrderTypeId || null)
-                    .input('endUserId', sql.Int, EndUserID)
-                    .input('regNo', sql.NVarChar(150), VehicleRegNo)
-                    .input('chassis', sql.NVarChar(150), ChasisNo)
-                    .input('engine', sql.NVarChar(150), EngineNo)
-                    .input('brand', sql.Int, BrandCode || null)
-                    .input('version', sql.NVarChar(300), VersionCode)
-                    .input('vehicle', sql.NVarChar(150), VehicleCode)
-                    .input('km', sql.Decimal(18,2), KiloMeter || 0)
-                    .input('millage', sql.Decimal(18,2), Millage || 0)
-                    .input('receipt', sql.DateTime, receiptDt)
-                    .input('promised', sql.DateTime, parseWallDateTime(PromisedDate))
-                    .input('remarks', sql.NVarChar(sql.MAX), Remarks)
-                    .input('payType', sql.NVarChar(50), PaymentType || 'Cash')
-                    .input('payCO', sql.NVarChar(100), PaymentCO || null)
-                    .input('payBankId', sql.Int, PaymentBankID || null)
-                    .input('fuel', sql.NVarChar(20), FuelLevel || '')
-                    .input('voc', sql.NVarChar(sql.MAX), VOCRemarks || '')
-                    .input('custType', sql.NVarChar(20), CustomerType || 'Walk-in')
-                    .input('partyId', sql.Int, PartyID || null)
-                    .input('companyId', sql.Int, 1)
-                    .input('pmType', sql.NVarChar(50), PMType || 'None')
-                    .input('advisor', sql.NVarChar(100), ServiceAdvisor || null)
-                    .input('advisorId', sql.Int, ServiceAdvisorID ? parseInt(ServiceAdvisorID) : null)
-                    .input('repeatROID', sql.Int, RepeatROID || null)
-                    .input('batteryNo', sql.NVarChar(50), BatteryNo || null)
-                    .input('color', sql.NVarChar(100), VehicleColor || null)
-                    .input('isEst', sql.Bit, IsEstimatedRO ? 1 : 0)
-                    .input('estRONo', sql.NVarChar(50), EstimatedRONo || null)
-                    .input('approvedBy', sql.NVarChar(100), ApprovedBy || null)
-                    .input('revisedDel', sql.DateTime, parseWallDateTime(RevisedDelivery))
-                    .input('jobResult', sql.NVarChar(20), JobResult || 'No Fixed')
-                    .input('isFIR', sql.Bit, IsFIR ? 1 : 0)
-                    .input('bringByType', sql.NVarChar(50), BringByType || 'Self')
-                    .input('bringByName', sql.NVarChar(100), BringByName || null)
-                    .input('bringByMobile', sql.NVarChar(20), BringByMobile || null)
-                    .input('deliveredTo', sql.NVarChar(100), DeliveredTo || null)
-                    .input('delivMobile', sql.NVarChar(20), DeliveryMobile || null)
-                    .input('deliveredAt', sql.DateTime, parseWallDateTime(DeliveredAt))
-                    .input('careOffId', sql.Int, CareOffID || null)
-                    .input('careOffName', sql.NVarChar(100), CareOffName || null)
-                    .input('dqirNo', sql.NVarChar(50), DQIRNo || null)
-                    .input('checkedById', sql.Int, CheckedByID || null)
-                    .input('checkedByName', sql.NVarChar(100), CheckedByName || null)
-                    .input('confirmById', sql.Int, ConfirmByID || null)
-                    .input('confirmByName', sql.NVarChar(100), ConfirmByName || null)
-                    .input('wacResults', sql.NVarChar(sql.MAX), WACResults || null)
-                    .query(`INSERT INTO Addata_JobCardInfo
-                        (JobCardNo, jobCode, DMSJobCardNo, JobCardDate, JobTypeId, OrderTypeId, EndUserID, VehicleRegNo, ChasisNo, EngineNo,
-                         BrandCode, VersionCode, VehicleCode, KiloMeter, Millage,
-                         ReceiptDate, PromisedDate, Remarks, Status, JobStatus,
-                         FuelLevel, VOCRemarks, CustomerType, PartyID, PaymentCO, PaymentBankID,
-                         PMType, ServiceAdvisor, ServiceAdvisorID, RepeatROID, BatteryNo, VehicleColor,
-                         IsEstimatedRO, EstimatedRONo, ApprovedBy, RevisedDelivery,
-                         JobResult, IsFIR, BringByType, BringByName, BringByMobile,
-                         DeliveredTo, DeliveryMobile, DeliveredAt,
-                         CareOffID, CareOffName,
-                         DQIRNo, CheckedByID, CheckedByName, ConfirmByID, ConfirmByName, WACResults,
-                         CompanyID, EntryUserDateTime, CreatedBy, CreatedByName)
-                        OUTPUT INSERTED.JobCardId
-                        VALUES (@no, @jobCode, @dmsJobCardNo, @jobCardDate, @jobTypeId, @orderTypeId, @endUserId, @regNo, @chassis, @engine,
-                                @brand, @version, @vehicle, @km, @millage,
-                                @receipt, @promised, @remarks, @payType, 0,
-                                @fuel, @voc, @custType, @partyId, @payCO, @payBankId,
-                                @pmType, @advisor, @advisorId, @repeatROID, @batteryNo, @color,
-                                @isEst, @estRONo, @approvedBy, @revisedDel,
-                                @jobResult, @isFIR, @bringByType, @bringByName, @bringByMobile,
-                                @deliveredTo, @delivMobile, @deliveredAt,
-                                @careOffId, @careOffName,
-                                @dqirNo, @checkedById, @checkedByName, @confirmById, @confirmByName, @wacResults,
-                                @companyId, GETDATE(), @createdBy, @createdByName)`);
-
-                const newId = insertRes.recordset[0].JobCardId;
-
-                for (const item of effectiveItems) {
-                    const discAmtVal = computeLineDiscAmt(item);
-                    const tax = snapshotTax(item.Price, discAmtVal, pstRate);
-                    await new sql.Request(transaction)
-                        .input('jcId', sql.Int, newId)
-                        .input('remarks', sql.NVarChar(sql.MAX), item.WorkDescription)
-                        .input('price', sql.Decimal(18, 2), item.Price || 0)
-                        .input('discount', sql.Decimal(18, 3), Number(item.Discount) || 0)
-                        .input('discAmt', sql.Decimal(18, 3), discAmtVal)
-                        .input('discType', sql.NVarChar(10), item.DiscType || null)
-                        .input('taxRate', sql.Decimal(8, 4), tax.taxRate)
-                        .input('taxAmount', sql.Decimal(18, 2), tax.taxAmount)
-                        // JobInfoId = the InventItems.ItemId of the labour service
-                        // (the labour catalog lives in InventItems with ItemType='Service').
-                        // Stored so campaign matching can detect which labour services
-                        // are on this JC, and so service-history reports can group by code.
-                        .input('jobInfoId', sql.Int, item.JobInfoId ? parseInt(item.JobInfoId) : null)
-                        .query('INSERT INTO Addata_JobCardInfoDetail (JobCardId, Remarks, Price, Discount, DiscAmt, DiscType, TaxRate, TaxAmount, JobInfoId) VALUES (@jcId, @remarks, @price, @discount, @discAmt, @discType, @taxRate, @taxAmount, @jobInfoId)');
-                }
-
-                if (Accessories && Array.isArray(Accessories)) {
-                    for (const acc of Accessories) {
-                        await new sql.Request(transaction)
-                            .input('jcId', sql.Int, newId)
-                            .input('accId', sql.Int, acc.AccessoryID)
-                            .input('chk', sql.Bit, acc.IsChecked ? 1 : 0)
-                            .input('qty', sql.Int, acc.Qty || 0)
-                            .query('INSERT INTO dms_JobCardAccessories (JobCardID,AccessoryID,IsChecked,Qty) VALUES (@jcId,@accId,@chk,@qty)');
-                    }
-                }
-
-                if (DamageMarks && Array.isArray(DamageMarks)) {
-                    for (const mark of DamageMarks) {
-                        await new sql.Request(transaction)
-                            .input('jcId', sql.Int, newId)
-                            .input('x', sql.Decimal(6,3), mark.XPct)
-                            .input('y', sql.Decimal(6,3), mark.YPct)
-                            .input('note', sql.NVarChar(200), mark.Note || null)
-                            .input('by', sql.Int, req.user?.userId || null)
-                            .query('INSERT INTO dms_DamageMarks (JobCardID, XPct, YPct, Note, CreatedBy) VALUES (@jcId, @x, @y, @note, @by)');
-                    }
-                }
+                // Numbering, header, labour lines, accessories and damage marks
+                // are written by services/jobCardSaveService.js, shared with the
+                // service tablet's signature step (plan 2026-09-14, Phase 2).
+                const { JobCardId: newId, JobCardNo: generatedRoNumber } = await createJobCardInTx(
+                    transaction, { ...req.body, LabourItems: effectiveItems }, req.user, pstRate);
 
                 await transaction.commit();
                 if (CareOffID) {
@@ -1292,7 +1123,12 @@ exports.saveJobCard = async (req, res) => {
                 res.status(201).json({ message: 'Job Card created', JobCardId: newId, JobCardNo: generatedRoNumber });
             }
         } catch (err) { await transaction.rollback(); throw err; }
-    } catch (err) { console.error(err); res.status(400).json({ error: err.message }); }
+    } catch (err) {
+        // Refusals from jobCardSaveService (duplicate Job Number, missing RO
+        // counter) carry a statusCode and are not logged, as before the move.
+        if (!err.statusCode) console.error(err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
 };
 
 exports.updateJobStatus = async (req, res) => {
@@ -1466,166 +1302,17 @@ exports.issuePartsToJobCard = async (req, res) => {
         await transaction.begin();
 
         try {
-            const finCheck = await transaction.request()
-                .input('jcId', sql.Int, JobCardId)
-                .query('SELECT IsFinalized FROM Addata_JobCardInfo WHERE JobCardId=@jcId');
-            if (finCheck.recordset[0]?.IsFinalized) {
-                await transaction.rollback();
-                return res.status(423).json({ error: 'Job Card is finalized. Cannot issue parts.' });
-            }
-
-            // Block over-issue: every line's quantity must be ≤ current on-hand
-            // (computed inside this transaction so concurrent issues can't both pass).
-            try { await assertEnoughStock(transaction, Items); }
-            catch (e) {
-                await transaction.rollback();
-                return res.status(400).json({ error: e.message });
-            }
-
-            // 1. Create issue header
-            const countRes = await transaction.request().query('SELECT ISNULL(MAX(IssueNo), 0) + 1 AS NextNo FROM data_StockIssuetoJobCard');
-            const nextNo = countRes.recordset[0].NextNo;
-
-            const insertRes = await transaction.request()
-                .input('issueNo', sql.Int, nextNo)
-                .input('issueDate', sql.Date, new Date())
-                .input('jobCardId', sql.Int, JobCardId)
-                .input('jobCardNo', sql.NVarChar(50), JobCardNo)
-                .input('remarks', sql.NVarChar(sql.MAX), Remarks)
-                .input('companyId', sql.Int, 1)
-                .query(`INSERT INTO data_StockIssuetoJobCard
-                    (IssueNo, IssueDate, JobCardId, JobCardNo, Remarks, CompanyID, EntryUserDateTime)
-                    OUTPUT INSERTED.StockIssueID
-                    VALUES (@issueNo, @issueDate, @jobCardId, @jobCardNo, @remarks, @companyId, GETDATE())`);
-
-            const issueId = insertRes.recordset[0].StockIssueID;
-
-            // 2. Insert issue detail lines (with GST + landed cost snapshot per §14.4 / §14.6)
-            let gstRate = 0;
-            try { gstRate = await resolveRate('GST'); } catch (e) { console.warn('GST rate not configured:', e.message); }
-
-            for (const item of Items) {
-                // Resolve unit landed cost for the COGS snapshot.
-                //
-                // This used to be ISNULL(WeightedRate, ItemPurchasePrice), which
-                // had two failures found 2026-09-10: ISNULL only falls back on
-                // NULL, so a WeightedRate of 0 returned 0 and never consulted
-                // ItemPurchasePrice; and nothing in AutoDMS ever maintains
-                // WeightedRate, so items created after the original import sit
-                // at 0 forever. Result: 400 issue lines (PKR 10.1M of parts)
-                // booked at zero cost, and because jobCardJournalBuilder only
-                // emits COGS/Inventory lines when partsCOGS > 0, 251 finalized
-                // job cards relieved no inventory at all.
-                //
-                // NULLIF(...,0) makes each step actually fall through, and the
-                // last resort is the real purchase cost off the most recent GRN
-                // line for the item (data_PurchaseDetail.UnitLandedCost, which
-                // grnController writes from the received ItemRate).
-                const costRes = await new sql.Request(transaction)
-                    .input('iid', sql.Int, item.ItemId)
-                    .query(`SELECT COALESCE(
-                                NULLIF(i.WeightedRate, 0),
-                                NULLIF(i.ItemPurchasePrice, 0),
-                                NULLIF((SELECT TOP 1 pd.UnitLandedCost
-                                        FROM   data_PurchaseDetail pd
-                                        JOIN   data_PurchaseInfo   pi ON pi.PurchaseID = pd.PurchaseID
-                                        WHERE  pd.ItemId = @iid
-                                          AND  ISNULL(pd.UnitLandedCost, 0) > 0
-                                        ORDER  BY pi.PurchaseDate DESC, pd.PurchaseDetailID DESC), 0),
-                                0) AS cost
-                            FROM InventItems i WHERE i.ItemId = @iid`);
-                const unitCost = costRes.recordset[0]?.cost ?? 0;
-                if (!(Number(unitCost) > 0)) {
-                    console.warn(`Parts issue: no cost could be resolved for ItemId=${item.ItemId} — ` +
-                                 `this line will post no COGS. Set a purchase price on the item.`);
-                }
-
-                const qty = Number(item.Quantity) || 0;
-                const rate = Number(item.Rate) || 0;
-                const discAmtVal = Number(item.DiscAmt) || 0;
-                const gross = rate * qty;
-                // Owner ask 2026-07-03: honour per-line IsGST toggle. Non-GST
-                // items on the parts issue slip get zero tax; taxable ones use
-                // the configured rate. Backward-compatible: if the caller
-                // doesn't send IsGST we keep the old behaviour (default taxable).
-                const isTaxable = item.IsGST === undefined ? true : !!item.IsGST;
-                const tax = isTaxable
-                    ? snapshotTax(gross, discAmtVal, gstRate)
-                    : { taxRate: 0, taxAmount: 0 };
-
-                await new sql.Request(transaction)
-                    .input('issueId', sql.Int, issueId)
-                    .input('itemId', sql.Int, item.ItemId)
-                    .input('qty', sql.Numeric(18,2), qty)
-                    .input('rate', sql.Numeric(18,2), rate)
-                    .input('issueQty', sql.Numeric(18,2), qty)
-                    .input('jobCardId', sql.Int, JobCardId)
-                    .input('taxRate', sql.Decimal(8,4), tax.taxRate)
-                    .input('taxAmount', sql.Decimal(18,2), tax.taxAmount)
-                    .input('unitCost', sql.Decimal(18,4), unitCost)
-                    .input('discount', sql.Decimal(18,3), Number(item.Discount) || 0)
-                    .input('discAmt', sql.Decimal(18,3), discAmtVal)
-                    .query(`INSERT INTO data_StockIssuetoJobCardDetail
-                        (StockIssueID, ItemId, Quantity, StockRate, ItemRate, IssueQuantity, JobCardId,
-                         TaxRate, TaxAmount, UnitLandedCost, Discount, DiscAmt)
-                        VALUES (@issueId, @itemId, @qty, @rate, @rate, @issueQty, @jobCardId,
-                                @taxRate, @taxAmount, @unitCost, @discount, @discAmt)`);
-            }
-
-            // 3. Deduct stock in inventory ledger
-            const ioNoRes = await transaction.request().query('SELECT ISNULL(MAX(StockIONo), 0) + 1 AS NextNo FROM data_StockInOutInfo');
-            const ioNo = ioNoRes.recordset[0].NextNo;
-
-            // WHID is now NOT NULL on data_StockInOutInfo. Pick the warehouse
-            // from the first issued line; fall back to any active warehouse.
-            // (We can't assume WHID=1 exists — it was wiped in migration 050.)
-            let issueWHID = Items.find(i => i.WHID)?.WHID;
-            if (!issueWHID) {
-                const whRes = await transaction.request().query(
-                    `SELECT TOP 1 WHID FROM InventWareHouse
-                     WHERE ISNULL(InActive, 0) = 0
-                     ORDER BY WHID`
-                );
-                if (!whRes.recordset.length) {
-                    throw new Error('No active warehouse exists. Create one in Parts Config first.');
-                }
-                issueWHID = whRes.recordset[0].WHID;
-            } else {
-                // Validate the supplied WHID exists — friendlier error than the FK conflict
-                const check = await transaction.request()
-                    .input('w', sql.Int, issueWHID)
-                    .query('SELECT 1 AS ok FROM InventWareHouse WHERE WHID = @w');
-                if (!check.recordset.length) {
-                    throw new Error(`Warehouse #${issueWHID} does not exist. Pick a valid warehouse on each parts line.`);
-                }
-            }
-
-            const ioRes = await transaction.request()
-                .input('ioNo', sql.Int, ioNo)
-                .input('ioDate', sql.Date, new Date())
-                .input('issueId', sql.Int, issueId)
-                .input('companyId', sql.Int, 1)
-                .input('whId', sql.Int, issueWHID)
-                .query(`INSERT INTO data_StockInOutInfo
-                    (StockIONo, StockIODate, StockType, IssuanceID, CompanyID, WHID, EntryUserDateTime, IsTaxable, ReadOnly)
-                    OUTPUT INSERTED.StockIOID
-                    VALUES (@ioNo, @ioDate, 'Issue', @issueId, @companyId, @whId, GETDATE(), 0, 0)`);
-
-            const ioId = ioRes.recordset[0].StockIOID;
-
-            for (const item of Items) {
-                await transaction.request()
-                    .input('ioId', sql.Int, ioId)
-                    .input('itemId', sql.Int, item.ItemId)
-                    .input('qty', sql.Numeric(18,2), -Math.abs(item.Quantity))
-                    .input('rate', sql.Numeric(18,2), item.Rate)
-                    .query(`INSERT INTO data_StockInOutDetail (StockIOID, ItemId, Quantity, StockRate)
-                            VALUES (@ioId, @itemId, @qty, @rate)`);
-            }
-
+            // Body moved to services/partsIssueService.js (plan 2026-09-14,
+            // Phase 3) so the parts counter's requisition queue issues parts
+            // through exactly the same stock, tax and COGS logic.
+            const result = await issuePartsInTx(transaction, { JobCardId, JobCardNo, Items, Remarks });
             await transaction.commit();
-            res.status(201).json({ message: 'Parts issued successfully', StockIssueID: issueId });
-        } catch (err) { await transaction.rollback(); throw err; }
+            res.status(201).json({ message: 'Parts issued successfully', StockIssueID: result.StockIssueID });
+        } catch (err) {
+            await transaction.rollback();
+            if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+            throw err;
+        }
     } catch (err) { console.error(err); res.status(400).json({ error: err.message }); }
 };
 

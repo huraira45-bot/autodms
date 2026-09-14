@@ -13,13 +13,21 @@ const { uploadDiagnostic, uploadServiceMedia, withUploadErrors } = require('../m
 // unauthorised request is refused before a single byte reaches disk.
 const tablet = requireAccess('workshop_tablet');
 
+// Signature PNGs arrive as multipart; a refused upload answers in JSON.
+const signatureUpload = (req, res, next) => c.signatureUpload(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'The signature image is too large.' : err.message });
+});
+
 // Phase 0 — diagnostics
 router.post('/diagnostics/upload', tablet, withUploadErrors(uploadDiagnostic.single('video')), c.diagnosticsUpload);
 
-// Phase 1 — lookups. Customer search and a customer's vehicles are read-only
-// and served by the desk's own handlers; adding goes through wrappers that
-// can only insert, never edit.
+// Phase 1 — lookups. Customer search, a customer's vehicles and the bay list
+// are read-only and served by the desk's own handlers; adding goes through
+// wrappers that can only insert, never edit.
 router.get(   '/lookups/job-types',               tablet, c.lookupJobTypes);
+router.get(   '/lookups/bays',                    tablet, workshop.getBays);
 router.get(   '/catalog',                         tablet, c.searchCatalog);
 router.get(   '/customers',                       tablet, workshop.getCustomers);
 router.post(  '/customers',                       tablet, c.createCustomer);
@@ -35,5 +43,9 @@ router.put(   '/estimates/:id',                   tablet, c.updateEstimate);
 router.post(  '/estimates/:id/cancel',            tablet, c.cancelEstimate);
 router.post(  '/estimates/:id/media',             tablet, withUploadErrors(uploadServiceMedia.single('media')), c.uploadEstimateMedia);
 router.delete('/estimates/:id/media/:mediaId',    tablet, c.deleteEstimateMedia);
+
+// Phase 2 — the customer's signature opens the job card
+router.post(  '/estimates/:id/sign',              tablet, signatureUpload, c.signEstimate);
+router.get(   '/estimates/:id/signature',         tablet, c.getSignatureImage);
 
 module.exports = router;

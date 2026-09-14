@@ -18,7 +18,7 @@ import axios from 'axios';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
     Video, Image as ImageIcon, Trash2, Loader2, Search, UserPlus, Car, Plus, Minus, X,
-    ChevronLeft, ChevronRight, Printer, AlertTriangle, CheckCircle2, RefreshCw, Package, Wrench,
+    ChevronLeft, ChevronRight, Printer, AlertTriangle, CheckCircle2, RefreshCw, Package, Wrench, ClipboardList, PenLine,
 } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
@@ -195,12 +195,26 @@ export default function TabletEstimateEditor() {
                 </Link>
                 <div style={{ fontSize: 22, fontWeight: 700 }}>{est.EstimateNo}</div>
                 <span style={pill(st)}>{st.label}</span>
+                {est.JobCardID && est.Status === 'Draft' && (
+                    <span style={{ fontSize: 16, color: T.muted }}>Additional work for {est.JobCardNo}</span>
+                )}
                 {editable && (
                     <SaveIndicator state={saveState} error={saveError} onRetry={save} onReload={() => load(false)} />
                 )}
             </div>
 
-            {!editable && (
+            {est.Status === 'Converted' && (
+                <div style={{ ...S.result('ok'), marginTop: 0, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <span style={{ flex: 1 }}>
+                        Signed{est.Signature ? ` by ${est.Signature.SignerName}, ${fmtDateTime(est.Signature.SignedAt)}` : ''}.
+                        {' '}Job card <strong>{est.JobCardNo}</strong>{est.BayName ? `, ${est.BayName}` : ''}.
+                    </span>
+                    <Link to={`/tablet/job-cards/${est.JobCardID}`} style={{ ...S.btnGhost, minHeight: 44, textDecoration: 'none' }}>
+                        <ClipboardList size={18} /> Open job card
+                    </Link>
+                </div>
+            )}
+            {!editable && est.Status !== 'Converted' && (
                 <div style={{ ...S.result('warn'), marginTop: 0, marginBottom: 12 }}>
                     This estimate is <strong>{st.label.toLowerCase()}</strong>
                     {est.CancelReason ? ` (${est.CancelReason})` : ''} — it can be viewed and printed but not changed.
@@ -223,7 +237,7 @@ export default function TabletEstimateEditor() {
             </div>
 
             {step === 0 && <VideoStep est={est} setEst={setEst} editable={editable} />}
-            {step === 1 && <CustomerStep draft={draft} change={change} editable={editable} />}
+            {step === 1 && <CustomerStep draft={draft} change={change} editable={editable && !est.JobCardID} />}
             {step === 2 && <JobsStep draft={draft} change={change} editable={editable} est={est} saveState={saveState} />}
             {step === 3 && (
                 <ReviewStep est={est} editable={editable} flush={flush}
@@ -943,11 +957,18 @@ function ReviewStep({ est, editable, flush, onCancelled }) {
     if (!est.EndUserID) missing.push('the customer');
     if (!est.VehicleID) missing.push('the vehicle');
     if (!lines.length) missing.push('at least one job or part');
+    const signMissing = [...missing];
+    if (!est.JobCardID && !est.JobTypeId) signMissing.push('the job type');
     const hasVideo = (est.Media || []).some(m => m.MediaType === 'VIDEO');
 
     const print = async () => {
         if (editable && !(await flush())) return;
         navigate(`/tablet/estimates/${est.EstimateID}/print`);
+    };
+
+    const sign = async () => {
+        if (!(await flush())) return;
+        navigate(`/tablet/estimates/${est.EstimateID}/sign`);
     };
 
     const cancel = async () => {
@@ -1033,13 +1054,18 @@ function ReviewStep({ est, editable, flush, onCancelled }) {
 
             <div style={S.card}>
                 <div style={S.row}>
-                    <button type="button" style={S.btn} onClick={print} disabled={missing.length > 0}>
+                    <button type="button" style={S.btnGhost} onClick={print} disabled={missing.length > 0}>
                         <Printer size={20} /> Print estimate
                     </button>
-                    <span style={{ fontSize: 15, color: T.muted }}>
-                        Customer signature and opening the job card come in the next update.
-                    </span>
+                    {editable && (
+                        <button type="button" style={S.btn} onClick={sign} disabled={signMissing.length > 0}>
+                            <PenLine size={20} /> {est.JobCardID ? 'Customer signs for the additional work' : 'Customer signature'}
+                        </button>
+                    )}
                 </div>
+                {editable && signMissing.length > missing.length && (
+                    <div style={{ fontSize: 14, color: T.warn, marginTop: 10 }}>Pick the job type in step 2 before the customer signs.</div>
+                )}
             </div>
 
             {editable && (

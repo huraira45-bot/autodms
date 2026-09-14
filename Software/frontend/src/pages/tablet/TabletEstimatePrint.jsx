@@ -13,7 +13,7 @@ import { ChevronLeft, Printer, Loader2 } from 'lucide-react';
 import { businessHeaderHtml } from '../../utils/businessProfile';
 import { isNativeApp, serverPageUrl } from '../../tablet/serverConfig';
 import { tStyles as S } from '../../tablet/tabletStyles';
-import { API, money, rateLabel, errText, fmtDate } from '../../tablet/estimateFormat';
+import { API, money, rateLabel, errText, fmtDate, fmtDateTime } from '../../tablet/estimateFormat';
 
 const CSS = `
 .est-page { background: #e2e8f0; min-height: 100vh; }
@@ -52,12 +52,25 @@ export default function TabletEstimatePrint() {
     const navigate = useNavigate();
     const [data, setData] = useState(null);
     const [err, setErr] = useState('');
+    const [sigUrl, setSigUrl] = useState(null);
 
     useEffect(() => {
         axios.get(`${API}/estimates/${id}/print-data`)
             .then(r => setData(r.data))
             .catch(e => setErr(errText(e)));
     }, [id]);
+
+    // The signature image needs the login, so it is fetched with the session
+    // and shown from memory rather than linked by URL.
+    const signed = !!data?.estimate?.Signature;
+    useEffect(() => {
+        if (!signed) return undefined;
+        let url = null;
+        axios.get(`${API}/estimates/${id}/signature`, { responseType: 'blob' })
+            .then(r => { url = URL.createObjectURL(r.data); setSigUrl(url); })
+            .catch(() => setSigUrl(null));
+        return () => { if (url) URL.revokeObjectURL(url); };
+    }, [id, signed]);
 
     // The document title becomes the default file name when saving as PDF.
     useEffect(() => {
@@ -97,7 +110,7 @@ export default function TabletEstimatePrint() {
 
     const header = businessHeaderHtml(data.business, {
         docTitle: 'Service Estimate',
-        docSubtitle: e.EstimateNo + (e.RevisionNo > 1 ? ` · Revision ${e.RevisionNo}` : ''),
+        docSubtitle: e.EstimateNo + (e.RevisionNo > 1 ? ` · Revision ${e.RevisionNo}` : '') + (e.JobCardNo ? ` · Job card ${e.JobCardNo}` : ''),
         docMetaLeft: `Date: ${fmtDate(e.UpdatedAt || e.CreatedAt)}`,
         docMetaRight: e.AdvisorName ? `Service advisor: ${e.AdvisorName}` : '',
         logoBase: isNativeApp() ? serverPageUrl('/uploads/') : '/uploads/',
@@ -215,8 +228,24 @@ export default function TabletEstimatePrint() {
                 </div>
 
                 <div className="est-sign">
-                    <div>Customer signature</div>
-                    <div>Service advisor</div>
+                    <div style={{ position: 'relative' }}>
+                        {sigUrl && (
+                            <img src={sigUrl} alt="" style={{
+                                position: 'absolute', left: 0, right: 0, bottom: '100%', margin: '0 auto',
+                                maxHeight: '18mm', maxWidth: '100%',
+                            }} />
+                        )}
+                        Customer signature
+                        {e.Signature && (
+                            <div style={{ border: 0, padding: 0, fontSize: '8pt' }}>
+                                {e.Signature.SignerName} · {fmtDateTime(e.Signature.SignedAt)}
+                            </div>
+                        )}
+                    </div>
+                    <div>
+                        Service advisor
+                        {e.AdvisorName && <div style={{ border: 0, padding: 0, fontSize: '8pt' }}>{e.AdvisorName}</div>}
+                    </div>
                 </div>
             </div>
         </div>

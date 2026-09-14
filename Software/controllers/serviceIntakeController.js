@@ -13,8 +13,12 @@ const fs = require('fs');
 const path = require('path');
 const { sql, getPool } = require('../config/db');
 const { resolveRate } = require('./taxRatesController');
+const crypto = require('crypto');
+const multer = require('multer');
 const { UPLOAD_DIR } = require('../middleware/serviceMediaUpload');
 const workshop = require('./workshopController');
+const { createJobCardInTx, insertLabourLine } = require('../services/jobCardSaveService');
+const { findOverlongFields, describeOverlong } = require('../services/jobCardFieldLimits');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -25,6 +29,33 @@ const lineTax = (gross, discAmt, rate) => {
     const net = Math.max(0, (Number(gross) || 0) - (Number(discAmt) || 0));
     return Math.round((net * ((Number(rate) || 0) / 100)) * 100) / 100;
 };
+
+/** An error the handler returns to the tablet as-is, with this status. */
+const httpError = (statusCode, message, extra) => Object.assign(new Error(message), { statusCode, extra });
+
+/**
+ * sha256 of everything the customer sees and signs on an estimate: who and
+ * which car, the visit details, every line with its price and tax, and the
+ * total. The signature step refuses a hash that no longer matches, so a
+ * customer can only ever sign what was on the screen in front of them.
+ */
+function contentHash(head, lines) {
+    const canon = {
+        EndUserID: head.EndUserID ?? null,
+        VehicleID: head.VehicleID ?? null,
+        JobCardID: head.JobCardID ?? null,
+        JobTypeId: head.JobTypeId ?? null,
+        KiloMeter: head.KiloMeter == null ? null : Number(head.KiloMeter).toFixed(2),
+        CustomerRemarks: head.CustomerRemarks || '',
+        GrandTotal: Number(head.GrandTotal || 0).toFixed(2),
+        Lines: lines.map(l => [
+            l.LineType, l.ItemID, l.Description,
+            Number(l.Quantity).toFixed(2), Number(l.Rate).toFixed(2),
+            Number(l.TaxRate).toFixed(4), Number(l.TaxAmount).toFixed(2), Number(l.LineTotal).toFixed(2),
+        ]),
+    };
+    return crypto.createHash('sha256').update(JSON.stringify(canon)).digest('hex');
+}
 
 // =========================================================================
 // Phase 0 — diagnostics
@@ -267,15 +298,21 @@ async function loadEstimate(pool, id) {
                c.CNIC         AS CustomerCNIC,
                c.Address      AS CustomerAddress,
                t.CardCode     AS JobTypeCode,
-               t.Title        AS JobTypeName
+               t.Title        AS JobTypeName,
+               jc.JobCardNo,
+               ISNULL(jc.IsFinalized, 0) AS JobCardFinalized,
+               bay.BayName
         FROM   dms_ServiceEstimates e
         LEFT   JOIN addata_CustomerInfo c ON c.ProfileID     = e.EndUserID
         LEFT   JOIN gen_JobCardType     t ON t.JobCardTypeId = e.JobTypeId
+        LEFT   JOIN Addata_JobCardInfo jc ON jc.JobCardId    = e.JobCardID
+        LEFT   JOIN dms_Bays          bay ON bay.BayID       = e.BayID
         WHERE  e.EstimateID = @id`);
     if (!head.recordset.length) return null;
 
-    const [lines, media] = await Promise.all([
-        pool.request().input('id', sql.Int, id).query(`
+    // One query at a time, not Promise.all: this also runs inside the
+    // signature transaction, which takes a single request at a time.
+    const lines = await pool.request().input('id', sql.Int, id).query(`
             SELECT l.LineID, l.LineSeq, l.LineType, l.ItemID, l.Description, l.PartNumber,
                    l.Quantity, l.Rate, l.DiscAmt, l.TaxRate, l.TaxAmount, l.LineTotal,
                    -- Live stock for part lines, so a reopened estimate still
@@ -286,14 +323,24 @@ async function loadEstimate(pool, id) {
                    END AS OnHand
             FROM   dms_ServiceEstimateLines l
             WHERE  l.EstimateID = @id
-            ORDER  BY l.LineSeq`),
-        pool.request().input('id', sql.Int, id).query(`
+            ORDER  BY l.LineSeq`);
+    const media = await pool.request().input('id', sql.Int, id).query(`
             SELECT MediaID, MediaType, OriginalName, MimeType, SizeBytes, CapturedByName, CapturedAt
             FROM   dms_ServiceMedia
             WHERE  EstimateID = @id AND DeletedAt IS NULL
-            ORDER  BY MediaID`),
-    ]);
-    return { ...head.recordset[0], Lines: lines.recordset, Media: media.recordset };
+            ORDER  BY MediaID`);
+    const signature = await pool.request().input('id', sql.Int, id).query(`
+            SELECT SignatureID, SignerName, SignerMobile, SignedAt, GrandTotal, BayName, CapturedByName
+            FROM   dms_ServiceEstimateSignatures
+            WHERE  EstimateID = @id`);
+    const h = head.recordset[0];
+    return {
+        ...h,
+        Lines: lines.recordset,
+        Media: media.recordset,
+        Signature: signature.recordset[0] || null,
+        ContentHash: contentHash(h, lines.recordset),
+    };
 }
 
 async function estimateStatus(pool, id) {
@@ -336,19 +383,20 @@ exports.listEstimates = async (req, res) => {
         const search = (req.query.search || '').trim();
         if (search) {
             rq.input('s', sql.NVarChar(200), `%${search}%`);
-            conds.push('(e.EstimateNo LIKE @s OR e.VehicleRegNo LIKE @s OR c.endUserName LIKE @s OR c.PhoneNo LIKE @s)');
+            conds.push('(e.EstimateNo LIKE @s OR e.VehicleRegNo LIKE @s OR c.endUserName LIKE @s OR c.PhoneNo LIKE @s OR jc.JobCardNo LIKE @s)');
         }
         const r = await rq.query(`
             SELECT TOP 100
                    e.EstimateID, e.EstimateNo, e.Status, e.VehicleRegNo, e.VehicleModel,
-                   e.GrandTotal, e.AdvisorName, e.CreatedAt, e.UpdatedAt,
-                   c.endUserName AS CustomerName, c.PhoneNo AS CustomerPhone,
+                   e.GrandTotal, e.AdvisorName, e.CreatedAt, e.UpdatedAt, e.JobCardID,
+                   c.endUserName AS CustomerName, c.PhoneNo AS CustomerPhone, jc.JobCardNo,
                    (SELECT COUNT(*) FROM dms_ServiceMedia m
                     WHERE m.EstimateID = e.EstimateID AND m.DeletedAt IS NULL) AS MediaCount,
                    (SELECT COUNT(*) FROM dms_ServiceEstimateLines l
                     WHERE l.EstimateID = e.EstimateID) AS LineCount
             FROM   dms_ServiceEstimates e
             LEFT   JOIN addata_CustomerInfo c ON c.ProfileID = e.EndUserID
+            LEFT   JOIN Addata_JobCardInfo jc ON jc.JobCardId = e.JobCardID
             ${conds.length ? 'WHERE ' + conds.join(' AND ') : ''}
             ORDER  BY e.EstimateID DESC`);
         res.json(r.recordset);
@@ -398,8 +446,12 @@ exports.updateEstimate = async (req, res) => {
             return res.status(423).json({ error: `Estimate is ${status} and can no longer be edited.` });
         }
 
-        const endUserId = b.EndUserID ? parseInt(b.EndUserID) : null;
-        const vehicleId = endUserId && b.VehicleID ? parseInt(b.VehicleID) : null;
+        // Additional work on an open job card keeps the job card's customer
+        // and vehicle, whatever the tablet sends.
+        const cur = (await pool.request().input('id', sql.Int, id)
+            .query('SELECT EndUserID, VehicleID, JobCardID FROM dms_ServiceEstimates WHERE EstimateID = @id')).recordset[0];
+        const endUserId = cur.JobCardID ? cur.EndUserID : (b.EndUserID ? parseInt(b.EndUserID) : null);
+        const vehicleId = cur.JobCardID ? cur.VehicleID : (endUserId && b.VehicleID ? parseInt(b.VehicleID) : null);
 
         let vehicle = null;
         if (vehicleId) {
@@ -556,6 +608,281 @@ exports.getEstimatePrintData = async (req, res) => {
         res.json({ estimate: est, business: bp.recordset[0] || null });
     } catch (err) {
         console.error('getEstimatePrintData:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// =========================================================================
+// Phase 2 — the customer's signature opens the job card
+// =========================================================================
+
+const SIGNATURE_DIR = path.join(UPLOAD_DIR, 'signatures');
+fs.mkdirSync(SIGNATURE_DIR, { recursive: true });
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+// Multipart, not JSON: a signature PNG from a high-density tablet screen can
+// be larger than the 100 kB JSON body limit.
+exports.signatureUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 1024 * 1024, files: 1 },
+    fileFilter: (req, file, cb) => (file.mimetype === 'image/png'
+        ? cb(null, true)
+        : cb(new Error('The signature must be a PNG image.'))),
+}).single('signature');
+
+function assertSignable(est, hash) {
+    if (est.Status !== 'Draft') {
+        throw httpError(423, `${est.EstimateNo} is ${est.Status === 'Converted' ? 'already signed' : est.Status.toLowerCase()}.`);
+    }
+    const missing = [];
+    if (!est.EndUserID) missing.push('the customer');
+    if (!est.VehicleID) missing.push('the vehicle');
+    if (!est.JobCardID && !est.JobTypeId) missing.push('the job type');
+    if (!est.Lines.length) missing.push('at least one job or part');
+    if (missing.length) throw httpError(400, `Still needed before signing: ${missing.join(', ')}.`);
+    if (!hash || hash !== est.ContentHash) {
+        throw httpError(409,
+            'The estimate changed after it was shown to the customer. Show them the updated estimate and ask them to sign again.',
+            { code: 'content_changed' });
+    }
+}
+
+const labourItemsFor = (est, bayName) => est.Lines
+    .filter(l => l.LineType === 'LABOUR')
+    .map(l => ({
+        JobInfoId: l.ItemID,
+        WorkDescription: l.Description,
+        Price: Number(l.Rate),
+        Discount: 0,
+        DiscAmt: 0,
+        DiscType: null,
+        BayNo: bayName,
+    }));
+
+const jobCardBodyFor = (est, { jobCode, promised, signerName, vehicleColor, user, bayName }) => ({
+    jobCode,
+    DMSJobCardNo: null,
+    JobTypeId: est.JobTypeId,
+    OrderTypeId: null,
+    EndUserID: est.EndUserID,
+    VehicleRegNo: est.VehicleRegNo,
+    ChasisNo: est.ChasisNo,
+    EngineNo: est.EngineNo,
+    VersionCode: est.VehicleModel,
+    VehicleCode: null,
+    VehicleColor: vehicleColor || null,
+    KiloMeter: est.KiloMeter,
+    PromisedDate: promised || null,
+    Remarks: `Opened on the service tablet from estimate ${est.EstimateNo}, signed by ${signerName}.`,
+    VOCRemarks: est.CustomerRemarks || '',
+    PaymentType: 'Cash',
+    CustomerType: 'Walk-in',
+    ServiceAdvisor: user?.employeeName || user?.userName || null,
+    ServiceAdvisorID: user?.employeeId || null,
+    LabourItems: labourItemsFor(est, bayName),
+    Accessories: [],
+    DamageMarks: [],
+});
+
+/**
+ * POST /api/service-intake/estimates/:id/sign   multipart
+ * Fields: ContentHash, SignerName, SignerMobile, BayID, JobCode (new visit
+ * only), PromisedDate ("YYYY-MM-DDTHH:MM", optional); file "signature" (PNG).
+ *
+ * In ONE transaction:
+ *   - a new visit opens a job card through the same code as the desk form
+ *     (RO number, header, labour lines with PST), every job line on the chosen
+ *     bay; additional work appends its job lines to the open job card instead
+ *   - the signature is recorded with the server's clock and the content hash
+ *   - the parts go to the parts counter as a requisition, at the signed prices
+ *   - the estimate becomes Converted and its media is linked to the job card
+ * The ContentHash must match the estimate as it stands — checked again under a
+ * row lock — so the customer can only sign what was on the screen.
+ */
+exports.signEstimate = async (req, res) => {
+    const id = parseInt(req.params.id);
+    const b = req.body || {};
+    let filePath = null;
+    try {
+        const signerName = String(b.SignerName || '').trim();
+        const signerMobile = String(b.SignerMobile || '').trim();
+        const jobCode = String(b.JobCode || '').trim();
+        const promised = String(b.PromisedDate || '').trim();
+        const bayId = parseInt(b.BayID);
+
+        if (!signerName) throw httpError(400, 'Enter the name of the person signing.');
+        const long = tooLong([['Name of person signing', signerName, 150], ['Mobile', signerMobile, 30]]);
+        if (long.length) throw httpError(400, long.join(' '));
+        const png = req.file?.buffer;
+        if (!png || png.length < 200) throw httpError(400, 'The signature is missing. Ask the customer to sign in the box.');
+        if (!png.subarray(0, 8).equals(PNG_MAGIC)) throw httpError(400, 'The signature must be a PNG image.');
+        if (!Number.isInteger(bayId)) throw httpError(400, 'Pick the bay where the car will be worked on.');
+        if (promised && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(promised)) {
+            throw httpError(400, 'Promised delivery is not a valid date and time.');
+        }
+
+        const pool = await getPool();
+        const pre = await loadEstimate(pool, id);
+        if (!pre) throw httpError(404, 'Estimate not found.');
+        assertSignable(pre, b.ContentHash);
+        const isRevision = !!pre.JobCardID;
+        if (!isRevision && !jobCode) throw httpError(400, 'Enter the job number, as on the desk job card form.');
+
+        // The total the customer sees was taxed at the rates in force when the
+        // estimate was last saved. If a rate has changed since, the job card
+        // would charge a different total from the one signed for.
+        const { pst, gst } = await currentRates();
+        const hasLabour = pre.Lines.some(l => l.LineType === 'LABOUR');
+        const hasParts = pre.Lines.some(l => l.LineType === 'PART');
+        if ((hasLabour && Number(pre.PSTRate) !== pst) || (hasParts && Number(pre.GSTRate) !== gst)) {
+            throw httpError(409,
+                'The tax rate has changed since this estimate was last saved. Recalculate it and ask the customer to sign again.',
+                { code: 'rates_changed' });
+        }
+
+        const bay = (await pool.request().input('b', sql.Int, bayId)
+            .query('SELECT BayID, BayName FROM dms_Bays WHERE BayID = @b AND IsActive = 1')).recordset[0];
+        if (!bay) throw httpError(400, 'That bay is not active. Pick another bay.');
+        if (String(bay.BayName).length > 20) {
+            throw httpError(400, `The bay name "${bay.BayName}" is longer than the 20 characters a job line holds. Shorten it in Workshop Settings.`);
+        }
+
+        const vehicleColor = (await pool.request().input('v', sql.Int, pre.VehicleID)
+            .query('SELECT VehicleColor FROM WorkshopVehicles WHERE VehicleID = @v')).recordset[0]?.VehicleColor;
+        const bodyArgs = { jobCode, promised, signerName, vehicleColor, user: req.user, bayName: bay.BayName };
+        const overlong = await findOverlongFields(pool, isRevision
+            ? { LabourItems: labourItemsFor(pre, bay.BayName) }
+            : jobCardBodyFor(pre, bodyArgs));
+        if (overlong.length) throw httpError(400, describeOverlong(overlong));
+
+        filePath = path.join(SIGNATURE_DIR, `est${id}_${Date.now()}.png`);
+        await fs.promises.writeFile(filePath, png);
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        let result;
+        try {
+            await new sql.Request(tx).input('id', sql.Int, id)
+                .query('SELECT Status FROM dms_ServiceEstimates WITH (UPDLOCK, HOLDLOCK) WHERE EstimateID = @id');
+            const est = await loadEstimate(tx, id);
+            assertSignable(est, b.ContentHash);
+
+            let jobCardId, jobCardNo;
+            if (est.JobCardID) {
+                const jc = (await new sql.Request(tx).input('jc', sql.Int, est.JobCardID)
+                    .query('SELECT JobCardNo, IsFinalized FROM Addata_JobCardInfo WITH (UPDLOCK) WHERE JobCardId = @jc')).recordset[0];
+                if (!jc) throw httpError(404, 'The job card for this additional work no longer exists.');
+                if (jc.IsFinalized) throw httpError(423, `${jc.JobCardNo} is finalized, so work can no longer be added to it.`);
+                for (const item of labourItemsFor(est, bay.BayName)) {
+                    await insertLabourLine(tx, est.JobCardID, item, pst);
+                }
+                await new sql.Request(tx).input('jc', sql.Int, est.JobCardID)
+                    .query('UPDATE Addata_JobCardInfo SET ModifyDate = GETDATE() WHERE JobCardId = @jc');
+                jobCardId = est.JobCardID;
+                jobCardNo = jc.JobCardNo;
+            } else {
+                const created = await createJobCardInTx(tx, jobCardBodyFor(est, bodyArgs), req.user, pst);
+                jobCardId = created.JobCardId;
+                jobCardNo = created.JobCardNo;
+            }
+
+            const sig = await new sql.Request(tx)
+                .input('id',    sql.Int,           id)
+                .input('jc',    sql.Int,           jobCardId)
+                .input('rev',   sql.Int,           est.RevisionNo)
+                .input('name',  sql.NVarChar(150), signerName)
+                .input('mob',   sql.NVarChar(30),  signerMobile || null)
+                .input('file',  sql.NVarChar(260), path.basename(filePath))
+                .input('hash',  sql.Char(64),      est.ContentHash)
+                .input('total', sql.Decimal(18, 2), est.GrandTotal)
+                .input('bay',   sql.Int,           bay.BayID)
+                .input('bayN',  sql.NVarChar(50),  bay.BayName)
+                .input('uid',   sql.Int,           req.user?.userId || null)
+                .input('uname', sql.NVarChar(100), req.user?.userName || null)
+                .query(`INSERT INTO dms_ServiceEstimateSignatures
+                            (EstimateID, JobCardID, RevisionNo, SignerName, SignerMobile, SignatureFile, ContentHash,
+                             GrandTotal, BayID, BayName, CapturedByUserID, CapturedByName)
+                        OUTPUT INSERTED.SignatureID
+                        VALUES (@id, @jc, @rev, @name, @mob, @file, @hash, @total, @bay, @bayN, @uid, @uname)`);
+            const signatureId = sig.recordset[0].SignatureID;
+
+            let requisitionNo = null;
+            const partLines = est.Lines.filter(l => l.LineType === 'PART');
+            if (partLines.length) {
+                const n = (await new sql.Request(tx).query('SELECT NEXT VALUE FOR dbo.seq_PartsRequisitionNo AS n')).recordset[0].n;
+                requisitionNo = 'PR-' + String(n).padStart(5, '0');
+                const reqIns = await new sql.Request(tx)
+                    .input('no',    sql.NVarChar(20),  requisitionNo)
+                    .input('jc',    sql.Int,           jobCardId)
+                    .input('jcNo',  sql.NVarChar(100), jobCardNo)
+                    .input('est',   sql.Int,           id)
+                    .input('sig',   sql.Int,           signatureId)
+                    .input('uid',   sql.Int,           req.user?.userId || null)
+                    .input('uname', sql.NVarChar(100), req.user?.userName || null)
+                    .query(`INSERT INTO dms_PartsRequisitions
+                                (RequisitionNo, JobCardID, JobCardNo, EstimateID, SignatureID, RequestedByUserID, RequestedByName)
+                            OUTPUT INSERTED.RequisitionID
+                            VALUES (@no, @jc, @jcNo, @est, @sig, @uid, @uname)`);
+                const requisitionId = reqIns.recordset[0].RequisitionID;
+                for (let i = 0; i < partLines.length; i++) {
+                    const l = partLines[i];
+                    await new sql.Request(tx)
+                        .input('rid',  sql.Int,            requisitionId)
+                        .input('seq',  sql.Int,            i + 1)
+                        .input('item', sql.Int,            l.ItemID)
+                        .input('desc', sql.NVarChar(300),  l.Description)
+                        .input('pn',   sql.NVarChar(100),  l.PartNumber || null)
+                        .input('qty',  sql.Decimal(18, 2), l.Quantity)
+                        .input('rate', sql.Decimal(18, 2), l.Rate)
+                        .input('eln',  sql.Int,            l.LineID)
+                        .query(`INSERT INTO dms_PartsRequisitionLines
+                                    (RequisitionID, LineSeq, ItemID, Description, PartNumber, QtyRequested, Rate, EstimateLineID)
+                                VALUES (@rid, @seq, @item, @desc, @pn, @qty, @rate, @eln)`);
+                }
+            }
+
+            await new sql.Request(tx)
+                .input('id',  sql.Int, id)
+                .input('jc',  sql.Int, jobCardId)
+                .input('bay', sql.Int, bay.BayID)
+                .query(`UPDATE dms_ServiceEstimates
+                        SET Status = 'Converted', JobCardID = @jc, BayID = @bay, UpdatedAt = GETDATE()
+                        WHERE EstimateID = @id;
+                        UPDATE dms_ServiceMedia SET JobCardID = @jc WHERE EstimateID = @id;`);
+
+            await tx.commit();
+            result = {
+                JobCardId: jobCardId, JobCardNo: jobCardNo, RequisitionNo: requisitionNo,
+                BayName: bay.BayName, isRevision: !!est.JobCardID,
+            };
+        } catch (e) {
+            try { await tx.rollback(); } catch { /* already rolled back */ }
+            throw e;
+        }
+
+        filePath = null;   // committed: the signature file stays
+        res.status(201).json({ ...result, estimate: await loadEstimate(pool, id) });
+    } catch (err) {
+        if (filePath) fs.unlink(filePath, () => {});
+        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message, ...(err.extra || {}) });
+        console.error('signEstimate:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/** GET /api/service-intake/estimates/:id/signature — the signature PNG (login required). */
+exports.getSignatureImage = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request().input('id', sql.Int, parseInt(req.params.id))
+            .query('SELECT SignatureFile FROM dms_ServiceEstimateSignatures WHERE EstimateID = @id');
+        if (!r.recordset.length) return res.status(404).json({ error: 'This estimate has not been signed.' });
+        res.set('Cache-Control', 'private, no-store');
+        res.sendFile(path.join(SIGNATURE_DIR, path.basename(r.recordset[0].SignatureFile)), (err) => {
+            if (err && !res.headersSent) res.status(404).json({ error: 'The signature image file is missing.' });
+        });
+    } catch (err) {
+        console.error('getSignatureImage:', err);
         res.status(500).json({ error: err.message });
     }
 };

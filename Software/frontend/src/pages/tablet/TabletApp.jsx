@@ -21,6 +21,7 @@ import TabletDiagnostics from './TabletDiagnostics';
 import TabletEstimates, { NewIntakeButton } from './TabletEstimates';
 import TabletEstimateEditor from './TabletEstimateEditor';
 import TabletEstimatePrint from './TabletEstimatePrint';
+import TabletEstimateSign from './TabletEstimateSign';
 
 const PRINT_ROUTE = /^\/tablet\/estimates\/\d+\/print\/?$/;
 
@@ -78,6 +79,7 @@ export default function TabletApp() {
                 <Route path="/tablet" element={<TabletHome user={user} />} />
                 <Route path="/tablet/estimates" element={<TabletEstimates />} />
                 <Route path="/tablet/estimates/:id" element={<TabletEstimateEditor />} />
+                <Route path="/tablet/estimates/:id/sign" element={<TabletEstimateSign />} />
                 <Route path="/tablet/diagnostics" element={<TabletDiagnostics />} />
                 <Route path="/tablet/settings" element={<ServerSettings onSaved={setServerUrlState} />} />
                 <Route path="*" element={<Navigate to="/tablet" replace />} />
