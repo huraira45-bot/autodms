@@ -7,15 +7,18 @@
  *   3. Negotiated price (defaults to standard; any reduction triggers approval)
  *   4. Optional: Corporate PO number, Source Inquiry
  *   5. Submit → either advances to PendingPayment (no discount) or PendingApproval (with reason captured)
+ *   6. Optional: drag in PBO / CNIC / other documents — uploaded to the booking
+ *      right after it is created (owner ask 2026-09-14)
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowLeft, Loader2, Search, AlertTriangle, Car, User, UserPlus, XCircle, Headphones } from 'lucide-react';
+import { ArrowLeft, Loader2, Search, AlertTriangle, Car, User, UserPlus, XCircle, Headphones, Paperclip } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { inputStyle, Field, Err, FlashMsg, Shell, Actions } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
 import { ErpControlPanel } from '../../components/erp';
+import BookingDocumentDrop, { uploadBookingDocuments, validateDocumentItems } from './BookingDocumentDrop';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -48,6 +51,12 @@ export default function NewBooking() {
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
     const [msg, setMsg] = useState(null);
+
+    // Documents dropped before the booking exists; uploaded once it is created.
+    const [pendingDocs, setPendingDocs] = useState([]);
+    // Set when the booking was created but a document failed, so the form
+    // can't be submitted a second time and create a duplicate booking.
+    const [created, setCreated] = useState(null);
 
     useEffect(() => {
         (async () => {
@@ -117,6 +126,8 @@ export default function NewBooking() {
                   (!needsApproval || negotiationReason.trim().length >= 5);
 
     const submit = async () => {
+        const docProblems = validateDocumentItems(pendingDocs);
+        if (docProblems.length) { setErr(docProblems.join(' ')); return; }
         setBusy(true); setErr(null);
         try {
             const body = {
@@ -128,7 +139,24 @@ export default function NewBooking() {
             if (needsApproval) body.NegotiationReason = negotiationReason.trim();
             if (inquiryId) body.SourceInquiryID = Number(inquiryId);
             const r = await axios.post(`${API}/sales/bookings`, body);
-            setMsg({ kind: 'ok', text: `Booking ${r.data.BookingNo} created — ${r.data.Status}` });
+
+            if (pendingDocs.length) {
+                setMsg({ kind: 'ok', text: `Booking ${r.data.BookingNo} created — uploading ${pendingDocs.length} document(s)…` });
+                const results = await uploadBookingDocuments(r.data.BookingID, pendingDocs,
+                    (done, total) => setMsg({ kind: 'ok', text: `Booking ${r.data.BookingNo} created — uploading document ${done} of ${total}…` }));
+                const failed = new Map(results.filter(x => !x.ok).map(x => [x.key, x.error]));
+                if (failed.size) {
+                    setCreated(r.data);
+                    setPendingDocs(pendingDocs.filter(d => failed.has(d.key)).map(d => ({ ...d, error: failed.get(d.key) })));
+                    setMsg({ kind: 'ok', text: `Booking ${r.data.BookingNo} created — ${r.data.Status}` });
+                    setErr(`${failed.size} of ${results.length} document(s) did not upload. The booking is saved; open it to add them.`);
+                    setBusy(false);
+                    return;
+                }
+                setMsg({ kind: 'ok', text: `Booking ${r.data.BookingNo} created with ${results.length} document(s) — ${r.data.Status}` });
+            } else {
+                setMsg({ kind: 'ok', text: `Booking ${r.data.BookingNo} created — ${r.data.Status}` });
+            }
             setTimeout(() => navigate(`/sales/bookings/${r.data.BookingID}`), 600);
         } catch (e) {
             setErr(e.response?.data?.error || e.message);
@@ -308,9 +336,30 @@ export default function NewBooking() {
                 </Field>
             </div>
 
+            <div className="card">
+                <h3 style={{ marginTop: 0, fontSize: '1rem' }}>
+                    <Paperclip size={16} style={{ display: 'inline', verticalAlign: 'middle' }} /> Documents
+                    <span style={{ fontWeight: 400, color: '#64748b', fontSize: '0.8rem' }}> — optional: PBO, CNIC, authority letter or anything else</span>
+                </h3>
+                <BookingDocumentDrop items={pendingDocs} onChange={setPendingDocs} disabled={busy || !!created} />
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 6 }}>
+                    Uploaded to the booking as soon as it is created. A CNIC is needed before a vehicle can be allocated.
+                </div>
+            </div>
+
+            {created && (
+                <div className="card" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+                    Booking <strong>{created.BookingNo}</strong> is saved.{' '}
+                    <Link to={`/sales/bookings/${created.BookingID}`} style={{ color: '#1e40af', fontWeight: 600 }}>
+                        Open the booking
+                    </Link>{' '}
+                    to add the documents that did not upload.
+                </div>
+            )}
+
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn-sm" onClick={() => navigate('/sales/bookings')}>Cancel</button>
-                <button onClick={submit} disabled={busy || !ready}
+                <button onClick={submit} disabled={busy || !ready || !!created}
                     style={{ padding: '10px 20px', background: ready ? '#1e40af' : '#cbd5e1', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: ready ? 'pointer' : 'not-allowed' }}>
                     {busy ? <Loader2 size={14} className="animate-spin" /> : null}
                     {needsApproval ? 'Submit for approval' : 'Create booking'}

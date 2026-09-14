@@ -20,6 +20,7 @@ import {
 } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
 import { printGatePass } from '../../utils/gatePassPrint';
+import BookingDocumentDrop from './BookingDocumentDrop';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -74,6 +75,8 @@ export default function BookingDetail() {
     useEffect(() => { load(); }, [load]);
 
     const hasDoc = (type) => documents.some(d => d.DocType === type && !d.DeletedAt);
+    // Same roles the server accepts for POST /bookings/:id/documents.
+    const canUploadDocs = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm');
 
     if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Loader2 className="animate-spin" /></div>;
     if (!data) return <div style={{ padding: 40, color: '#dc2626' }}>Booking not found</div>;
@@ -242,9 +245,11 @@ export default function BookingDetail() {
                     <h3 style={{ margin: 0, fontSize: '1rem' }}>
                         <Paperclip size={16} style={{ display: 'inline', verticalAlign: 'middle' }} /> Documents ({documents.filter(d => !d.DeletedAt).length})
                     </h3>
-                    <button className="btn" onClick={() => setShowUploadDoc(true)}>
-                        <Upload size={14} /> Upload Document
-                    </button>
+                    {canUploadDocs && (
+                        <button className="btn" onClick={() => setShowUploadDoc(true)}>
+                            <Upload size={14} /> Upload Document
+                        </button>
+                    )}
                 </div>
 
                 {/* Required-doc checklist */}
@@ -280,6 +285,19 @@ export default function BookingDetail() {
                         );
                     })}
                 </div>
+
+                {canUploadDocs && (
+                    <div style={{ marginBottom: 12 }}>
+                        <BookingDocumentDrop
+                            bookingId={id}
+                            types={['PBO', 'CNIC', 'AuthorityLetter', 'ProofOfPayment', 'Other']}
+                            onUploaded={(results) => {
+                                const ok = results.filter(x => x.ok).length;
+                                if (ok) flash('ok', `${ok} document${ok === 1 ? '' : 's'} uploaded`);
+                                if (ok) load();
+                            }} />
+                    </div>
+                )}
 
                 {documents.filter(d => !d.DeletedAt).length === 0 ? (
                     <div style={{ padding: 16, color: '#94a3b8', textAlign: 'center', fontSize: '0.85rem' }}>No documents uploaded yet.</div>

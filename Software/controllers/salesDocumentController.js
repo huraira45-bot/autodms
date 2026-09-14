@@ -10,6 +10,7 @@
  *   - bookingHasDocOfType(bookingId, docType) → bool
  *   - missingRequiredDocs(bookingId, requiredTypes[]) → string[] of missing types
  */
+const fs = require('fs');
 const path = require('path');
 const { sql, getPool } = require('../config/db');
 
@@ -34,20 +35,23 @@ exports.listForBooking = async (req, res) => {
 
 // POST /api/sales/bookings/:id/documents  (multipart) — field 'file' + DocType + Description
 exports.upload = async (req, res) => {
+    // multer has already written the file by the time these checks run, so a
+    // refused upload must remove it or it stays on disk with no record.
+    const discard = () => { if (req.file?.path) fs.unlink(req.file.path, () => {}); };
     try {
         const bookingId = parseInt(req.params.id);
         const b = req.body || {};
         const docType = b.DocType;
         const description = (b.Description || '').trim();
 
-        if (!VALID_DOC_TYPES.has(docType)) return res.status(400).json({ error: `DocType must be one of: ${[...VALID_DOC_TYPES].join(', ')}` });
-        if (description.length < 5) return res.status(400).json({ error: 'Description is required (min 5 chars).' });
+        if (!VALID_DOC_TYPES.has(docType)) { discard(); return res.status(400).json({ error: `DocType must be one of: ${[...VALID_DOC_TYPES].join(', ')}` }); }
+        if (description.length < 5) { discard(); return res.status(400).json({ error: 'Description is required (min 5 chars).' }); }
         if (!req.file) return res.status(400).json({ error: 'File is required (field name: "file").' });
 
         const pool = await getPool();
         const bkExists = await pool.request().input('id', sql.Int, bookingId)
             .query(`SELECT BookingID FROM dms_SalesBookings WHERE BookingID=@id`);
-        if (!bkExists.recordset.length) return res.status(404).json({ error: 'Booking not found' });
+        if (!bkExists.recordset.length) { discard(); return res.status(404).json({ error: 'Booking not found' }); }
 
         const relPath = `uploads/sales/${path.basename(req.file.path)}`;
         const r = await pool.request()
@@ -67,6 +71,7 @@ exports.upload = async (req, res) => {
                     VALUES (@dt, @desc, @fp, @orig, @mime, @sz, @bid, @emp, @empN)`);
         res.status(201).json({ message: 'Document uploaded', DocumentID: r.recordset[0].DocumentID, FilePath: relPath });
     } catch (err) {
+        discard();
         console.error('document upload:', err);
         res.status(500).json({ error: err.message });
     }

@@ -23,6 +23,14 @@ const requireAny = (...keys) => (req, res, next) => {
     return res.status(403).json({ error: `Access denied: one of (${keys.join(', ')}) required.` });
 };
 
+// A refused file (wrong type, over 10 MB) answers in JSON the screen can show,
+// instead of Express's HTML error page.
+const withUploadErrors = (mw) => (req, res, next) => mw(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    return res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'The file is larger than 10 MB.' : err.message });
+});
+
 // Read permissions: anyone in the sales chain or settings/reports
 const SALES_READERS = ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings', 'sales_master_settlement', 'sales_reports'];
 
@@ -84,7 +92,7 @@ router.post(  '/cancellations/:id/withdraw',          requireAny('sales_executiv
 // Booking documents (PBO, CNIC, AuthorityLetter, Other) — separate from payment proof
 router.get( '/bookings/:id/documents',               requireAny(...SALES_READERS), doc.listForBooking);
 router.post('/bookings/:id/documents',               requireAny('sales_executive', 'sales_agm', 'sales_gm'),
-            uploadSalesDoc.single('file'), doc.upload);
+            withUploadErrors(uploadSalesDoc.single('file')), doc.upload);
 router.delete('/bookings/:id/documents/:docId',      requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), doc.remove);
 
 // Lifecycle — allocation, Master invoice posting, delivery, gate pass
