@@ -164,8 +164,22 @@ cd ..
 cd C:\AutoDMS\Software
 pm2 start ecosystem.config.js
 pm2 save
-pm2-startup install
 ```
+
+**Start after a reboot.** `pm2-startup install` (pm2-windows-startup) only starts
+PM2 when someone signs in to Windows, so after an unattended reboot the app
+stays down (it happened on live on 2026-09-14). Instead, create a scheduled task
+once, in Command Prompt, signed in as the account that runs PM2 (it asks for
+that account's password):
+
+```bat
+schtasks /create /tn "DealerDesk start after reboot" /sc onstart /delay 0001:00 /rl highest /ru Administrator /rp * /tr "\"D:\saher 2.0\autodms\Software\scripts\start-after-reboot.cmd\""
+```
+
+`Software/scripts/start-after-reboot.cmd` restores the saved PM2 list a minute
+after startup (so SQL Server is up first) and does nothing if the app is already
+running, so `schtasks /run /tn "DealerDesk start after reboot"` is a safe test.
+Its log is `%USERPROFILE%\.pm2\start-after-reboot.log`.
 
 Verify it's running:
 ```bat
