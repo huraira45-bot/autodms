@@ -35,4 +35,13 @@ router.get('/stock-on-hand', requireAnyAccess(
 router.post('/',     requireAnyPerm(['parts_spare', 'workshop_labour'], 'insert'), itemController.createItem);
 router.put( '/:id',  requireAnyPerm(['parts_spare', 'workshop_labour'], 'edit'),   itemController.updateItem);
 
+// Hidden (switched-off) items, so a screen can list and restore them.
+router.get('/hidden', requireAnyAccess('parts_spare:view', 'workshop_labour:view', 'inventory_settings:view'),
+          itemController.getHiddenItems);
+
+// Hiding keeps history intact, so it is an edit. Deleting removes the row for
+// good and is only allowed for an item never used anywhere (see deleteItem).
+router.patch( '/:id/status', requireAnyPerm(['parts_spare', 'workshop_labour'], 'edit'),   itemController.setItemStatus);
+router.delete('/:id',        requireAnyPerm(['parts_spare', 'workshop_labour'], 'delete'), itemController.deleteItem);
+
 module.exports = router;

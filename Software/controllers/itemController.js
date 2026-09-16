@@ -233,3 +233,164 @@ exports.updateItem = async (req, res) => {
     res.status(400).json({ error: 'Database Error', details: err.message });
   }
 };
+
+// ---------------------------------------------------------------------------
+// Delete / hide (owner ask 2026-09-16: let admin delete labour jobs)
+// ---------------------------------------------------------------------------
+
+// Where a catalog item can be referenced, and what to call it when telling
+// someone why it can't be deleted. A job card line keeps only the item's id
+// (Addata_JobCardInfoDetail.JobInfoId), with no foreign key, so deleting a
+// used job would leave old job cards pointing at nothing — hence this list
+// rather than relying on the database to refuse.
+const ITEM_USAGE = [
+  ['Addata_JobCardInfoDetail',        'JobInfoId',          'job cards'],
+  ['Addata_JobCardInfoSubletJobDetail', 'JobInfoId',        'sublet jobs'],
+  ['Addata_JobCardInfoPartsDetail',   'JobInfoId',          'job card parts'],
+  ['Addata_JobCardInfolubricantDetail', 'JobInfoId',        'job card lubricants'],
+  ['Addata_JobCardInfocheckboxDetail', 'JobInfoId',         'job card checklists'],
+  ['Addata_JobCardInfosubjobDetail',  'JobInfoId',          'job card sub-jobs'],
+  ['Addata_JobCardInfosubpartsDetail', 'JobInfoId',         'job card sub-parts'],
+  ['addata_CustomerInvoiceDetailInfo', 'JobInfoId',         'customer invoices'],
+  ['addata_CustomerInvoiceSubletJobDetail', 'JobInfoId',    'customer invoices'],
+  ['adgen_ScheduleMaintainceDetail',  'JobInfoId',          'maintenance schedules'],
+  ['dms_ServiceCampaignEligibleJobs', 'JobInfoId',          'service campaigns'],
+  ['dms_ServiceEstimateLines',        'ItemID',             'service tablet estimates'],
+  ['dms_PartsRequisitionLines',       'ItemID',             'parts requests'],
+  ['data_StockIssuetoJobCardDetail',  'ItemId',             'parts issues'],
+  ['data_StockInOutDetail',           'ItemId',             'stock movements'],
+  ['data_StockArrivalDetail',         'ItemId',             'stock arrivals'],
+  ['data_PurchaseDetail',             'ItemId',             'purchases (GRN)'],
+  ['data_PurchaseReturnDetail',       'ItemId',             'purchase returns'],
+  ['data_StoreSaleDetail',            'ItemId',             'store sales'],
+  ['data_StoreSaleReturnDetail',      'ItemId',             'store sale returns'],
+  ['adgen_InsuranceJobEstimateDetail', 'ItemId',            'insurance estimates'],
+  ['paint_Issue',                     'ItemId',             'paint issues'],
+  ['InventItems',                     'SupersededByItemId', 'another item superseded by it'],
+];
+
+/** Where this item is already used: [{ where, count }], empty when nowhere. */
+async function itemUsage(pool, itemId) {
+  // Only look at tables/columns this database actually has — the legacy schema
+  // differs between installs.
+  const present = (await pool.request().query(`
+      SELECT t.name AS tbl, c.name AS col
+      FROM   sys.columns c JOIN sys.tables t ON t.object_id = c.object_id
+      WHERE  t.is_ms_shipped = 0
+        AND  c.name IN ('ItemId', 'ItemID', 'JobInfoId', 'SupersededByItemId')`)).recordset;
+  const has = new Set(present.map(x => `${x.tbl.toLowerCase()}.${x.col.toLowerCase()}`));
+  const checks = ITEM_USAGE.filter(([tbl, col]) => has.has(`${tbl.toLowerCase()}.${col.toLowerCase()}`));
+  if (!checks.length) return [];
+
+  const sqlText = checks
+    .map(([tbl, col], i) => `SELECT ${i} AS i, COUNT(*) AS n FROM [${tbl}] WHERE [${col}] = @id`)
+    .join(' UNION ALL ');
+  const rows = (await pool.request().input('id', sql.Int, itemId).query(sqlText)).recordset;
+
+  const byLabel = new Map();
+  for (const row of rows) {
+    if (!row.n) continue;
+    const label = checks[row.i][2];
+    byLabel.set(label, (byLabel.get(label) || 0) + Number(row.n));
+  }
+  return [...byLabel].map(([where, count]) => ({ where, count }));
+}
+
+const describeUsage = (usage) => usage.map(u => `${u.count} ${u.where}`).join(', ');
+
+/**
+ * DELETE /api/items/:id
+ * Deletes a labour job or part outright, but only when it has never been used.
+ * Anything with history is refused with where it is used, and the caller is
+ * told it can be hidden instead (canHide).
+ */
+exports.deleteItem = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id.' });
+    const pool = await getPool();
+    const item = (await pool.request().input('id', sql.Int, id)
+      .query('SELECT ItemId, ItenName, ItemType FROM InventItems WHERE ItemId = @id')).recordset[0];
+    if (!item) return res.status(404).json({ error: 'That item no longer exists.' });
+
+    const usage = await itemUsage(pool, id);
+    if (usage.length) {
+      return res.status(409).json({
+        error: `"${item.ItenName}" is used on ${describeUsage(usage)}, so it cannot be deleted.`,
+        usage,
+        canHide: true,
+      });
+    }
+
+    try {
+      await pool.request().input('id', sql.Int, id).query('DELETE FROM InventItems WHERE ItemId = @id');
+    } catch (e) {
+      if (/REFERENCE constraint|FOREIGN KEY/i.test(e.message)) {
+        return res.status(409).json({
+          error: `"${item.ItenName}" is used elsewhere in the system, so it cannot be deleted.`,
+          canHide: true,
+        });
+      }
+      throw e;
+    }
+    console.warn(`[items] ${req.user?.userName || 'unknown user'} deleted ${item.ItemType || 'item'} ${id} "${item.ItenName}"`);
+    res.json({ message: 'Deleted', ItemId: id, ItenName: item.ItenName });
+  } catch (err) {
+    console.error('deleteItem:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * PATCH /api/items/:id/status   { IsActive }
+ * Hides a job or part from every picker without touching history, or brings
+ * it back. Hidden items keep working on the records that already use them.
+ */
+exports.setItemStatus = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid item id.' });
+    const raw = req.body?.IsActive;
+    if (raw === undefined) return res.status(400).json({ error: 'Send IsActive: true or false.' });
+    const isActive = raw === true || raw === 1 || raw === 'true' || raw === '1';
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('id', sql.Int, id)
+      .input('st', sql.Bit, isActive ? 1 : 0)
+      .query('UPDATE InventItems SET ItemStatus = @st WHERE ItemId = @id');
+    if (!r.rowsAffected[0]) return res.status(404).json({ error: 'That item no longer exists.' });
+    res.json({ ItemId: id, IsActive: isActive });
+  } catch (err) {
+    console.error('setItemStatus:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * GET /api/items/hidden?type=Service
+ * Items switched off (ItemStatus = 0), so a screen can show and restore them.
+ * vw_ActiveItems — what every picker reads — leaves these out.
+ */
+exports.getHiddenItems = async (req, res) => {
+  try {
+    const pool = await getPool();
+    const rq = pool.request();
+    const conds = ['i.ItemStatus = 0'];
+    if (req.query.type) {
+      rq.input('t', sql.VarChar(10), String(req.query.type));
+      conds.push('i.ItemType = @t');
+    }
+    const r = await rq.query(`
+      SELECT i.ItemId, i.ItenName, i.ItemNumber, i.ManualNumber, i.ItemSalesPrice, i.ItemPurchasePrice,
+             i.ItemType, i.UOMId, i.CategoryID, i.DepartmentID, i.JobTypeID, i.BinLocation,
+             jt.CardCode AS JobTypeCode, jt.Title AS JobTypeName
+      FROM   InventItems i
+      LEFT   JOIN gen_JobCardType jt ON i.JobTypeID = jt.JobCardTypeId
+      WHERE  ${conds.join(' AND ')}
+      ORDER  BY i.ItenName`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error('getHiddenItems:', err);
+    res.status(500).json({ error: err.message });
+  }
+};

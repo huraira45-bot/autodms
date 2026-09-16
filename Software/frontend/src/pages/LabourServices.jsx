@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Wrench, Plus, Edit, X, Search, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
+import { Wrench, Plus, Edit, X, Search, ChevronDown, ChevronRight, Building2, Trash2, EyeOff, RotateCcw } from 'lucide-react';
 import { useFeedback } from '../context/FeedbackContext';
+import { useCan } from '../context/AuthContext';
 import { EmptyState } from '../components/UXPrimitives';
 import SearchableSelect from '../components/SearchableSelect';
 import { ErpControlPanel } from '../components/erp';
@@ -9,8 +10,10 @@ import { ErpControlPanel } from '../components/erp';
 const API_BASE = '/api';
 
 export default function LabourServices() {
-  const { notify } = useFeedback();
+  const { notify, confirm } = useFeedback();
+  const { canInsert, canEdit, canDelete } = useCan('workshop_labour');
   const [items, setItems] = useState([]);
+  const [showHidden, setShowHidden] = useState(false);
   const [jobTypes, setJobTypes] = useState([]);
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState({});
@@ -20,16 +23,63 @@ export default function LabourServices() {
 
   const fetchData = async () => {
     try {
-      const [itemRes, jtRes] = await Promise.all([
+      const [itemRes, jtRes, hiddenRes] = await Promise.all([
         axios.get(`${API_BASE}/items`),
-        axios.get(`${API_BASE}/workshop/job-types`)
+        axios.get(`${API_BASE}/workshop/job-types`),
+        showHidden ? axios.get(`${API_BASE}/items/hidden`, { params: { type: 'Service' } }) : Promise.resolve({ data: [] }),
       ]);
-      setItems(itemRes.data.filter(i => i.ItemType === 'Service'));
+      setItems([
+        ...itemRes.data.filter(i => i.ItemType === 'Service').map(i => ({ ...i, IsHidden: false })),
+        ...(hiddenRes.data || []).map(i => ({ ...i, IsHidden: true })),
+      ]);
       setJobTypes(jtRes.data);
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [showHidden]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hiding keeps every old job card intact; only a job that has never been
+  // used anywhere can actually be deleted, and the server decides that.
+  const setHidden = async (item, hidden) => {
+    try {
+      await axios.patch(`${API_BASE}/items/${item.ItemId}/status`, { IsActive: !hidden });
+      notify({ type: 'success', title: hidden ? 'Service hidden' : 'Service restored', message: item.ItenName });
+      fetchData();
+    } catch (err) {
+      notify({
+        type: 'error',
+        title: hidden ? 'Could not hide the service' : 'Could not restore the service',
+        message: err.response?.data?.error || err.message,
+      });
+    }
+  };
+
+  const handleDelete = async (item) => {
+    const ok = await confirm({
+      title: `Delete "${item.ItenName}"?`,
+      message: 'It is removed from the labour list for good. A job already used on a job card cannot be deleted — you will be offered to hide it instead.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await axios.delete(`${API_BASE}/items/${item.ItemId}`);
+      notify({ type: 'success', title: 'Service deleted', message: item.ItenName });
+      fetchData();
+    } catch (err) {
+      const data = err.response?.data;
+      if (err.response?.status === 409 && data?.canHide) {
+        const hide = await confirm({
+          title: 'This job has already been used',
+          message: `${data.error} Hide it instead? It then stops appearing on new job cards, and old ones stay as they are.`,
+          confirmLabel: 'Hide it',
+        });
+        if (hide) setHidden(item, true);
+        return;
+      }
+      notify({ type: 'error', title: 'Could not delete the service', message: data?.error || err.message });
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
@@ -97,9 +147,11 @@ export default function LabourServices() {
         title="Labour & Services"
         subtitle="Standard labour operations and rates, grouped by business unit."
         actions={
-          <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
-            <Plus size={14} /> Add Service
-          </button>
+          canInsert && (
+            <button type="button" className="erp-btn erp-btn-primary" onClick={openNew}>
+              <Plus size={14} /> Add Service
+            </button>
+          )
         }
       />
 
@@ -113,6 +165,9 @@ export default function LabourServices() {
           onChange={e => setSearch(e.target.value)}
           style={{ border: 'none', outline: 'none', flex: 1, fontSize: '0.9rem' }}
         />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', color: '#64748b', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+          <input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} /> Show hidden
+        </label>
         <span style={{ fontSize: '0.85rem', color: '#64748b', whiteSpace: 'nowrap' }}>
           {totalServices} service{totalServices !== 1 ? 's' : ''} · {grouped.length} unit{grouped.length !== 1 ? 's' : ''}
         </span>
@@ -162,7 +217,7 @@ export default function LabourServices() {
                     <tr style={{ background: '#fafafa' }}>
                       <th style={{ padding: '8px 20px', textAlign: 'left', fontSize: 12, color: '#64748b', fontWeight: 600 }}>Service / Labour Description</th>
                       <th style={{ padding: '8px 20px', textAlign: 'right', fontSize: 12, color: '#64748b', fontWeight: 600, width: 180 }}>Standard Rate (PKR)</th>
-                      <th style={{ padding: '8px 16px', width: 60 }}></th>
+                      <th style={{ padding: '8px 16px', width: 150 }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -173,18 +228,59 @@ export default function LabourServices() {
                         onMouseEnter={e => e.currentTarget.style.background = '#fafafa'}
                         onMouseLeave={e => e.currentTarget.style.background = 'white'}
                       >
-                        <td style={{ padding: '11px 20px', fontWeight: 500, color: '#1e293b' }}>{item.ItenName}</td>
+                        <td style={{ padding: '11px 20px', fontWeight: 500, color: item.IsHidden ? '#94a3b8' : '#1e293b' }}>
+                          {item.ItenName}
+                          {item.IsHidden && (
+                            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#f1f5f9', color: '#64748b' }}>
+                              Hidden
+                            </span>
+                          )}
+                        </td>
                         <td style={{ padding: '11px 20px', textAlign: 'right', fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)' }}>
                           {parseFloat(item.ItemSalesPrice || 0).toLocaleString()}
                         </td>
-                        <td style={{ padding: '11px 16px', textAlign: 'center' }}>
-                          <button
-                            onClick={() => openEdit(item)}
-                            style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#64748b' }}
-                            title="Edit"
-                          >
-                            <Edit size={14} />
-                          </button>
+                        <td style={{ padding: '11px 16px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          {item.IsHidden ? (
+                            canEdit && (
+                              <button
+                                onClick={() => setHidden(item, false)}
+                                style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#15803d' }}
+                                title="Restore — show this job again"
+                              >
+                                <RotateCcw size={14} />
+                              </button>
+                            )
+                          ) : (
+                            <>
+                              {canEdit && (
+                                <button
+                                  onClick={() => openEdit(item)}
+                                  style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#64748b' }}
+                                  title="Edit"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                              )}
+                              {canEdit && (
+                                <button
+                                  onClick={() => setHidden(item, true)}
+                                  style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#64748b', marginLeft: 6 }}
+                                  title="Hide — keep old job cards, stop offering it on new ones"
+                                >
+                                  <EyeOff size={14} />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  onClick={() => handleDelete(item)}
+                                  style={{ background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#b91c1c', marginLeft: 6 }}
+                                  title="Delete — only possible if this job was never used"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}
