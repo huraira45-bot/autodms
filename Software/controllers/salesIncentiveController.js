@@ -249,10 +249,15 @@ function computeAmount(policy, negotiatedPrice) {
 async function accrueForBooking(tx, bookingId) {
     // Booking details
     const r = await new sql.Request(tx).input('id', sql.Int, bookingId).query(`
-        SELECT BookingID, NegotiatedPrice, CreatedBy_SalesExecutiveID, Status, VehicleVariantID
+        SELECT BookingID, NegotiatedPrice, CreatedBy_SalesExecutiveID, Status, VehicleVariantID, IsHistorical
         FROM dms_SalesBookings WHERE BookingID=@id`);
     if (!r.recordset.length) return { skipped: 'booking-not-found' };
     const booking = r.recordset[0];
+    // A deal closed before DealerDesk was commissioned at the time. Entering it
+    // as a record must never pay anyone a second time (owner decision
+    // 2026-09-18) — belt and braces, since the historical entry path does not
+    // call this at all.
+    if (booking.IsHistorical) return { skipped: 'historical-booking' };
     if (!booking.CreatedBy_SalesExecutiveID) return { skipped: 'no-executive' };
 
     // Idempotency check

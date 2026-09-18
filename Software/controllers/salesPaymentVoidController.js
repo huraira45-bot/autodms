@@ -29,6 +29,7 @@ const BOOKING_LOCKED = ['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'];
 
 const SELECT_PAYMENT = `
     SELECT p.PaymentID, p.BookingID, p.Amount, p.Status, p.VoucherID, p.VoucherNo,
+           p.IsLinkedVoucher,
            b.Status AS BookingStatus, b.NegotiatedPrice, b.BookingNo,
            v.MinimumBookingAmount,
            fv.Status AS VoucherStatus
@@ -49,7 +50,12 @@ function assertVoucherVoidable(voucher, voucherNo) {
 async function applyVoid(tx, payment, user, reason) {
     let voucherAction = 'none';
 
-    if (payment.VoucherID) {
+    if (payment.IsLinkedVoucher) {
+        // The voucher was already in the ledger before this booking was even
+        // entered. Undoing the link must leave it exactly where it is — we
+        // never posted it, so we do not get to remove or reverse it.
+        voucherAction = 'link_removed';
+    } else if (payment.VoucherID) {
         const vRes = await new sql.Request(tx).input('vid', sql.Int, payment.VoucherID)
             .query(`SELECT Status, VoucherNo FROM data_FinanceVoucherInfo WHERE VoucherID=@vid`);
         const voucher = vRes.recordset[0];
@@ -74,7 +80,7 @@ async function applyVoid(tx, payment, user, reason) {
         }
     }
 
-    const clearVoucherLink = voucherAction === 'draft_deleted' || voucherAction === 'missing';
+    const clearVoucherLink = ['draft_deleted', 'missing', 'link_removed'].includes(voucherAction);
     await new sql.Request(tx)
         .input('pid', sql.Int, payment.PaymentID)
         .input('emp', sql.Int, user?.employeeId || null)
@@ -128,14 +134,18 @@ exports.propose = async (req, res) => {
         if (!pRes.recordset.length) return res.status(404).json({ error: 'That payment is not on this booking.' });
         const p = pRes.recordset[0];
         if (p.Status === 'Reversed') return res.status(409).json({ error: 'That payment has already been voided.' });
-        if (BOOKING_LOCKED.includes(p.BookingStatus)) {
+        // A linked payment only points at a voucher that was already in the
+        // ledger, so correcting a mis-linked one is safe even on a closed
+        // historical booking — nothing in the GL moves either way.
+        if (!p.IsLinkedVoucher && BOOKING_LOCKED.includes(p.BookingStatus)) {
             return res.status(409).json({
                 error: `This booking is ${p.BookingStatus} — a payment cannot be voided once the vehicle has gone. Record a refund, or reverse the voucher in Accounting.`,
             });
         }
         // A finalized voucher is never voided — that correction belongs to the
-        // unfinalize loop (owner rule 2026-09-18).
-        if (p.VoucherStatus && p.VoucherStatus !== 'Draft') {
+        // unfinalize loop (owner rule 2026-09-18). A linked voucher is exempt:
+        // voiding only removes the link, the voucher itself is untouched.
+        if (!p.IsLinkedVoucher && p.VoucherStatus && p.VoucherStatus !== 'Draft') {
             return res.status(409).json({
                 error: `Voucher ${p.VoucherNo || ''} has been finalized (${p.VoucherStatus}), so this payment cannot be voided. Request an unfinalize for the voucher, or post a reversing entry in Accounting.`,
                 VoucherStatus: p.VoucherStatus,
@@ -200,6 +210,7 @@ exports.list = async (req, res) => {
                    vr.AdminName, vr.AdminNotes, vr.ExecutedAt, vr.VoucherAction,
                    b.BookingNo, b.Status AS BookingStatus, b.AmountPaidToDate,
                    pt.PartyName, p.PaymentMode, p.ReceivedAt, p.Status AS PaymentStatus,
+                   p.IsLinkedVoucher,
                    fv.Status AS VoucherStatus
             FROM   dms_SalesPaymentVoidRequests vr
             JOIN   dms_SalesBookings b   ON b.BookingID = vr.BookingID
@@ -324,7 +335,7 @@ exports.adminExecute = async (req, res) => {
             if (!pRes.recordset.length) throw new Error('The payment no longer exists.');
             const p = pRes.recordset[0];
             if (p.Status === 'Reversed') throw new Error('That payment has already been voided.');
-            if (BOOKING_LOCKED.includes(p.BookingStatus)) {
+            if (!p.IsLinkedVoucher && BOOKING_LOCKED.includes(p.BookingStatus)) {
                 throw new Error(`This booking is now ${p.BookingStatus} — the payment can no longer be voided. Record a refund, or reverse the voucher in Accounting.`);
             }
 

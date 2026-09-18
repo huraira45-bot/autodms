@@ -178,6 +178,7 @@ import IncentiveDisbursement from './pages/sales/IncentiveDisbursement';
 import DraftVouchers         from './pages/sales/DraftVouchers';
 import CancellationQueue from './pages/sales/CancellationQueue';
 import PaymentVoidQueue from './pages/sales/PaymentVoidQueue';
+import HistoricalBooking from './pages/sales/HistoricalBooking';
 import SalesInquiryQueue from './pages/sales/SalesInquiryQueue';
 import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
@@ -1315,6 +1316,9 @@ function AppShell() {
                     } />
                     <Route path="/sales/payment-voids" element={
                         <ProtectedRoute><PaymentVoidQueue /></ProtectedRoute>
+                    } />
+                    <Route path="/sales/historical-booking" element={
+                        <ProtectedRoute><HistoricalBooking /></ProtectedRoute>
                     } />
                     <Route path="/sales/inquiries" element={
                         <ProtectedRoute><SalesInquiryQueue /></ProtectedRoute>

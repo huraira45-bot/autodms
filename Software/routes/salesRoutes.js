@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const pv = require('../controllers/salesPaymentVoidController');
+const hist = require('../controllers/salesHistoricalController');
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
 const lc  = require('../controllers/salesLifecycleController');
@@ -93,6 +94,14 @@ router.post(  '/payment-voids/:id/withdraw',      requireAny('sales_executive', 
 router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_agm', 'sales_gm'),
               uploadSalesDoc.single('proof'),
               bk.recordPayment);
+
+// Historical bookings — deals done before DealerDesk, whose vouchers are
+// already posted in the ledger. Back-dated data entry that ties the two
+// together, so it sits with the people who own the sales data.
+router.get( '/historical/states',                         requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.states);
+router.post('/historical/bookings',                       requireAny('sales_admin_settings', 'sales_gm'), hist.createBooking);
+router.get( '/historical/bookings/:id/linkable-vouchers', requireAny('sales_admin_settings', 'sales_gm'), hist.linkableVouchers);
+router.post('/historical/bookings/:id/link-payment',      requireAny('sales_admin_settings', 'sales_gm'), hist.linkPayment);
 
 // Cancellation 3-step finalization loop
 router.get(   '/cancellations',                       requireAny(...SALES_READERS, 'am_approve', 'admin_unfinalize'), bk.listCancellations);

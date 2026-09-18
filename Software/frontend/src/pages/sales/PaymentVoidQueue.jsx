@@ -37,6 +37,7 @@ const STATUS_STYLE = {
 
 const VOUCHER_ACTION_TEXT = {
     draft_deleted: 'Draft voucher removed',
+    link_removed:  'Link removed — the ledger voucher was left alone',
     missing:       'Voucher no longer existed',
     none:          'No voucher attached',
 };
@@ -236,8 +237,10 @@ function ActionModal({ row, kind, onClose, onSaved }) {
     const [comments, setComments] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
-    // A finalized voucher is never voided — the admin cannot execute it.
-    const finalized = !!row.VoucherStatus && row.VoucherStatus !== 'Draft';
+    // A finalized voucher is never voided — the admin cannot execute it. A
+    // linked voucher is the exception: it was already in the ledger, and
+    // voiding only removes the link.
+    const finalized = !row.IsLinkedVoucher && !!row.VoucherStatus && row.VoucherStatus !== 'Draft';
 
     const titles = {
         amApprove: `Approve void — ${row.BookingNo}`,
@@ -286,6 +289,11 @@ function ActionModal({ row, kind, onClose, onSaved }) {
                         Voucher {row.VoucherNo} has been finalized ({row.VoucherStatus}). A finalized voucher is never
                         voided — request an unfinalize for it, or post a reversing entry in Accounting. Reject this
                         request instead.
+                    </div>
+                ) : row.IsLinkedVoucher ? (
+                    <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
+                        The payment is marked Voided and the booking's paid total drops by PKR {fmtN(row.Amount)}.
+                        {row.VoucherNo ? ` Voucher ${row.VoucherNo} was already in the ledger before this booking was entered, so it is left exactly as it is — only the link is removed.` : ''}
                     </div>
                 ) : (
                     <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
