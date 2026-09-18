@@ -833,14 +833,38 @@ exports.deleteVoucher = async (req, res) => {
         const id = parseInt(req.params.id);
         const pool = await getPool();
         const check = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT Status FROM data_FinanceVoucherInfo WHERE VoucherID=@id`);
+            .query(`SELECT Status, VoucherNo, SourceDocType, SourceDocID
+                    FROM data_FinanceVoucherInfo WHERE VoucherID=@id`);
         if (!check.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
-        if (check.recordset[0].Status !== 'Draft')
-            return res.status(409).json({ error: `Only Draft vouchers can be deleted. Current status: ${check.recordset[0].Status}. Use Request Unfinalize to reverse a Posted voucher.` });
+        const v = check.recordset[0];
+        if (v.Status !== 'Draft')
+            return res.status(409).json({ error: `Only Draft vouchers can be deleted. Current status: ${v.Status}. Use Request Unfinalize to reverse a Posted voucher.` });
+
+        // A sales payment's voucher belongs to the payment: deleting it here
+        // would leave the booking still claiming money was received, against a
+        // voucher that no longer exists. Void the payment instead — that undoes
+        // both. Owner report 2026-09-18.
+        if (v.SourceDocType === 'SALES_PAYMENT') {
+            return res.status(409).json({
+                error: `${v.VoucherNo} was raised for a customer payment. Open the booking, find the payment under Payments and use Void — that removes this voucher and corrects the booking's paid total in one step.`,
+                sourceDocType: v.SourceDocType,
+                sourceDocId: v.SourceDocID,
+            });
+        }
 
         const transaction = new sql.Transaction(pool);
         await transaction.begin();
         try {
+            // Everything that points at this voucher has to go first. The
+            // subsidiary ledger row is written while the voucher is still a
+            // draft, so without this the delete failed on a bare
+            // FK_PartyLedger_Voucher message (owner report 2026-09-18).
+            await new sql.Request(transaction).input('id', sql.Int, id)
+                .query(`DELETE FROM dms_PartyLedger WHERE VoucherID=@id OR AllocatedToVoucherID=@id`);
+            await new sql.Request(transaction).input('id', sql.Int, id)
+                .query(`DELETE FROM dms_PendingCheques WHERE ReceiptVoucherID=@id OR ClearanceVoucherID=@id`);
+            await new sql.Request(transaction).input('id', sql.Int, id)
+                .query(`UPDATE data_FinanceVoucherDetail SET AllocatedToVoucherID=NULL WHERE AllocatedToVoucherID=@id`);
             await new sql.Request(transaction).input('id', sql.Int, id)
                 .query(`DELETE FROM data_FinanceVoucherDetail WHERE VoucherID=@id`);
             await new sql.Request(transaction).input('id', sql.Int, id)
@@ -852,6 +876,12 @@ exports.deleteVoucher = async (req, res) => {
             throw err;
         }
     } catch (err) {
+        if (/REFERENCE constraint|FOREIGN KEY/i.test(err.message || '')) {
+            return res.status(409).json({
+                error: 'Something else in the system still refers to this voucher, so it cannot be deleted. Undo it where it was created, or reverse it.',
+                details: err.message,
+            });
+        }
         res.status(400).json({ error: err.message });
     }
 };

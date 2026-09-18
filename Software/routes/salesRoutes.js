@@ -78,6 +78,10 @@ router.patch('/bookings/:id/executive',    requireAny('sales_agm', 'sales_gm', '
 
 // Payments against a booking — Direct or PayOrder path. Multipart: file field 'proof' required.
 router.get(   '/bookings/:id/payments',    requireAny(...SALES_READERS),       bk.listPayments);
+// Undoing a payment is a correction, so it sits with the managers rather than
+// with whoever can record one.
+router.post(  '/bookings/:id/payments/:paymentId/void',
+              requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'),     bk.voidPayment);
 router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_agm', 'sales_gm'),
               uploadSalesDoc.single('proof'),
               bk.recordPayment);

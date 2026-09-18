@@ -786,6 +786,148 @@ exports.recordPayment = async (req, res) => {
     }
 };
 
+/**
+ * POST /api/sales/bookings/:id/payments/:paymentId/void   { Reason }
+ *
+ * Undo a payment that should never have been recorded. Owner report
+ * 2026-09-18: a wrong payment left a voucher behind, and deleting that voucher
+ * from the Vouchers screen failed on FK_PartyLedger_Voucher — the subsidiary
+ * ledger row is written together with the voucher while it is still Draft.
+ *
+ * What happens to the voucher depends on how far it got:
+ *   Draft  — it never reached the GL, so it and its ledger / pending-cheque
+ *            rows are removed outright.
+ *   Posted — a mirror reversal is posted instead; both stay visible and the
+ *            net GL effect is zero.
+ *
+ * The payment row itself is kept and marked Reversed with the reason, so the
+ * mistake stays on the record. The booking's paid total follows on its own:
+ * tr_SalesPayments_UpdateBookingPaid sums Posted payments only.
+ */
+exports.voidPayment = async (req, res) => {
+    const bookingId = parseInt(req.params.id);
+    const paymentId = parseInt(req.params.paymentId);
+    const reason = (req.body?.Reason || '').trim();
+    if (!Number.isInteger(bookingId) || !Number.isInteger(paymentId)) {
+        return res.status(400).json({ error: 'Invalid booking or payment id.' });
+    }
+    if (reason.length < 5) {
+        return res.status(400).json({ error: 'Give a reason for voiding this payment (at least 5 characters).' });
+    }
+
+    try {
+        const pool = await getPool();
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            const pRes = await new sql.Request(tx)
+                .input('pid', sql.Int, paymentId)
+                .input('bid', sql.Int, bookingId)
+                .query(`SELECT p.PaymentID, p.Amount, p.Status, p.VoucherID, p.VoucherNo,
+                               b.Status AS BookingStatus, b.NegotiatedPrice, v.MinimumBookingAmount
+                        FROM   dms_SalesPayments p
+                        INNER  JOIN dms_SalesBookings b ON b.BookingID = p.BookingID
+                        LEFT   JOIN dms_VehicleVariant v ON v.VariantID = b.VehicleVariantID
+                        WHERE  p.PaymentID = @pid AND p.BookingID = @bid`);
+            if (!pRes.recordset.length) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'That payment is not on this booking.' });
+            }
+            const p = pRes.recordset[0];
+            if (p.Status === 'Reversed') {
+                await tx.rollback();
+                return res.status(409).json({ error: 'That payment has already been voided.' });
+            }
+            if (['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'].includes(p.BookingStatus)) {
+                await tx.rollback();
+                return res.status(409).json({
+                    error: `This booking is ${p.BookingStatus} — a payment cannot be voided once the vehicle has gone. Record a refund, or reverse the voucher in Accounting.`,
+                });
+            }
+
+            // ---- the voucher ----
+            let voucherAction = 'none';
+            let reversalNo = null;
+            if (p.VoucherID) {
+                const vRes = await new sql.Request(tx).input('vid', sql.Int, p.VoucherID)
+                    .query(`SELECT Status FROM data_FinanceVoucherInfo WHERE VoucherID=@vid`);
+                const vStatus = vRes.recordset[0]?.Status;
+                if (!vStatus) {
+                    voucherAction = 'missing';
+                } else if (vStatus === 'Draft') {
+                    for (const q of [
+                        `DELETE FROM dms_PartyLedger WHERE VoucherID=@vid OR AllocatedToVoucherID=@vid`,
+                        `DELETE FROM dms_PendingCheques WHERE ReceiptVoucherID=@vid OR ClearanceVoucherID=@vid`,
+                        `UPDATE data_FinanceVoucherDetail SET AllocatedToVoucherID=NULL WHERE AllocatedToVoucherID=@vid`,
+                        `DELETE FROM data_FinanceVoucherDetail WHERE VoucherID=@vid`,
+                        `DELETE FROM data_FinanceVoucherInfo WHERE VoucherID=@vid`,
+                    ]) {
+                        await new sql.Request(tx).input('vid', sql.Int, p.VoucherID).query(q);
+                    }
+                    voucherAction = 'draft_deleted';
+                } else if (vStatus === 'Posted') {
+                    const { postReversalVoucher } = require('../services/voucherReversalService');
+                    const rev = await postReversalVoucher(p.VoucherID, req.user, tx);
+                    reversalNo = rev.reversalNo;
+                    voucherAction = 'reversed';
+                } else {
+                    voucherAction = vStatus === 'Reversed' ? 'already_reversed' : 'none';
+                }
+            }
+
+            // ---- the payment (the trigger re-totals the booking off this) ----
+            const clearVoucherLink = voucherAction === 'draft_deleted' || voucherAction === 'missing';
+            await new sql.Request(tx)
+                .input('pid', sql.Int, paymentId)
+                .input('emp', sql.Int, req.user?.employeeId || null)
+                .input('reason', sql.NVarChar(sql.MAX), reason)
+                .query(`UPDATE dms_SalesPayments
+                        SET Status='Reversed', ReversedAt=GETDATE(),
+                            ReversedByEmployeeID=@emp, ReversalReason=@reason
+                            ${clearVoucherLink ? ', VoucherID=NULL, VoucherNo=NULL' : ''}
+                        WHERE PaymentID=@pid`);
+
+            // ---- the booking, if this payment is what advanced it ----
+            const bRes = await new sql.Request(tx).input('bid', sql.Int, bookingId)
+                .query(`SELECT Status, AmountPaidToDate FROM dms_SalesBookings WHERE BookingID=@bid`);
+            const nowPaid = Number(bRes.recordset[0]?.AmountPaidToDate) || 0;
+            const status = bRes.recordset[0]?.Status;
+            const minAmt = Number(p.MinimumBookingAmount) || 0;
+            const negotiated = Number(p.NegotiatedPrice) || 0;
+
+            let newStatus = status;
+            if (status === 'PendingPayment' && !(negotiated > 0 && nowPaid >= negotiated - 0.01)) {
+                newStatus = (minAmt > 0 && nowPaid >= minAmt) ? 'BookingConfirmed' : 'PendingBookingPayment';
+            } else if (status === 'BookingConfirmed' && nowPaid < minAmt) {
+                newStatus = 'PendingBookingPayment';
+            }
+            if (newStatus !== status) {
+                await new sql.Request(tx)
+                    .input('bid', sql.Int, bookingId)
+                    .input('st', sql.NVarChar(30), newStatus)
+                    .query(`UPDATE dms_SalesBookings SET Status=@st, UpdatedAt=GETDATE() WHERE BookingID=@bid`);
+            }
+            await logTransition(tx, bookingId, status, newStatus, req.user,
+                `Payment #${paymentId} (PKR ${Number(p.Amount).toLocaleString()}) voided: ${reason}`
+                + (voucherAction === 'draft_deleted' ? ` Draft voucher ${p.VoucherNo || ''} deleted.`
+                 : voucherAction === 'reversed' ? ` Voucher ${p.VoucherNo || ''} reversed by ${reversalNo}.` : ''));
+
+            await tx.commit();
+            res.json({
+                message: 'Payment voided.',
+                PaymentID: paymentId,
+                VoucherAction: voucherAction,
+                ReversalVoucherNo: reversalNo,
+                AmountPaidToDate: nowPaid,
+                BookingStatus: newStatus,
+            });
+        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
+    } catch (err) {
+        console.error('voidPayment:', err);
+        res.status(400).json({ error: err.message });
+    }
+};
+
 // GET /api/sales/bookings/:id/payments
 exports.listPayments = async (req, res) => {
     try {
