@@ -100,6 +100,7 @@ router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_
 // together, so it sits with the people who own the sales data.
 router.get( '/historical/states',                         requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.states);
 router.post('/historical/bookings',                       requireAny('sales_admin_settings', 'sales_gm'), hist.createBooking);
+router.get( '/historical/pending-links',                  requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.pendingLinks);
 router.get( '/historical/bookings/:id/linkable-vouchers', requireAny('sales_admin_settings', 'sales_gm'), hist.linkableVouchers);
 // Two steps on purpose: record the payment from the old file first, link its
 // ledger voucher whenever it is found.

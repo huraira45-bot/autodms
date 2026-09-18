@@ -21,7 +21,7 @@ import {
 import SearchableSelect from '../../components/SearchableSelect';
 import { printGatePass } from '../../utils/gatePassPrint';
 import BookingDocumentDrop from './BookingDocumentDrop';
-import { HistoricalPaymentModal, LinkVoucherModal } from './HistoricalPaymentModals';
+import { HistoricalPaymentModal } from './HistoricalPaymentModals';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -56,7 +56,6 @@ export default function BookingDetail() {
     // each one is linked to a voucher already in the ledger afterwards — two
     // separate steps (owner ask 2026-09-18).
     const [showHistPayment, setShowHistPayment] = useState(false);
-    const [linkFor, setLinkFor] = useState(null);
     const [showCancel, setShowCancel] = useState(false);
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
@@ -98,15 +97,7 @@ export default function BookingDetail() {
     const [voidBusy, setVoidBusy] = useState(false);
     const [voidErr, setVoidErr] = useState(null);
     const canRequestVoid = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings');
-    // Same roles the server accepts for the historical linking endpoints.
-    const canLinkVoucher = hasModule('sales_admin_settings') || hasModule('sales_gm');
-    const unlinkVoucher = async (p) => {
-        try {
-            const { data: r } = await axios.post(`${API}/sales/historical/payments/${p.PaymentID}/unlink`);
-            flash('ok', r.message);
-            load();
-        } catch (e) { flash('err', e.response?.data?.error || e.message); }
-    };
+
     const openVoidFor = (paymentId) => voidReqs.find(v => v.PaymentID === paymentId && ['Pending', 'AMApproved'].includes(v.Status));
     const closeVoid = () => { setVoidFor(null); setVoidReason(''); setVoidErr(null); };
     const submitVoid = async () => {
@@ -435,20 +426,17 @@ export default function BookingDetail() {
                                                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#0f766e', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600 }}>
                                                         <Printer size={12} /> {p.VoucherNo || 'Print'}
                                                     </a>
-                                                    {p.IsLinkedVoucher && canLinkVoucher && !voided && (
-                                                        <button type="button" onClick={() => unlinkVoucher(p)}
-                                                                title="Remove the link — the voucher stays exactly as it is in the ledger"
-                                                                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.68rem', textDecoration: 'underline' }}>
-                                                            unlink
-                                                        </button>
+                                                    {p.IsLinkedVoucher && (
+                                                        <span title="Already in the ledger before this booking was entered — linked, not posted by DealerDesk"
+                                                              style={{ fontSize: '0.68rem', color: '#94a3b8' }}>linked</span>
                                                     )}
                                                 </span>
-                                            ) : data.IsHistorical && canLinkVoucher ? (
-                                                <button type="button" onClick={() => setLinkFor(p)}
-                                                        title="Link this payment to the voucher already posted in the ledger"
-                                                        style={{ background: 'none', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
-                                                    Link voucher
-                                                </button>
+                                            ) : data.IsHistorical ? (
+                                                <Link to={`/sales/historical-links?bookingId=${data.BookingID}`}
+                                                      title="Link this payment to the voucher already posted in the ledger"
+                                                      style={{ color: '#b45309', fontSize: '0.72rem', fontWeight: 700, textDecoration: 'none' }}>
+                                                    Not linked →
+                                                </Link>
                                             ) : (
                                                 <span style={{ color: '#94a3b8', fontSize: '0.72rem' }} title="GL voucher was not posted (system accounts may not be mapped)">—</span>
                                             )}
@@ -613,11 +601,7 @@ export default function BookingDetail() {
                     onSaved={(text) => { setShowHistPayment(false); flash('ok', text || 'Payment recorded'); load(); }} />
             )}
 
-            {linkFor && (
-                <LinkVoucherModal booking={data} payment={linkFor}
-                    onClose={() => setLinkFor(null)}
-                    onSaved={(voucherNo) => { setLinkFor(null); flash('ok', `Payment linked to ${voucherNo}`); load(); }} />
-            )}
+
             {showCancel && (
                 <CancelModal booking={data}
                     onClose={() => setShowCancel(false)}

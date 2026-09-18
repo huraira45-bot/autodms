@@ -134,7 +134,16 @@ export default function BookingsList() {
                                         onClick={() => navigate(`/sales/bookings/${b.BookingID}`)}
                                         className="row-clickable"
                                         style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                        <Td mono color="#475569">{b.BookingNo}</Td>
+                                        <Td mono color="#475569">
+                                            {b.BookingNo}
+                                            {b.IsHistorical && (
+                                                <span title="Entered afterwards as a past record; its payments link to vouchers already in the ledger"
+                                                      style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: '1px 6px',
+                                                               borderRadius: 20, background: '#f1f5f9', color: '#475569', whiteSpace: 'nowrap' }}>
+                                                    HISTORICAL
+                                                </span>
+                                            )}
+                                        </Td>
                                         <Td>
                                             <div style={{ fontWeight: 500 }}>{b.PartyName}</div>
                                             <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{b.PartyType} {b.CorporatePONumber ? `· PO ${b.CorporatePONumber}` : ''}</div>

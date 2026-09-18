@@ -179,6 +179,7 @@ import DraftVouchers         from './pages/sales/DraftVouchers';
 import CancellationQueue from './pages/sales/CancellationQueue';
 import PaymentVoidQueue from './pages/sales/PaymentVoidQueue';
 import HistoricalBooking from './pages/sales/HistoricalBooking';
+import HistoricalLinking from './pages/sales/HistoricalLinking';
 import SalesInquiryQueue from './pages/sales/SalesInquiryQueue';
 import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
@@ -1319,6 +1320,9 @@ function AppShell() {
                     } />
                     <Route path="/sales/historical-booking" element={
                         <ProtectedRoute><HistoricalBooking /></ProtectedRoute>
+                    } />
+                    <Route path="/sales/historical-links" element={
+                        <ProtectedRoute><HistoricalLinking /></ProtectedRoute>
                     } />
                     <Route path="/sales/inquiries" element={
                         <ProtectedRoute><SalesInquiryQueue /></ProtectedRoute>

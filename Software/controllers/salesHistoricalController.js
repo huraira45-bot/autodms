@@ -383,6 +383,48 @@ exports.unlinkPayment = async (req, res) => {
 };
 
 /**
+ * GET /api/sales/historical/pending-links?state=unlinked|linked|all&bookingId=
+ *
+ * Every payment on a historical booking, for the screen that does the linking —
+ * the same idea as the Draft Vouchers queue: the work sits in one list instead
+ * of being hunted booking by booking (owner ask 2026-09-18).
+ */
+exports.pendingLinks = async (req, res) => {
+    try {
+        const state = (req.query.state || 'unlinked').toLowerCase();
+        const pool = await getPool();
+        const rq = pool.request();
+        const conds = ['b.IsHistorical = 1', `p.Status = 'Posted'`];
+        if (state === 'unlinked') conds.push('p.VoucherID IS NULL');
+        else if (state === 'linked') conds.push('p.VoucherID IS NOT NULL');
+        if (req.query.bookingId) {
+            rq.input('bid', sql.Int, parseInt(req.query.bookingId));
+            conds.push('p.BookingID = @bid');
+        }
+        const r = await rq.query(`
+            SELECT p.PaymentID, p.BookingID, p.Amount, p.PremiumPortion, p.ReceivedAt,
+                   p.PaymentMode, p.Notes, p.VoucherID, p.VoucherNo, p.IsLinkedVoucher,
+                   b.BookingNo, b.Status AS BookingStatus, b.BookingDate,
+                   pt.PartyName, pt.PartyGLID,
+                   m.ModelName, v.VariantName, veh.ChasisNo,
+                   fv.VoucherDate AS LinkedVoucherDate
+            FROM   dms_SalesPayments p
+            JOIN   dms_SalesBookings b    ON b.BookingID  = p.BookingID
+            LEFT   JOIN gen_PartiesInfo pt ON pt.PartyID  = b.PartyID
+            LEFT   JOIN dms_VehicleModel m ON m.ModelID   = b.VehicleModelID
+            LEFT   JOIN dms_VehicleVariant v ON v.VariantID = b.VehicleVariantID
+            LEFT   JOIN dms_Vehicle veh   ON veh.VehicleID = b.AllocatedVehicleID
+            LEFT   JOIN data_FinanceVoucherInfo fv ON fv.VoucherID = p.VoucherID
+            WHERE  ${conds.join(' AND ')}
+            ORDER  BY b.BookingDate DESC, p.ReceivedAt DESC, p.PaymentID DESC`);
+        res.json(r.recordset);
+    } catch (err) {
+        console.error('pendingLinks:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
  * GET /api/sales/historical/bookings/:id/linkable-vouchers?amount=&search=&all=
  *
  * Posted vouchers on this customer's own account that no payment has taken yet.
