@@ -21,6 +21,7 @@ import {
 import SearchableSelect from '../../components/SearchableSelect';
 import { printGatePass } from '../../utils/gatePassPrint';
 import BookingDocumentDrop from './BookingDocumentDrop';
+import { HistoricalPaymentModal, LinkVoucherModal } from './HistoricalPaymentModals';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -51,9 +52,11 @@ export default function BookingDetail() {
     const [msg, setMsg] = useState(null);
     const [showUploadDoc, setShowUploadDoc] = useState(false);
     const [showPayment, setShowPayment] = useState(false);
-    // A historical booking links its payments to vouchers already in the
-    // ledger instead of posting new ones (owner ask 2026-09-18).
-    const [showLinkPayment, setShowLinkPayment] = useState(false);
+    // A historical booking records its payments without posting anything, and
+    // each one is linked to a voucher already in the ledger afterwards — two
+    // separate steps (owner ask 2026-09-18).
+    const [showHistPayment, setShowHistPayment] = useState(false);
+    const [linkFor, setLinkFor] = useState(null);
     const [showCancel, setShowCancel] = useState(false);
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
@@ -95,6 +98,15 @@ export default function BookingDetail() {
     const [voidBusy, setVoidBusy] = useState(false);
     const [voidErr, setVoidErr] = useState(null);
     const canRequestVoid = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings');
+    // Same roles the server accepts for the historical linking endpoints.
+    const canLinkVoucher = hasModule('sales_admin_settings') || hasModule('sales_gm');
+    const unlinkVoucher = async (p) => {
+        try {
+            const { data: r } = await axios.post(`${API}/sales/historical/payments/${p.PaymentID}/unlink`);
+            flash('ok', r.message);
+            load();
+        } catch (e) { flash('err', e.response?.data?.error || e.message); }
+    };
     const openVoidFor = (paymentId) => voidReqs.find(v => v.PaymentID === paymentId && ['Pending', 'AMApproved'].includes(v.Status));
     const closeVoid = () => { setVoidFor(null); setVoidReason(''); setVoidErr(null); };
     const submitVoid = async () => {
@@ -386,7 +398,7 @@ export default function BookingDetail() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                         <h3 style={{ margin: 0, fontSize: '1rem' }}><DollarSign size={16} style={{ display: 'inline', verticalAlign: 'middle' }} /> Payments ({data.payments?.length || 0})</h3>
                         {canPay && (data.IsHistorical
-                            ? <button className="btn" onClick={() => setShowLinkPayment(true)}><Plus size={14} /> Link payment</button>
+                            ? <button className="btn" onClick={() => setShowHistPayment(true)}><Plus size={14} /> Record payment</button>
                             : <button className="btn" onClick={() => setShowPayment(true)}><Plus size={14} /> Record</button>)}
                     </div>
                     {data.payments?.length === 0 ? (
@@ -416,12 +428,27 @@ export default function BookingDetail() {
                                                 <span title={p.ReversalReason || 'Voided'}
                                                       style={{ fontSize: '0.72rem', fontWeight: 700, color: '#b91c1c' }}>Voided</span>
                                             ) : p.VoucherID ? (
-                                                <a href={`/vouchers/${p.PaymentMode === 'Cash' ? 'crv' : 'brv'}?id=${p.VoucherID}&print=1`}
-                                                   target="_blank" rel="noreferrer"
-                                                   title={`Print ${p.VoucherNo}`}
-                                                   style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#0f766e', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600 }}>
-                                                    <Printer size={12} /> {p.VoucherNo || 'Print'}
-                                                </a>
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                                    <a href={`/vouchers/${p.PaymentMode === 'Cash' ? 'crv' : 'brv'}?id=${p.VoucherID}&print=1`}
+                                                       target="_blank" rel="noreferrer"
+                                                       title={p.IsLinkedVoucher ? `${p.VoucherNo} — already in the ledger, linked to this payment` : `Print ${p.VoucherNo}`}
+                                                       style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#0f766e', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600 }}>
+                                                        <Printer size={12} /> {p.VoucherNo || 'Print'}
+                                                    </a>
+                                                    {p.IsLinkedVoucher && canLinkVoucher && !voided && (
+                                                        <button type="button" onClick={() => unlinkVoucher(p)}
+                                                                title="Remove the link — the voucher stays exactly as it is in the ledger"
+                                                                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.68rem', textDecoration: 'underline' }}>
+                                                            unlink
+                                                        </button>
+                                                    )}
+                                                </span>
+                                            ) : data.IsHistorical && canLinkVoucher ? (
+                                                <button type="button" onClick={() => setLinkFor(p)}
+                                                        title="Link this payment to the voucher already posted in the ledger"
+                                                        style={{ background: 'none', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
+                                                    Link voucher
+                                                </button>
                                             ) : (
                                                 <span style={{ color: '#94a3b8', fontSize: '0.72rem' }} title="GL voucher was not posted (system accounts may not be mapped)">—</span>
                                             )}
@@ -580,10 +607,16 @@ export default function BookingDetail() {
                     onSaved={() => { setShowPayment(false); flash('ok', 'Payment recorded'); load(); }} />
             )}
 
-            {showLinkPayment && (
-                <LinkPaymentModal booking={data}
-                    onClose={() => setShowLinkPayment(false)}
-                    onSaved={(voucherNo) => { setShowLinkPayment(false); flash('ok', `Payment linked to ${voucherNo}`); load(); }} />
+            {showHistPayment && (
+                <HistoricalPaymentModal booking={data}
+                    onClose={() => setShowHistPayment(false)}
+                    onSaved={(text) => { setShowHistPayment(false); flash('ok', text || 'Payment recorded'); load(); }} />
+            )}
+
+            {linkFor && (
+                <LinkVoucherModal booking={data} payment={linkFor}
+                    onClose={() => setLinkFor(null)}
+                    onSaved={(voucherNo) => { setLinkFor(null); flash('ok', `Payment linked to ${voucherNo}`); load(); }} />
             )}
             {showCancel && (
                 <CancelModal booking={data}
@@ -990,116 +1023,6 @@ function GatePassModal({ booking, onClose, onSaved }) {
                 </>
             )}
             <Actions onCancel={onClose} onConfirm={save} confirmLabel="Issue Gate Pass" busy={busy} disabled={!readiness?.ready} />
-        </Shell>
-    );
-}
-
-/**
- * Links a payment on a historical booking to a voucher that is already posted
- * in the chart of accounts. Nothing is posted here — the voucher is the
- * accounting record; this only ties it to the booking.
- */
-function LinkPaymentModal({ booking, onClose, onSaved }) {
-    const [amount, setAmount] = useState('');
-    const [premium, setPremium] = useState('');
-    const [mode, setMode] = useState('BankTransfer');
-    const [search, setSearch] = useState('');
-    const [vouchers, setVouchers] = useState(null);   // null until a search is run
-    const [picked, setPicked] = useState(null);
-    const [busy, setBusy] = useState(false);
-    const [err, setErr] = useState(null);
-
-    const total = Math.round(((Number(amount) || 0) + (Number(premium) || 0)) * 100) / 100;
-
-    const find = async () => {
-        setErr(null); setPicked(null); setBusy(true);
-        try {
-            const { data } = await axios.get(
-                `${API}/sales/historical/bookings/${booking.BookingID}/linkable-vouchers`,
-                { params: { amount: total, search: search || undefined } });
-            setVouchers(data.vouchers || []);
-        } catch (e) { setErr(e.response?.data?.error || e.message); setVouchers([]); }
-        setBusy(false);
-    };
-
-    const link = async () => {
-        setBusy(true); setErr(null);
-        try {
-            await axios.post(`${API}/sales/historical/bookings/${booking.BookingID}/link-payment`, {
-                VoucherID: picked.VoucherID,
-                PaymentMode: mode,
-                Amount: Number(amount),
-                PremiumPortion: Number(premium) || 0,
-            });
-            onSaved(picked.VoucherNo);
-        } catch (e) { setErr(e.response?.data?.error || e.message); setBusy(false); }
-    };
-
-    return (
-        <Shell title="Link a payment to a voucher already in the ledger" onClose={onClose}>
-            {err && <Err>{err}</Err>}
-
-            <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4, marginBottom: 12, fontSize: '0.82rem', color: '#0c4a6e' }}>
-                This records what the customer paid on the old deal. No voucher is posted — you pick the one that is
-                already on <strong>{booking.PartyName}</strong>'s account, and it must be for the same amount.
-            </div>
-
-            <div style={{ display: 'flex', gap: 10 }}>
-                <Field label="Vehicle amount (PKR) *" flex>
-                    <input type="number" value={amount} onChange={e => { setAmount(e.target.value); setVouchers(null); setPicked(null); }} style={inputStyle} />
-                </Field>
-                <Field label="Premium (if any)" flex>
-                    <input type="number" value={premium} onChange={e => { setPremium(e.target.value); setVouchers(null); setPicked(null); }} style={inputStyle} />
-                </Field>
-            </div>
-            <Field label="How it was paid">
-                <select value={mode} onChange={e => setMode(e.target.value)} style={inputStyle}>
-                    {['BankTransfer', 'Cash', 'Cheque', 'POS', 'PayOrder'].map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-            </Field>
-            <Field label="Narrow by voucher number or narration (optional)">
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. BRV-0912" style={inputStyle} />
-            </Field>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
-                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                    Matching vouchers for PKR {fmtN(total)}
-                </span>
-                <button className="btn-sm" onClick={find} disabled={busy || !(total > 0)}>
-                    {busy ? 'Searching…' : 'Find vouchers'}
-                </button>
-            </div>
-
-            {vouchers && (
-                <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
-                    {vouchers.length === 0 ? (
-                        <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
-                            No posted voucher on this customer's account for exactly PKR {fmtN(total)}.
-                            Check the amount, or post the entry in Accounting first.
-                        </div>
-                    ) : vouchers.map(v => (
-                        <div key={v.VoucherID} onClick={() => setPicked(v)}
-                             style={{ padding: 10, borderBottom: '1px solid #f1f5f9', cursor: 'pointer',
-                                      background: picked?.VoucherID === v.VoucherID ? '#eff6ff' : 'white' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                                <strong>{v.VoucherNo}</strong>
-                                <span>{fmtN(v.TotalAmount)}</span>
-                            </div>
-                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                                {v.VoucherType} · {new Date(v.VoucherDate).toLocaleDateString()}
-                                {v.Remarks ? ` · ${String(v.Remarks).slice(0, 80)}` : ''}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button className="btn-sm" onClick={onClose}>Cancel</button>
-                <button className="btn" onClick={link} disabled={busy || !picked}>
-                    {picked ? `Link to ${picked.VoucherNo}` : 'Pick a voucher'}
-                </button>
-            </div>
         </Shell>
     );
 }

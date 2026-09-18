@@ -101,7 +101,11 @@ router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_
 router.get( '/historical/states',                         requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.states);
 router.post('/historical/bookings',                       requireAny('sales_admin_settings', 'sales_gm'), hist.createBooking);
 router.get( '/historical/bookings/:id/linkable-vouchers', requireAny('sales_admin_settings', 'sales_gm'), hist.linkableVouchers);
-router.post('/historical/bookings/:id/link-payment',      requireAny('sales_admin_settings', 'sales_gm'), hist.linkPayment);
+// Two steps on purpose: record the payment from the old file first, link its
+// ledger voucher whenever it is found.
+router.post('/historical/bookings/:id/payment',           requireAny('sales_admin_settings', 'sales_gm'), hist.recordPayment);
+router.post('/historical/payments/:paymentId/link',       requireAny('sales_admin_settings', 'sales_gm'), hist.linkPayment);
+router.post('/historical/payments/:paymentId/unlink',     requireAny('sales_admin_settings', 'sales_gm'), hist.unlinkPayment);
 
 // Cancellation 3-step finalization loop
 router.get(   '/cancellations',                       requireAny(...SALES_READERS, 'am_approve', 'admin_unfinalize'), bk.listCancellations);
