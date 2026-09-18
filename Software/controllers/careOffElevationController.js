@@ -19,14 +19,22 @@ const requirePerm = (req, key) => (req.user?.modules || []).includes(key);
 // Returns the effective cap % (0–100) for a JC given a base cap. Reads any
 // approved elevation request for the JobCardID and takes the MAX. If no
 // elevation exists, returns the base cap unchanged.
-async function getEffectiveCapForJC(jobCardId, baseCapPct) {
+async function getEffectiveCapForJC(jobCardId, baseCapPct, careOffId) {
     if (!jobCardId) return baseCapPct;
     const pool = await getPool();
-    const r = await pool.request()
-        .input('jcId', sql.Int, jobCardId)
+    // A raise is approved for one JC *and* one care-off employee. If the JC is
+    // later switched to a different care-off, the approval must not travel
+    // with it — the new employee keeps their own cap.
+    const rq = pool.request().input('jcId', sql.Int, jobCardId);
+    let coFilter = '';
+    if (careOffId) {
+        rq.input('coId', sql.Int, parseInt(careOffId));
+        coFilter = ' AND CareOffID = @coId';
+    }
+    const r = await rq
         .query(`SELECT MAX(RequestedCapPct) AS ElevCap
                 FROM   dms_CareOffElevationRequests
-                WHERE  JobCardID = @jcId AND Status = 'APPROVED'`);
+                WHERE  JobCardID = @jcId AND Status = 'APPROVED'${coFilter}`);
     const elev = r.recordset[0]?.ElevCap;
     return elev != null ? Math.max(Number(baseCapPct) || 0, Number(elev)) : baseCapPct;
 }
@@ -66,7 +74,7 @@ exports.forJC = async (req, res) => {
         const pool = await getPool();
         const r = await pool.request()
             .input('jcId', sql.Int, parseInt(req.params.id))
-            .query(`SELECT TOP 1 RequestID, RequestedCapPct, OriginalCapPct, Status, DecidedAt, DecidedByName
+            .query(`SELECT TOP 1 RequestID, CareOffID, RequestedCapPct, OriginalCapPct, Status, DecidedAt, DecidedByName
                     FROM   dms_CareOffElevationRequests
                     WHERE  JobCardID = @jcId
                     ORDER  BY CASE Status WHEN 'APPROVED' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,

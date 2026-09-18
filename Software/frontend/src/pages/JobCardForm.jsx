@@ -264,6 +264,10 @@ export default function JobCardForm() {
           if (jc.CareOffID) {
             const foundCO = careOffsList.find(c => c.CareOffID === jc.CareOffID);
             setCareOff(foundCO || { CareOffID: jc.CareOffID, EmployeeName: jc.CareOffName || `Care-Off #${jc.CareOffID}`, MaxDiscountPct: 100, IsActive: false });
+            // A cap raise an admin already approved for this JC.
+            axios.get(`/api/careoff-elevations/for-jc/${id}`)
+                 .then(r => setElevation(r.data && r.data.Status === 'APPROVED' ? r.data : null))
+                 .catch(() => {});
           }
           if (jc.PartsItems) setIssuedParts(jc.PartsItems);
           if (jc.SubletItems) setSubletItems(jc.SubletItems);
@@ -378,6 +382,34 @@ export default function JobCardForm() {
   };
 
 
+  // An admin can raise one JC's discount cap for one care-off employee (Cap
+  // Elevation Requests). The form has to read that approval, or it keeps
+  // refusing the very discount the admin just allowed — the save endpoint
+  // already honours it. Owner report 2026-09-18.
+  const [elevation, setElevation] = useState(null);   // APPROVED raise for this JC, or null
+
+  // Cap % that actually applies to a care-off on this JC: their own cap,
+  // raised by an approval granted for that same employee.
+  const capPctFor = (co, elev = elevation) => {
+    const base = Number(co?.MaxDiscountPct) || 0;
+    if (!elev || elev.Status !== 'APPROVED') return base;
+    if (elev.CareOffID && co?.CareOffID && Number(elev.CareOffID) !== Number(co.CareOffID)) return base;
+    return Math.max(base, Number(elev.RequestedCapPct) || 0);
+  };
+  const capAmountFor = (co, elev = elevation) => +(totalLabour * (capPctFor(co, elev) / 100)).toFixed(2);
+
+  // Re-read the approval: an admin may have granted it while this JC was open,
+  // and the advisor should not have to reload the page to use it.
+  const refreshElevation = async () => {
+    if (!id) return elevation;
+    try {
+      const { data } = await axios.get(`/api/careoff-elevations/for-jc/${id}`);
+      const approved = data && data.Status === 'APPROVED' ? data : null;
+      setElevation(approved);
+      return approved;
+    } catch { return elevation; }
+  };
+
   const handleCareOffChange = (newCareOff) => {
     if (!newCareOff) {
       setCareOff(null);
@@ -390,7 +422,7 @@ export default function JobCardForm() {
       if (!i.DiscType || disc === 0 || price === 0) return s;
       return s + (i.DiscType === 'Percent' ? +(price * disc / 100).toFixed(3) : +Math.min(disc, price).toFixed(3));
     }, 0).toFixed(2);
-    const newMax = +(totalLabour * (newCareOff.MaxDiscountPct / 100)).toFixed(2);
+    const newMax = capAmountFor(newCareOff);
     if (currentTotal > newMax + 0.005) {
       flash(`Cannot assign ${newCareOff.EmployeeName}: existing discounts (PKR ${currentTotal}) exceed their cap (PKR ${newMax}). Clear discounts first.`, true);
       return;
@@ -410,7 +442,7 @@ export default function JobCardForm() {
     if (hasModule('careoff_request_elevation') && id && careOff?.CareOffID) {
       setCapElevationCtx({
         baseCapPct:      careOff?.MaxDiscountPct ?? 0,
-        effectiveCapPct: careOff?.MaxDiscountPct ?? 0,
+        effectiveCapPct: capPctFor(careOff),
         message: `${verb}. Current cap: PKR ${curMax.toLocaleString()}. Request an admin to raise it for this JC.`,
       });
     } else {
@@ -418,21 +450,32 @@ export default function JobCardForm() {
     }
   };
 
-  const handleDiscountChange = (idx, newVal) => {
+  const handleDiscountChange = async (idx, newVal) => {
     const discType = labourItems[idx].DiscType || 'Percent';
     const newItems = labourItems.map((it, j) => j === idx ? { ...it, Discount: newVal, DiscType: discType } : it);
     const newTotal = +newItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
-    const curMax = +(totalLabour * (careOff.MaxDiscountPct / 100)).toFixed(2);
-    if (newTotal > curMax + 0.005) { flashCapOrOfferElevation(curMax); return; }
+    if (newTotal > capAmountFor(careOff) + 0.005) {
+      // An admin may have approved a higher cap since this page was opened.
+      const fresh = await refreshElevation();
+      if (newTotal > capAmountFor(careOff, fresh) + 0.005) {
+        flashCapOrOfferElevation(capAmountFor(careOff, fresh));
+        return;
+      }
+    }
     setLabourItems(newItems);
   };
 
-  const handleDiscTypeToggle = (idx) => {
+  const handleDiscTypeToggle = async (idx) => {
     const newType = labourItems[idx].DiscType === 'Amount' ? 'Percent' : 'Amount';
     const newItems = labourItems.map((it, j) => j === idx ? { ...it, DiscType: newType } : it);
     const newTotal = +newItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
-    const curMax = +(totalLabour * (careOff.MaxDiscountPct / 100)).toFixed(2);
-    if (newTotal > curMax + 0.005) { flashCapOrOfferElevation(curMax, `Switching to ${newType} would exceed the cap`); return; }
+    if (newTotal > capAmountFor(careOff) + 0.005) {
+      const fresh = await refreshElevation();
+      if (newTotal > capAmountFor(careOff, fresh) + 0.005) {
+        flashCapOrOfferElevation(capAmountFor(careOff, fresh), `Switching to ${newType} would exceed the cap`);
+        return;
+      }
+    }
     setLabourItems(newItems);
   };
 
@@ -709,7 +752,11 @@ export default function JobCardForm() {
   const totalLabourDisc = +labourItems.reduce((s, i) => s + computeDiscAmt(i), 0).toFixed(2);
   // Combined discount = labour (care-off) + per-part Parts Issue discounts.
   const totalDiscountUsed = +(totalLabourDisc + totalPartsDisc).toFixed(2);
-  const maxDiscountAllowed = careOff ? +(totalLabour * (careOff.MaxDiscountPct / 100)).toFixed(2) : 0;
+  // The cap in force here: the care-off's own %, or the higher one an admin
+  // approved for this JC.
+  const effectiveCapPct = careOff ? capPctFor(careOff) : 0;
+  const capWasRaised = !!careOff && effectiveCapPct > (Number(careOff.MaxDiscountPct) || 0);
+  const maxDiscountAllowed = careOff ? +(totalLabour * (effectiveCapPct / 100)).toFixed(2) : 0;
 
   // Tax per §14.4 — calculated on NET amount (discount before tax):
   //   PST = (labour - labour_disc + sublet) × PST rate / 100
@@ -880,11 +927,17 @@ export default function JobCardForm() {
           <span>⚠ Discount cap exceeded: PKR {totalDiscountUsed.toLocaleString()} used, max PKR {maxDiscountAllowed.toLocaleString()}. Reduce discounts before saving.</span>
           {hasModule('careoff_request_elevation') && careOff?.CareOffID && id && (
             <button type="button"
-                    onClick={() => setCapElevationCtx({
-                        baseCapPct: careOff?.MaxDiscountPct ?? 0,
-                        effectiveCapPct: careOff?.MaxDiscountPct ?? 0,
-                        message: `Total discount PKR ${totalDiscountUsed.toLocaleString()} exceeds the current cap (max PKR ${maxDiscountAllowed.toLocaleString()}).`,
-                    })}
+                    onClick={async () => {
+                        // If an admin approved a raise while this JC was open,
+                        // use it instead of asking for another one.
+                        const fresh = await refreshElevation();
+                        if (totalLabourDisc <= capAmountFor(careOff, fresh) + 0.005) return;
+                        setCapElevationCtx({
+                            baseCapPct: careOff?.MaxDiscountPct ?? 0,
+                            effectiveCapPct: capPctFor(careOff, fresh),
+                            message: `Total discount PKR ${totalDiscountUsed.toLocaleString()} exceeds the current cap (max PKR ${capAmountFor(careOff, fresh).toLocaleString()}).`,
+                        });
+                    }}
                     style={{ background: '#0f172a', color: 'white', border: 'none', padding: '2px 10px',
                               borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
               Request higher cap →
@@ -1335,7 +1388,12 @@ export default function JobCardForm() {
                       <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>⚠ Care-Off is inactive — assign an active one</div>
                     )}
                     {careOff && careOff.IsActive !== false && (
-                      <div style={{ fontSize: 10, color: '#1d4ed8', marginTop: 2 }}>Cap: PKR {maxDiscountAllowed.toLocaleString()} on current labour</div>
+                      <div style={{ fontSize: 10, color: '#1d4ed8', marginTop: 2 }}>
+                        Cap: PKR {maxDiscountAllowed.toLocaleString()} on current labour
+                        {capWasRaised && (
+                          <span style={{ color: '#166534', fontWeight: 700 }}> · raised to {effectiveCapPct}% by admin</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1694,7 +1752,14 @@ export default function JobCardForm() {
                     </table>
                     {careOff ? (
                       <div style={{ marginTop: 4, padding: '4px 8px', background: capOver ? '#fee2e2' : '#f0fdf4', border: `1px solid ${capOver ? '#fca5a5' : '#86efac'}`, borderRadius: 3, fontSize: 11, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span><strong>{careOff.EmployeeName}</strong> — max {careOff.MaxDiscountPct}% on labour</span>
+                        <span>
+                          <strong>{careOff.EmployeeName}</strong> — max {effectiveCapPct}% on labour
+                          {capWasRaised && (
+                            <span style={{ color: '#166534', fontWeight: 700 }}>
+                              {' '}(raised from {careOff.MaxDiscountPct}% by {elevation?.DecidedByName || 'admin'})
+                            </span>
+                          )}
+                        </span>
                         <span style={{ color: capOver ? '#b91c1c' : '#166534', fontWeight: 700 }}>
                           Disc used: PKR {totalDiscountUsed.toLocaleString()} / Max: PKR {maxDiscountAllowed.toLocaleString()}
                         </span>

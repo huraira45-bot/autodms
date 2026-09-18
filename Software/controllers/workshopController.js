@@ -943,7 +943,7 @@ exports.saveJobCard = async (req, res) => {
             // If an admin has APPROVED a cap-elevation request for this JC,
             // use the higher cap. Otherwise the care-off's normal cap applies.
             const baseCap = Number(coRes.recordset[0].MaxDiscountPct) || 0;
-            const effCap  = JobCardId ? await getEffectiveCapForJC(JobCardId, baseCap) : baseCap;
+            const effCap  = JobCardId ? await getEffectiveCapForJC(JobCardId, baseCap, CareOffID) : baseCap;
             const cap = validateDiscountCap(LabourItems, effCap);
             if (!cap.valid)
                 return res.status(422).json({
