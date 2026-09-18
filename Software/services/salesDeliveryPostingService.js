@@ -22,6 +22,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+const N = require('./salesNarration');
 
 async function resolveAccounts() {
     const need = ['BOOKING_ADVANCE', 'BOOKING_VARIANT_RECEIVABLE',
@@ -109,9 +110,23 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     const voucherNo = await nextVoucherNo(transaction, 'JV');
 
     const totalAmount = masterPaid + premium;
-    const narration = `Delivery — settling booking ${b.BookingNo}`
-        + (masterPaid > 0 ? ` (vehicle: PKR ${masterPaid.toLocaleString('en-PK')})` : '')
-        + (premium > 0 ? `, premium PKR ${premium.toLocaleString('en-PK')} recognized` : '');
+
+    // Cross narration (owner ask 2026-09-18).
+    const ctx = await N.loadNarrationContext(transaction, b.BookingID);
+    const customer = N.customerText(ctx);
+    const vehicle = N.vehicleText(ctx);
+    const forVeh = N.forVehicleAndBooking(ctx);
+    const customerTitle = await N.accountTitle(transaction, customerLeaf.GLCAID);
+    const bvrTitle = await N.accountTitle(transaction, acc.BOOKING_VARIANT_RECEIVABLE.GLCAID);
+    const premDefTitle = await N.accountTitle(transaction, acc.PREMIUM_DEFERRED.GLCAID);
+    const premIncTitle = await N.accountTitle(transaction, acc.PREMIUM_INCOME.GLCAID);
+
+    const narration = N.line([
+        `Delivery of ${vehicle || 'the booked vehicle'} to ${customer},`,
+        b.BookingNo ? `booking ${b.BookingNo}.` : '',
+        masterPaid > 0 ? `Vehicle PKR ${masterPaid.toLocaleString('en-PK')}.` : '',
+        premium > 0 ? `Premium PKR ${premium.toLocaleString('en-PK')} recognized.` : '',
+    ]);
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     new Date())
@@ -148,19 +163,28 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
 
     // A. Vehicle settlement — Customer A/c against BVR (no premium here)
     if (masterPaid > 0) {
-        await insertLine(customerLeaf.GLCAID, masterPaid, 0,
-            `Vehicle delivery settled — ${b.BookingNo}`
-            + (customerLeaf.isPartyLeaf ? '' : ' (Booking Advance fallback)'));
-        await insertLine(acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, 0, masterPaid,
-            `Booking variant fulfilled by Master (${b.BookingNo})`);
+        await insertLine(customerLeaf.GLCAID, masterPaid, 0, N.line([
+            `${customer} charged on delivery of ${vehicle || 'the booked vehicle'},`,
+            b.BookingNo ? `booking ${b.BookingNo}.` : '',
+            customerLeaf.isPartyLeaf ? '' : '(posted to Booking Advance — no party account mapped)',
+        ], bvrTitle));
+        await insertLine(acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, 0, masterPaid, N.line([
+            `Master Motors delivered ${vehicle || 'the booked vehicle'} to ${customer},`,
+            b.BookingNo ? `booking ${b.BookingNo}` : '',
+            '— receivable from Master Motors cleared.',
+        ], customerTitle));
     }
 
     // B. Premium recognition — strictly separate, never on the customer A/c
     if (premium > 0) {
-        await insertLine(acc.PREMIUM_DEFERRED.GLCAID, premium, 0,
-            `Premium deferred → recognized (${b.BookingNo})`);
-        await insertLine(acc.PREMIUM_INCOME.GLCAID, 0, premium,
-            `Premium income recognized at delivery (${b.BookingNo})`);
+        await insertLine(acc.PREMIUM_DEFERRED.GLCAID, premium, 0, N.line([
+            `Premium held on ${customer}'s booking released on delivery of ${vehicle || 'the booked vehicle'},`,
+            b.BookingNo ? `booking ${b.BookingNo}.` : '',
+        ], premIncTitle));
+        await insertLine(acc.PREMIUM_INCOME.GLCAID, 0, premium, N.line([
+            `Premium earned on delivery of ${vehicle || 'the booked vehicle'} to ${customer},`,
+            b.BookingNo ? `booking ${b.BookingNo}.` : '',
+        ], premDefTitle));
     }
 
     // Subsidiary ledger — track the vehicle-side Dr against the customer's running balance.
@@ -171,7 +195,10 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
             .input('vid', sql.Int, voucherId)
             .input('gl',  sql.Int, customerLeaf.GLCAID)
             .input('dr',  sql.Decimal(18,2), masterPaid)
-            .input('nar', sql.NVarChar(500), `Vehicle delivered — ${b.BookingNo}`)
+            .input('nar', sql.NVarChar(500), N.line([
+                `${vehicle || 'Vehicle'} delivered to ${customer},`,
+                b.BookingNo ? `booking ${b.BookingNo}.` : '',
+            ]).slice(0, 500))
             .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                     VALUES (@pid, @bid, @vid, @gl, @dr, 0, @nar)`);
     }

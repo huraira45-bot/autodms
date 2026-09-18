@@ -26,6 +26,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+const N = require('./salesNarration');
 
 // Agency model (migration 045): Master invoices the customer directly, not us.
 // We never own the vehicle, so this step posts NO inventory/payable legs.
@@ -80,7 +81,21 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
     const voucherNo = await nextVoucherNo(transaction, 'JV');
 
     const totalAmount = stdIncentive;
-    const narration = `Master incentive accrued on Master invoice ${b.MasterInvoiceNo || '(no#)'} for booking ${b.BookingNo} (PKR ${stdIncentive.toLocaleString('en-PK')})`;
+
+    // Cross narration (owner ask 2026-09-18).
+    const ctx = await N.loadNarrationContext(transaction, b.BookingID);
+    const customer = N.customerText(ctx);
+    const vehicle = N.vehicleText(ctx);
+    const invoiceText = `Master invoice ${b.MasterInvoiceNo || '(no number)'}`;
+    const recvTitle = await N.accountTitle(transaction, acc.MASTER_INCENTIVE_RECEIVABLE.GLCAID);
+    const incomeTitle = await N.accountTitle(transaction, acc.MASTER_INCENTIVE_INCOME.GLCAID);
+
+    const narration = N.line([
+        `Incentive due from Master Motors on ${invoiceText}`,
+        `for ${vehicle || 'the booked vehicle'} sold to ${customer},`,
+        b.BookingNo ? `booking ${b.BookingNo}` : '',
+        `(PKR ${stdIncentive.toLocaleString('en-PK')}).`,
+    ]);
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     b.MasterInvoiceDate || new Date())
@@ -115,8 +130,16 @@ async function postMasterInvoiceVoucher(bookingId, invoice, userInfo, transactio
 
     // Agency model: only the incentive accrual is posted here.
     {
-        await insertLine(acc.MASTER_INCENTIVE_RECEIVABLE.GLCAID, stdIncentive, 0, `Master incentive receivable on ${b.BookingNo}`);
-        await insertLine(acc.MASTER_INCENTIVE_INCOME.GLCAID, 0, stdIncentive, `Master incentive earned on ${b.BookingNo}`);
+        await insertLine(acc.MASTER_INCENTIVE_RECEIVABLE.GLCAID, stdIncentive, 0, N.line([
+            `Incentive receivable from Master Motors on ${invoiceText}`,
+            `for ${vehicle || 'the booked vehicle'} sold to ${customer},`,
+            b.BookingNo ? `booking ${b.BookingNo}.` : '',
+        ], incomeTitle));
+        await insertLine(acc.MASTER_INCENTIVE_INCOME.GLCAID, 0, stdIncentive, N.line([
+            `Incentive earned from Master Motors on ${invoiceText}`,
+            `for ${vehicle || 'the booked vehicle'} sold to ${customer},`,
+            b.BookingNo ? `booking ${b.BookingNo}.` : '',
+        ], recvTitle));
     }
 
     // Deliberately left as Draft (owner ask 2026-08-07): every sales-module

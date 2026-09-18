@@ -22,15 +22,18 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+const N = require('./salesNarration');
 
 async function loadAccrual(accrualId, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, accrualId)
         .query(`SELECT a.AccrualID, a.BookingID, a.EarnerEmployeeID, a.AmountAccrued,
                        a.Status, a.AccrualVoucherID,
-                       b.BookingNo, b.PartyID
+                       b.BookingNo, b.PartyID,
+                       e.EmployeeName AS EarnerName
                 FROM dms_SalesIncentiveAccruals a
                 INNER JOIN dms_SalesBookings b ON a.BookingID = b.BookingID
+                LEFT  JOIN gen_EmployeeInfo  e ON e.EmployeeId = a.EarnerEmployeeID
                 WHERE a.AccrualID = @id`);
     if (!r.recordset.length) throw new Error(`Accrual ${accrualId} not found.`);
     return r.recordset[0];
@@ -55,7 +58,19 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
 
     const voucherNo = await nextVoucherNo(transaction, 'JV');
 
-    const narration = `Staff incentive accrued — booking ${a.BookingNo}, employee #${a.EarnerEmployeeID}`;
+    // Cross narration (owner ask 2026-09-18).
+    const ctx = await N.loadNarrationContext(transaction, a.BookingID);
+    const customer = N.customerText(ctx);
+    const forVeh = N.forVehicleAndBooking(ctx);
+    const earner = a.EarnerName || `employee #${a.EarnerEmployeeID}`;
+    const expenseTitle = await N.accountTitle(transaction, expenseGL);
+    const payableTitle = await N.accountTitle(transaction, payableGL);
+
+    const narration = N.line([
+        `Staff incentive earned by ${earner} on the sale`,
+        forVeh,
+        ctx?.PartyName ? `to ${customer}.` : '.',
+    ]);
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     new Date())
@@ -88,8 +103,16 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
                     VALUES (@vid, @gl, @nar, @dr, @cr, @bid)`);
     };
 
-    await insertLine(expenseGL, amount, 0, `Incentive expense — ${a.BookingNo}`);
-    await insertLine(payableGL, 0, amount, `Owed to employee #${a.EarnerEmployeeID}`);
+    await insertLine(expenseGL, amount, 0, N.line([
+        `Staff incentive earned by ${earner} on the sale`,
+        forVeh,
+        ctx?.PartyName ? `to ${customer}.` : '.',
+    ], payableTitle));
+    await insertLine(payableGL, 0, amount, N.line([
+        `Owed to ${earner} for the sale`,
+        forVeh,
+        ctx?.PartyName ? `to ${customer}.` : '.',
+    ], expenseTitle));
 
     // Deliberately left as Draft (owner ask 2026-08-07). Unlike Master
     // Invoice/Payment/Delivery, nothing downstream needs to wait for this —
@@ -173,8 +196,14 @@ async function postDisbursementVoucher(dis, userInfo, transaction) {
                     VALUES (@vid, @gl, @nar, @dr, @cr)`);
     };
 
-    await insertLine(payableGL, amount, 0, 'Incentive payable settled');
-    await insertLine(creditGL,  0, amount, dis.mode === 'Cash' ? 'Cash paid out' : 'Bank disbursement');
+    const payableTitle = await N.accountTitle(transaction, payableGL);
+    const creditTitle = await N.accountTitle(transaction, creditGL);
+    const paidBy = dis.mode === 'Cash' ? 'in cash' : `by bank transfer from ${creditTitle || 'the bank account'}`;
+
+    await insertLine(payableGL, amount, 0,
+        N.line([`Staff incentive owed to employees settled, paid ${paidBy}.`], creditTitle));
+    await insertLine(creditGL, 0, amount,
+        N.line([`Staff incentive disbursement paid ${paidBy}.`], payableTitle));
 
     // Deliberately left as Draft (owner ask 2026-08-07). The accrual rows'
     // DisbursedAmount/Status are already updated unconditionally by the

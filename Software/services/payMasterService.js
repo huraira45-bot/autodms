@@ -16,6 +16,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+const N = require('./salesNarration');
 
 async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID, reference, notes }, userInfo, tx) {
     if (!bookingId)            throw new Error('bookingId is required.');
@@ -48,8 +49,22 @@ async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID
 
     const voucherNo = await nextVoucherNo(tx, vtCode);
 
-    const narration = `Pay Master Motors for booking ${b.BookingNo}`
-        + (reference ? ` — ref ${reference}` : '');
+    // Cross narration (owner ask 2026-09-18): the receivable line carries the
+    // variant and the customer, the bank/cash line carries how it was paid.
+    const ctx = await N.loadNarrationContext(tx, bookingId);
+    const customer = N.customerText(ctx);
+    const forVeh = N.forVehicleAndBooking(ctx);
+    const crTitle = await N.accountTitle(tx, crGL);
+    const bvrTitle = await N.accountTitle(tx, bvrGL);
+    const paidBy = mode === 'Cash' ? 'in cash' : `by bank transfer from ${crTitle || 'the bank account'}`;
+    const refText = reference ? `(ref ${reference})` : '';
+
+    const narration = N.line([
+        `Paid Master Motors ${paidBy}`,
+        forVeh,
+        `on behalf of ${customer}`,
+        refText,
+    ]);
 
     const hdr = await new sql.Request(tx)
         .input('vd',   sql.DateTime,     new Date())
@@ -82,8 +97,19 @@ async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID
                     VALUES (@vid, @gl, @nar, @dr, @cr, @bid)`);
     };
 
-    await insertLine(bvrGL, amount, 0, `Paid Master for booking ${b.BookingNo}`);
-    await insertLine(crGL,  0, amount, `${mode} disbursement to Master`);
+    await insertLine(bvrGL, amount, 0, N.line([
+        `Paid Master Motors ${paidBy}`,
+        forVeh,
+        `on behalf of ${customer}`,
+        refText,
+        '— receivable from Master Motors until the vehicle is delivered.',
+    ], crTitle));
+    await insertLine(crGL, 0, amount, N.line([
+        `Payment to Master Motors ${paidBy}`,
+        forVeh,
+        `on behalf of ${customer}`,
+        refText + '.',
+    ], bvrTitle));
 
     // Track booking-side balance in subsidiary ledger
     await new sql.Request(tx)
@@ -92,7 +118,9 @@ async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID
         .input('vid', sql.Int, voucherId)
         .input('gl',  sql.Int, bvrGL)
         .input('dr',  sql.Decimal(18,2), amount)
-        .input('nar', sql.NVarChar(500), `Booking variant receivable raised — ${b.BookingNo}`)
+        .input('nar', sql.NVarChar(500), N.line([
+            `Paid Master Motors ${paidBy}`, forVeh, `on behalf of ${customer}.`,
+        ]).slice(0, 500))
         .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                 VALUES (@pid, @bid, @vid, @gl, @dr, 0, @nar)`);
 

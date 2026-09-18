@@ -24,6 +24,7 @@
 const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+const N = require('./salesNarration');
 
 // Agency model (migration 045). Two journal patterns based on PaymentMode:
 //
@@ -84,9 +85,21 @@ async function postDirectPayOrderVoucher(paymentId, p, amount, accounts, custome
 
     const voucherNo = await nextVoucherNo(transaction, 'JV');
 
-    const narration = `Booking ${p.BookingNo} — Pay Order ${p.PayOrderNumber || ''}`
-        + (p.PayOrderBankName ? ` (${p.PayOrderBankName})` : '')
-        + ` direct to Master Motors`;
+    // Cross narration (owner ask 2026-09-18): each line names the customer, the
+    // vehicle, how the money moved, and the account on the other side.
+    const ctx = await N.loadNarrationContext(transaction, p.BookingID);
+    const customer = N.customerText(ctx);
+    const vehicle = N.vehicleText(ctx);
+    const forVeh = N.forVehicleAndBooking(ctx);
+    const instrument = N.instrumentText({ mode: 'PayOrder', payOrderNo: p.PayOrderNumber, payOrderBank: p.PayOrderBankName });
+    const bvrTitle = await N.accountTitle(transaction, bvrGL);
+    const customerTitle = await N.accountTitle(transaction, customerLeaf.GLCAID);
+
+    const narration = N.line([
+        `${customer} paid Master Motors direct ${instrument}`,
+        forVeh + '.',
+        'Dealer is pass-through; claim raised on Master Motors.',
+    ]);
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     p.ReceivedAt || new Date())
@@ -120,10 +133,16 @@ async function postDirectPayOrderVoucher(paymentId, p, amount, accounts, custome
                     VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @bid)`);
     };
 
-    await insertLine(bvrGL,             amount, 0, `Master to fulfil booking ${p.BookingNo} (PayOrder direct)`);
-    await insertLine(customerLeaf.GLCAID, 0, amount,
-        `Customer paid Master via Pay Order ${p.PayOrderNumber || ''} — booking ${p.BookingNo}`
-        + (customerLeaf.isPartyLeaf ? '' : ' (Booking Advance fallback)'));
+    await insertLine(bvrGL, amount, 0, N.line([
+        `Claim on Master Motors to deliver ${vehicle || 'the booked vehicle'} to ${customer},`,
+        p.BookingNo ? `booking ${p.BookingNo},` : '',
+        `paid ${instrument}.`,
+    ], customerTitle));
+    await insertLine(customerLeaf.GLCAID, 0, amount, N.line([
+        `${customer} paid Master Motors direct ${instrument}`,
+        forVeh + '.',
+        customerLeaf.isPartyLeaf ? '' : '(posted to Booking Advance — no party account mapped)',
+    ], bvrTitle));
 
     // Subsidiary ledger entry for the customer-side Cr
     await new sql.Request(transaction)
@@ -132,7 +151,9 @@ async function postDirectPayOrderVoucher(paymentId, p, amount, accounts, custome
         .input('vid', sql.Int, voucherId)
         .input('gl',  sql.Int, customerLeaf.GLCAID)
         .input('cr',  sql.Decimal(18,2), amount)
-        .input('nar', sql.NVarChar(500), `Pay Order direct to Master — booking ${p.BookingNo}`)
+        .input('nar', sql.NVarChar(500), N.line([
+            `${customer} paid Master Motors direct ${instrument}`, forVeh + '.',
+        ]).slice(0, 500))
         .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                 VALUES (@pid, @bid, @vid, @gl, 0, @cr, @nar)`);
 
@@ -154,7 +175,7 @@ async function loadPayment(paymentId, transaction) {
         .input('id', sql.Int, paymentId)
         .query(`SELECT p.PaymentID, p.BookingID, p.PaymentPath, p.PaymentMode, p.Amount,
                        p.PremiumPortion, p.BankAccountID, p.ChequeNumber, p.ChequeDate,
-                       p.POSTransactionRef, p.PayOrderNumber, p.ReceivedAt,
+                       p.POSTransactionRef, p.PayOrderNumber, p.PayOrderBankName, p.ReceivedAt,
                        b.BookingNo, b.PartyID, b.Status, b.NegotiatedPrice
                 FROM dms_SalesPayments p
                 INNER JOIN dms_SalesBookings b ON p.BookingID = b.BookingID
@@ -190,20 +211,32 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
     const totalReceived = Math.round((vehicleAmount + premium) * 100) / 100;
     const bank = await resolveBank(p.BankAccountID, transaction);
 
-    let debitGL, debitNarrationTail;
+    // How the money moved is described by N.instrumentText below, so this only
+    // has to pick the account the money landed in.
+    let debitGL;
     if (p.PaymentMode === 'Cash') {
         debitGL = accounts.CASH_BOOK.GLCAID;
-        debitNarrationTail = 'Cash receipt';
     } else if (p.PaymentMode === 'Cheque') {
         debitGL = accounts.CHEQUES_ON_HAND.GLCAID;
-        debitNarrationTail = `Cheque #${p.ChequeNumber || ''} (uncleared)`;
     } else if (p.PaymentMode === 'BankTransfer' || p.PaymentMode === 'POS') {
         if (!bank) throw new Error(`Bank account is required for PaymentMode=${p.PaymentMode}`);
         debitGL = bank.GLCAID;
-        debitNarrationTail = p.PaymentMode === 'POS' ? `POS ref ${p.POSTransactionRef || ''}` : 'Bank transfer';
     } else {
         throw new Error(`Unknown PaymentMode: ${p.PaymentMode}`);
     }
+
+    // Cross narration (owner ask 2026-09-18) — customer, vehicle, instrument
+    // (cheque no / POS ref / bank) and the contra account, on every line.
+    const ctx = await N.loadNarrationContext(transaction, p.BookingID);
+    const customer = N.customerText(ctx);
+    const forVeh = N.forVehicleAndBooking(ctx);
+    const bankTitle = bank ? await N.accountTitle(transaction, bank.GLCAID) : '';
+    const instrument = N.instrumentText({
+        mode: p.PaymentMode, chequeNo: p.ChequeNumber, posRef: p.POSTransactionRef, bankTitle,
+    });
+    const debitTitle = await N.accountTitle(transaction, debitGL);
+    const customerTitle = await N.accountTitle(transaction, customerLeaf.GLCAID);
+    const premiumTitle = await N.accountTitle(transaction, accounts.PREMIUM_DEFERRED.GLCAID);
 
     const premiumDeferredGL = accounts.PREMIUM_DEFERRED.GLCAID;
 
@@ -216,9 +249,14 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
 
     const voucherNo = await nextVoucherNo(transaction, vtCode);
 
-    const narration = premium > 0
-        ? `Booking ${p.BookingNo} — ${debitNarrationTail} → vehicle ${vehicleAmount} + premium ${premium} (total ${totalReceived})`
-        : `Booking ${p.BookingNo} — ${debitNarrationTail} → customer account`;
+    const narration = N.line([
+        `Received from ${customer} ${instrument}`,
+        forVeh + '.',
+        premium > 0
+            ? `Vehicle PKR ${vehicleAmount.toLocaleString('en-PK')} + premium PKR ${premium.toLocaleString('en-PK')}`
+              + ` (total PKR ${totalReceived.toLocaleString('en-PK')}).`
+            : '',
+    ]);
 
     const hdrRes = await new sql.Request(transaction)
         .input('vd',   sql.DateTime,     p.ReceivedAt || new Date())
@@ -255,14 +293,24 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
         return r.recordset[0].VoucherDetailID;
     };
 
-    const drDetailId = await insertLine(debitGL, totalReceived, 0, `${debitNarrationTail} for booking ${p.BookingNo}`);
+    const drDetailId = await insertLine(debitGL, totalReceived, 0, N.line([
+        `Received from ${customer} ${instrument}`,
+        forVeh + '.',
+    ], [customerTitle, premium > 0 ? premiumTitle : ''].filter(Boolean).join(' and ')));
     if (vehicleAmount > 0) {
-        await insertLine(customerLeaf.GLCAID, 0, vehicleAmount,
-            `Vehicle portion — booking ${p.BookingNo}` + (customerLeaf.isPartyLeaf ? '' : ' (Booking Advance fallback)'));
+        await insertLine(customerLeaf.GLCAID, 0, vehicleAmount, N.line([
+            `${customer} paid ${instrument}`,
+            forVeh + '.',
+            premium > 0 ? 'Vehicle portion.' : '',
+            customerLeaf.isPartyLeaf ? '' : '(posted to Booking Advance — no party account mapped)',
+        ], debitTitle));
     }
     if (premium > 0) {
-        await insertLine(premiumDeferredGL, 0, premium,
-            `Premium portion (deferred — recognized at delivery) — booking ${p.BookingNo}`);
+        await insertLine(premiumDeferredGL, 0, premium, N.line([
+            `Premium received from ${customer} ${instrument}`,
+            forVeh + ',',
+            'held deferred until delivery.',
+        ], debitTitle));
     }
 
     // Subsidiary ledger — vehicle leg only (premium has its own dedicated GL).
@@ -273,7 +321,9 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
             .input('vid', sql.Int, voucherId)
             .input('gl',  sql.Int, customerLeaf.GLCAID)
             .input('cr',  sql.Decimal(18,2), vehicleAmount)
-            .input('nar', sql.NVarChar(500), `Vehicle receipt — booking ${p.BookingNo}`)
+            .input('nar', sql.NVarChar(500), N.line([
+                `Received from ${customer} ${instrument}`, forVeh + '.',
+            ]).slice(0, 500))
             .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                     VALUES (@pid, @bid, @vid, @gl, 0, @cr, @nar)`);
     }
