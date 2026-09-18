@@ -63,41 +63,44 @@ export default function BookingDetail() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const [r, d] = await Promise.all([
+            const [r, d, vv] = await Promise.all([
                 axios.get(`${API}/sales/bookings/${id}`),
                 axios.get(`${API}/sales/bookings/${id}/documents`),
+                // Open void requests on this booking's payments. Readers who
+                // are not allowed to see the queue simply get none.
+                axios.get(`${API}/sales/payment-voids`, { params: { bookingId: id } }).catch(() => ({ data: [] })),
             ]);
             setData(r.data);
             setDocuments(d.data);
+            setVoidReqs(vv.data || []);
         } catch (e) { flash('err', e.response?.data?.error || e.message); }
         setLoading(false);
     }, [id]);
     useEffect(() => { load(); }, [load]);
 
+    const [voidReqs, setVoidReqs] = useState([]);
     const hasDoc = (type) => documents.some(d => d.DocType === type && !d.DeletedAt);
     // Same roles the server accepts for POST /bookings/:id/documents.
     const canUploadDocs = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm');
 
-    // Owner report 2026-09-18: a payment entered by mistake left a voucher
-    // behind that could not be deleted. Voiding undoes the payment and its
-    // voucher together, and keeps the mistake on the record.
+    // Owner ask 2026-09-18: a payment recorded by mistake is not undone on the
+    // spot. It is requested here, the Accounts Manager approves it, and an
+    // admin executes it from Sales › Payment Voids — the same three stages as
+    // a booking cancellation. Nothing changes until that last step.
     const [voidFor, setVoidFor] = useState(null);
     const [voidReason, setVoidReason] = useState('');
     const [voidBusy, setVoidBusy] = useState(false);
     const [voidErr, setVoidErr] = useState(null);
-    const canVoidPayment = hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings');
+    const canRequestVoid = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings');
+    const openVoidFor = (paymentId) => voidReqs.find(v => v.PaymentID === paymentId && ['Pending', 'AMApproved'].includes(v.Status));
     const closeVoid = () => { setVoidFor(null); setVoidReason(''); setVoidErr(null); };
     const submitVoid = async () => {
         setVoidBusy(true); setVoidErr(null);
         try {
-            const { data: r } = await axios.post(
-                `${API}/sales/bookings/${id}/payments/${voidFor.PaymentID}/void`, { Reason: voidReason.trim() });
+            await axios.post(`${API}/sales/bookings/${id}/payments/${voidFor.PaymentID}/void-request`,
+                             { Reason: voidReason.trim() });
             closeVoid();
-            flash('ok', r.VoucherAction === 'reversed'
-                ? `Payment voided — voucher reversed by ${r.ReversalVoucherNo}.`
-                : r.VoucherAction === 'draft_deleted'
-                    ? 'Payment voided — its draft voucher was removed.'
-                    : 'Payment voided.');
+            flash('ok', 'Void requested — the Accounts Manager has to approve it, then an admin executes it. Nothing has changed yet.');
             load();
         } catch (e) { setVoidErr(e.response?.data?.error || e.message); }
         setVoidBusy(false);
@@ -383,11 +386,14 @@ export default function BookingDetail() {
                         <table style={{ width: '100%', fontSize: '0.82rem' }}>
                             <thead><tr style={{ borderBottom: '1px solid #e2e8f0' }}>
                                 <Th>Date</Th><Th>Path</Th><Th>Mode</Th><Th align="right">Amount</Th><Th>Voucher</Th>
-                                {canVoidPayment && <Th></Th>}
+                                {canRequestVoid && <Th></Th>}
                             </tr></thead>
                             <tbody>
                                 {data.payments?.map(p => {
                                   const voided = p.Status === 'Reversed';
+                                  const vreq = openVoidFor(p.PaymentID);
+                                  // A finalized voucher is never voided — that correction goes through unfinalize.
+                                  const finalizedVoucher = !!p.VoucherStatus && p.VoucherStatus !== 'Draft';
                                   return (
                                     <tr key={p.PaymentID} style={{ borderBottom: '1px solid #f1f5f9', opacity: voided ? 0.65 : 1 }}>
                                         <Td style={{ fontSize: '0.75rem' }}>{new Date(p.ReceivedAt).toLocaleString()}</Td>
@@ -409,13 +415,25 @@ export default function BookingDetail() {
                                                 <span style={{ color: '#94a3b8', fontSize: '0.72rem' }} title="GL voucher was not posted (system accounts may not be mapped)">—</span>
                                             )}
                                         </Td>
-                                        {canVoidPayment && (
+                                        {canRequestVoid && (
                                             <Td align="right">
-                                                {!voided && (
+                                                {vreq ? (
+                                                    <Link to="/sales/payment-voids"
+                                                          title={`Requested by ${vreq.ProposerName}: ${vreq.ProposalReason}`}
+                                                          style={{ fontSize: '0.7rem', fontWeight: 700, textDecoration: 'none',
+                                                                   color: vreq.Status === 'Pending' ? '#92400e' : '#1e40af' }}>
+                                                        {vreq.Status === 'Pending' ? 'Void: awaiting AM' : 'Void: awaiting admin'}
+                                                    </Link>
+                                                ) : finalizedVoucher ? (
+                                                    <span title={`Voucher ${p.VoucherNo} is finalized (${p.VoucherStatus}). A finalized voucher cannot be voided — request an unfinalize for it instead.`}
+                                                          style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>
+                                                        Finalized
+                                                    </span>
+                                                ) : !voided && (
                                                     <button type="button" onClick={() => { setVoidFor(p); setVoidReason(''); setVoidErr(null); }}
-                                                            title="Void this payment — recorded by mistake"
+                                                            title="Ask for this payment to be voided — it was recorded by mistake"
                                                             style={{ background: 'none', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
-                                                        Void
+                                                        Request void
                                                     </button>
                                                 )}
                                             </Td>
@@ -428,15 +446,16 @@ export default function BookingDetail() {
                     )}
 
                     {voidFor && (
-                        <Shell title={`Void payment of PKR ${fmtN(voidFor.Amount)}`} onClose={closeVoid}>
+                        <Shell title={`Request void — payment of PKR ${fmtN(voidFor.Amount)}`} onClose={closeVoid}>
                             {voidErr && <Err>{voidErr}</Err>}
                             <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
-                                The payment stays on record marked <strong>Voided</strong>, and the booking's paid total drops by PKR {fmtN(voidFor.Amount)}.
-                                {voidFor.VoucherNo
-                                    ? ` Voucher ${voidFor.VoucherNo} is removed if it is still a draft, or reversed if it has already been posted.`
-                                    : ''}
+                                Nothing changes yet. The request goes to the <strong>Accounts Manager</strong> for approval,
+                                and an <strong>admin</strong> executes it from Sales › Payment Voids. Only then is the payment
+                                marked Voided, the booking's paid total reduced by PKR {fmtN(voidFor.Amount)}
+                                {voidFor.VoucherNo ? `, and draft voucher ${voidFor.VoucherNo} removed.` : '.'}
+                                {' '}A voucher that has already been finalized cannot be voided at all — that one needs an unfinalize.
                             </div>
-                            <Field label="Why is this being voided? *">
+                            <Field label="Why should this payment be voided? *">
                                 <textarea rows={3} value={voidReason} onChange={e => setVoidReason(e.target.value)}
                                           style={{ ...inputStyle, resize: 'vertical' }}
                                           placeholder="e.g. entered twice by mistake" />
@@ -445,7 +464,7 @@ export default function BookingDetail() {
                                 <button className="btn-sm" onClick={closeVoid}>Cancel</button>
                                 <button className="btn" disabled={voidBusy || voidReason.trim().length < 5}
                                         onClick={submitVoid} style={{ background: '#b91c1c' }}>
-                                    {voidBusy ? 'Voiding…' : 'Void payment'}
+                                    {voidBusy ? 'Sending…' : 'Send for approval'}
                                 </button>
                             </div>
                         </Shell>

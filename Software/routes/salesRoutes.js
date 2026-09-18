@@ -6,6 +6,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const pv = require('../controllers/salesPaymentVoidController');
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
 const lc  = require('../controllers/salesLifecycleController');
@@ -78,10 +79,17 @@ router.patch('/bookings/:id/executive',    requireAny('sales_agm', 'sales_gm', '
 
 // Payments against a booking — Direct or PayOrder path. Multipart: file field 'proof' required.
 router.get(   '/bookings/:id/payments',    requireAny(...SALES_READERS),       bk.listPayments);
-// Undoing a payment is a correction, so it sits with the managers rather than
-// with whoever can record one.
-router.post(  '/bookings/:id/payments/:paymentId/void',
-              requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'),     bk.voidPayment);
+
+// Payment void — three stages, like a booking cancellation or a job card
+// unfinalize. Anyone in sales can ask for one; the payment, the booking total
+// and the GL are untouched until the AM approves and an admin executes it.
+router.post(  '/bookings/:id/payments/:paymentId/void-request',
+              requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'), pv.propose);
+router.get(   '/payment-voids',                   requireAny(...SALES_READERS, 'am_approve', 'admin_unfinalize'), pv.list);
+router.post(  '/payment-voids/:id/am-approve',    requireAny('am_approve'), pv.amApprove);
+router.post(  '/payment-voids/:id/am-reject',     requireAny('am_approve'), pv.amReject);
+router.post(  '/payment-voids/:id/admin-execute', requireAny('admin_unfinalize', 'sales_admin_settings'), pv.adminExecute);
+router.post(  '/payment-voids/:id/withdraw',      requireAny('sales_executive', 'sales_agm', 'sales_gm'), pv.withdraw);
 router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_agm', 'sales_gm'),
               uploadSalesDoc.single('proof'),
               bk.recordPayment);

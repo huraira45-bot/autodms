@@ -842,11 +842,11 @@ exports.deleteVoucher = async (req, res) => {
 
         // A sales payment's voucher belongs to the payment: deleting it here
         // would leave the booking still claiming money was received, against a
-        // voucher that no longer exists. Void the payment instead — that undoes
-        // both. Owner report 2026-09-18.
+        // voucher that no longer exists. The void approval loop undoes both.
+        // Owner report 2026-09-18.
         if (v.SourceDocType === 'SALES_PAYMENT') {
             return res.status(409).json({
-                error: `${v.VoucherNo} was raised for a customer payment. Open the booking, find the payment under Payments and use Void — that removes this voucher and corrects the booking's paid total in one step.`,
+                error: `${v.VoucherNo} was raised for a customer payment. Open the booking, find the payment under Payments and use "Request void" — once the Accounts Manager approves and an admin executes it, this voucher goes and the booking's paid total is corrected together.`,
                 sourceDocType: v.SourceDocType,
                 sourceDocId: v.SourceDocID,
             });
