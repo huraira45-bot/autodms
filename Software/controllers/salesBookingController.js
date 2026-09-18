@@ -140,6 +140,18 @@ exports.getBooking = async (req, res) => {
         const negotiation = await pool.request().input('id', sql.Int, id)
             .query(`SELECT TOP 5 * FROM dms_NegotiationRequests WHERE BookingID=@id ORDER BY ProposedAt DESC`);
 
+        // What we forwarded to Master Motors against this booking. Pay Master
+        // keeps no record of its own — the voucher is the record — so the
+        // booking screen reads them straight off the vouchers (owner ask
+        // 2026-09-18: show these next to the customer's payments).
+        const masterPayments = await pool.request().input('id', sql.Int, id).query(`
+            SELECT v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Status,
+                   v.Remarks, v.CreatedByName, vt.Title AS VoucherType
+            FROM   data_FinanceVoucherInfo v
+            LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
+            WHERE  v.SourceDocType = 'PAY_MASTER' AND v.SourceDocID = @id
+            ORDER  BY v.VoucherDate DESC, v.VoucherID DESC`);
+
         // Cumulative amount forwarded to Master against this booking — sum of
         // BOOKING_VARIANT_RECEIVABLE Dr legs tagged with the booking. Used by
         // the UI to show remaining-to-pay-master and toggle the Pay Master button.
@@ -156,6 +168,7 @@ exports.getBooking = async (req, res) => {
             ...bk.recordset[0],
             AmountPaidToMaster: Number(masterPaidR.recordset[0]?.AmountPaidToMaster || 0),
             payments: payments.recordset,
+            masterPayments: masterPayments.recordset,
             transitions: transitions.recordset,
             negotiations: negotiation.recordset,
         });

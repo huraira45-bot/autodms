@@ -445,6 +445,51 @@ export default function BookingDetail() {
                         </table>
                     )}
 
+                    {/* Money forwarded to Master Motors against this booking.
+                        Pay Master writes no payment row of its own — the
+                        voucher is the record — so these come from the vouchers
+                        themselves (owner ask 2026-09-18). */}
+                    {data.masterPayments?.length > 0 && (
+                        <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px dashed #cbd5e1' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                                <h4 style={{ margin: 0, fontSize: '0.85rem', color: '#0e7490' }}>
+                                    Paid to Master ({data.masterPayments.length})
+                                </h4>
+                                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                    Total PKR {fmtN(data.masterPayments.reduce((s, m) => s + Number(m.TotalAmount || 0), 0))}
+                                </span>
+                            </div>
+                            <table style={{ width: '100%', fontSize: '0.82rem' }}>
+                                <thead><tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                    <Th>Date</Th><Th>Mode</Th><Th align="right">Amount</Th><Th>Voucher</Th>
+                                </tr></thead>
+                                <tbody>
+                                    {data.masterPayments.map(m => {
+                                        const isCash = m.VoucherType === 'CPV';
+                                        return (
+                                            <tr key={m.VoucherID} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                <Td style={{ fontSize: '0.75rem' }}>{new Date(m.VoucherDate).toLocaleString()}</Td>
+                                                <Td>{isCash ? 'Cash' : 'Bank'}</Td>
+                                                <Td align="right" style={{ fontWeight: 600, color: '#0e7490' }}>{fmtN(m.TotalAmount)}</Td>
+                                                <Td>
+                                                    <a href={`/vouchers/${isCash ? 'cpv' : 'bpv'}?id=${m.VoucherID}&print=1`}
+                                                       target="_blank" rel="noreferrer"
+                                                       title={m.Remarks || `Print ${m.VoucherNo}`}
+                                                       style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#0f766e', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 600 }}>
+                                                        <Printer size={12} /> {m.VoucherNo}
+                                                    </a>
+                                                    {m.Status && m.Status !== 'Posted' && (
+                                                        <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#92400e' }}>{m.Status}</span>
+                                                    )}
+                                                </Td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
                     {voidFor && (
                         <Shell title={`Request void — payment of PKR ${fmtN(voidFor.Amount)}`} onClose={closeVoid}>
                             {voidErr && <Err>{voidErr}</Err>}
