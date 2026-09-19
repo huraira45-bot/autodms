@@ -10,6 +10,7 @@ router.get( '/',                          requireAnyAccess(
                                               'procurement_grn:view', 'procurement_grtn:view',
                                               'sales_store:view',     'sales_ssr:view',
                                               'payments', 'finance_vouchers:view',
+                                              'crm_party_category',
                                           ), partyController.getParties);
 
 router.post('/',                          requirePerm('crm_parties', 'insert'), partyController.createParty);
@@ -24,7 +25,9 @@ router.post('/business-access/grant-all', requireAccess('crm_party_access'),    
 router.get( '/:id',                       requirePerm('crm_parties', 'view'),   partyController.getParty);
 router.put( '/:id',                       requirePerm('crm_parties', 'edit'),   partyController.updateParty);
 // Individual / Corporate / Insurance / Master Motors — the classification the
-// receivable and recovery reports group by.
-router.patch('/:id/category',             requirePerm('crm_parties', 'edit'),   partyController.setPartyCategory);
+// receivable and recovery reports group by. Grantable on its own, so someone
+// can sort parties without being able to edit party master data.
+router.patch('/:id/category',             requireAnyAccess('crm_parties:edit', 'crm_party_category'),
+                                          partyController.setPartyCategory);
 
 module.exports = router;

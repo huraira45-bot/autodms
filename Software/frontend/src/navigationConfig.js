@@ -164,7 +164,7 @@ export const NAV_ITEMS = [
     // ── Parties (grouped under Admin section for compactness) ─
     { id: 'a-parties',   moduleGroup: 'admin', label: 'Credit Parties',        path: '/customers',            icon: Users, moduleKey: 'crm_parties',    description: 'Named customer / supplier master.', keywords: 'party' },
     { id: 'a-pba',       moduleGroup: 'admin', label: 'Party Business Access', path: '/party-business-access', icon: ShieldCheck, moduleKey: 'crm_parties', description: 'Which business each party belongs to.', keywords: 'access' },
-    { id: 'a-pcat',      moduleGroup: 'admin', label: 'Party Categories',      path: '/parties/categories',   icon: Users, moduleKey: 'crm_parties', description: 'Individual, Corporate, Insurance or Master Motors — what the unpaid and recovery reports group by.', keywords: 'category individual corporate insurance master motors classify' },
+    { id: 'a-pcat',      moduleGroup: 'admin', label: 'Party Categories',      path: '/parties/categories',   icon: Users, anyPermissions: ['crm_parties', 'crm_party_category'], description: 'Individual, Corporate, Insurance or Master Motors — what the unpaid and recovery reports group by.', keywords: 'category individual corporate insurance master motors classify' },
 
     // ── Reports ──────────────────────────────────────────────
     // Owner ask 2026-07-17: each report tagged with a `section` label so the

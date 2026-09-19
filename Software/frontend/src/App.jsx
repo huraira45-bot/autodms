@@ -1076,7 +1076,7 @@ function AppShell() {
                     <Route path="/reports/party-open-invoices"  element={<ProtectedRoute moduleKey="reports"><PartyOpenInvoices /></ProtectedRoute>} />
                     <Route path="/reports/unpaid-by-category"   element={<ProtectedRoute moduleKey="reports"><UnpaidByPartyCategory /></ProtectedRoute>} />
                     <Route path="/reports/recovery-by-category" element={<ProtectedRoute moduleKey="reports"><RecoveryByPartyCategory /></ProtectedRoute>} />
-                    <Route path="/parties/categories"           element={<ProtectedRoute moduleKey="crm_parties"><PartyCategories /></ProtectedRoute>} />
+                    <Route path="/parties/categories"           element={<ProtectedRoute anyModules={['crm_parties', 'crm_party_category']}><PartyCategories /></ProtectedRoute>} />
                     <Route path="/reports/party-job-cards"      element={<ProtectedRoute moduleKey="reports"><PartyJobCards /></ProtectedRoute>} />
                     <Route path="/reports/store-sale-receivables" element={<ProtectedRoute moduleKey="reports"><StoreSaleReceivables /></ProtectedRoute>} />
                     <Route path="/reports/store-sale-receivables-custom" element={

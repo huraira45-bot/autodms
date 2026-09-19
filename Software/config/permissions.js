@@ -81,6 +81,10 @@ const SECTIONS = [
         items: [
             { key: 'crm_parties',       label: 'Credit Parties',        kind: 'document' },
             { key: 'crm_party_access',  label: 'Party Business Access', kind: 'workflow' },
+            // Classify parties (Individual / Corporate / Insurance / Master
+            // Motors) without the wider Credit Parties > Edit, which also
+            // allows changing names, CNICs and credit limits.
+            { key: 'crm_party_category', label: 'Party Categories (classify only)', kind: 'workflow' },
             { key: 'crd_followups',     label: 'CRD Follow-Ups',        kind: 'workflow' },
         ],
     },
