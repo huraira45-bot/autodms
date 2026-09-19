@@ -2038,6 +2038,7 @@ exports.getPartyOpenInvoices = async (req, res) => {
                 SELECT i.InvVoucherID, i.InvVoucherNo, i.InvDate,
                        i.SourceDocType, i.SourceDocID,
                        jc.JobCardNo, jc.VehicleRegNo,
+                       ins.InsClaimNo, ins.SurveyorName,
                        ss.InvoiceNo AS SaleInvoiceNo,
                        i.Invoiced,
                        ISNULL(a.Paid, 0) AS Paid,
@@ -2047,6 +2048,10 @@ exports.getPartyOpenInvoices = async (req, res) => {
                 LEFT   JOIN Allocations a ON a.InvVoucherID = i.InvVoucherID
                 LEFT   JOIN Addata_JobCardInfo jc
                           ON i.SourceDocType='JOBCARD'    AND jc.JobCardId = i.SourceDocID
+                -- An insurance receivable is chased by claim number and by the
+                -- surveyor who handled it, so both travel with the open invoice
+                -- (owner ask 2026-09-19).
+                LEFT   JOIN dms_JobCardInsurance ins ON ins.JobCardId = jc.JobCardId
                 LEFT   JOIN data_StoreSaleInfo ss
                           ON i.SourceDocType='STORE_SALE' AND ss.SaleID    = i.SourceDocID
                 WHERE  i.Invoiced - ISNULL(a.Paid, 0) > 0.005
@@ -2065,6 +2070,8 @@ exports.getPartyOpenInvoices = async (req, res) => {
             DocType:     x.SourceDocType === 'JOBCARD' ? 'Job Card' : 'Store Sale',
             DocNo:       x.JobCardNo || x.SaleInvoiceNo || '',
             VehicleRegNo: x.VehicleRegNo || '',
+            ClaimNo:      x.InsClaimNo || '',
+            SurveyorName: x.SurveyorName || '',
             Invoiced:    +Number(x.Invoiced || 0).toFixed(2),
             Paid:        +Number(x.Paid || 0).toFixed(2),
             Outstanding: +Number(x.Outstanding || 0).toFixed(2),

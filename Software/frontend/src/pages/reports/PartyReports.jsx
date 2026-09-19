@@ -98,9 +98,11 @@ function PartyPicker({ params, updateParam, labelKey = 'partyId' }) {
 export function PartyOpenInvoices() {
     const excelExport = (data, params) => ({
         filename: `party-open-invoices-${params.partyId || 'party'}-as-of-${params.asOf || 'today'}.csv`,
-        headers: ['Doc Type', 'Doc No', 'Voucher', 'Invoice Date', 'Vehicle', 'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket'],
+        headers: ['Doc Type', 'Doc No', 'Voucher', 'Invoice Date', 'Vehicle', 'Ins. Claim #', 'Surveyor',
+                  'Invoiced', 'Paid', 'Outstanding', 'Age (days)', 'Bucket'],
         rows: (data.rows || []).map(r => [
             r.DocType, r.DocNo, r.VoucherNo, r.InvoiceDate || '', r.VehicleRegNo || '',
+            r.ClaimNo || '', r.SurveyorName || '',
             Number(r.Invoiced), Number(r.Paid), Number(r.Outstanding),
             r.AgeDays, r.Bucket,
         ]),
@@ -161,6 +163,7 @@ export function PartyOpenInvoices() {
                                         <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                                             <TH>Doc Type</TH><TH>Doc #</TH><TH>Voucher</TH>
                                             <TH>Invoice Date</TH><TH>Vehicle</TH>
+                                            <TH>Ins. Claim #</TH><TH>Surveyor</TH>
                                             <TH align="right">Invoiced</TH>
                                             <TH align="right">Paid</TH>
                                             <TH align="right">Outstanding</TH>
@@ -176,6 +179,8 @@ export function PartyOpenInvoices() {
                                                 <TD mono color="#64748b">{r.VoucherNo}</TD>
                                                 <TD>{r.InvoiceDate || '—'}</TD>
                                                 <TD mono>{r.VehicleRegNo}</TD>
+                                                <TD mono>{r.ClaimNo || '—'}</TD>
+                                                <TD>{r.SurveyorName || '—'}</TD>
                                                 <TD align="right" mono>{fmt(r.Invoiced)}</TD>
                                                 <TD align="right" mono color={r.Paid > 0 ? '#15803d' : undefined}>{fmt(r.Paid)}</TD>
                                                 <TD align="right" mono bold>{fmt(r.Outstanding)}</TD>
@@ -188,7 +193,7 @@ export function PartyOpenInvoices() {
                                     </tbody>
                                     <tfoot>
                                         <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc' }}>
-                                            <td colSpan={5} style={{ padding: 12, fontWeight: 700 }}>Totals — {data.rows.length} invoices</td>
+                                            <td colSpan={7} style={{ padding: 12, fontWeight: 700 }}>Totals — {data.rows.length} invoices</td>
                                             <TD align="right" bold>{fmt(data.totals.invoiced)}</TD>
                                             <TD align="right" bold>{fmt(data.totals.paid)}</TD>
                                             <TD align="right" bold>{fmt(data.totals.outstanding)}</TD>
