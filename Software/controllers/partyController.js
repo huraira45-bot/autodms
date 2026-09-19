@@ -146,13 +146,49 @@ async function provisionPartyLeaf(pool, { parentCode, title }) {
     throw new Error(`Could not allocate a free GL code under ${parentCode} after 20 attempts.`);
 }
 
+// Individual / Corporate / Insurance / Master Motors — what kind of customer a
+// party is. Kept separate from PartyType, which says how they trade with us and
+// drives the sales picker and supplier screens (owner ask 2026-09-19).
+const PARTY_CATEGORIES = ['Individual', 'Corporate', 'Insurance', 'MasterMotors'];
+exports.PARTY_CATEGORIES = PARTY_CATEGORIES;
+
+/**
+ * PATCH /api/parties/:id/category   { PartyCategory }
+ * An empty value puts the party back to unclassified.
+ */
+exports.setPartyCategory = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid party id.' });
+        const raw = req.body?.PartyCategory;
+        const category = (raw === null || raw === '' || raw === undefined) ? null : String(raw);
+        if (category && !PARTY_CATEGORIES.includes(category)) {
+            return res.status(400).json({ error: `Category must be one of: ${PARTY_CATEGORIES.join(', ')}` });
+        }
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('id', sql.Int, id)
+            .input('cat', sql.NVarChar(20), category)
+            .query(`UPDATE gen_PartiesInfo SET PartyCategory=@cat WHERE PartyID=@id`);
+        if (!r.rowsAffected[0]) return res.status(404).json({ error: 'That party no longer exists.' });
+        res.json({ PartyID: id, PartyCategory: category });
+    } catch (err) {
+        console.error('setPartyCategory:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 exports.getParties = async (req, res) => {
     try {
-        const { type, search, business, glCode } = req.query;
+        const { type, search, business, glCode, category } = req.query;
         const pool = await getPool();
         const r = pool.request();
         let where = `1=1`;
         if (type)   { r.input('t', sql.NVarChar(20), type);     where += ` AND p.PartyType = @t`; }
+        if (category) {
+            if (category === 'Unclassified') where += ` AND p.PartyCategory IS NULL`;
+            else { r.input('cat', sql.NVarChar(20), category); where += ` AND p.PartyCategory = @cat`; }
+        }
         if (search) { r.input('q', sql.NVarChar(200), `%${search}%`);
                       where += ` AND (p.PartyName LIKE @q OR p.CNIC LIKE @q OR p.PhoneOne LIKE @q OR p.NTNNO LIKE @q)`; }
         // Optional direct-COA filter (?glCode=201002): parties whose
@@ -176,7 +212,8 @@ exports.getParties = async (req, res) => {
         }
 
         const result = await r.query(`
-            SELECT p.PartyID, p.PartyName, p.PartyType, p.PhoneOne, p.Email, p.CNIC, p.NTNNO,
+            SELECT p.PartyID, p.PartyName, p.PartyType, p.PartyCategory,
+                   p.PhoneOne, p.Email, p.CNIC, p.NTNNO,
                    p.AddressOne, p.ContactPerson, p.CreditLimit, p.PartyGLID,
                    c.GLCode AS PartyGLCode, c.GLTitle AS PartyGLTitle,
                    pg.PartyGroupID, pg.GroupName AS PartyGroupName

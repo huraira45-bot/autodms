@@ -2101,6 +2101,257 @@ exports.getPartyOpenInvoices = async (req, res) => {
     }
 };
 
+// Individual / Corporate / Insurance / Master Motors, plus everyone not yet
+// sorted. Owner ask 2026-09-19.
+const CATEGORY_LABEL = {
+    Individual:   'Individual',
+    Corporate:    'Corporate',
+    Insurance:    'Insurance',
+    MasterMotors: 'Master Motors',
+    Unclassified: 'Not classified yet',
+};
+
+/**
+ * GET /reports/party-outstanding-by-type?asOf=YYYY-MM-DD&category=
+ *
+ * Every party with an unpaid job card or store sale, grouped by what kind of
+ * party they are: what was invoiced, what they have paid against it, what is
+ * left, and how old it is. One row per party — the invoices behind a row come
+ * from the existing party-open-invoices report.
+ *
+ * "Paid" is money allocated against those same invoices, so paid + outstanding
+ * always equals invoiced. Payments sitting on account unallocated are not
+ * counted here; the recovery report reports those separately.
+ */
+exports.getPartyOutstandingByType = async (req, res) => {
+    try {
+        const asOfRaw = req.query.asOf ? new Date(req.query.asOf) : new Date();
+        const asOf = endOfDay(asOfRaw);
+        const category = req.query.category && req.query.category !== 'ALL' ? String(req.query.category) : null;
+
+        const pool = await getPool();
+        const rq = pool.request().input('asOf', sql.DateTime, asOf);
+        let catClause = '';
+        if (category) {
+            if (category === 'Unclassified') catClause = ' AND p.PartyCategory IS NULL';
+            else { rq.input('cat', sql.NVarChar(20), category); catClause = ' AND p.PartyCategory = @cat'; }
+        }
+
+        const r = await rq.query(`
+            WITH InvoiceDrs AS (
+                SELECT l.PartyID,
+                       v.VoucherID   AS InvVoucherID,
+                       v.VoucherDate AS InvDate,
+                       v.SourceDocType,
+                       SUM(l.Debit)  AS Invoiced
+                FROM   dms_PartyLedger l
+                JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                WHERE  l.Debit > 0 AND l.PartyID IS NOT NULL
+                  AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND  v.VoucherDate <= @asOf
+                  AND  v.SourceDocType IN ('JOBCARD','STORE_SALE')
+                GROUP BY l.PartyID, v.VoucherID, v.VoucherDate, v.SourceDocType
+            ),
+            Allocations AS (
+                SELECT l.AllocatedToVoucherID AS InvVoucherID, SUM(l.Credit) AS Paid
+                FROM   dms_PartyLedger l
+                JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+                WHERE  l.Credit > 0 AND l.AllocatedToVoucherID IS NOT NULL
+                  AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND  v.VoucherDate <= @asOf
+                GROUP BY l.AllocatedToVoucherID
+            ),
+            OpenInv AS (
+                SELECT i.PartyID, i.InvDate, i.SourceDocType,
+                       i.Invoiced,
+                       ISNULL(a.Paid, 0) AS Paid,
+                       i.Invoiced - ISNULL(a.Paid, 0) AS Outstanding,
+                       DATEDIFF(day, i.InvDate, @asOf) AS AgeDays
+                FROM   InvoiceDrs i
+                LEFT   JOIN Allocations a ON a.InvVoucherID = i.InvVoucherID
+                WHERE  i.Invoiced - ISNULL(a.Paid, 0) > 0.005
+            )
+            SELECT o.PartyID, p.PartyName, p.PartyType,
+                   ISNULL(p.PartyCategory, 'Unclassified') AS Category,
+                   COUNT(*)            AS InvoiceCount,
+                   SUM(o.Invoiced)     AS Invoiced,
+                   SUM(o.Paid)         AS Paid,
+                   SUM(o.Outstanding)  AS Outstanding,
+                   SUM(CASE WHEN o.SourceDocType='JOBCARD'    THEN o.Outstanding ELSE 0 END) AS JobCardDue,
+                   SUM(CASE WHEN o.SourceDocType='STORE_SALE' THEN o.Outstanding ELSE 0 END) AS StoreSaleDue,
+                   SUM(CASE WHEN o.AgeDays <= 30 THEN o.Outstanding ELSE 0 END) AS [Current],
+                   SUM(CASE WHEN o.AgeDays BETWEEN 31 AND 60 THEN o.Outstanding ELSE 0 END) AS b31_60,
+                   SUM(CASE WHEN o.AgeDays BETWEEN 61 AND 90 THEN o.Outstanding ELSE 0 END) AS b61_90,
+                   SUM(CASE WHEN o.AgeDays > 90 THEN o.Outstanding ELSE 0 END) AS b90plus,
+                   MAX(o.AgeDays)      AS OldestDays
+            FROM   OpenInv o
+            JOIN   gen_PartiesInfo p ON p.PartyID = o.PartyID
+            WHERE  1=1 ${catClause}
+            GROUP  BY o.PartyID, p.PartyName, p.PartyType, ISNULL(p.PartyCategory, 'Unclassified')
+            ORDER  BY SUM(o.Outstanding) DESC`);
+
+        const num = (n) => +Number(n || 0).toFixed(2);
+        const rows = r.recordset.map(x => ({
+            PartyID: x.PartyID,
+            PartyName: x.PartyName,
+            PartyType: x.PartyType,
+            Category: x.Category,
+            CategoryLabel: CATEGORY_LABEL[x.Category] || x.Category,
+            InvoiceCount: Number(x.InvoiceCount || 0),
+            Invoiced:    num(x.Invoiced),
+            Paid:        num(x.Paid),
+            Outstanding: num(x.Outstanding),
+            JobCardDue:  num(x.JobCardDue),
+            StoreSaleDue:num(x.StoreSaleDue),
+            current:     num(x.Current),
+            b31_60:      num(x.b31_60),
+            b61_90:      num(x.b61_90),
+            b90plus:     num(x.b90plus),
+            OldestDays:  Number(x.OldestDays || 0),
+        }));
+
+        const blank = () => ({ parties: 0, invoices: 0, invoiced: 0, paid: 0, outstanding: 0,
+                               jobCardDue: 0, storeSaleDue: 0, current: 0, b31_60: 0, b61_90: 0, b90plus: 0 });
+        const byCategory = {};
+        const totals = blank();
+        for (const x of rows) {
+            const t = byCategory[x.Category] || (byCategory[x.Category] = { ...blank(), Category: x.Category, CategoryLabel: x.CategoryLabel });
+            for (const [k, v] of [['parties', 1], ['invoices', x.InvoiceCount], ['invoiced', x.Invoiced], ['paid', x.Paid],
+                                  ['outstanding', x.Outstanding], ['jobCardDue', x.JobCardDue], ['storeSaleDue', x.StoreSaleDue],
+                                  ['current', x.current], ['b31_60', x.b31_60], ['b61_90', x.b61_90], ['b90plus', x.b90plus]]) {
+                t[k] += v; totals[k] += v;
+            }
+        }
+        for (const t of [...Object.values(byCategory), totals]) {
+            for (const k of Object.keys(t)) if (typeof t[k] === 'number') t[k] = +t[k].toFixed(2);
+        }
+
+        res.json({
+            asOf: asOfRaw.toISOString().slice(0, 10),
+            category: category || 'ALL',
+            rows,
+            byCategory: Object.values(byCategory).sort((a, b) => b.outstanding - a.outstanding),
+            totals,
+        });
+    } catch (err) {
+        console.error('Party outstanding by type error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /reports/recovery-by-type?from=&to=&category=
+ *
+ * What was actually recovered from parties in the period, grouped by what kind
+ * of party they are. Owner decision 2026-09-19: only receipts matched against a
+ * specific job card or store sale count as recovery.
+ *
+ * Receipts that were never matched to an invoice are reported separately, as a
+ * total, so money sitting on account is visible rather than missing.
+ */
+exports.getRecoveryByType = async (req, res) => {
+    try {
+        const from = req.query.from ? new Date(req.query.from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        const to   = endOfDay(req.query.to ? new Date(req.query.to) : new Date());
+        const category = req.query.category && req.query.category !== 'ALL' ? String(req.query.category) : null;
+
+        const pool = await getPool();
+        const rq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+        let catClause = '';
+        if (category) {
+            if (category === 'Unclassified') catClause = ' AND p.PartyCategory IS NULL';
+            else { rq.input('cat', sql.NVarChar(20), category); catClause = ' AND p.PartyCategory = @cat'; }
+        }
+
+        const r = await rq.query(`
+            SELECT l.PartyID, p.PartyName, p.PartyType,
+                   ISNULL(p.PartyCategory, 'Unclassified') AS Category,
+                   SUM(l.Credit) AS Recovered,
+                   COUNT(DISTINCT l.VoucherID) AS Receipts,
+                   COUNT(DISTINCT l.AllocatedToVoucherID) AS InvoicesSettled,
+                   SUM(CASE WHEN inv.SourceDocType='JOBCARD'    THEN l.Credit ELSE 0 END) AS FromJobCards,
+                   SUM(CASE WHEN inv.SourceDocType='STORE_SALE' THEN l.Credit ELSE 0 END) AS FromStoreSales,
+                   MAX(v.VoucherDate) AS LastReceiptDate
+            FROM   dms_PartyLedger l
+            JOIN   data_FinanceVoucherInfo v   ON v.VoucherID = l.VoucherID
+            JOIN   gen_PartiesInfo p           ON p.PartyID   = l.PartyID
+            LEFT   JOIN data_FinanceVoucherInfo inv ON inv.VoucherID = l.AllocatedToVoucherID
+            WHERE  l.Credit > 0
+              AND  l.AllocatedToVoucherID IS NOT NULL
+              AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+              AND  v.VoucherDate BETWEEN @from AND @to
+              ${catClause}
+            GROUP  BY l.PartyID, p.PartyName, p.PartyType, ISNULL(p.PartyCategory, 'Unclassified')
+            ORDER  BY SUM(l.Credit) DESC`);
+
+        // Money received in the same period that was never matched to an
+        // invoice — excluded from the figures above by the owner's rule, but
+        // shown so it is not invisible.
+        const unRq = pool.request()
+            .input('from', sql.DateTime, from)
+            .input('to',   sql.DateTime, to);
+        if (category && category !== 'Unclassified') unRq.input('cat', sql.NVarChar(20), category);
+        const un = await unRq.query(`
+            SELECT ISNULL(SUM(l.Credit), 0) AS Unallocated,
+                   COUNT(DISTINCT l.VoucherID) AS Receipts
+            FROM   dms_PartyLedger l
+            JOIN   data_FinanceVoucherInfo v ON v.VoucherID = l.VoucherID
+            JOIN   gen_PartiesInfo p         ON p.PartyID   = l.PartyID
+            WHERE  l.Credit > 0
+              AND  l.AllocatedToVoucherID IS NULL
+              AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL
+              AND  v.VoucherDate BETWEEN @from AND @to
+              ${catClause}`);
+
+        const num = (n) => +Number(n || 0).toFixed(2);
+        const rows = r.recordset.map(x => ({
+            PartyID: x.PartyID,
+            PartyName: x.PartyName,
+            PartyType: x.PartyType,
+            Category: x.Category,
+            CategoryLabel: CATEGORY_LABEL[x.Category] || x.Category,
+            Recovered:       num(x.Recovered),
+            FromJobCards:    num(x.FromJobCards),
+            FromStoreSales:  num(x.FromStoreSales),
+            Receipts:        Number(x.Receipts || 0),
+            InvoicesSettled: Number(x.InvoicesSettled || 0),
+            LastReceiptDate: x.LastReceiptDate ? x.LastReceiptDate.toISOString().slice(0, 10) : null,
+        }));
+
+        const byCategory = {};
+        let total = 0, jc = 0, ss = 0;
+        for (const x of rows) {
+            const t = byCategory[x.Category] || (byCategory[x.Category] = {
+                Category: x.Category, CategoryLabel: x.CategoryLabel, parties: 0, recovered: 0, fromJobCards: 0, fromStoreSales: 0, receipts: 0 });
+            t.parties += 1; t.recovered += x.Recovered; t.fromJobCards += x.FromJobCards;
+            t.fromStoreSales += x.FromStoreSales; t.receipts += x.Receipts;
+            total += x.Recovered; jc += x.FromJobCards; ss += x.FromStoreSales;
+        }
+        for (const t of Object.values(byCategory)) {
+            for (const k of ['recovered', 'fromJobCards', 'fromStoreSales']) t[k] = +t[k].toFixed(2);
+        }
+
+        res.json({
+            from: from.toISOString().slice(0, 10),
+            to:   to.toISOString().slice(0, 10),
+            category: category || 'ALL',
+            rows,
+            byCategory: Object.values(byCategory).sort((a, b) => b.recovered - a.recovered),
+            totals: { recovered: +total.toFixed(2), fromJobCards: +jc.toFixed(2), fromStoreSales: +ss.toFixed(2), parties: rows.length },
+            unallocated: {
+                amount:   num(un.recordset[0]?.Unallocated),
+                receipts: Number(un.recordset[0]?.Receipts || 0),
+                note: 'Received in this period but not matched to a job card or store sale, so not counted as recovery.',
+            },
+        });
+    } catch (err) {
+        console.error('Recovery by type error:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 /**
  * Party Job Card History — owner ask 2026-09-08: pick a credit party, see
  * every Job Card ever raised for them and whether it's been paid.

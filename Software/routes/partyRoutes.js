@@ -23,5 +23,8 @@ router.post('/business-access/grant-all', requireAccess('crm_party_access'),    
 
 router.get( '/:id',                       requirePerm('crm_parties', 'view'),   partyController.getParty);
 router.put( '/:id',                       requirePerm('crm_parties', 'edit'),   partyController.updateParty);
+// Individual / Corporate / Insurance / Master Motors — the classification the
+// receivable and recovery reports group by.
+router.patch('/:id/category',             requirePerm('crm_parties', 'edit'),   partyController.setPartyCategory);
 
 module.exports = router;

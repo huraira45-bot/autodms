@@ -164,6 +164,7 @@ export const NAV_ITEMS = [
     // ── Parties (grouped under Admin section for compactness) ─
     { id: 'a-parties',   moduleGroup: 'admin', label: 'Credit Parties',        path: '/customers',            icon: Users, moduleKey: 'crm_parties',    description: 'Named customer / supplier master.', keywords: 'party' },
     { id: 'a-pba',       moduleGroup: 'admin', label: 'Party Business Access', path: '/party-business-access', icon: ShieldCheck, moduleKey: 'crm_parties', description: 'Which business each party belongs to.', keywords: 'access' },
+    { id: 'a-pcat',      moduleGroup: 'admin', label: 'Party Categories',      path: '/parties/categories',   icon: Users, moduleKey: 'crm_parties', description: 'Individual, Corporate, Insurance or Master Motors — what the unpaid and recovery reports group by.', keywords: 'category individual corporate insurance master motors classify' },
 
     // ── Reports ──────────────────────────────────────────────
     // Owner ask 2026-07-17: each report tagged with a `section` label so the
@@ -183,6 +184,8 @@ export const NAV_ITEMS = [
     { id: 'r-cust-stmt', moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Customer Statement',  path: '/reports/customer-statement',  icon: UserCog,      permission: 'report:customer_statement' },
     { id: 'r-sup-stmt',  moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Supplier Statement',  path: '/reports/supplier-statement',  icon: Truck,        permission: 'report:supplier_statement' },
     { id: 'r-p-open',    moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Party Open Invoices', path: '/reports/party-open-invoices', icon: ListChecks,   permission: 'report:party_open_invoices' },
+    { id: 'r-p-cat',     moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Unpaid by Party Category', path: '/reports/unpaid-by-category', icon: Users, permission: 'report:party_outstanding_by_type', description: 'Who owes what, with aging, by Individual / Corporate / Insurance / Master Motors.', keywords: 'unpaid outstanding aging category individual corporate insurance' },
+    { id: 'r-p-rec',     moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Recovery by Party Category', path: '/reports/recovery-by-category', icon: Wallet, permission: 'report:recovery_by_type', description: 'What was actually recovered in a period, by kind of party.', keywords: 'recovery recovered collection received category' },
     { id: 'r-p-jc',      moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Party Job Card History', path: '/reports/party-job-cards', icon: ClipboardList, permission: 'report:party_job_cards', description: 'Every job card for a party, paid or unpaid.', keywords: 'party job card paid unpaid history' },
     { id: 'r-p-ssr',     moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Store Sale Receivables', path: '/reports/store-sale-receivables', icon: ListChecks, permission: 'report:store_sale_receivables' },
     { id: 'r-p-ssr-custom', moduleGroup: 'reports', section: 'Party Ledgers & Aging', label: 'Store Sale Receivables (Custom View)', path: '/reports/store-sale-receivables-custom', icon: Wallet, permission: 'report:store_sale_receivables_custom', description: 'Same report, minus whichever parties are hidden via its settings page.' },
