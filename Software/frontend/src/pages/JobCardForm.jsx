@@ -1201,7 +1201,15 @@ export default function JobCardForm() {
                                     <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                                         {['Cash', 'Credit', 'POS', 'Bank Transfer'].map(pt => (
                                             <label key={pt} style={{ ...S.chk, cursor: disabled ? 'default' : 'pointer' }}>
-                                                <input type="radio" name="payType" value={pt} checked={form.PaymentType === pt} onChange={() => !disabled && f('PaymentType', pt)} /> {pt === 'POS' ? 'POS CLEAR' : pt}
+                                                <input type="radio" name="payType" value={pt} checked={form.PaymentType === pt}
+                                                       onChange={() => {
+                                                           if (disabled) return;
+                                                           f('PaymentType', pt);
+                                                           // The Party picker only shows for Credit, so a party
+                                                           // chosen earlier would otherwise stay on the job card
+                                                           // and print (owner report 2026-09-21).
+                                                           if (pt !== 'Credit' && form.PartyID) f('PartyID', '');
+                                                       }} /> {pt === 'POS' ? 'POS CLEAR' : pt}
                                             </label>
                                         ))}
                                     </div>

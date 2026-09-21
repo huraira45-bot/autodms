@@ -1000,7 +1000,9 @@ exports.saveJobCard = async (req, res) => {
                     .input('fuel', sql.NVarChar(20), FuelLevel)
                     .input('voc', sql.NVarChar(sql.MAX), VOCRemarks)
                     .input('custType', sql.NVarChar(20), CustomerType)
-                    .input('partyId', sql.Int, PartyID || null)
+                    // Only a credit job card carries a party — see the same
+                    // guard in jobCardSaveService (owner report 2026-09-21).
+                    .input('partyId', sql.Int, PaymentType === 'Credit' ? (PartyID || null) : null)
                     .input('pmType', sql.NVarChar(50), PMType || 'None')
                     .input('advisor', sql.NVarChar(100), ServiceAdvisor || null)
                     .input('advisorId', sql.Int, ServiceAdvisorID ? parseInt(ServiceAdvisorID) : null)

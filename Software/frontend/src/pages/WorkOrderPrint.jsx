@@ -116,7 +116,12 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                 <tbody>
                     <tr>
                         <td className="lbl">Customer Name</td><td colSpan={3} className="val">{jc.CustomerName || jc.BringByName || jc.PartyName || ''}</td>
-                        <td className="lbl">Party Name</td><td colSpan={2} className="val">{jc.PartyName || ''}</td>
+                        {/* The party is the credit counterparty. On a cash job
+                            card it is meaningless, and on older records a party
+                            left over from switching Credit -> Cash was still
+                            being printed (owner report 2026-09-21). */}
+                        <td className="lbl">Party Name</td>
+                        <td colSpan={2} className="val">{jc.PaymentType === 'Credit' ? (jc.PartyName || '') : ''}</td>
                         <td className="lbl wo-lbl" rowSpan={2}>WO Number</td>
                         <td className="val wo-val" rowSpan={2}>{jc.JobCardNo || ''}</td>
                     </tr>

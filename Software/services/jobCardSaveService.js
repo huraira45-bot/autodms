@@ -191,7 +191,11 @@ async function createJobCardInTx(transaction, body, user, pstRate) {
         .input('fuel', sql.NVarChar(20), FuelLevel || '')
         .input('voc', sql.NVarChar(sql.MAX), VOCRemarks || '')
         .input('custType', sql.NVarChar(20), CustomerType || 'Walk-in')
-        .input('partyId', sql.Int, PartyID || null)
+        // A party belongs to a CREDIT job card. Anything else (Cash, POS, Bank
+        // Transfer) must not keep a party left behind by switching the payment
+        // type — a cash B&P job was printing an insurer as its party (owner
+        // report 2026-09-21).
+        .input('partyId', sql.Int, PaymentType === 'Credit' ? (PartyID || null) : null)
         .input('companyId', sql.Int, 1)
         .input('pmType', sql.NVarChar(50), PMType || 'None')
         .input('advisor', sql.NVarChar(100), ServiceAdvisor || null)
