@@ -33,7 +33,18 @@ exports.listPickableAccounts = async (req, res) => {
             WHERE c.GLLevel = 4
               AND c.Status = 1
               AND (LEFT(c.GLCode, 3) = '102' OR LEFT(c.GLCode, 3) = '201')
+              -- One party per account (UX_gen_PartiesInfo_PartyGLID). Offering
+              -- an account that already belongs to somebody only produced a
+              -- duplicate-key error at save time (owner report 2026-09-22).
+              AND NOT EXISTS (SELECT 1 FROM gen_PartiesInfo x WHERE x.PartyGLID = c.GLCAID)
             ORDER BY c.GLCode`);
+
+        const taken = await pool.request().query(`
+            SELECT COUNT(*) AS n
+            FROM GLChartOFAccount c
+            WHERE c.GLLevel = 4 AND c.Status = 1
+              AND (LEFT(c.GLCode, 3) = '102' OR LEFT(c.GLCode, 3) = '201')
+              AND EXISTS (SELECT 1 FROM gen_PartiesInfo x WHERE x.PartyGLID = c.GLCAID)`);
 
         const grouped = {};
         for (const row of r.recordset) {
@@ -46,7 +57,7 @@ exports.listPickableAccounts = async (req, res) => {
                 Nature:  row.GLNature === 1 ? 'Debit' : 'Credit',
             });
         }
-        res.json({ groups: grouped });
+        res.json({ groups: grouped, excludedTaken: taken.recordset[0].n });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -56,7 +67,7 @@ exports.listPickableAccounts = async (req, res) => {
  * Validate that a user-supplied PartyGLID is a real, active L4 leaf under an
  * allowed parent. Returns the account row for echoing back in the response.
  */
-async function validatePartyGLID(pool, partyGLID) {
+async function validatePartyGLID(pool, partyGLID, excludePartyID = null) {
     if (!partyGLID) throw new Error('PartyGLID is required — pick the GL account this party posts against.');
     const r = await pool.request()
         .input('id', sql.Int, parseInt(partyGLID))
@@ -69,6 +80,25 @@ async function validatePartyGLID(pool, partyGLID) {
     const prefix = acct.GLCode.substring(0, 3);
     if (!PICKABLE_PARENT_PREFIXES.includes(prefix)) {
         throw new Error(`GL account ${acct.GLCode} is not under a Current Asset / Current Liability — parties must post against receivables, payables, or advances.`);
+    }
+
+    // Every party has its own account, enforced by UX_gen_PartiesInfo_PartyGLID.
+    // Say who holds it rather than letting the insert fail on an index name
+    // (owner report 2026-09-22, creating a customer from the booking form).
+    const held = await pool.request()
+        .input('gl', sql.Int, acct.GLCAID)
+        .input('ex', sql.Int, excludePartyID ? parseInt(excludePartyID) : null)
+        .query(`SELECT TOP 1 PartyID, PartyName FROM gen_PartiesInfo
+                WHERE PartyGLID = @gl AND (@ex IS NULL OR PartyID <> @ex)`);
+    if (held.recordset.length) {
+        const h = held.recordset[0];
+        const err = new Error(
+            `Account ${acct.GLCode} already belongs to "${h.PartyName}". Each party has its own account, so search for that customer `
+            + `in the customer box instead of creating a new one — or pick a different account / let the system open a new one.`);
+        err.statusCode = 409;
+        err.existingPartyID = h.PartyID;
+        err.existingPartyName = h.PartyName;
+        throw err;
     }
     return acct;
 }
@@ -457,7 +487,10 @@ exports.createParty = async (req, res) => {
         });
     } catch (err) {
         console.error('createParty:', err);
-        res.status(400).json({ error: err.message });
+        res.status(err.statusCode || 400).json({
+            error: err.message,
+            ...(err.existingPartyID ? { existingPartyID: err.existingPartyID, existingPartyName: err.existingPartyName } : {}),
+        });
     }
 };
 
@@ -473,7 +506,8 @@ exports.updateParty = async (req, res) => {
         const ntn  = normaliseNTN(b.NTNNO);
 
         const pool = await getPool();
-        const control = await validatePartyGLID(pool, b.PartyGLID);
+        // A party keeps its own account on edit, so exclude itself from the check.
+        const control = await validatePartyGLID(pool, b.PartyGLID, id);
 
         // Duplicate checks against OTHER parties
         const dup = await pool.request()
@@ -533,6 +567,9 @@ exports.updateParty = async (req, res) => {
         res.json({ message: 'Party updated', PartyGLID: control.GLCAID });
     } catch (err) {
         console.error('updateParty:', err);
-        res.status(400).json({ error: err.message });
+        res.status(err.statusCode || 400).json({
+            error: err.message,
+            ...(err.existingPartyID ? { existingPartyID: err.existingPartyID, existingPartyName: err.existingPartyName } : {}),
+        });
     }
 };
