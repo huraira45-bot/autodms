@@ -16,12 +16,19 @@
  * per column, whether a blank is an empty field or a field we do not hold.
  */
 const path = require('path');
+const fs = require('fs');
 const XLSX = require('xlsx');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { getPool } = require('../config/db');
 
+// The template lives on the HR machine, not on the server. If it is not where
+// we are pointed, the sheet is built from scratch with the same two-row header
+// so this still runs anywhere (owner hit exactly this on live, 2026-09-22).
 const TEMPLATE = process.argv[2] || 'C:/Users/ServerDeskop/Desktop/DATA/Employee Details Sheet.xlsx';
-const OUT = process.argv[3] || TEMPLATE.replace(/\.xlsx$/i, '') + ` - FILLED ${new Date().toISOString().slice(0, 10)}.xlsx`;
+const HAS_TEMPLATE = fs.existsSync(TEMPLATE);
+const OUT = process.argv[3] || (HAS_TEMPLATE
+    ? TEMPLATE.replace(/\.xlsx$/i, '') + ` - FILLED ${new Date().toISOString().slice(0, 10)}.xlsx`
+    : path.join(process.cwd(), `Employee Details Sheet - FILLED ${new Date().toISOString().slice(0, 10)}.xlsx`));
 const DEALERSHIP = process.env.DEALERSHIP_NAME || 'Changan Multan Motors';
 
 const clean = (v) => (v === null || v === undefined ? '' : String(v).trim());
@@ -93,9 +100,34 @@ const COLUMNS = [
                       ORDER BY x.PassingYear DESC, x.EmployeeEducationDetailID DESC) ed
         ORDER  BY e.IsActive DESC, e.EmployeeName`)).recordset;
 
-    const wb = XLSX.readFile(TEMPLATE, { cellStyles: true, cellDates: true });
-    const ws = wb.Sheets['Employee Details'];
-    if (!ws) throw new Error('The template has no "Employee Details" sheet.');
+    let wb, ws;
+    if (HAS_TEMPLATE) {
+        wb = XLSX.readFile(TEMPLATE, { cellStyles: true, cellDates: true });
+        ws = wb.Sheets['Employee Details'];
+        if (!ws) throw new Error('The template has no "Employee Details" sheet.');
+    } else {
+        console.log(`Template not found at ${TEMPLATE} — building the sheet from scratch with the same headers.\n`);
+        const head1 = ['S.N', 'Emp. ID', 'Punch Codes', 'Prefix Name', 'Employee Name', 'Father Name', 'Cell No',
+            "Employee's NIC", 'Issuance Date of CNIC', 'Expiry date of CNIC', 'DOB', 'Age', 'Present Address',
+            'Permanent Address', 'Emergency Contact Person', 'Emergency Contact Relation', 'Personal Email',
+            'Emergency Contact No.', 'Designation', 'Department', 'Sub-Department', 'Dealership Name', 'DOJ',
+            'Current', 'Job Tenure', 'Joining\r\nConfirmation Due', 'Joining Salary', 'Current Salary',
+            'Other Benefits', '', '', '', '', 'Service Status', '', 'Religion', 'Education', 'Institute',
+            'Bank Name', 'Account N'];
+        const head2 = new Array(40).fill('');
+        ['Vehicle', 'Fuel', 'Lunch ', 'other Allowance', 'Others'].forEach((v, i) => { head2[28 + i] = v; });
+        head2[33] = 'Active'; head2[34] = 'Resigned';
+        ws = XLSX.utils.aoa_to_sheet([head1, head2]);
+        ws['!merges'] = [
+            ...[...Array(28).keys()].map(c => ({ s: { r: 0, c }, e: { r: 1, c } })),   // A..AB span both rows
+            { s: { r: 0, c: 28 }, e: { r: 0, c: 32 } },                                 // Other Benefits
+            { s: { r: 0, c: 33 }, e: { r: 0, c: 34 } },                                 // Service Status
+            ...[35, 36, 37, 38, 39].map(c => ({ s: { r: 0, c }, e: { r: 1, c } })),
+        ];
+        ws['!cols'] = head1.map((h, i) => ({ wch: [12, 13, 14, 25, 22, 25, 22].includes(i) ? 24 : Math.max(10, Math.min(24, String(h).length + 2)) }));
+        wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Employee Details');
+    }
 
     // Clear any previous data rows, leaving the two header rows untouched.
     const range = XLSX.utils.decode_range(ws['!ref']);
