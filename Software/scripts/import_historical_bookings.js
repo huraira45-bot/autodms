@@ -47,6 +47,17 @@ if (!FILE) {
     console.error('usage: node scripts/import_historical_bookings.js "<file.xlsx>" [--commit] [--executive <employeeId>] [--user "<name>"] [--partial]');
     process.exit(1);
 }
+if (!require('fs').existsSync(FILE)) {
+    console.error(`There is no file at:\n  ${FILE}\n`);
+    if (/\.\.\.|<.*>/.test(FILE)) {
+        console.error('That looks like a placeholder rather than a real path. Put the full path to the');
+        console.error('spreadsheet in quotes, e.g. "D:\\saher 2.0\\autodms\\Software\\customers.xlsx".');
+    } else {
+        console.error('Check the path. The sheet has to be on THIS machine — the import talks to the');
+        console.error('database directly, so copy the file to the server first.');
+    }
+    process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // Reading the sheet
