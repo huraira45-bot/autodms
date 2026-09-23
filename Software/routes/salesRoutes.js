@@ -104,6 +104,7 @@ router.get( '/historical/pending-links',                  requireAny('sales_admi
 router.get( '/historical/bookings/:id/linkable-vouchers', requireAny('sales_admin_settings', 'sales_gm'), hist.linkableVouchers);
 // Two steps on purpose: record the payment from the old file first, link its
 // ledger voucher whenever it is found.
+router.patch('/historical/bookings/:id/date',             requireAny('sales_admin_settings', 'sales_gm'), hist.setBookingDate);
 router.post('/historical/bookings/:id/payment',           requireAny('sales_admin_settings', 'sales_gm'), hist.recordPayment);
 router.post('/historical/payments/:paymentId/link',       requireAny('sales_admin_settings', 'sales_gm'), hist.linkPayment);
 router.post('/historical/payments/:paymentId/unlink',     requireAny('sales_admin_settings', 'sales_gm'), hist.unlinkPayment);

@@ -11,7 +11,7 @@ import axios from 'axios';
 import {
     ArrowLeft, Loader2, RefreshCw, Plus, DollarSign, Ban, Car,
     User, Briefcase, Clock, Link2, FileCheck2, Send, AlertTriangle,
-    Upload, Trash2, Paperclip, Printer, CreditCard, X,
+    Upload, Trash2, Paperclip, Printer, CreditCard, X, CalendarDays,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
@@ -57,6 +57,9 @@ export default function BookingDetail() {
     // separate steps (owner ask 2026-09-18).
     const [showHistPayment, setShowHistPayment] = useState(false);
     const [showCancel, setShowCancel] = useState(false);
+    // Imported historical bookings can arrive without a date — the owner's
+    // August sheet had none — so it is filled in here afterwards.
+    const [showBookingDate, setShowBookingDate] = useState(false);
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
@@ -123,6 +126,8 @@ export default function BookingDetail() {
     const remaining = vehicleRemaining;
     const paidPct = data.NegotiatedPrice > 0 ? (data.AmountPaidToDate / data.NegotiatedPrice * 100) : 0;
     const canPay = ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
+    const canSetBookingDate = data.IsHistorical &&
+        (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
         (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
     const canAllocate = ['PendingPayment', 'MasterInvoicePending'].includes(data.Status) &&
@@ -170,17 +175,27 @@ export default function BookingDetail() {
                         {data.BookingNo}
                         <Pill bg={sty.bg} col={sty.col}>{sty.label}</Pill>
                         {data.IsHistorical && <Pill bg="#f1f5f9" col="#475569">Historical record</Pill>}
+                        {data.IsHistorical && !data.BookingDate && <Pill bg="#fef3c7" col="#92400e">No booking date</Pill>}
                     </span>
                 }
                 subtitle={`${data.PartyName} · ${data.VariantCode} ${data.VariantName}`
-                    + (data.IsHistorical && data.BookingDate
-                        ? ` · booked ${new Date(data.BookingDate).toLocaleDateString()}, entered afterwards — payments link to vouchers already in the ledger`
+                    + (data.IsHistorical
+                        ? (data.BookingDate
+                            ? ` · booked ${new Date(data.BookingDate).toLocaleDateString()}, entered afterwards — payments link to vouchers already in the ledger`
+                            : ' · the date of the deal has not been recorded yet — payments link to vouchers already in the ledger')
                         : '')}
                 actions={
                     <>
                         <button type="button" className="erp-btn erp-btn-sm" onClick={() => navigate('/sales/bookings')}>
                             <ArrowLeft size={14} /> Back
                         </button>
+                        {canSetBookingDate && (
+                            <button type="button"
+                                    className={`erp-btn erp-btn-sm${data.BookingDate ? '' : ' erp-btn-primary'}`}
+                                    onClick={() => setShowBookingDate(true)}>
+                                <CalendarDays size={14} /> {data.BookingDate ? 'Booking date' : 'Set booking date'}
+                            </button>
+                        )}
                         {canCancel && (
                             <button type="button" className="erp-btn erp-btn-sm erp-btn-danger" onClick={() => setShowCancel(true)}>
                                 <Ban size={14} /> Cancel
@@ -602,6 +617,11 @@ export default function BookingDetail() {
             )}
 
 
+            {showBookingDate && (
+                <BookingDateModal booking={data}
+                    onClose={() => setShowBookingDate(false)}
+                    onSaved={() => { setShowBookingDate(false); flash('ok', 'Booking date saved'); load(); }} />
+            )}
             {showCancel && (
                 <CancelModal booking={data}
                     onClose={() => setShowCancel(false)}
@@ -1364,6 +1384,49 @@ function CoaLinkModal({ partyId, partyName, onClose, onSaved }) {
  * workings, so getting it wrong pays the wrong person — but it could only ever
  * be set from whoever happened to create the booking.
  */
+/**
+ * The date an old deal was actually struck.
+ *
+ * Historical bookings imported from the owner's customer sheet came in without
+ * one — the dates were still being dug out of the files — so this is how they
+ * get filled in, one booking at a time (owner ask 2026-09-23).
+ */
+function BookingDateModal({ booking, onClose, onSaved }) {
+    const iso = (d) => new Date(d).toISOString().slice(0, 10);
+    const [date, setDate] = useState(booking.BookingDate ? iso(booking.BookingDate) : '');
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+
+    const save = async () => {
+        if (!date) { setErr('Pick the day the customer booked.'); return; }
+        setBusy(true); setErr(null);
+        try {
+            await axios.patch(`${API}/sales/historical/bookings/${booking.BookingID}/date`, { BookingDate: date });
+            onSaved(date);
+        } catch (e) { setErr(e.response?.data?.error || e.message); }
+        setBusy(false);
+    };
+
+    return (
+        <Shell title={`Booking date — ${booking.BookingNo}`} onClose={onClose}>
+            {err && <Err>{err}</Err>}
+            <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: '0.85rem' }}>
+                Currently: <strong>{booking.BookingDate
+                    ? new Date(booking.BookingDate).toLocaleDateString('en-PK')
+                    : 'not recorded'}</strong>
+            </div>
+            <Field label="Date of the deal *">
+                <input type="date" style={inputStyle} value={date} max={iso(Date.now())}
+                       onChange={e => { setDate(e.target.value); setErr(null); }} />
+            </Field>
+            <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: 10 }}>
+                The day the customer actually booked, not today. Reports date this booking by it.
+            </div>
+            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Save date" busy={busy} disabled={!date} />
+        </Shell>
+    );
+}
+
 function ChangeExecutiveModal({ booking, onClose, onSaved }) {
     const [people, setPeople] = useState([]);
     const [exeId, setExeId] = useState(booking.CreatedBy_SalesExecutiveID || '');

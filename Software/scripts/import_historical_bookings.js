@@ -9,9 +9,11 @@
  *
  * Decisions taken with the owner (2026-09-23):
  *   - every booking goes in as IsHistorical with status PendingPayment;
- *   - the booking date comes from a date column the owner adds to the sheet —
- *     there is no sensible default, and a wrong date on 93 financial records is
- *     not something to guess at;
+ *   - the booking date is OPTIONAL (owner, 2026-09-23: the dates were still
+ *     being dug out of the files, so the deals go on record first and staff
+ *     fill the date in afterwards on the booking page). A booking with no date
+ *     gets none rather than a made-up one, and carries a "No booking date"
+ *     mark until somebody sets it;
  *   - the A/C number in the sheet is an account that ALREADY exists in the
  *     chart of accounts, so this never creates GL accounts. A row whose account
  *     is missing is reported and skipped, not invented;
@@ -159,8 +161,12 @@ function planRow(rec, look) {
     const p = { rec, problems: [] };
     if (rec.duplicateOf) { p.action = 'skip'; p.note = `same customer as row ${rec.duplicateOf}`; return p; }
 
+    // No date is allowed: the deal still goes on record and the date is filled
+    // in later on the booking page. Only an unreadable one is a problem.
     const d = parseBookingDate(rec.dateCell);
-    if (d.error) p.problems.push(d.error); else { p.date = d.date; p.ambiguous = d.ambiguous; }
+    if (d.error === 'no booking date') p.date = null;
+    else if (d.error) p.problems.push(d.error);
+    else { p.date = d.date; p.ambiguous = d.ambiguous; }
     if (p.date && p.date.getTime() > Date.now() + 86400000) p.problems.push('booking date is in the future');
     if (!(rec.price > 0)) p.problems.push('no retail price');
 
@@ -192,10 +198,13 @@ async function bookingNoForYear(tx, year) {
 }
 
 async function alreadyImported(pool, partyId, variantId, date) {
+    // A dateless import is matched on customer and variant alone, so running
+    // this again before the dates are filled in does not double anything up.
     const r = await pool.request()
-        .input('p', sql.Int, partyId).input('v', sql.Int, variantId).input('d', sql.Date, date)
+        .input('p', sql.Int, partyId).input('v', sql.Int, variantId).input('d', sql.Date, date || null)
         .query(`SELECT TOP 1 BookingNo FROM dms_SalesBookings
-                WHERE IsHistorical = 1 AND PartyID=@p AND VehicleVariantID=@v AND CAST(BookingDate AS DATE)=@d`);
+                WHERE IsHistorical = 1 AND PartyID=@p AND VehicleVariantID=@v
+                  AND ((@d IS NULL AND BookingDate IS NULL) OR CAST(BookingDate AS DATE)=@d)`);
     return r.recordset.length ? r.recordset[0].BookingNo : null;
 }
 
@@ -232,7 +241,8 @@ async function importOne(pool, p) {
             p.categorised = true;
         }
 
-        const bookingNo = await bookingNoForYear(tx, p.date.getFullYear());
+        // With no date, the booking is numbered in the year it was entered.
+        const bookingNo = await bookingNoForYear(tx, (p.date || new Date()).getFullYear());
         const br = await new sql.Request(tx)
             .input('no', sql.NVarChar(20), bookingNo)
             .input('pid', sql.Int, partyId)
@@ -242,7 +252,7 @@ async function importOne(pool, p) {
             .input('st', sql.NVarChar(30), STATUS)
             .input('exe', sql.Int, EXECUTIVE)
             .input('exeN', sql.NVarChar(100), USERNAME)
-            .input('bd', sql.DateTime, p.date)
+            .input('bd', sql.DateTime, p.date || null)
             .query(`INSERT INTO dms_SalesBookings
                         (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
                          StandardPrice, NegotiatedPrice, Status,
@@ -250,7 +260,7 @@ async function importOne(pool, p) {
                          IsHistorical, BookingDate, HistoricalEnteredAt, CreatedAt)
                     OUTPUT INSERTED.BookingID
                     VALUES (@no, @pid, @mid, @vid, @price, @price, @st, @exe, @exeN,
-                            1, @bd, GETDATE(), @bd)`);
+                            1, @bd, GETDATE(), ISNULL(@bd, GETDATE()))`);
         const bookingId = br.recordset[0].BookingID;
 
         await new sql.Request(tx)
@@ -259,8 +269,9 @@ async function importOne(pool, p) {
             .input('emp', sql.Int, EXECUTIVE)
             .input('name', sql.NVarChar(100), USERNAME)
             .input('reason', sql.NVarChar(sql.MAX),
-                   `Historical booking imported from the August customer sheet (row ${p.rec.excelRow}) `
-                   + `for a deal dated ${iso(p.date)}. Payments are linked to vouchers already in the ledger; `
+                   `Historical booking imported from the customer sheet (row ${p.rec.excelRow}) `
+                   + (p.date ? `for a deal dated ${iso(p.date)}. ` : 'with no date yet — to be set on the booking page. ')
+                   + `Payments are linked to vouchers already in the ledger; `
                    + `nothing is posted to the GL and no staff incentive is raised.`)
             .query(`INSERT INTO dms_BookingStateTransitions
                         (BookingID, FromState, ToState, ActorEmployeeID, ActorName, ActorRole, Reason)
@@ -284,10 +295,8 @@ async function importOne(pool, p) {
     console.log(`sheet: ${sheetName} — ${rows.length} customer rows\n`);
 
     if (!hasDateColumn) {
-        console.error('There is no booking date column in this sheet.\n');
-        console.error('Add a column headed BOOKING DATE and put each deal\'s date in it, then run this again.');
-        console.error('Format the column as a date in Excel, or write dates as YYYY-MM-DD.');
-        process.exit(1);
+        console.log('Note: there is no BOOKING DATE column in this sheet, so every booking goes on');
+        console.log('      record without one. Staff set the date afterwards on the booking page.\n');
     }
 
     const pool = await getPool();
@@ -329,7 +338,7 @@ async function importOne(pool, p) {
     console.log('PLAN');
     toDo.slice(0, 200).forEach(p => console.log(
         `  row ${String(p.rec.excelRow).padStart(3)}  ${p.rec.ac.padEnd(10)} ${p.rec.name.slice(0, 34).padEnd(35)}`
-        + `${iso(p.date)}  ${money(p.rec.price).padStart(12)}  `
+        + `${(p.date ? iso(p.date) : 'no date').padEnd(11)} ${money(p.rec.price).padStart(12)}  `
         + (p.action === 'party+booking' ? 'create customer + booking' : 'booking (customer exists)')));
 
     const counts = plans.reduce((m, p) => { m[p.action] = (m[p.action] || 0) + 1; return m; }, {});
@@ -340,6 +349,8 @@ async function importOne(pool, p) {
     console.log(`  already imported          ${counts.already || 0}`);
     console.log(`  duplicate rows skipped    ${plans.filter(p => p.rec.duplicateOf).length}`);
     console.log(`  blocked                   ${blocked.length}`);
+    const undated = toDo.filter(p => !p.date).length;
+    console.log(`  without a booking date    ${undated}${undated ? '   <-- set these on the booking page afterwards' : ''}`);
     console.log(`  total value               PKR ${money(toDo.reduce((s, p) => s + p.rec.price, 0))}`);
 
     if (!COMMIT) {

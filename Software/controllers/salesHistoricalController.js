@@ -198,6 +198,69 @@ exports.createBooking = async (req, res) => {
 };
 
 /**
+ * PATCH /api/sales/historical/bookings/:id/date   { BookingDate }
+ *
+ * Owner ask 2026-09-23: the August deals were imported from the customer sheet
+ * before anyone had gone back through the files for the dates, so they went on
+ * record without one. This is how the date gets filled in afterwards, one
+ * booking at a time, without touching anything else about it.
+ *
+ * Historical bookings only — a normal booking's date is the day it was made and
+ * is not something to edit. CreatedAt moves with it, the same way createBooking
+ * backdates it, so the booking sits in the right place in date-ordered lists.
+ */
+exports.setBookingDate = async (req, res) => {
+    try {
+        const bookingId = parseInt(req.params.id);
+        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
+        if (!req.body?.BookingDate) return res.status(400).json({ error: 'Booking date is required.' });
+
+        const bookingDate = new Date(req.body.BookingDate);
+        if (isNaN(bookingDate.getTime())) return res.status(400).json({ error: 'Booking date is not a real date.' });
+        if (bookingDate.getTime() > Date.now() + 86400000) {
+            return res.status(400).json({ error: 'A historical booking cannot be dated in the future.' });
+        }
+
+        const pool = await getPool();
+        const booking = await loadBooking(pool, bookingId);
+        if (!booking.IsHistorical) {
+            fail('Only a historical booking can be dated. A normal booking is dated by the day it was made.');
+        }
+
+        const was = await pool.request().input('id', sql.Int, bookingId)
+            .query(`SELECT BookingDate FROM dms_SalesBookings WHERE BookingID=@id`);
+        const previous = was.recordset[0]?.BookingDate;
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            await new sql.Request(tx)
+                .input('id', sql.Int, bookingId)
+                .input('bd', sql.DateTime, bookingDate)
+                .input('by', sql.Int, req.user?.employeeId || null)
+                .input('byN', sql.NVarChar(200), req.user?.userName || null)
+                .query(`UPDATE dms_SalesBookings
+                        SET BookingDate=@bd, CreatedAt=@bd,
+                            UpdatedAt=GETDATE(), UpdatedByEmployeeID=@by, UpdatedByName=@byN
+                        WHERE BookingID=@id`);
+
+            await logBookingTransition(tx, bookingId, booking.Status, booking.Status, req.user,
+                previous
+                    ? `Booking date corrected from ${new Date(previous).toISOString().slice(0, 10)} `
+                      + `to ${bookingDate.toISOString().slice(0, 10)}.`
+                    : `Booking date set to ${bookingDate.toISOString().slice(0, 10)} — this historical record was `
+                      + `entered without one.`);
+            await tx.commit();
+        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
+
+        res.json({ message: 'Booking date saved.', BookingDate: bookingDate });
+    } catch (err) {
+        console.error('historical setBookingDate:', err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
+/**
  * POST /api/sales/historical/bookings/:id/payment
  * body: { Amount, PremiumPortion?, PaymentMode, ReceivedAt?, Notes?, VoucherID? }
  *
