@@ -40,7 +40,9 @@ const DAYS = 3650;
  */
 function findOpenssl() {
     const candidates = [
-        process.env.OPENSSL_BIN,
+        // Trimmed: `set OPENSSL_BIN=... && node ...` in cmd.exe keeps the
+        // space before the &&, which would make the path unusable.
+        (process.env.OPENSSL_BIN || '').trim(),
         'openssl',
         // Forward slashes on purpose — Windows accepts them and they keep
         // this list readable.
