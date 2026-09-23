@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import axios from 'axios'
 import { isDemoMode } from './demoMode'   // must run before App so the adapter is installed
 import { isNativeApp, getServerUrl } from './tablet/serverConfig'
+import './tablet/installPrompt'   // must listen before Chrome fires beforeinstallprompt
 import App from './App.jsx'
 import './index.css'
 

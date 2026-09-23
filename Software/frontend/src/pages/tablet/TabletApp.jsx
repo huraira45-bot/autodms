@@ -16,7 +16,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
-import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, ClipboardCheck, Video, MonitorSmartphone } from 'lucide-react';
+import { LogOut, Settings, Stethoscope, Server, Loader2, ShieldAlert, Wrench, ClipboardList, ClipboardCheck, Video, MonitorSmartphone, Smartphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isNativeApp, getServerUrl, setServerUrl, normalizeServerUrl } from '../../tablet/serverConfig';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
@@ -28,6 +28,7 @@ import TabletEstimateSign from './TabletEstimateSign';
 import BayScreen, { hasBayDevice } from './BayScreen';
 import TabletJobCards from './TabletJobCards';
 import TabletJobCard, { TabletJobCardPrint } from './TabletJobCard';
+import AddToHomeScreen, { resetHomeScreenHint, homeScreenHintApplies } from '../../tablet/AddToHomeScreen';
 
 const PRINT_ROUTE = /^\/tablet\/(estimates|job-cards)\/\d+\/print\/?$/;
 
@@ -116,6 +117,7 @@ function TabletHome({ user }) {
     const canSetUpBays = hasPermission('workshop_bay_screen');
     return (
         <div style={S.body}>
+            <AddToHomeScreen />
             <h1 style={{ ...S.h1, margin: '4px 0 16px' }}>Hello, {user.userName}</h1>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
                 <NewIntakeButton style={{ ...tile, background: T.brand, borderColor: T.brand, color: '#fff' }}>
@@ -173,7 +175,9 @@ function TabletLogin({ serverUrl }) {
     };
 
     return (
-        <div style={{ ...S.page, display: 'grid', placeItems: 'center', padding: 20 }}>
+        <div style={{ ...S.page, display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <AddToHomeScreen style={{ width: '100%', maxWidth: 460 }} />
             <form onSubmit={submit} style={{ ...S.card, width: '100%', maxWidth: 460 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
                     <div style={{ width: 44, height: 44, borderRadius: 10, background: T.brand, display: 'grid', placeItems: 'center' }}>
@@ -268,6 +272,19 @@ function ServerSettings({ firstRun = false, onSaved }) {
                     {!firstRun && <Link to="/tablet" style={{ ...S.btnGhost, textDecoration: 'none' }}>Back</Link>}
                 </div>
                 {state && <div style={S.result(state.tone)}>{state.text}</div>}
+
+                {!firstRun && homeScreenHintApplies() && (
+                    <>
+                        <hr style={{ border: 0, borderTop: `1px solid ${T.line}`, margin: '20px 0 16px' }} />
+                        <label style={S.label}>Home screen</label>
+                        <p style={S.p}>Put a DealerDesk icon on this tablet so the advisor opens service
+                            reception with one tap instead of typing the address.</p>
+                        <button style={S.btnGhost}
+                                onClick={() => { resetHomeScreenHint(); navigate('/tablet'); }}>
+                            <Smartphone size={20} /> Show me how
+                        </button>
+                    </>
+                )}
             </div>
         </div>
     );

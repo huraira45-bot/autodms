@@ -1,0 +1,49 @@
+{
+  "id": "/tablet",
+  "name": "DealerDesk Service",
+  "short_name": "DealerDesk",
+  "description": "Service reception at the vehicle: walk-around video, estimate, customer signature, job card.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/tablet",
+  "scope": "/tablet",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "theme_color": "#714b67",
+  "background_color": "#f1f5f9",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/tablet-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tablet-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/tablet-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Estimates",
+      "short_name": "Estimates",
+      "description": "Continue, print or cancel an estimate",
+      "url": "/tablet/estimates"
+    },
+    {
+      "name": "Job cards",
+      "short_name": "Job cards",
+      "description": "Jobs and parts progress, add work, finalize, print",
+      "url": "/tablet/job-cards"
+    }
+  ]
+}
