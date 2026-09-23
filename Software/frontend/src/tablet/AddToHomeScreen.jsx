@@ -11,6 +11,10 @@
  *     icon from /manifest.webmanifest, so it lands as "DealerDesk" with the
  *     wrench — it just opens in a browser tab.
  *
+ * Chrome keeps renaming that menu item: it is "Install and create shortcut" on
+ * the workshop's tablet (seen 2026-09-23) and "Add to Home screen" on older
+ * builds, so the tip names both rather than sending the advisor hunting.
+ *
  * Hidden inside the Android app, once the app is running from the home screen,
  * on desktop (a mouse means it isn't a tablet), and after the advisor closes
  * it — the dismissal is remembered on that device.
@@ -74,7 +78,8 @@ export default function AddToHomeScreen({ style }) {
                         ? 'Add it once and open service reception straight from the tablet, without typing an address.'
                         : isIOS()
                             ? <>Tap <Share size={15} style={inlineIcon} /> <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</>
-                            : <>Tap <MoreVertical size={15} style={inlineIcon} /> in Chrome, then <strong>Add to Home screen</strong>.</>}
+                            : <>Tap <MoreVertical size={15} style={inlineIcon} /> in Chrome, then <strong>Install and create
+                                shortcut</strong> — older Chrome calls it <strong>Add to Home screen</strong>.</>}
                 </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
