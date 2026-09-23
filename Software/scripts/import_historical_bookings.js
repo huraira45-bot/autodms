@@ -34,8 +34,11 @@ const FILE = args.find(a => !a.startsWith('--'));
 const COMMIT = args.includes('--commit');
 const PARTIAL = args.includes('--partial');
 const argVal = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
-const EXECUTIVE = argVal('--executive') ? parseInt(argVal('--executive')) : null;
-const USERNAME = argVal('--user') || 'Historical import';
+// Either an employee id or part of a name — typing a name is easier than
+// looking an id up first, and cmd.exe swallows angle-bracket placeholders.
+const EXECUTIVE_ARG = argVal('--executive');
+let EXECUTIVE = null;
+let USERNAME = argVal('--user') || null;
 
 const STATUS = 'PendingPayment';
 const GL_PARENT = '201002';        // CUSTOMER ADVANCES - VEHICLE PARTIES
@@ -251,7 +254,7 @@ async function importOne(pool, p) {
             .input('price', sql.Decimal(18, 2), p.rec.price)
             .input('st', sql.NVarChar(30), STATUS)
             .input('exe', sql.Int, EXECUTIVE)
-            .input('exeN', sql.NVarChar(100), USERNAME)
+            .input('exeN', sql.NVarChar(100), USERNAME || 'Historical import')
             .input('bd', sql.DateTime, p.date || null)
             .query(`INSERT INTO dms_SalesBookings
                         (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
@@ -267,7 +270,7 @@ async function importOne(pool, p) {
             .input('bid', sql.Int, bookingId)
             .input('to', sql.NVarChar(30), STATUS)
             .input('emp', sql.Int, EXECUTIVE)
-            .input('name', sql.NVarChar(100), USERNAME)
+            .input('name', sql.NVarChar(100), USERNAME || 'Historical import')
             .input('reason', sql.NVarChar(sql.MAX),
                    `Historical booking imported from the customer sheet (row ${p.rec.excelRow}) `
                    + (p.date ? `for a deal dated ${iso(p.date)}. ` : 'with no date yet — to be set on the booking page. ')
@@ -283,6 +286,43 @@ async function importOne(pool, p) {
         await tx.rollback();
         throw err;
     }
+}
+
+/** Shows who could be picked, when what was given matches nothing. */
+async function listEmployees(pool, like = null) {
+    const rq = pool.request();
+    let where = '';
+    if (like) { rq.input('q', sql.NVarChar(200), `%${like}%`); where = 'WHERE EmployeeName LIKE @q'; }
+    const r = await rq.query(`SELECT TOP 30 EmployeeID, EmployeeName FROM gen_EmployeeInfo
+                              ${where} ORDER BY EmployeeName`);
+    if (!r.recordset.length) { console.error('  (no employees matched)'); return; }
+    console.error('  id     name');
+    r.recordset.forEach(e => console.error(`  ${String(e.EmployeeID).padEnd(6)} ${e.EmployeeName}`));
+}
+
+/** Takes an employee id, or a piece of a name to search for. */
+async function resolveExecutive(pool, arg) {
+    const asId = parseInt(arg);
+    if (String(asId) === String(arg).trim()) {
+        const r = await pool.request().input('id', sql.Int, asId)
+            .query(`SELECT EmployeeID, EmployeeName FROM gen_EmployeeInfo WHERE EmployeeID=@id`);
+        if (r.recordset.length) return r.recordset[0];
+        console.error(`\nThere is no employee ${asId}.\n`);
+        await listEmployees(pool);
+        return null;
+    }
+    const r = await pool.request().input('q', sql.NVarChar(200), `%${arg}%`)
+        .query(`SELECT EmployeeID, EmployeeName FROM gen_EmployeeInfo
+                WHERE EmployeeName LIKE @q ORDER BY EmployeeName`);
+    if (r.recordset.length === 1) return r.recordset[0];
+    if (!r.recordset.length) {
+        console.error(`\nNo employee matches "${arg}". Some of the names on file:\n`);
+        await listEmployees(pool);
+        return null;
+    }
+    console.error(`\n"${arg}" matches ${r.recordset.length} employees — be more specific, or give the id:\n`);
+    await listEmployees(pool, arg);
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,17 +394,23 @@ async function importOne(pool, p) {
     console.log(`  total value               PKR ${money(toDo.reduce((s, p) => s + p.rec.price, 0))}`);
 
     if (!COMMIT) {
-        console.log('\nNothing was written. Re-run with --commit --executive <employeeId> to import.');
-        console.log('Find the employee id with:  SELECT EmployeeID, EmployeeName FROM gen_EmployeeInfo');
+        console.log('\nNothing was written. To import, add --commit and say who handled these deals:');
+        console.log('  --commit --executive "part of their name"        (or their employee id)');
         process.exit(0);
     }
 
-    // ---- committing ----
-    if (!EXECUTIVE) {
-        console.error('\n--executive <employeeId> is required for --commit: every booking records who handled it.');
-        console.error('Find it with:  SELECT EmployeeID, EmployeeName FROM gen_EmployeeInfo');
+    // ---- who handled these deals ----
+    if (!EXECUTIVE_ARG) {
+        console.error('\n--executive is required for --commit: every booking records who handled it.');
+        console.error('Give an employee id, or part of a name in quotes.\n');
+        await listEmployees(pool);
         process.exit(1);
     }
+    const chosen = await resolveExecutive(pool, EXECUTIVE_ARG);
+    if (!chosen) process.exit(1);
+    EXECUTIVE = chosen.EmployeeID;
+    USERNAME = USERNAME || chosen.EmployeeName;
+    console.log(`\nrecording these against: ${chosen.EmployeeName} (employee ${EXECUTIVE})`);
     if (blocked.length && !PARTIAL) {
         console.error(`\n${blocked.length} rows are blocked. Fix them, or re-run with --partial to import only the ${toDo.length} that are ready.`);
         process.exit(1);
