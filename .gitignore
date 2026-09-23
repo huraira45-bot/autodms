@@ -46,3 +46,7 @@ Thumbs.db
 .codex/
 .agents/
 .claude/settings.local.json
+
+# TLS for the tablet app — the private keys must never be committed, and each
+# server generates its own (scripts/make_tls_cert.js).
+Software/certs/

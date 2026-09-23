@@ -1,6 +1,8 @@
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const express = require('express');
 const cors = require('cors');
 const { connectDB } = require('./config/db');
@@ -32,6 +34,27 @@ app.use('/uploads', express.static('uploads'));
 // React Router can handle deep links like /sales/bookings/42.
 const FRONTEND_DIST = path.join(__dirname, 'frontend', 'dist');
 app.use(express.static(FRONTEND_DIST));
+
+// TLS material for the tablet app's HTTPS port (scripts/make_tls_cert.js).
+// Never committed — each server makes its own.
+const TLS_DIR  = process.env.TLS_DIR || path.join(__dirname, 'certs');
+const TLS_CERT = process.env.TLS_CERT_FILE || path.join(TLS_DIR, 'dealerdesk-server.crt');
+const TLS_KEY  = process.env.TLS_KEY_FILE  || path.join(TLS_DIR, 'dealerdesk-server.key');
+const TLS_CA   = process.env.TLS_CA_FILE   || path.join(TLS_DIR, 'dealerdesk-ca.crt');
+
+// A tablet cannot trust the HTTPS port until it has this file, so it is served
+// over plain HTTP with no login — that is the only way out of the chicken and
+// egg. It is the PUBLIC half of the certificate, meant to be handed out; the
+// private key that signs with it never leaves the server.
+app.get('/dealerdesk-ca.crt', (req, res) => {
+    if (!fs.existsSync(TLS_CA)) {
+        return res.status(404).type('text/plain')
+                  .send('No certificate yet. On the server: node scripts/make_tls_cert.js');
+    }
+    res.type('application/x-x509-ca-cert');
+    res.setHeader('Content-Disposition', 'attachment; filename="dealerdesk-ca.crt"');
+    res.sendFile(TLS_CA);
+});
 
 // Connect to Database
 connectDB();
@@ -137,6 +160,36 @@ const io = chatSocket.attach(httpServer);
 // Live updates for the service tablet, the parts counter and bay screens
 // (plan 2026-09-14, Phase 3) share the socket.io server with chat.
 require('./services/serviceEvents').attach(io);
+// ---- HTTPS, for the service tablets (owner ask 2026-09-23) ----
+// Chrome only installs a page as an app — the thing that takes away the
+// address bar and the tabs — over HTTPS. So the tablets get a TLS port,
+// running beside the plain HTTP one that the desktop ERP keeps using
+// unchanged. Certificates come from scripts/make_tls_cert.js and are never
+// committed; with none present this is skipped and the server behaves exactly
+// as it did before.
+const HTTPS_PORT = Number(process.env.HTTPS_PORT || 5443);
+
+if (fs.existsSync(TLS_CERT) && fs.existsSync(TLS_KEY)) {
+    try {
+        const httpsServer = https.createServer(
+            { cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, app);
+        // Same socket.io instance on both ports, so chat and the bay screens
+        // work whichever way a client connected.
+        io.attach(httpsServer);
+        httpsServer.on('error', (err) => {
+            console.error(`[https] port ${HTTPS_PORT} unavailable: ${err.code || err.message}. HTTP is unaffected.`);
+        });
+        httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+            console.log(`HTTPS is running on port ${HTTPS_PORT}`);
+            console.log(`Tablets: https://<lan-ip>:${HTTPS_PORT}/tablet`);
+        });
+    } catch (err) {
+        console.error('[https] could not start:', err.message, '— HTTP is unaffected.');
+    }
+} else {
+    console.log(`[https] no certificate in ${TLS_DIR} — HTTPS off (run: node scripts/make_tls_cert.js)`);
+}
+
 // Bind to 0.0.0.0 so the server is reachable from other machines on the LAN
 // (Express defaults to 0.0.0.0 already, but stating it explicitly is clearer).
 httpServer.listen(PORT, '0.0.0.0', async () => {

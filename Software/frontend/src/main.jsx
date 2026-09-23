@@ -4,6 +4,7 @@ import axios from 'axios'
 import { isDemoMode } from './demoMode'   // must run before App so the adapter is installed
 import { isNativeApp, getServerUrl } from './tablet/serverConfig'
 import './tablet/installPrompt'   // must listen before Chrome fires beforeinstallprompt
+import { registerTabletServiceWorker } from './tablet/registerTabletSW'
 import App from './App.jsx'
 import './index.css'
 
@@ -36,6 +37,12 @@ if (isNativeApp()
     && !window.location.pathname.startsWith('/tablet')
     && !/\/print(?:\/|$)/.test(window.location.pathname)) {
     window.history.replaceState(null, '', '/tablet');
+}
+
+// The tablet app's service worker — what lets Chrome install it as a
+// full-screen app. Does nothing on the desktop ERP or over plain HTTP.
+if (window.location.pathname.startsWith('/tablet')) {
+    registerTabletServiceWorker();
 }
 
 axios.interceptors.response.use(
