@@ -153,6 +153,14 @@ async function loadStoreSalePaymentModes(tx, saleId) {
 // blocking list (B&P / CT). "Open" = not finalized OR has unpaid walk-out
 // balance. Other business types are ignored entirely per owner ask
 // 2026-07-05 — the gate opens for them regardless of their state.
+//
+// The credit-party bypass of rule 1 applies here too (owner report 2026-09-23,
+// B&P-1238 blocked by B&P-1124): an RO billed to a credit party is settled on
+// that party's statement, so checking it directly opens the gate — it must not
+// shut the gate as "another RO". An unfinalized RO still blocks whoever pays,
+// because that is work still open on the vehicle, not money. Insurance parties
+// are NOT bypassed: the customer's depreciation share sits on the Gen-Cust legs
+// and rule 2 says it has to be paid.
 async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCustGL, advGL) {
     if (!regNo && !chasisNo) return [];
     // sql.NVarChar parameters can't hold a list, so build the IN() literal
@@ -168,9 +176,11 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
         .query(`
             SELECT jc.JobCardId, jc.JobCardNo, jc.IsFinalized,
                    jct.CardCode AS JobCardTypeCode, jct.Title AS JobCardTypeTitle,
+                   op.PartyName AS OtherPartyName, op.PartyType AS OtherPartyType,
                    bal.OutstandingDr - bal.OutstandingCr - adv.AdvanceCredit AS Outstanding
             FROM Addata_JobCardInfo jc
             LEFT JOIN gen_JobCardType jct ON jct.JobCardTypeId = jc.JobTypeId
+            LEFT JOIN gen_PartiesInfo  op  ON op.PartyID       = jc.PartyID
             OUTER APPLY (
                 SELECT
                   ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0) AS OutstandingDr,
@@ -194,7 +204,9 @@ async function findOtherOpenROsOnVehicle(tx, currentJcId, regNo, chasisNo, genCu
               AND ((@reg     IS NOT NULL AND jc.VehicleRegNo = @reg)
                 OR (@chassis IS NOT NULL AND jc.ChasisNo     = @chassis))
               AND (jc.IsFinalized = 0
-                  OR (bal.OutstandingDr - bal.OutstandingCr - adv.AdvanceCredit) > 0.01)`);
+                  OR ((bal.OutstandingDr - bal.OutstandingCr - adv.AdvanceCredit) > 0.01
+                      -- rule 1, applied to the other RO as well
+                      AND NOT (jc.PartyID IS NOT NULL AND op.PartyType IN ('Customer', 'Both'))))`);
     return q.recordset;
 }
 
@@ -301,7 +313,9 @@ async function checkEligibility({ docType, docId }) {
         );
         for (const o of others) {
             const reason = !o.IsFinalized ? 'not finalized'
-                : `outstanding PKR ${Number(o.Outstanding || 0).toFixed(2)}`;
+                : `outstanding PKR ${Number(o.Outstanding || 0).toFixed(2)}`
+                  + (o.OtherPartyType === 'Insurance' && o.OtherPartyName
+                      ? ` on the customer's share (${o.OtherPartyName} covers the rest)` : '');
             blockers.push({
                 code: 'OTHER_OPEN_RO',
                 message: `Another RO ${o.JobCardNo} (${o.JobCardTypeTitle || o.JobCardTypeCode || 'Job'}) on the same vehicle is ${reason}.`,
