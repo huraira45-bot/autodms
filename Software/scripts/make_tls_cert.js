@@ -33,7 +33,33 @@ const SRV_CRT = path.join(CERT_DIR, 'dealerdesk-server.crt');
 const SRV_KEY = path.join(CERT_DIR, 'dealerdesk-server.key');
 const DAYS = 3650;
 
-const openssl = (args, opts = {}) => execFileSync('openssl', args, { stdio: 'pipe', ...opts });
+/**
+ * Finds openssl. On the live server this runs in cmd.exe, where Git for
+ * Windows' copy is installed but not on the PATH, so look there too rather
+ * than failing on a machine that has it.
+ */
+function findOpenssl() {
+    const candidates = [
+        process.env.OPENSSL_BIN,
+        'openssl',
+        // Forward slashes on purpose — Windows accepts them and they keep
+        // this list readable.
+        'C:/Program Files/Git/usr/bin/openssl.exe',
+        'C:/Program Files (x86)/Git/usr/bin/openssl.exe',
+        'C:/Program Files/Git/mingw64/bin/openssl.exe',
+        'C:/Program Files/OpenSSL-Win64/bin/openssl.exe',
+    ].filter(Boolean);
+    for (const bin of candidates) {
+        try {
+            execFileSync(bin, ['version'], { stdio: 'pipe' });
+            return bin;
+        } catch { /* not here — try the next */ }
+    }
+    return null;
+}
+
+const OPENSSL = findOpenssl();
+const openssl = (args, opts = {}) => execFileSync(OPENSSL, args, { stdio: 'pipe', ...opts });
 
 /** Every IPv4 address this machine answers on, so the cert covers them all. */
 const localIPs = () => Object.values(os.networkInterfaces()).flat()
@@ -46,12 +72,18 @@ const hosts = [...new Set(['localhost', ...extra.filter(a => !/^\d+\.\d+\.\d+\.\
 
 fs.mkdirSync(CERT_DIR, { recursive: true });
 
-try {
-    openssl(['version']);
-} catch {
-    console.error('openssl is not on the PATH. Git for Windows ships it — try the Git Bash shell.');
+if (!OPENSSL) {
+    console.error([
+        'Could not find openssl.',
+        '',
+        'Git for Windows ships a copy. If Git is installed somewhere unusual,',
+        'point at it directly, e.g.:',
+        '  set OPENSSL_BIN=C:\\Program Files\\Git\\usr\\bin\\openssl.exe',
+        '  node scripts\\make_tls_cert.js 192.168.3.10',
+    ].join('\n'));
     process.exit(1);
 }
+console.log(`Using ${OPENSSL}`);
 
 // ---- the CA: made once, then left alone ----
 if (fs.existsSync(CA_CRT) && fs.existsSync(CA_KEY)) {
