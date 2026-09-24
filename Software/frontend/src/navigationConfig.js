@@ -23,7 +23,7 @@ import {
     SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
     ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
     Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
-    Gauge, ScrollText, Monitor, Building2, Utensils, FileClock,
+    Gauge, ScrollText, Monitor, MonitorPlay, Building2, Utensils, FileClock,
 } from 'lucide-react';
 
 // Top-level module groups (order = sidebar order). Each has an id / label /
@@ -67,6 +67,7 @@ export const NAV_ITEMS = [
     { id: 'w-ctrl',      moduleGroup: 'workshop', label: 'Job Controller',       path: '/workshop/controller',      icon: Gauge,          moduleKey: 'workshop_controller', description: 'Real-time RO status board.', keywords: 'status bay', isQueue: true },
     { id: 'w-gatepass',  moduleGroup: 'workshop', label: 'Gate Pass',            path: '/gatepass',                 icon: ClipboardCheck, moduleKey: 'workshop_gatepass',  description: 'Issue and audit vehicle gate passes.', keywords: 'gate exit' },
     { id: 'w-kiosk',     moduleGroup: 'workshop', label: 'Lobby Job Kiosk',      path: '/kiosk/jobs',               icon: Monitor,        moduleKey: 'workshop_jobs',      description: 'Big-screen public job status board (opens in a new tab).', keywords: 'kiosk tv lobby big-screen', newTab: true },
+    { id: 'w-lobbyvid',  moduleGroup: 'workshop', label: 'Lobby Videos',         path: '/workshop/lobby-videos',    icon: MonitorPlay,    moduleKey: 'workshop_kiosk_videos', description: 'Videos the lobby board plays between job updates.', keywords: 'kiosk tv lobby video advert promo playlist' },
 
     // ── Parts & Inventory ────────────────────────────────────
     { id: 'p-spare',     moduleGroup: 'parts', label: 'Spare Parts',              path: '/parts',        icon: Package, moduleKey: 'parts_spare',           description: 'Parts master + stock.', keywords: 'inventory items', priority: 6 },
