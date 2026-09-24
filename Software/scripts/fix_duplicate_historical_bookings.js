@@ -49,12 +49,17 @@ const BY = argVal('--by');
         LEFT   JOIN GLChartOFAccount c ON c.GLCAID = p.PartyGLID
         JOIN   dms_VehicleVariant v ON v.VariantID = b.VehicleVariantID
         WHERE  b.IsHistorical = 1 ${filter}
-        ORDER  BY b.PartyID, b.VehicleVariantID, b.BookingID`)).recordset;
+        ORDER  BY b.BookingID`)).recordset;
 
-    // Group by what "the same deal" means: customer + vehicle + date.
+    // The same deal twice is keyed on the LEDGER ACCOUNT, not the customer
+    // record. Owner report 2026-09-24: a second import made five bookings that
+    // already existed, and grouping by customer found nothing — because the
+    // two copies sat on two different customer records sharing one account
+    // code. The account is the deal's identity; the customer row is not.
     const groups = new Map();
     for (const b of rows) {
-        const key = [b.PartyID, b.VehicleVariantID,
+        const identity = b.GLCode ? `acct:${String(b.GLCode).trim()}` : `party:${b.PartyID}`;
+        const key = [identity, b.VehicleVariantID,
                      b.BookingDate ? b.BookingDate.toISOString().slice(0, 10) : 'nodate'].join('|');
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(b);
@@ -63,6 +68,26 @@ const BY = argVal('--by');
 
     console.log(`historical bookings looked at : ${rows.length}`);
     console.log(`duplicated deals              : ${dupes.length}`);
+
+    // Grouping on the account can still miss a pair sitting on two different
+    // accounts, so say how many bookings there are per account either way —
+    // a count above one is worth a look even when the grouping found nothing.
+    const perAccount = (await pool.request().query(`
+        SELECT c.GLCode, p.PartyName, COUNT(*) AS n,
+               STRING_AGG(CAST(b.BookingNo AS NVARCHAR(40)), ', ') AS Bookings
+        FROM   dms_SalesBookings b
+        JOIN   gen_PartiesInfo p ON p.PartyID = b.PartyID
+        LEFT   JOIN GLChartOFAccount c ON c.GLCAID = p.PartyGLID
+        WHERE  b.IsHistorical = 1
+        GROUP  BY c.GLCode, p.PartyName
+        HAVING COUNT(*) > 1
+        ORDER  BY c.GLCode`)).recordset;
+    if (perAccount.length) {
+        console.log(`\nACCOUNTS CARRYING MORE THAN ONE HISTORICAL BOOKING: ${perAccount.length}`);
+        perAccount.slice(0, 30).forEach(a =>
+            console.log(`  ${(a.GLCode || '—').padEnd(12)} ${String(a.n)}  ${a.PartyName}  [${a.Bookings}]`));
+        console.log('  A customer who really did buy two vehicles will show here too — check before deleting.');
+    }
     if (!dupes.length) {
         console.log('\nNothing is duplicated.');
         process.exit(0);
@@ -72,8 +97,8 @@ const BY = argVal('--by');
     const blocked = [];
     for (const g of dupes) {
         const keep = g[0];                       // lowest BookingID = first made
-        console.log(`\n${keep.PartyName}  ·  ${keep.VariantName}  ·  account ${keep.GLCode || '—'}`);
-        console.log(`  keep    ${keep.BookingNo}`);
+        console.log(`\naccount ${keep.GLCode || '—'}  ·  ${keep.VariantName}`);
+        console.log(`  keep    ${keep.BookingNo}  ${keep.PartyName}`);
         for (const b of g.slice(1)) {
             const attached = [];
             if (b.Payments > 0) attached.push(`${b.Payments} payment(s)`);
@@ -81,10 +106,10 @@ const BY = argVal('--by');
             if (b.DeliveryVoucherID) attached.push('a delivery voucher');
             if (attached.length) {
                 blocked.push(b);
-                console.log(`  KEEP    ${b.BookingNo}  — has ${attached.join(' and ')}, so it is left alone`);
+                console.log(`  KEEP    ${b.BookingNo}  ${b.PartyName} — has ${attached.join(' and ')}, so it is left alone`);
             } else {
                 toDelete.push(b);
-                console.log(`  delete  ${b.BookingNo}`);
+                console.log(`  delete  ${b.BookingNo}  ${b.PartyName}`);
             }
         }
     }

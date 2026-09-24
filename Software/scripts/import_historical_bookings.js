@@ -145,18 +145,30 @@ function readSheet(file) {
 // ---------------------------------------------------------------------------
 async function loadLookups(pool) {
     const q = async (s) => (await pool.request().query(s)).recordset;
+
+    // Ordered on purpose. Without ORDER BY, a name that exists twice resolves
+    // to whichever row the server happened to return last, which need not be
+    // the same from one run to the next. GLCode is unique in the database, so
+    // accounts cannot go that way; variant names are not, so they can.
     const accounts = new Map();
-    for (const a of await q(`SELECT GLCAID, GLCode, GLTitle FROM GLChartOFAccount`)) accounts.set(norm(a.GLCode), a);
+    for (const a of await q(`SELECT GLCAID, GLCode, GLTitle FROM GLChartOFAccount ORDER BY GLCAID`)) {
+        accounts.set(norm(a.GLCode), a);
+    }
     const partyByGL = new Map();
-    for (const p of await q(`SELECT PartyID, PartyName, PartyGLID, PartyCategory FROM gen_PartiesInfo WHERE PartyGLID IS NOT NULL`)) {
+    for (const p of await q(`SELECT PartyID, PartyName, PartyGLID, PartyCategory
+                             FROM gen_PartiesInfo WHERE PartyGLID IS NOT NULL ORDER BY PartyID`)) {
         partyByGL.set(p.PartyGLID, p);
     }
     const variants = new Map();
+    const variantTwins = new Map();
     for (const v of await q(`SELECT v.VariantID, v.VariantName, v.ModelID, m.ModelName
-                             FROM dms_VehicleVariant v JOIN dms_VehicleModel m ON m.ModelID = v.ModelID`)) {
-        variants.set(up(v.VariantName), v);
+                             FROM dms_VehicleVariant v JOIN dms_VehicleModel m ON m.ModelID = v.ModelID
+                             ORDER BY v.VariantID`)) {
+        const key = up(v.VariantName);
+        variantTwins.set(key, (variantTwins.get(key) || 0) + 1);
+        if (!variants.has(key)) variants.set(key, v);
     }
-    return { accounts, partyByGL, variants };
+    return { accounts, partyByGL, variants, variantTwins };
 }
 
 /** What would happen to this row, without doing any of it. */
@@ -180,9 +192,13 @@ function planRow(rec, look) {
         p.party = look.partyByGL.get(acct.GLCAID) || null;
     }
 
-    const variant = look.variants.get(up(rec.variant));
+    const variantKey = up(rec.variant);
+    const variant = look.variants.get(variantKey);
     if (!variant) p.problems.push(`variant "${rec.variant}" is not set up in DealerDesk`);
-    else p.variant = variant;
+    else if (look.variantTwins.get(variantKey) > 1) {
+        p.problems.push(`variant "${rec.variant}" is set up ${look.variantTwins.get(variantKey)} times — `
+                        + `remove the spare before importing against it`);
+    } else p.variant = variant;
 
     if (p.problems.length) { p.action = 'blocked'; return p; }
     p.action = p.party ? 'booking' : 'party+booking';
@@ -200,14 +216,28 @@ async function bookingNoForYear(tx, year) {
     return `BK-${year}-${String(r.recordset[0].nextNo).padStart(4, '0')}`;
 }
 
-async function alreadyImported(pool, partyId, variantId, date) {
-    // A dateless import is matched on customer and variant alone, so running
-    // this again before the dates are filled in does not double anything up.
+async function alreadyImported(pool, accountCode, variantName, date) {
+    // Keyed on the LEDGER ACCOUNT and the variant's NAME — the sheet's own
+    // identifiers — rather than on the party and variant ids this run happened
+    // to resolve. Owner report 2026-09-24: a second run made five bookings it
+    // had already made, so something about that resolution differed between
+    // the two runs; matching on what the sheet actually says cannot drift that
+    // way whatever the cause turns out to be. A dateless import matches other
+    // dateless ones, so re-running before the dates are filled in does not
+    // double anything up.
     const r = await pool.request()
-        .input('p', sql.Int, partyId).input('v', sql.Int, variantId).input('d', sql.Date, date || null)
-        .query(`SELECT TOP 1 BookingNo FROM dms_SalesBookings
-                WHERE IsHistorical = 1 AND PartyID=@p AND VehicleVariantID=@v
-                  AND ((@d IS NULL AND BookingDate IS NULL) OR CAST(BookingDate AS DATE)=@d)`);
+        .input('c', sql.NVarChar(50), accountCode)
+        .input('vn', sql.NVarChar(200), variantName)
+        .input('d', sql.Date, date || null)
+        .query(`SELECT TOP 1 b.BookingNo
+                FROM   dms_SalesBookings b
+                JOIN   gen_PartiesInfo    p ON p.PartyID  = b.PartyID
+                JOIN   GLChartOFAccount   c ON c.GLCAID   = p.PartyGLID
+                JOIN   dms_VehicleVariant v ON v.VariantID = b.VehicleVariantID
+                WHERE  b.IsHistorical = 1
+                  AND  c.GLCode = @c
+                  AND  UPPER(LTRIM(RTRIM(v.VariantName))) = @vn
+                  AND  ((@d IS NULL AND b.BookingDate IS NULL) OR CAST(b.BookingDate AS DATE) = @d)`);
     return r.recordset.length ? r.recordset[0].BookingNo : null;
 }
 
@@ -370,7 +400,7 @@ async function resolveExecutive(pool, arg) {
     // ---- what would be done ----
     const doable = plans.filter(p => p.action === 'booking' || p.action === 'party+booking');
     for (const p of doable) {
-        const done = await alreadyImported(pool, p.party?.PartyID || -1, p.variant.VariantID, p.date);
+        const done = await alreadyImported(pool, p.rec.ac, up(p.rec.variant), p.date);
         if (done) { p.action = 'already'; p.note = `already on record as ${done}`; }
     }
     const toDo = plans.filter(p => p.action === 'booking' || p.action === 'party+booking');
