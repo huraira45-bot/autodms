@@ -5,7 +5,7 @@ import {
     Car, Users, Building, Settings as SettingsIcon, LayoutDashboard, Database,
     Wrench, Package, FileInput, FileOutput, ShoppingCart, Undo2, Landmark,
     CreditCard, Wallet, Receipt, ArrowLeftRight, ClipboardList, UserCircle,
-    BoxSelect, PlusCircle, ExternalLink, SlidersHorizontal, LogOut, ShieldCheck, UsersRound, Unlock, UserCheck,
+    BoxSelect, PlusCircle, ExternalLink, SlidersHorizontal, LogOut, ShieldCheck, UsersRound, Unlock, UserCheck, MonitorPlay,
     FileBarChart, ListChecks, Headphones, UserCog, Truck, Percent, Bell, MessageSquare, Megaphone, Layers, Ban, Search,
     TrendingUp, ChevronDown, ChevronRight as ChevronRightIcon,
     Paintbrush, FileClock,
@@ -121,6 +121,7 @@ import PartsIssue         from './pages/PartsIssue';
 import PartsRequisitions  from './pages/PartsRequisitions';
 import SubletRepair       from './pages/SubletRepair';
 import LabourServices     from './pages/LabourServices';
+import KioskVideosAdmin  from './pages/KioskVideosAdmin';
 import WorkshopSettings   from './pages/WorkshopSettings';
 import CareOffAdmin       from './pages/CareOffAdmin';
 import CareOffElevationRequests from './pages/CareOffElevationRequests';
@@ -342,6 +343,11 @@ function LegacySidebar() {
                 {hasModule('workshop_sublet') && (
                     <NavLink to="/workshop/sublet" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ExternalLink size={20} /> Sublet Repairs
+                    </NavLink>
+                )}
+                {hasModule('workshop_kiosk_videos') && (
+                    <NavLink to="/workshop/lobby-videos" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <MonitorPlay size={20} /> Lobby Videos
                     </NavLink>
                 )}
                 {hasModule('workshop_settings') && (
@@ -1176,6 +1182,9 @@ function AppShell() {
                     } />
                     <Route path="/workshop/services" element={
                         <ProtectedRoute moduleKey="workshop_labour"><LabourServices /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/lobby-videos" element={
+                        <ProtectedRoute moduleKey="workshop_kiosk_videos"><KioskVideosAdmin /></ProtectedRoute>
                     } />
                     <Route path="/workshop/sublet" element={
                         <ProtectedRoute moduleKey="workshop_sublet"><SubletRepair /></ProtectedRoute>

@@ -125,6 +125,9 @@ app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/pos-settlement', require('./routes/posSettlementRoutes'));
 app.use('/api/cheques', require('./routes/chequeRoutes'));
 app.use('/api/gatepass', require('./routes/gatePassRoutes'));
+// The library behind the lobby board's videos. What the TV itself reads is
+// the anonymous /api/kiosk/playlist, registered above the auth middleware.
+app.use('/api/kiosk-videos', require('./routes/kioskVideoRoutes'));
 app.use('/api/settings/business-profile', require('./routes/businessProfileRoutes'));
 app.use('/api/reports', require('./routes/reportsRoutes'));
 app.use('/api/reports/service', require('./routes/serviceReportsRoutes'));

@@ -10,10 +10,17 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
     Clock, Wrench, ShieldCheck, Droplets, CheckCircle,
-    Car, Sparkles, MapPin, User,
+    Car, Sparkles, MapPin, User, Volume2,
 } from 'lucide-react';
 
 const REFRESH_MS = 15_000;
+// The playlist changes only when somebody uploads, so it is re-read far
+// less often than the jobs — but often enough that a new clip appears on
+// the TV without anyone restarting the browser (owner ask 2026-09-23).
+const PLAYLIST_MS = 5 * 60_000;
+// A video that stops sending progress has stalled. Rather than leave the
+// lobby staring at a frozen frame, give up on it and go back to the board.
+const STALL_MS = 30_000;
 const CACHE_KEY  = 'kiosk:cache';
 const CACHE_TTL_MS = 10 * 60_000;   // 10 minutes — beyond that we hide stale data
 
@@ -93,6 +100,14 @@ export default function JobKiosk() {
     const [now, setNow]           = useState(new Date());
     const [error, setError]       = useState(null);
 
+    // --- videos between refreshes of the board (owner ask 2026-09-23) ---
+    // The board shows for boardSeconds, one video plays to the end, the board
+    // comes back, the next video plays, and after the last it loops round.
+    const [playlist, setPlaylist]       = useState([]);
+    const [boardSeconds, setBoardSecs]  = useState(60);
+    const [showingVideo, setShowVideo]  = useState(false);
+    const [videoIdx, setVideoIdx]       = useState(0);
+
     // Poll every 15s. On success clear stale marker + refresh cache. On
     // failure, keep whatever we last showed and mark the header stale.
     useEffect(() => {
@@ -134,6 +149,39 @@ export default function JobKiosk() {
         const iv = setInterval(() => setNow(new Date()), 1000);
         return () => clearInterval(iv);
     }, []);
+
+    // The playlist. A failure here is never allowed to disturb the board —
+    // the worst case is a lobby that simply shows no videos.
+    useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            try {
+                const r = await axios.get('/api/kiosk/playlist');
+                if (cancelled) return;
+                setPlaylist(Array.isArray(r.data?.videos) ? r.data.videos : []);
+                if (r.data?.boardSeconds > 0) setBoardSecs(r.data.boardSeconds);
+            } catch { /* keep whatever we were already playing */ }
+        };
+        load();
+        const iv = setInterval(load, PLAYLIST_MS);
+        return () => { cancelled = true; clearInterval(iv); };
+    }, []);
+
+    // Board → video. Restarts every time the board comes back, so the gap
+    // between videos is always a full boardSeconds.
+    useEffect(() => {
+        if (showingVideo || !playlist.length) return;
+        const t = setTimeout(() => setShowVideo(true), boardSeconds * 1000);
+        return () => clearTimeout(t);
+    }, [showingVideo, playlist.length, boardSeconds]);
+
+    // One video is done (finished, broken or stalled): back to the board, and
+    // queue the next one up — wrapping round to the first after the last.
+    const endVideo = () => {
+        setVideoIdx(i => (playlist.length ? (i + 1) % playlist.length : 0));
+        setShowVideo(false);
+    };
+    const current = playlist.length ? playlist[videoIdx % playlist.length] : null;
 
     const groups = useMemo(() =>
         STATUSES.map(s => ({
@@ -226,6 +274,68 @@ export default function JobKiosk() {
                     </div>
                 )}
             </div>
+
+            {showingVideo && current && (
+                <LobbyVideo key={current.VideoID} video={current} onDone={endVideo} />
+            )}
+        </div>
+    );
+}
+
+// ----- Video between board refreshes ----------------------------------
+// Full-screen over the board, so coming back is instant and the board never
+// has to re-fetch. Plays to the end, then hands back (owner ask 2026-09-23).
+function LobbyVideo({ video, onDone }) {
+    const ref = useRef(null);
+    const doneRef = useRef(false);
+    const [silent, setSilent] = useState(false);
+
+    // onDone must fire exactly once per video: 'ended', an error and the
+    // stall watchdog can all race each other.
+    const finish = () => { if (!doneRef.current) { doneRef.current = true; onDone(); } };
+
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        let lastProgress = Date.now();
+        const onTime = () => { lastProgress = Date.now(); };
+        el.addEventListener('timeupdate', onTime);
+        const watchdog = setInterval(() => {
+            if (Date.now() - lastProgress > STALL_MS) finish();
+        }, 5_000);
+
+        // The owner wants sound. Browsers refuse to autoplay audio until
+        // somebody has interacted with the page, so try loud, and fall back
+        // to silent rather than showing a still frame.
+        el.muted = false;
+        el.play().then(() => setSilent(false)).catch(() => {
+            el.muted = true;
+            setSilent(true);
+            el.play().catch(finish);
+        });
+
+        return () => { el.removeEventListener('timeupdate', onTime); clearInterval(watchdog); };
+    }, [video.url]);
+
+    // One tap anywhere unlocks audio for the rest of the session, so this
+    // prompt appears at most once after the TV or browser is restarted.
+    const enableSound = () => {
+        const el = ref.current;
+        if (!el) return;
+        el.muted = false;
+        el.play().then(() => setSilent(false)).catch(() => {});
+    };
+
+    return (
+        <div style={S.videoWrap} onClick={silent ? enableSound : undefined}>
+            <video ref={ref} src={video.url} style={S.video}
+                   autoPlay playsInline preload="auto"
+                   onEnded={finish} onError={finish} />
+            {silent && (
+                <div style={S.soundPrompt}>
+                    <Volume2 size={26} /> Tap the screen for sound
+                </div>
+            )}
         </div>
     );
 }
@@ -711,5 +821,27 @@ const S = {
     },
     errStrip: {
         color: '#fecaca', fontSize: '0.85rem', textAlign: 'center', width: '100%',
+    },
+
+    // --- video between refreshes of the board ---
+    // Covers the board rather than replacing it, so the board is still mounted
+    // and fully up to date the instant the video finishes.
+    videoWrap: {
+        position: 'fixed', inset: 0, zIndex: 50, background: '#000',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+    },
+    // `contain` so a clip shot in the wrong aspect is letterboxed rather than
+    // cropped — a TV in a lobby gets fed whatever marketing exports.
+    video: {
+        width: '100%', height: '100%', objectFit: 'contain', background: '#000',
+    },
+    soundPrompt: {
+        position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '14px 26px', borderRadius: 999,
+        background: 'rgba(15,23,42,0.82)', color: '#fff',
+        fontSize: '1.15rem', fontWeight: 600, letterSpacing: '0.01em',
+        border: '1px solid rgba(255,255,255,0.25)',
+        animation: 'bayClockTick 2s ease-in-out infinite',
     },
 };

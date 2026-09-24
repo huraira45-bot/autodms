@@ -28,6 +28,8 @@ const SECTIONS = [
             { key: 'workshop_controller',    label: 'Job Controller',          kind: 'workflow' },
             { key: 'workshop_tablet',        label: 'Service Tablet App',      kind: 'workflow' },
             { key: 'workshop_bay_screen',    label: 'Bay Screens (register devices)', kind: 'workflow' },
+            // Videos the lobby job board plays between refreshes.
+            { key: 'workshop_kiosk_videos',  label: 'Lobby Videos',            kind: 'document' },
             { key: 'parts_requisition',      label: 'Parts Counter: tablet requisitions', kind: 'workflow' },
         ],
     },
