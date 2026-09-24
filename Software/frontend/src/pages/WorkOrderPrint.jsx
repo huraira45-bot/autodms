@@ -217,18 +217,21 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                             </ul>
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
-                            <div className="sec-head" style={{ textAlign: 'center' }}><b>INVOICE Parts &amp; Labour Amount</b></div>
+                            <div className="sec-head" style={{ textAlign: 'center' }}><b>INVOICE PARTS &amp; LABOUR AMOUNT</b></div>
+                            {/* Owner ask 2026-09-24: parts figures together (GST sits with the
+                                parts it was charged on, the way PST sits with labour), nothing
+                                bold but the grand total. */}
                             <table className="amt-tbl">
                                 <tbody>
                                     <tr><td>Parts Amount</td><td>{fmt(partsGross)}</td></tr>
                                     <tr><td>Parts Discount</td><td>{fmt(partsDisc)}</td></tr>
-                                    <tr><td>Parts Total Net</td><td><b>{fmt(partsNet)}</b></td></tr>
+                                    {gst > 0 && <tr><td>GST</td><td>{fmt(gst)}</td></tr>}
+                                    <tr><td>Parts Total Net</td><td>{fmt(partsNet)}</td></tr>
                                     <tr><td>Labour Amount</td><td>{fmt(labourGross)}</td></tr>
                                     <tr><td>Labour Discount</td><td>{fmt(labourDisc)}</td></tr>
                                     <tr><td>PST</td><td>{fmt(pst)}</td></tr>
-                                    <tr><td>Labour Total Net</td><td><b>{fmt(labourNet + pst)}</b></td></tr>
+                                    <tr><td>Labour Total Net</td><td>{fmt(labourNet + pst)}</td></tr>
                                     <tr><td>Sublet Amount</td><td>{fmt(sublet)}</td></tr>
-                                    {gst > 0 && <tr><td>GST</td><td>{fmt(gst)}</td></tr>}
                                     {campaign && (
                                         <>
                                             <tr><td>Sub-Total</td><td>{fmt(grossTotal)}</td></tr>
@@ -248,7 +251,7 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                                             <tr><td>Depreciation Balance</td><td>{fmt(depBalance)}</td></tr>
                                         </>
                                     )}
-                                    <tr className="grand"><td>Total Amount</td><td><b>{fmt(total)}</b></td></tr>
+                                    <tr className="grand"><td><b>Grand Total</b></td><td><b>{fmt(total)}</b></td></tr>
                                 </tbody>
                             </table>
                         </td>
