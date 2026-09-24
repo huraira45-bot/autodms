@@ -219,12 +219,12 @@ async function bookingNoForYear(tx, year) {
 async function alreadyImported(pool, accountCode, variantName, date) {
     // Keyed on the LEDGER ACCOUNT and the variant's NAME — the sheet's own
     // identifiers — rather than on the party and variant ids this run happened
-    // to resolve. Owner report 2026-09-24: a second run made five bookings it
-    // had already made, so something about that resolution differed between
-    // the two runs; matching on what the sheet actually says cannot drift that
-    // way whatever the cause turns out to be. A dateless import matches other
-    // dateless ones, so re-running before the dates are filled in does not
-    // double anything up.
+    // to resolve.
+    //
+    // The date is a tie-breaker, never a requirement. Owner report 2026-09-24:
+    // five bookings were imported a second time because staff had filled in
+    // their dates in between, and the old check looked for a booking with no
+    // date. Only a booking on a DIFFERENT day is a different deal.
     const r = await pool.request()
         .input('c', sql.NVarChar(50), accountCode)
         .input('vn', sql.NVarChar(200), variantName)
@@ -237,7 +237,12 @@ async function alreadyImported(pool, accountCode, variantName, date) {
                 WHERE  b.IsHistorical = 1
                   AND  c.GLCode = @c
                   AND  UPPER(LTRIM(RTRIM(v.VariantName))) = @vn
-                  AND  ((@d IS NULL AND b.BookingDate IS NULL) OR CAST(b.BookingDate AS DATE) = @d)`);
+                  -- Same customer, same vehicle, and nothing saying they are
+                  -- different days. A booking that has since been given a date
+                  -- must still match a sheet row that has none, or filling the
+                  -- date in makes the deal look unimported and it is created
+                  -- again — which is exactly what happened on 2026-09-24.
+                  AND  (@d IS NULL OR b.BookingDate IS NULL OR CAST(b.BookingDate AS DATE) = @d)`);
     return r.recordset.length ? r.recordset[0].BookingNo : null;
 }
 
