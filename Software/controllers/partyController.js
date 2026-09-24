@@ -104,6 +104,48 @@ async function validatePartyGLID(pool, partyGLID, excludePartyID = null) {
 }
 
 /**
+ * Turns "duplicate key ... UX_gen_PartiesInfo_PartyGLID" into the same plain
+ * message validatePartyGLID gives.
+ *
+ * That check can be overtaken: two people — or a person and a bulk import —
+ * creating a customer moments apart both see the account free, and the second
+ * insert is the one that fails. Owner report 2026-09-24, creating MUHAMMAD
+ * AHMAD on 201002062: the screen showed an ODBC index name, which tells the
+ * user nothing about what to do next.
+ *
+ * The account id is read back out of the error text, so nothing above has to
+ * be restructured to keep it in scope.
+ */
+async function explainPartyGLConflict(err) {
+    const isDuplicate = err.number === 2627 || err.number === 2601
+        || /duplicate key/i.test(err.message || '');
+    if (!isDuplicate || !/UX_gen_PartiesInfo_PartyGLID/i.test(err.message || '')) return err;
+
+    const m = /duplicate key value is \((\d+)\)/i.exec(err.message || '');
+    if (!m) return err;
+    try {
+        const pool = await getPool();
+        const r = await pool.request().input('gl', sql.Int, parseInt(m[1]))
+            .query(`SELECT TOP 1 p.PartyID, p.PartyName, c.GLCode
+                    FROM   gen_PartiesInfo p
+                    LEFT   JOIN GLChartOFAccount c ON c.GLCAID = p.PartyGLID
+                    WHERE  p.PartyGLID = @gl`);
+        if (!r.recordset.length) return err;
+        const h = r.recordset[0];
+        const friendly = new Error(
+            `Account ${h.GLCode || m[1]} already belongs to "${h.PartyName}". Each customer has an account of `
+            + `their own, so search for that customer instead of creating a new one — or let the system open a `
+            + `new account for this one.`);
+        friendly.statusCode = 409;
+        friendly.existingPartyID = h.PartyID;
+        friendly.existingPartyName = h.PartyName;
+        return friendly;
+    } catch {
+        return err;   // never let the explanation hide the original failure
+    }
+}
+
+/**
  * Opens a new L4 leaf under an L3 party group and returns its GLCAID.
  *
  * Mirrors the allocation in accountController.addAccount: take the smallest
@@ -388,6 +430,9 @@ function normaliseNTN(s) {
 
 const VALID_PARTY_TYPES = new Set(['Customer', 'Supplier', 'Insurance', 'Both']);
 
+// Exported so the translation can be tested without racing two inserts.
+exports.explainPartyGLConflict = explainPartyGLConflict;
+
 exports.createParty = async (req, res) => {
     try {
         const b = req.body;
@@ -485,7 +530,8 @@ exports.createParty = async (req, res) => {
             PartyGLCode: control.GLCode,
             PartyGLTitle: control.GLTitle
         });
-    } catch (err) {
+    } catch (rawErr) {
+        const err = await explainPartyGLConflict(rawErr);
         console.error('createParty:', err);
         res.status(err.statusCode || 400).json({
             error: err.message,
@@ -565,7 +611,8 @@ exports.updateParty = async (req, res) => {
                     PartyGroupID = @PartyGroupID, Remarks = @Remarks, PartyGLID = @PartyGLID
                 WHERE PartyID = @id`);
         res.json({ message: 'Party updated', PartyGLID: control.GLCAID });
-    } catch (err) {
+    } catch (rawErr) {
+        const err = await explainPartyGLConflict(rawErr);
         console.error('updateParty:', err);
         res.status(err.statusCode || 400).json({
             error: err.message,
