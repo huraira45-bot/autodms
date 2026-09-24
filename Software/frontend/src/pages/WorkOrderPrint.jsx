@@ -220,13 +220,17 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                             <div className="sec-head" style={{ textAlign: 'center' }}><b>Invoice parts &amp; labour amount</b></div>
                             {/* Owner ask 2026-09-24: parts figures together (GST sits with the
                                 parts it was charged on, the way PST sits with labour), nothing
-                                bold but the grand total. */}
+                                bold but the grand total.
+                                Each total carries its own tax, so Parts Total + Labour Total +
+                                Sublet is the Grand Total. Parts Total used to leave GST out
+                                while Labour Total included PST, which left the reader 1,767.81
+                                short with nothing on the page to explain it. */}
                             <table className="amt-tbl">
                                 <tbody>
                                     <tr><td>Parts Amount</td><td>{fmt(partsGross)}</td></tr>
                                     <tr><td>Parts Discount</td><td>{fmt(partsDisc)}</td></tr>
                                     {gst > 0 && <tr><td>GST</td><td>{fmt(gst)}</td></tr>}
-                                    <tr><td>Parts Total</td><td>{fmt(partsNet)}</td></tr>
+                                    <tr><td>Parts Total</td><td>{fmt(partsNet + gst)}</td></tr>
                                     <tr><td>Labour Amount</td><td>{fmt(labourGross)}</td></tr>
                                     <tr><td>Labour Discount</td><td>{fmt(labourDisc)}</td></tr>
                                     <tr><td>PST</td><td>{fmt(pst)}</td></tr>
