@@ -226,11 +226,11 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                                     <tr><td>Parts Amount</td><td>{fmt(partsGross)}</td></tr>
                                     <tr><td>Parts Discount</td><td>{fmt(partsDisc)}</td></tr>
                                     {gst > 0 && <tr><td>GST</td><td>{fmt(gst)}</td></tr>}
-                                    <tr><td>Parts Total Net</td><td>{fmt(partsNet)}</td></tr>
+                                    <tr><td>Parts Total</td><td>{fmt(partsNet)}</td></tr>
                                     <tr><td>Labour Amount</td><td>{fmt(labourGross)}</td></tr>
                                     <tr><td>Labour Discount</td><td>{fmt(labourDisc)}</td></tr>
                                     <tr><td>PST</td><td>{fmt(pst)}</td></tr>
-                                    <tr><td>Labour Total Net</td><td>{fmt(labourNet + pst)}</td></tr>
+                                    <tr><td>Labour Total</td><td>{fmt(labourNet + pst)}</td></tr>
                                     <tr><td>Sublet Amount</td><td>{fmt(sublet)}</td></tr>
                                     {campaign && (
                                         <>
