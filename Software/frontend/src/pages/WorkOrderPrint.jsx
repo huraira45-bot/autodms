@@ -217,7 +217,7 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                             </ul>
                         </td>
                         <td style={{ verticalAlign: 'top' }}>
-                            <div className="sec-head" style={{ textAlign: 'center' }}><b>INVOICE PARTS &amp; LABOUR AMOUNT</b></div>
+                            <div className="sec-head" style={{ textAlign: 'center' }}><b>Invoice parts &amp; labour amount</b></div>
                             {/* Owner ask 2026-09-24: parts figures together (GST sits with the
                                 parts it was charged on, the way PST sits with labour), nothing
                                 bold but the grand total. */}
