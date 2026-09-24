@@ -44,7 +44,7 @@ if (!JOB_CARD_NO || CUSTOMER_PAYS == null || !WRITE_OFF_TO || !REASON) {
     console.error('usage: node scripts/write_off_jobcard_balance.js <JobCardNo> --customer-pays <amount> --to <GLCode> --reason "why" [--commit] [--by "name"]');
     console.error('');
     console.error('  --customer-pays  what the customer should owe after the write-off');
-    console.error('  --to             the GL code the difference is charged to');
+    console.error('  --to             the GL code, or part of the account name, to charge it to');
     console.error('  --reason         goes on the ledger line; there is no reversal to explain it otherwise');
     process.exit(1);
 }
@@ -62,10 +62,33 @@ if (!(CUSTOMER_PAYS >= 0)) { console.error('--customer-pays must be a number, 0 
     if (!jc) { console.error(`No job card ${JOB_CARD_NO}.`); process.exit(1); }
     console.log(`job card : ${jc.JobCardNo} (id ${jc.JobCardId})  payment mode: ${jc.PaymentType}`);
 
-    // Where the write-off is charged.
-    const dest = (await pool.request().input('c', sql.NVarChar(50), WRITE_OFF_TO)
+    // Where the write-off is charged. Takes a code, or part of the account's
+    // name — typing the name beats looking a code up first, and a placeholder
+    // pasted out of instructions then fails loudly with a list to choose from.
+    let dest = (await pool.request().input('c', sql.NVarChar(50), WRITE_OFF_TO)
         .query(`SELECT GLCAID, GLCode, GLTitle, isParent, Status FROM GLChartOFAccount WHERE GLCode = @c`)).recordset[0];
-    if (!dest) { console.error(`\nNo account ${WRITE_OFF_TO} in the chart of accounts.`); process.exit(1); }
+    if (!dest) {
+        const byName = (await pool.request().input('q', sql.NVarChar(200), `%${WRITE_OFF_TO}%`)
+            .query(`SELECT GLCAID, GLCode, GLTitle, isParent, Status FROM GLChartOFAccount
+                    WHERE GLTitle LIKE @q AND isParent = 0 AND Status = 1 ORDER BY GLCode`)).recordset;
+        if (byName.length === 1) dest = byName[0];
+        else if (byName.length > 1) {
+            console.error(`\n"${WRITE_OFF_TO}" matches ${byName.length} accounts — be more exact, or give the code:\n`);
+            byName.slice(0, 25).forEach(a => console.error(`  ${a.GLCode}  ${a.GLTitle}`));
+            process.exit(1);
+        }
+    }
+    if (!dest) {
+        console.error(`\nNo account matches "${WRITE_OFF_TO}". Ones you could charge this to:\n`);
+        const some = (await pool.request()
+            .query(`SELECT TOP 40 GLCode, GLTitle FROM GLChartOFAccount
+                    WHERE isParent = 0 AND Status = 1
+                      AND (GLTitle LIKE '%MISC%' OR GLTitle LIKE '%BAD DEBT%'
+                           OR GLTitle LIKE '%WRITE%' OR GLTitle LIKE '%EXPENSE%')
+                    ORDER BY GLCode`)).recordset;
+        some.forEach(a => console.error(`  ${a.GLCode}  ${a.GLTitle}`));
+        process.exit(1);
+    }
     if (dest.isParent) { console.error(`\n${dest.GLCode} is a group account — pick the detail account under it.`); process.exit(1); }
     if (!dest.Status) { console.error(`\n${dest.GLCode} is inactive.`); process.exit(1); }
     console.log(`write-off: ${dest.GLCode} ${dest.GLTitle}`);
