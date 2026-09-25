@@ -23,6 +23,46 @@ const events = require('../services/serviceEvents');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// The desk form's fuel gauge, word for word (JobCardForm FUEL_LEVELS), so the
+// two screens can never drift apart.
+const FUEL_LEVELS = ['Empty', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8', 'Full'];
+
+// The four the desk form offers. Until 2026-09-25 the tablet sent none of
+// this and every job card it opened was written as Cash, so a credit
+// customer's work posted to the wrong ledger at finalize.
+const PAYMENT_TYPES = ['Cash', 'Credit', 'POS', 'Bank Transfer'];
+
+/**
+ * Reads the payment block off a request, refusing anything that would leave a
+ * job card posting somewhere it should not.
+ *
+ * Credit needs the party to charge and Bank Transfer needs the account the
+ * money lands in; without them the job card cannot be posted at all, so they
+ * are refused here rather than at finalize, days later, by someone else.
+ * Fields belonging to the other modes are dropped, not kept: a party left over
+ * from a Credit draft would otherwise ride along on a Cash job card and print.
+ */
+const paymentFromBody = (b) => {
+    const raw = b.PaymentType == null || b.PaymentType === '' ? 'Cash' : String(b.PaymentType);
+    if (!PAYMENT_TYPES.includes(raw)) {
+        return { error: `"${raw}" is not a payment mode. Choose ${PAYMENT_TYPES.join(', ')}.` };
+    }
+    const partyId = b.PartyID ? parseInt(b.PartyID) : null;
+    const bankId = b.PaymentBankID ? parseInt(b.PaymentBankID) : null;
+    if (raw === 'Credit' && !Number.isInteger(partyId)) {
+        return { error: 'Credit needs the party the work is charged to.' };
+    }
+    if (raw === 'Bank Transfer' && !Number.isInteger(bankId)) {
+        return { error: 'Bank Transfer needs the bank account the money is paid into.' };
+    }
+    return {
+        PaymentType: raw,
+        PartyID: raw === 'Credit' ? partyId : null,
+        PaymentCO: raw === 'Credit' && b.PaymentCO ? String(b.PaymentCO).slice(0, 150) : null,
+        PaymentBankID: raw === 'Bank Transfer' ? bankId : null,
+    };
+};
+
 // Identical to the job card's snapshotTax (workshopController): tax on the line
 // AFTER discount, rounded to paisa. Kept the same on purpose so an estimate's
 // totals are exactly what the job card will charge once it is opened.
@@ -382,12 +422,19 @@ async function loadEstimate(pool, id) {
                t.Title        AS JobTypeName,
                jc.JobCardNo,
                ISNULL(jc.IsFinalized, 0) AS JobCardFinalized,
-               bay.BayName
+               bay.BayName,
+               -- Names for the two payment modes that point at something else,
+               -- so the screen can show "Credit - ACME Motors" without a second
+               -- round trip.
+               pty.PartyName AS PaymentPartyName,
+               bnk.GLTitle   AS PaymentBankName
         FROM   dms_ServiceEstimates e
         LEFT   JOIN addata_CustomerInfo c ON c.ProfileID     = e.EndUserID
         LEFT   JOIN gen_JobCardType     t ON t.JobCardTypeId = e.JobTypeId
         LEFT   JOIN Addata_JobCardInfo jc ON jc.JobCardId    = e.JobCardID
         LEFT   JOIN dms_Bays          bay ON bay.BayID       = e.BayID
+        LEFT   JOIN gen_PartiesInfo   pty ON pty.PartyID     = e.PartyID
+        LEFT   JOIN GLChartOFAccount  bnk ON bnk.GLCAID      = e.PaymentBankID
         WHERE  e.EstimateID = @id`);
     if (!head.recordset.length) return null;
 
@@ -546,6 +593,15 @@ exports.updateEstimate = async (req, res) => {
             }
         }
 
+        // How the customer will pay, and the fuel in the tank at the walk-around
+        // (owner ask 2026-09-25). Both settled at the vehicle; the sign step
+        // hands them to the job card. Anything not recognised is refused rather
+        // than quietly stored, because PaymentType decides which ledger the
+        // finalized job card posts to.
+        const payment = paymentFromBody(b);
+        if (payment.error) return res.status(400).json({ error: payment.error });
+        const fuel = FUEL_LEVELS.includes(String(b.FuelLevel || '')) ? String(b.FuelLevel) : null;
+
         const rawLines = Array.isArray(b.Lines) ? b.Lines : [];
         const itemIds = [...new Set(rawLines.map(l => parseInt(l.ItemID)).filter(n => Number.isInteger(n) && n > 0))];
         let items = new Map();
@@ -634,13 +690,20 @@ exports.updateEstimate = async (req, res) => {
                 .input('pt',     sql.Decimal(18, 2),   partsTotal)
                 .input('ptax',   sql.Decimal(18, 2),   partsTax)
                 .input('gt',     sql.Decimal(18, 2),   grandTotal)
+                .input('pay',    sql.NVarChar(30),     payment.PaymentType)
+                .input('party',  sql.Int,              payment.PartyID)
+                .input('co',     sql.NVarChar(150),    payment.PaymentCO)
+                .input('bank',   sql.Int,              payment.PaymentBankID)
+                .input('fuel',   sql.NVarChar(20),     fuel)
                 .query(`UPDATE dms_ServiceEstimates SET
                             EndUserID = @eu, VehicleID = @vid,
                             VehicleRegNo = @reg, ChasisNo = @ch, EngineNo = @eng, VehicleModel = @model,
                             KiloMeter = @km, JobTypeId = @jt, CustomerRemarks = @rem,
                             PSTRate = @pst, GSTRate = @gst,
                             LabourTotal = @lt, LabourTax = @ltax, PartsTotal = @pt, PartsTax = @ptax,
-                            GrandTotal = @gt, UpdatedAt = GETDATE()
+                            GrandTotal = @gt, UpdatedAt = GETDATE(),
+                            PaymentType = @pay, PartyID = @party, PaymentCO = @co,
+                            PaymentBankID = @bank, FuelLevel = @fuel
                         WHERE EstimateID = @id`);
 
             await new sql.Request(tx).input('id', sql.Int, id)
@@ -756,7 +819,14 @@ const jobCardBodyFor = (est, { jobCode, promised, signerName, vehicleColor, user
     PromisedDate: promised || null,
     Remarks: `Opened on the service tablet from estimate ${est.EstimateNo}, signed by ${signerName}.`,
     VOCRemarks: est.CustomerRemarks || '',
-    PaymentType: 'Cash',
+    // Settled at the vehicle and stored on the estimate; NULL on an estimate
+    // drafted before this existed, which reads as Cash — what the tablet was
+    // already doing for every job card.
+    PaymentType: est.PaymentType || 'Cash',
+    PartyID: est.PartyID || null,
+    PaymentCO: est.PaymentCO || null,
+    PaymentBankID: est.PaymentBankID || null,
+    FuelLevel: est.FuelLevel || null,
     CustomerType: 'Walk-in',
     ServiceAdvisor: user?.employeeName || user?.userName || null,
     ServiceAdvisorID: user?.employeeId || null,

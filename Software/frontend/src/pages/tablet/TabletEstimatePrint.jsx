@@ -150,6 +150,16 @@ export default function TabletEstimatePrint() {
                             {e.EngineNo && <><span>Engine</span><span>{e.EngineNo}</span></>}
                             <span>Odometer</span><span>{e.KiloMeter != null ? `${Number(e.KiloMeter).toLocaleString('en-PK')} km` : '—'}</span>
                             {e.JobTypeName && <><span>Job type</span><span>{e.JobTypeName}</span></>}
+                            {/* Read off the gauge at the walk-around, so the
+                                customer signs for the fuel that was in it. */}
+                            {e.FuelLevel && <><span>Fuel</span><span>{e.FuelLevel}</span></>}
+                            {e.PaymentType && (
+                                <><span>Payment</span><span>
+                                    {e.PaymentType === 'POS' ? 'POS CLEAR' : e.PaymentType}
+                                    {e.PaymentPartyName ? ` — ${e.PaymentPartyName}` : ''}
+                                    {e.PaymentBankName ? ` — ${e.PaymentBankName}` : ''}
+                                </span></>
+                            )}
                         </div>
                     </div>
                 </div>

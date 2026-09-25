@@ -4,6 +4,7 @@ const c = require('../controllers/serviceIntakeController');
 const workshop = require('../controllers/workshopController');
 const requisitions = require('../controllers/partsRequisitionController');
 const bayScreens = require('../controllers/bayScreenController');
+const accounts = require('../controllers/accountController');
 const jobCards = require('../controllers/serviceJobCardsController');
 const { requireAccess } = require('../middleware/permissions');
 const { uploadDiagnostic, uploadServiceMedia, withUploadErrors } = require('../middleware/serviceMediaUpload');
@@ -31,6 +32,11 @@ router.post('/diagnostics/upload', tablet, withUploadErrors(uploadDiagnostic.sin
 // wrappers that can only insert, never edit.
 router.get(   '/lookups/job-types',               tablet, c.lookupJobTypes);
 router.get(   '/lookups/bays',                    tablet, workshop.getBays);
+// Who to charge on Credit, and where the money lands on Bank Transfer (owner
+// ask 2026-09-25). Both are the desk's own read-only handlers, so the tablet
+// and the desk form offer exactly the same lists.
+router.get(   '/lookups/parties',                 tablet, workshop.getParties);
+router.get(   '/lookups/banks',                   tablet, accounts.getBanks);
 router.get(   '/catalog',                         tablet, c.searchCatalog);
 router.get(   '/customers',                       tablet, workshop.getCustomers);
 router.post(  '/customers',                       tablet, c.createCustomer);

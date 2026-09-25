@@ -39,6 +39,11 @@ const CANCEL_REASONS = [
 let keySeq = 0;
 const newKey = () => `n${++keySeq}`;
 
+// The desk form's own lists, word for word (JobCardForm), so an advisor sees
+// the same choices at the vehicle as at the counter.
+const FUEL_LEVELS = ['Empty', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8', 'Full'];
+const PAYMENT_TYPES = ['Cash', 'Credit', 'POS', 'Bank Transfer'];
+
 const fromEstimate = (e) => ({
     customer: e.EndUserID
         ? { ProfileID: e.EndUserID, CustomerName: e.CustomerName, PhoneNo: e.CustomerPhone,
@@ -48,6 +53,15 @@ const fromEstimate = (e) => ({
     KiloMeter: e.KiloMeter == null ? '' : String(Number(e.KiloMeter)),
     JobTypeId: e.JobTypeId ? String(e.JobTypeId) : '',
     CustomerRemarks: e.CustomerRemarks || '',
+    // Seen at the vehicle during the walk-around; the job card has always had
+    // a fuel gauge, the tablet simply had nowhere to record it.
+    FuelLevel: e.FuelLevel || '',
+    // Before this existed the tablet sent nothing and every job card it opened
+    // was written as Cash, so credit work posted to the wrong ledger.
+    PaymentType: e.PaymentType || 'Cash',
+    PartyID: e.PartyID ? String(e.PartyID) : '',
+    PaymentCO: e.PaymentCO || '',
+    PaymentBankID: e.PaymentBankID ? String(e.PaymentBankID) : '',
     lines: (e.Lines || []).map(l => ({
         key: `s${l.LineID}`, LineType: l.LineType, ItemID: l.ItemID, Description: l.Description,
         PartNumber: l.PartNumber, Quantity: Number(l.Quantity), Rate: Number(l.Rate),
@@ -61,6 +75,14 @@ const toPayload = (d) => ({
     KiloMeter: d.KiloMeter === '' ? null : Number(d.KiloMeter),
     JobTypeId: d.JobTypeId ? Number(d.JobTypeId) : null,
     CustomerRemarks: d.CustomerRemarks || null,
+    FuelLevel: d.FuelLevel || null,
+    PaymentType: d.PaymentType || 'Cash',
+    // The server drops whatever does not belong to the chosen mode; sending it
+    // anyway keeps a half-typed party from vanishing while the advisor is still
+    // deciding.
+    PartyID: d.PartyID ? Number(d.PartyID) : null,
+    PaymentCO: d.PaymentCO || null,
+    PaymentBankID: d.PaymentBankID ? Number(d.PaymentBankID) : null,
     Lines: d.lines.map(l => ({ LineType: l.LineType, ItemID: l.ItemID, Quantity: Number(l.Quantity) })),
 });
 
@@ -434,6 +456,8 @@ function CustomerStep({ draft, change, editable }) {
     const [newVeh, setNewVeh] = useState(null);
     const [vehDup, setVehDup] = useState(null);
     const [jobTypes, setJobTypes] = useState([]);
+    const [parties, setParties] = useState([]);
+    const [banks, setBanks] = useState([]);
     const [busy, setBusy] = useState(false);
     const justPicked = useRef(false);
 
@@ -442,6 +466,10 @@ function CustomerStep({ draft, change, editable }) {
 
     useEffect(() => {
         axios.get(`${API}/lookups/job-types`).then(r => setJobTypes(r.data)).catch(() => setJobTypes([]));
+        // Only needed for Credit and Bank Transfer, but fetched up front: the
+        // advisor is at the vehicle and may be on a weak corner of the Wi-Fi.
+        axios.get(`${API}/lookups/parties`).then(r => setParties(r.data || [])).catch(() => setParties([]));
+        axios.get(`${API}/lookups/banks`).then(r => setBanks(r.data || [])).catch(() => setBanks([]));
     }, []);
 
     useEffect(() => {
@@ -734,7 +762,76 @@ function CustomerStep({ draft, change, editable }) {
                             {jobTypes.map(j => <option key={j.JobCardTypeId} value={String(j.JobCardTypeId)}>{j.Title}</option>)}
                         </select>
                     </div>
+                    {/* Read off the gauge during the walk-around, while the
+                        advisor is still standing at the car (owner ask
+                        2026-09-25). */}
+                    <div>
+                        <label style={S.label}>Fuel level</label>
+                        <select style={S.input} value={draft.FuelLevel}
+                                onChange={e => { const v = e.target.value; change(d => ({ ...d, FuelLevel: v })); }}>
+                            <option value="">— Not recorded —</option>
+                            {FUEL_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                        </select>
+                    </div>
+                    {/* Until now the tablet wrote every job card as Cash, so a
+                        credit customer's work posted to the wrong ledger. */}
+                    <div>
+                        <label style={S.label}>Payment mode</label>
+                        <select style={S.input} value={draft.PaymentType}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    change(d => ({
+                                        ...d,
+                                        PaymentType: v,
+                                        // Clear what no longer applies, so a party picked
+                                        // while drafting Credit cannot ride along on a
+                                        // Cash job card and print.
+                                        PartyID: v === 'Credit' ? d.PartyID : '',
+                                        PaymentCO: v === 'Credit' ? d.PaymentCO : '',
+                                        PaymentBankID: v === 'Bank Transfer' ? d.PaymentBankID : '',
+                                    }));
+                                }}>
+                            {PAYMENT_TYPES.map(pt => (
+                                <option key={pt} value={pt}>{pt === 'POS' ? 'POS CLEAR' : pt}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
+
+                {draft.PaymentType === 'Credit' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                                  gap: 12, marginBottom: 12 }}>
+                        <div>
+                            <label style={S.label}>Party charged *</label>
+                            <select style={S.input} value={draft.PartyID}
+                                    onChange={e => { const v = e.target.value; change(d => ({ ...d, PartyID: v })); }}>
+                                <option value="">— Select —</option>
+                                {parties.map(p => <option key={p.PartyID} value={String(p.PartyID)}>{p.PartyName}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label style={S.label}>C/O</label>
+                            <input style={S.input} value={draft.PaymentCO}
+                                   onChange={e => { const v = e.target.value; change(d => ({ ...d, PaymentCO: v })); }} />
+                        </div>
+                    </div>
+                )}
+
+                {draft.PaymentType === 'Bank Transfer' && (
+                    <div style={{ marginBottom: 12 }}>
+                        <label style={S.label}>Bank account *</label>
+                        <select style={S.input} value={draft.PaymentBankID}
+                                onChange={e => { const v = e.target.value; change(d => ({ ...d, PaymentBankID: v })); }}>
+                            <option value="">— Select —</option>
+                            {banks.map(b => <option key={b.GLCAID} value={String(b.GLCAID)}>{b.GLTitle}</option>)}
+                        </select>
+                        {!banks.length && (
+                            <div style={{ fontSize: 13, color: '#a16207', marginTop: 4 }}>
+                                No bank accounts are set up. Mark them as banks in Chart of Accounts.
+                            </div>
+                        )}
+                    </div>
+                )}
                 <label style={S.label}>What the customer asked for / complaint</label>
                 <textarea style={{ ...S.input, minHeight: 110, resize: 'vertical' }} value={draft.CustomerRemarks}
                           onChange={e => { const v = e.target.value; change(d => ({ ...d, CustomerRemarks: v })); }} />
