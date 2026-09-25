@@ -59,12 +59,20 @@ async function createFollowUpForJobCard(jobCardId, userInfo) {
                     INSERT INTO dms_CRDFollowUps
                         (JobCardID, PartyID, CustomerProfileID, CustomerName, PhoneOne, VehicleRegNo,
                          DueDate, Status, CreatedBy, CreatedByName)
-                    OUTPUT INSERTED.FollowUpID
                     VALUES (@jcId, @partyId, @profileId, @custName, @phone, @vehReg,
                             @dueDate, 'Pending', @createdBy, @createdByName);
                 END
+
+                -- Always SELECT, rather than OUTPUT inside the IF. When the row
+                -- already existed the IF body never ran, the statement returned
+                -- no result set at all, and reading .recordset[0] threw
+                -- "Cannot read properties of undefined (reading '0')" -- on the
+                -- re-finalize path this function calls idempotent. Live logged
+                -- exactly that for JC 2847 (2026-09-25). This way the caller
+                -- gets the follow-up either way, new or existing.
+                SELECT FollowUpID FROM dms_CRDFollowUps WHERE JobCardID = @jcId;
             `);
-        return result.recordset[0]?.FollowUpID || null;
+        return result.recordset?.[0]?.FollowUpID || null;
     } catch (err) {
         console.error(`[CRD] follow-up auto-create failed for JC ${jobCardId}:`, err.message);
         return null;
