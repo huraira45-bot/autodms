@@ -14,9 +14,11 @@
  * original left in place and marked Reversed. Nothing is deleted and no
  * history disappears.
  *
- * The reversal carries the BookingID through (fixed the same day), so the
- * booking stops showing the money as paid to Master and the real voucher can
- * then be matched to it on the booking page.
+ * The booking stops showing the money as paid to Master because both readers
+ * of that figure count only Posted vouchers, and the original becomes
+ * Reversed. The mirror deliberately carries NO BookingID: tagging it as well
+ * would subtract the same money a second time and leave the booking negative.
+ * The real voucher can then be matched to the booking on the booking page.
  *
  * It will not touch a voucher on a booking that is not historical, one that is
  * not Posted, or one that has already been reversed.
@@ -105,16 +107,23 @@ const day = (d) => new Date(d).toISOString().slice(0, 10);
     console.log(`\nreversed ${ok}, failed ${failed}`);
 
     // Show where each booking now stands, so the next step is obvious.
+    // Deliberately a correlated subquery with INNER JOINs, mirroring
+    // salesBookingController.AmountPaidToMaster exactly. An earlier version
+    // used LEFT JOIN ... AND vi.Status='Posted', which does not filter at all:
+    // lines whose voucher is not posted still come through with a NULL vi and
+    // get summed, so reversed vouchers kept counting and this summary claimed
+    // the bookings were still paid when they were not.
     const after = (await pool.request().query(`
         SELECT b.BookingNo, b.NegotiatedPrice,
-               ISNULL(SUM(d.Debit - d.Credit), 0) AS PaidToMaster
+               ISNULL((SELECT SUM(d.Debit - d.Credit)
+                       FROM   data_FinanceVoucherDetail d
+                       JOIN   data_FinanceVoucherInfo vi ON vi.VoucherID = d.VoucherID
+                       JOIN   dms_SystemAccounts sa ON sa.GLCAID = d.GLCAID
+                       WHERE  d.BookingID = b.BookingID
+                         AND  vi.Status = 'Posted'
+                         AND  sa.RoleKey = 'BOOKING_VARIANT_RECEIVABLE'), 0) AS PaidToMaster
         FROM   dms_SalesBookings b
-        LEFT   JOIN data_FinanceVoucherDetail d ON d.BookingID = b.BookingID
-        LEFT   JOIN data_FinanceVoucherInfo vi ON vi.VoucherID = d.VoucherID AND vi.Status = 'Posted'
-        LEFT   JOIN dms_SystemAccounts sa ON sa.GLCAID = d.GLCAID AND sa.RoleKey = 'BOOKING_VARIANT_RECEIVABLE'
         WHERE  b.BookingID IN (${rows.map(r => r.BookingID).join(',')})
-          AND  (sa.GLCAID IS NOT NULL OR d.BookingID IS NULL)
-        GROUP  BY b.BookingNo, b.NegotiatedPrice
         ORDER  BY b.BookingNo`)).recordset;
     console.log('\nWHERE EACH BOOKING STANDS NOW');
     after.forEach(b => console.log(`  ${b.BookingNo.padEnd(14)} paid to Master PKR ${money(b.PaidToMaster).padStart(15)}`
