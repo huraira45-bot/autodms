@@ -10,9 +10,11 @@
  */
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Wifi, Video, Printer, Loader2, ExternalLink, Info } from 'lucide-react';
+import { Wifi, Video, Printer, Loader2, ExternalLink, Info,
+         Smartphone, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { isNativeApp, getServerUrl, serverPageUrl, openOutsideApp } from '../../tablet/serverConfig';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
+import { canPromptInstall } from '../../tablet/installPrompt';
 
 const mb = (bytes) => (bytes / 1048576).toFixed(1) + ' MB';
 
@@ -185,6 +187,125 @@ export default function TabletDiagnostics() {
                     </div>
                 )}
             </div>
+
+            <InstallReadiness />
+        </div>
+    );
+}
+
+/**
+ * Why Chrome will or will not install this as an app.
+ *
+ * Owner report 2026-09-25: the tablet's menu said "This app cannot be
+ * installed" with no reason given. Chrome does not tell you which of its
+ * conditions failed, and the address bar is not always in shot, so the device
+ * reports on itself instead of the answer being guessed at from here.
+ *
+ * Chrome's conditions, in the order they usually fail:
+ *   1. a secure origin — https, or localhost. Plain http can never install.
+ *   2. a service worker with a fetch handler. Browsers refuse to register one
+ *      on an insecure origin, so a failure at 1 always fails this too.
+ *   3. a manifest with a name, a 192px and a 512px icon, a start_url and a
+ *      standalone display.
+ */
+function InstallReadiness() {
+    const [checks, setChecks] = useState(null);
+    const [busy, setBusy] = useState(false);
+
+    const run = async () => {
+        setBusy(true);
+        const out = [];
+        const secure = window.isSecureContext;
+        out.push({
+            ok: secure,
+            label: 'Secure address (https)',
+            detail: secure
+                ? window.location.origin
+                : `${window.location.origin} — Chrome will not install over plain http. `
+                  + 'Open the https address instead.',
+        });
+
+        // A service worker cannot even be asked for on an insecure origin.
+        let swOk = false, swDetail = 'Service workers are not supported by this browser.';
+        if ('serviceWorker' in navigator) {
+            if (!secure) {
+                swDetail = 'Not registered — the address is not secure, so the browser refuses to register one.';
+            } else {
+                try {
+                    const reg = await navigator.serviceWorker.getRegistration('/tablet');
+                    swOk = !!reg;
+                    swDetail = reg ? `Registered for ${reg.scope}` : 'Not registered yet — reload this page once and try again.';
+                } catch (e) { swDetail = e.message; }
+            }
+        }
+        out.push({ ok: swOk, label: 'Service worker', detail: swDetail });
+
+        // The manifest, fetched and checked the way Chrome checks it.
+        try {
+            const r = await fetch('/manifest.webmanifest', { cache: 'no-store' });
+            const m = await r.json();
+            const has192 = (m.icons || []).some(i => i.sizes === '192x192');
+            const has512 = (m.icons || []).some(i => i.sizes === '512x512');
+            const display = ['standalone', 'fullscreen', 'minimal-ui'].includes(m.display);
+            const ok = !!(m.name || m.short_name) && !!m.start_url && has192 && has512 && display;
+            out.push({
+                ok,
+                label: 'App manifest',
+                detail: ok
+                    ? `${m.name} · ${m.display} · start ${m.start_url}`
+                    : 'Missing a name, an icon size, start_url or a standalone display.',
+            });
+        } catch (e) {
+            out.push({ ok: false, label: 'App manifest', detail: `Could not read it: ${e.message}` });
+        }
+
+        out.push({
+            ok: canPromptInstall(),
+            label: 'Chrome has offered to install',
+            detail: canPromptInstall()
+                ? 'Ready — the Add button on the tablet screens will install it.'
+                : 'Not yet. Chrome offers this only once everything above passes, and '
+                  + 'sometimes only after the page has been used for a few seconds.',
+        });
+
+        setChecks(out);
+        setBusy(false);
+    };
+
+    return (
+        <div style={S.card}>
+            <h2 style={S.h2}><Smartphone size={20} /> 4. Install as an app</h2>
+            <p style={S.p}>
+                If Chrome's menu says <strong>“This app cannot be installed”</strong>, run this. It checks the
+                same things Chrome does and says which one is failing.
+            </p>
+            <button style={S.btn} onClick={run} disabled={busy}>
+                {busy ? <Loader2 size={20} className="animate-spin" /> : 'Check'}
+            </button>
+
+            {checks && (
+                <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
+                    {checks.map((c, i) => (
+                        <div key={i} style={{
+                            display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px',
+                            borderRadius: 8, border: `1px solid ${c.ok ? '#bbf7d0' : '#fde68a'}`,
+                            background: c.ok ? T.okBg : T.warnBg,
+                        }}>
+                            {c.ok ? <CheckCircle2 size={18} color={T.ok} style={{ flex: '0 0 auto', marginTop: 2 }} />
+                                  : <AlertTriangle size={18} color={T.warn} style={{ flex: '0 0 auto', marginTop: 2 }} />}
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: 15 }}>{c.label}</div>
+                                <div style={{ fontSize: 14, color: T.muted, wordBreak: 'break-word' }}>{c.detail}</div>
+                            </div>
+                        </div>
+                    ))}
+                    {checks.some(c => !c.ok) && (
+                        <div style={{ fontSize: 14, color: T.muted, marginTop: 2 }}>
+                            Fix the first one that is not green — the ones under it usually depend on it.
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
