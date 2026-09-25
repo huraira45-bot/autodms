@@ -21,6 +21,7 @@ import { API, money, errText, fmtDateTime, statusStyle, pill } from '../../table
 import WorkOrderPrint from '../WorkOrderPrint';
 import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 import ServiceAuthorisation from '../../components/ServiceAuthorisation';
+import QCChecksheet from '../../components/QCChecksheet';
 
 const qty = (n) => String(+Number(n || 0).toFixed(2));
 
@@ -247,6 +248,9 @@ export default function TabletJobCard() {
                 on a job card that has neither. */}
             <ServiceAuthorisation jobCardId={id} signatures={jc.Signatures || []} media={jc.Media || []}
                                   apiBase={`${API}/job-cards`} size="tablet" />
+
+            {/* The checksheet walked round the car before handing it back. */}
+            <QCChecksheet jobCardId={id} apiBase={API} size="tablet" canEdit={!jc.IsFinalized} />
 
             <div style={S.card}>
                 {[

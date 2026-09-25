@@ -112,6 +112,7 @@ import WorkshopCustomers  from './pages/WorkshopCustomers';
 import JobCardList        from './pages/JobCardList';
 import JobCardForm        from './pages/JobCardForm';
 import WorkOrderPrint     from './pages/WorkOrderPrint';
+import QCChecksheetPrint from './pages/QCChecksheetPrint';
 import StoreSalePrint     from './pages/StoreSalePrint';
 import GRNPrint           from './pages/GRNPrint';
 import GRTNPrint          from './pages/GRTNPrint';
@@ -906,7 +907,11 @@ function AppShell() {
                 <main style={{ background: 'white' }}>
                     <Routes>
                         <Route path="/workshop/jobs/:id/print" element={<WorkOrderPrint />} />
-                        <Route path="/workshop/jobs/:id/credit-invoice" element={<CreditInvoicePrint />} />
+                        {/* The delivery checksheet on paper (owner ask 2026-09-25). */}
+                    <Route path="/workshop/qc/:inspectionId/print" element={
+                        <ProtectedRoute moduleKey="workshop_jobs"><QCChecksheetPrint /></ProtectedRoute>
+                    } />
+                    <Route path="/workshop/jobs/:id/credit-invoice" element={<CreditInvoicePrint />} />
                         <Route path="/workshop/jobs/:id/gst-invoice"    element={<JobCardGSTPrint />} />
                         <Route path="/workshop/jobs/:id/pst-invoice"    element={<JobCardPSTPrint />} />
                         <Route path="/workshop/jobs/:id/dep-print"          element={<JobCardDepreciationPrint />} />

@@ -16,6 +16,7 @@ const FUEL_LEVELS = ['Empty', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8', '
 const PM_TYPES = ['None', 'Monthly', 'Quarterly', 'Annual'];
 const BRING_BY_TYPES = ['Self', 'Driver', 'Towing', 'Other'];
 import ServiceAuthorisation from '../components/ServiceAuthorisation';
+import QCChecksheet from '../components/QCChecksheet';
 
 const TABS = ['General', 'Vehicle Info', 'Job Card Info', 'Spares', 'Sublet Repair', 'Insurance'];
 
@@ -1424,6 +1425,10 @@ export default function JobCardForm() {
 
           {/* Draws nothing unless this job card came from the tablet. */}
           <ServiceAuthorisation jobCardId={id} signatures={signatures} media={media} />
+
+          {/* The delivery checksheet (owner ask 2026-09-25). Only on a saved
+              job card -- there is nothing to inspect before one exists. */}
+          {isEdit && <QCChecksheet jobCardId={id} canEdit={!disabled} />}
 
           {/* Tabs — navigation buttons rendered OUTSIDE the disabled fieldset
               so they remain clickable when the JC is finalized. Each tab's

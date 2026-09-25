@@ -24,13 +24,14 @@ import TabletDiagnostics from './TabletDiagnostics';
 import TabletEstimates, { NewIntakeButton } from './TabletEstimates';
 import TabletEstimateEditor from './TabletEstimateEditor';
 import TabletEstimatePrint from './TabletEstimatePrint';
+import QCChecksheetPrint from '../QCChecksheetPrint';
 import TabletEstimateSign from './TabletEstimateSign';
 import BayScreen, { hasBayDevice } from './BayScreen';
 import TabletJobCards from './TabletJobCards';
 import TabletJobCard, { TabletJobCardPrint } from './TabletJobCard';
 import AddToHomeScreen, { resetHomeScreenHint, homeScreenHintApplies } from '../../tablet/AddToHomeScreen';
 
-const PRINT_ROUTE = /^\/tablet\/(estimates|job-cards)\/\d+\/print\/?$/;
+const PRINT_ROUTE = /^\/tablet\/(estimates|job-cards|qc)\/\d+\/print\/?$/;
 
 export default function TabletApp() {
     const { user, loading, logout, hasPermission } = useAuth();
@@ -68,6 +69,10 @@ export default function TabletApp() {
             <Routes>
                 <Route path="/tablet/estimates/:id/print" element={<TabletEstimatePrint />} />
                 <Route path="/tablet/job-cards/:id/print" element={<TabletJobCardPrint />} />
+                {/* The delivery checksheet, printed from the tablet. Same page
+                    as the desk uses, reading through the tablet's own API. */}
+                <Route path="/tablet/qc/:inspectionId/print"
+                       element={<QCChecksheetPrint apiBase="/api/service-intake" />} />
             </Routes>
         );
     }

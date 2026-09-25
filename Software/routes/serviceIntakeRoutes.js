@@ -5,6 +5,7 @@ const workshop = require('../controllers/workshopController');
 const requisitions = require('../controllers/partsRequisitionController');
 const bayScreens = require('../controllers/bayScreenController');
 const accounts = require('../controllers/accountController');
+const qc = require('../controllers/qcInspectionController');
 const jobCards = require('../controllers/serviceJobCardsController');
 const { requireAccess } = require('../middleware/permissions');
 const { uploadDiagnostic, uploadServiceMedia, withUploadErrors } = require('../middleware/serviceMediaUpload');
@@ -91,6 +92,15 @@ router.get(   '/job-cards/:id/print-data',        ...tabletJobCard, workshop.get
 // own copy of the work-order print and its job card screen can show them.
 router.get(   '/job-cards/:id/signature/:signatureId', ...tabletJobCard, c.getJobCardSignatureImage);
 router.get(   '/job-cards/:id/media/:mediaId/ticket',  ...tabletJobCard, c.getJobCardMediaTicket);
+
+// The QC checksheet at delivery, from the tablet. The points list is read-only
+// here -- editing it is a workshop setting, done at a desk.
+// Ordered before '/qc/:inspectionId' so "points" is never read as an id.
+router.get(   '/qc/points',                       tablet, qc.listPoints);
+router.get(   '/job-cards/:id/qc',                ...tabletJobCard, qc.listForJobCard);
+router.post(  '/job-cards/:id/qc',                ...tabletJobCard, qc.startForJobCard);
+router.get(   '/qc/:inspectionId',                tablet, qc.getInspection);
+router.put(   '/qc/:inspectionId',                tablet, qc.saveResults);
 router.get(   '/job-cards/:id/insurance',         ...tabletJobCard, workshop.getJobCardInsurance);
 
 module.exports = router;

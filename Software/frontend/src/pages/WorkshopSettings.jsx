@@ -4,6 +4,7 @@ import { Settings, Plus, Edit, Trash2, X, Briefcase, Tags, Loader2, Hash, Layout
 import { useFeedback } from '../context/FeedbackContext';
 import SearchableSelect from '../components/SearchableSelect';
 import { ErpControlPanel } from '../components/erp';
+import QCPointsSettings from '../components/QCPointsSettings';
 
 const API = '/api/workshop';
 
@@ -365,6 +366,10 @@ export default function WorkshopSettings() {
           </div>
         </div>
       )}
+
+      {/* The delivery checksheet's points (owner ask 2026-09-25). Full width:
+          44 points read badly in half a page. */}
+      <QCPointsSettings />
 
       <style>{`
         .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }

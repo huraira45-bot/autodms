@@ -3,6 +3,7 @@ const router = express.Router();
 const wc = require('../controllers/workshopController');
 const { requirePerm, requireAccess, requireAnyAccess } = require('../middleware/permissions');
 const si = require('../controllers/serviceIntakeController');
+const qc = require('../controllers/qcInspectionController');
 
 // ── Customers (workshop_customers) ─────────────────────────────────────────
 router.get(   '/customers',                 requirePerm('workshop_customers', 'view'),   wc.getCustomers);
@@ -45,6 +46,22 @@ router.get(   '/job-cards/:id/print-data',  requirePerm('workshop_jobs', 'view')
 // workshop_jobs, not workshop_tablet.
 router.get(   '/job-cards/:id/signature/:signatureId', requirePerm('workshop_jobs', 'view'), si.getJobCardSignatureImage);
 router.get(   '/job-cards/:id/media/:mediaId/ticket',  requirePerm('workshop_jobs', 'view'), si.getJobCardMediaTicket);
+
+// QC Inspection Checksheet, worked through before the car is handed back
+// (owner ask 2026-09-25). Record only -- nothing here is called from the
+// finalize path, so an unfinished sheet never strands a job card.
+//
+// Filling one goes with the job card; editing the list of points is a
+// workshop setting, so the two sit behind different permissions.
+router.get(   '/qc/points',               requireAnyAccess('workshop_jobs:view', 'workshop_settings:view'), qc.listPoints);
+router.post(  '/qc/points',               requirePerm('workshop_settings', 'edit'), qc.createPoint);
+router.put(   '/qc/points/:id',           requirePerm('workshop_settings', 'edit'), qc.updatePoint);
+router.delete('/qc/points/:id',           requirePerm('workshop_settings', 'edit'), qc.retirePoint);
+
+router.get(   '/job-cards/:id/qc',        requirePerm('workshop_jobs', 'view'), qc.listForJobCard);
+router.post(  '/job-cards/:id/qc',        requirePerm('workshop_jobs', 'edit'), qc.startForJobCard);
+router.get(   '/qc/:inspectionId',        requirePerm('workshop_jobs', 'view'), qc.getInspection);
+router.put(   '/qc/:inspectionId',        requirePerm('workshop_jobs', 'edit'), qc.saveResults);
 router.get(   '/job-cards/:id/invoice-data', requirePerm('workshop_jobs', 'view'),       wc.getJobCardInvoiceData);
 router.get(   '/job-cards/:id',             requirePerm('workshop_jobs', 'view'),        wc.getJobCardById);
 router.post(  '/job-cards',                 requirePerm('workshop_jobs', 'insert'),      wc.saveJobCard);
