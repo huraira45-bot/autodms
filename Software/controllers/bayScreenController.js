@@ -154,6 +154,33 @@ exports.getBayJobs = async (req, res) => {
                 CanUndo: !!row.CanUndo,
             });
         }
+        // Parts already issued against these job cards, so the technician can
+        // see what has been sent out to the bay (owner ask 2026-09-25).
+        //
+        // NAME AND QUANTITY ONLY. The rate, landed cost, discount and tax
+        // columns are deliberately not selected: a bay screen is an unattended
+        // device on the workshop floor holding a device token rather than a
+        // user login, and what a part cost is none of its business. Leaving
+        // them out of the query means they cannot leak through the API even if
+        // the screen is later changed to show more.
+        if (cards.length) {
+            const ids = cards.map(c => c.JobCardId).join(',');
+            const partsRes = await pool.request().query(`
+                SELECT d.JobCardId,
+                       ISNULL(i.ItenName, 'Part #' + CAST(d.ItemId AS VARCHAR(20))) AS PartName,
+                       SUM(ISNULL(d.IssueQuantity, 0)) AS Qty
+                FROM   data_StockIssuetoJobCardDetail d
+                LEFT   JOIN InventItems i ON i.ItemId = d.ItemId
+                WHERE  d.JobCardId IN (${ids})
+                GROUP  BY d.JobCardId, i.ItenName, d.ItemId
+                HAVING SUM(ISNULL(d.IssueQuantity, 0)) > 0
+                ORDER  BY d.JobCardId, PartName`);
+            for (const card of cards) card.Parts = [];
+            for (const row of partsRes.recordset) {
+                byId.get(row.JobCardId)?.Parts.push({ PartName: row.PartName, Qty: Number(row.Qty) });
+            }
+        }
+
         // Cards with work in progress first, then waiting, then all-done.
         const rank = (card) => (card.Lines.some(l => l.State === 'working') ? 0 : card.Lines.some(l => l.State === 'waiting') ? 1 : 2);
         cards.sort((a, b) => rank(a) - rank(b));

@@ -13,7 +13,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Loader2, Play, Square, Undo2, Wifi, WifiOff, MonitorSmartphone, CheckCircle2, Clock, User } from 'lucide-react';
+import { Loader2, Play, Square, Undo2, Wifi, WifiOff, MonitorSmartphone, CheckCircle2, Clock, User, Package } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
 import { isNativeApp, getServerUrl } from '../../tablet/serverConfig';
@@ -218,6 +218,28 @@ function BayBoard({ device }) {
                                 {line.State === 'done' && <CheckCircle2 size={40} color={D.done} />}
                             </div>
                         ))}
+
+                        {/* What the parts counter has sent out for this vehicle
+                            (owner ask 2026-09-25). Names and quantities only —
+                            what a part costs is not a technician's business,
+                            and the API does not send it. */}
+                        {card.Parts?.length > 0 && (
+                            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${D.line}` }}>
+                                <div style={{ fontSize: 15, color: D.muted, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                                    <Package size={16} /> Parts issued
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {card.Parts.map((p, i) => (
+                                        <span key={i}
+                                              style={{ fontSize: 17, background: '#1e293b', border: `1px solid ${D.line}`,
+                                                       borderRadius: 8, padding: '6px 12px', color: D.text }}>
+                                            {p.PartName}
+                                            {p.Qty > 1 && <strong style={{ color: '#93c5fd' }}> × {p.Qty}</strong>}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
