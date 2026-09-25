@@ -26,6 +26,7 @@
  *     GET  /api/hr/postings?monthId=YYYY-MM  (audit)
  */
 const { sql, getPool } = require('../config/db');
+const { buildSalarySheetWorkbook } = require('../services/salarySheetExcel');
 const { computeNetPay } = require('../utils/salaryCalculator');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { resolveRole } = require('./systemAccountsController');
@@ -247,6 +248,36 @@ exports.getSalarySheet = async (req, res) => {
         const sheet = await buildSheet(pool, req.params.monthId);
         res.json(sheet);
     } catch (err) { console.error('getSalarySheet:', err); res.status(500).json({ error: err.message }); }
+};
+
+/**
+ * GET /api/hr/salary-sheet/:monthId/excel
+ *
+ * The same sheet as an .xlsx download (owner ask 2026-09-25). It goes through
+ * buildSheet like everything else, so the workbook cannot drift from what the
+ * screen and the print show — the figures are computed once, here.
+ */
+exports.getSalarySheetExcel = async (req, res) => {
+    try {
+        const monthId = req.params.monthId;
+        const pool = await getPool();
+        const sheet = await buildSheet(pool, monthId);
+
+        let businessName = 'Salary Sheet';
+        try {
+            const bp = await pool.request().query(
+                `SELECT TOP 1 BusinessName FROM dms_BusinessProfile ORDER BY ProfileID`);
+            if (bp.recordset[0]?.BusinessName) businessName = bp.recordset[0].BusinessName;
+        } catch { /* no profile set up — the title just falls back */ }
+
+        const buf = buildSalarySheetWorkbook(sheet, businessName);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="Salary Sheet ${monthId}.xlsx"`);
+        res.send(buf);
+    } catch (err) {
+        console.error('getSalarySheetExcel:', err);
+        res.status(500).json({ error: err.message });
+    }
 };
 
 // ─── Voucher posting ────────────────────────────────────────────

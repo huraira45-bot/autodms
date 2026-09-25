@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Save, FileText, Landmark, Wallet, Printer, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Save, FileText, Landmark, Wallet, Printer, RefreshCw, ChevronLeft, ChevronRight, Sheet } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import { useCan } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
@@ -46,6 +46,29 @@ export default function HrSalarySheet() {
         } finally { setBusy(false); }
     };
     useEffect(() => { load(); }, [monthId]);
+
+    // The workbook is built on the server, so it is fetched rather than linked:
+    // a plain <a href> carries no Authorization header and would be refused.
+    const [excelBusy, setExcelBusy] = useState(false);
+    const downloadExcel = async () => {
+        setExcelBusy(true);
+        try {
+            const r = await axios.get(`${API}/salary-sheet/${monthId}/excel`, { responseType: 'blob' });
+            const url = URL.createObjectURL(r.data);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Salary Sheet ${monthId}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            // Freed on the next tick; revoking immediately cancels the download
+            // in some browsers.
+            setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        } catch (err) {
+            alert(err.response?.data?.error || 'Could not build the spreadsheet.');
+        }
+        setExcelBusy(false);
+    };
 
     const patch = (empId, field, value) => {
         setDrafts(prev => {
@@ -265,6 +288,10 @@ export default function HrSalarySheet() {
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>
                             </>
                         )}
+                        <button type="button" className="erp-btn" onClick={downloadExcel} disabled={excelBusy}
+                                title="The combined sheet as a spreadsheet — sortable, with the totals as real numbers">
+                            <Sheet size={13}/> {excelBusy ? 'Preparing…' : 'Excel'}
+                        </button>
                         <a className="erp-btn" href={`/hr/salary/${monthId}/print`} target="_blank" rel="noreferrer"
                            title="Everyone together, department-wise, no EOBI column">
                             <Printer size={13}/> Sheet · All (Combined)

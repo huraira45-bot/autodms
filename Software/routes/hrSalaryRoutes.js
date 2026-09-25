@@ -24,6 +24,9 @@ router.put( '/dept-accounts/:departmentId', requirePerm('hr_settings', 'edit'), 
 
 // Calculated salary sheet for one month
 router.get( '/salary-sheet/:monthId',   requirePerm('hr_salary', 'view'),       c.getSalarySheet);
+// The same sheet as a spreadsheet, so HR can sort and total it themselves
+// (owner ask 2026-09-25). Same permission — it is the same information.
+router.get( '/salary-sheet/:monthId/excel', requirePerm('hr_salary', 'view'),   c.getSalarySheetExcel);
 router.get( '/salary-slip/:monthId/:employeeId', requirePerm('hr_salary', 'view'), c.getEmployeeSlip);
 
 // Voucher posting.
