@@ -48,9 +48,135 @@ export default function BayScreen() {
 // ---------------------------------------------------------------------------
 // Board
 // ---------------------------------------------------------------------------
+//
+// Styled as workshop instrumentation (owner ask 2026-09-25): a dark console
+// with a faint grid, cyan as the "live" colour, and the technical values —
+// registration, job number, times, quantities — set in a monospace face so
+// digits line up and read like a readout.
+//
+// Everything here is read from several metres away by someone holding a tool,
+// so the decoration is kept behind the content: nothing dims text below the
+// contrast it had, every touch target stays at least 68px, and the only motion
+// is a slow pulse on work that is actually running. A board that is hard to
+// read in a hurry would be worse than a plain one.
 const D = {
-    bg: '#0b1220', card: '#16213a', line: '#26324d', text: '#f8fafc', muted: '#94a3b8',
-    start: '#16a34a', finish: '#2563eb', done: '#22c55e', warn: '#f59e0b', bad: '#ef4444',
+    bg: '#070b14', bgGrid: '#0e1626', card: '#111a2e', cardTop: '#16223c',
+    line: '#24314f', text: '#f1f5f9', muted: '#94a3b8', dim: '#64748b',
+    accent: '#22d3ee',                       // live / running
+    start: '#16a34a', finish: '#0891b2', done: '#22c55e', warn: '#f59e0b', bad: '#ef4444',
+};
+
+const MONO = "ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace";
+
+const BAY_CSS = `
+.bay-led { width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+           box-shadow: 0 0 10px currentColor; animation: bayPulse 2.4s ease-in-out infinite; }
+.bay-led-bad { animation: bayPulse 0.9s ease-in-out infinite; }
+@keyframes bayPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+/* The card's left edge is its state at a glance; only running work moves. */
+.bay-edge { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+.bay-edge-live { animation: bayEdge 2s ease-in-out infinite; }
+@keyframes bayEdge { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+.bay-card { position: relative; overflow: hidden; }
+.bay-card::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent 120px);
+}
+
+/* One thin sweep under the header — enough to read as an instrument, slow
+   enough to ignore while working. */
+.bay-scan { height: 2px; background: linear-gradient(90deg, transparent, ${'#22d3ee'}, transparent);
+            opacity: 0.5; animation: bayScan 7s linear infinite; }
+@keyframes bayScan { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+.bay-btn:active { transform: translateY(1px); }
+.bay-btn:disabled { opacity: 0.55; }
+
+@media (prefers-reduced-motion: reduce) {
+    .bay-led, .bay-edge-live, .bay-scan { animation: none; }
+}
+`;
+
+const S2 = {
+    screen: {
+        minHeight: '100vh', color: D.text,
+        background: `
+            radial-gradient(1200px 500px at 50% -10%, #12203a 0%, transparent 70%),
+            repeating-linear-gradient(0deg,  ${D.bgGrid} 0 1px, transparent 1px 44px),
+            repeating-linear-gradient(90deg, ${D.bgGrid} 0 1px, transparent 1px 44px),
+            ${D.bg}`,
+        fontFamily: "'Inter', 'Segoe UI', Arial, sans-serif",
+    },
+    hud: {
+        display: 'flex', alignItems: 'center', gap: 22, padding: '14px 26px', flexWrap: 'wrap',
+        background: 'linear-gradient(180deg, rgba(34,211,238,0.07), transparent)',
+        borderBottom: `1px solid ${D.line}`,
+    },
+    bayTag: { fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: D.accent, opacity: 0.85 },
+    bayName: { fontFamily: MONO, fontSize: 38, fontWeight: 700, letterSpacing: 3, textShadow: `0 0 22px ${D.accent}44` },
+    jobCount: { display: 'flex', alignItems: 'baseline', gap: 7, color: D.muted },
+    jobCountNum: { fontFamily: MONO, fontSize: 26, fontWeight: 700, color: D.text },
+    jobCountWord: { fontSize: 16 },
+    status: { display: 'flex', alignItems: 'center', gap: 9, fontFamily: MONO, fontSize: 15, letterSpacing: 1.5 },
+    clock: { fontFamily: MONO, fontSize: 30, fontWeight: 700, letterSpacing: 1 },
+    clockDate: { fontFamily: MONO, fontSize: 13, color: D.muted, letterSpacing: 1.5, textTransform: 'uppercase' },
+
+    alert: {
+        margin: '16px 26px 0', padding: '14px 18px', fontSize: 18,
+        background: 'rgba(127,29,29,0.5)', color: '#fecaca',
+        border: `1px solid ${D.bad}66`, borderLeft: `4px solid ${D.bad}`, borderRadius: 4,
+    },
+    emptyBig: { fontFamily: MONO, fontSize: 30, letterSpacing: 5, marginTop: 16, color: D.done },
+
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(460px, 1fr))', gap: 18, padding: 24 },
+    card: {
+        background: `linear-gradient(180deg, ${D.cardTop}, ${D.card})`,
+        border: `1px solid ${D.line}`, borderRadius: 4, padding: '18px 20px 18px 24px',
+        // A clipped top-right corner — a panel, not a web card.
+        clipPath: 'polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%)',
+    },
+    reg: { fontFamily: MONO, fontSize: 36, fontWeight: 700, letterSpacing: 2 },
+    jcNo: { fontFamily: MONO, fontSize: 16, color: D.accent, letterSpacing: 1.5 },
+    vehicle: { fontSize: 18, color: '#cbd5e1', marginTop: 3 },
+    meta: {
+        fontFamily: MONO, fontSize: 13.5, color: D.muted, marginTop: 6,
+        display: 'flex', gap: 18, flexWrap: 'wrap', letterSpacing: 1,
+    },
+
+    lineRow: {
+        display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0 4px', marginTop: 12,
+        borderTop: `1px solid ${D.line}`,
+    },
+    lineDot: { width: 8, height: 8, borderRadius: 50, flex: '0 0 auto', boxShadow: '0 0 8px currentColor' },
+    lineJob: { fontSize: 21, fontWeight: 600 },
+    lineMeta: { fontFamily: MONO, fontSize: 13.5, marginTop: 3, letterSpacing: 1 },
+
+    undoBtn: {
+        background: 'transparent', color: D.muted, border: `1px solid ${D.line}`, borderRadius: 4,
+        minHeight: 52, padding: '0 14px', fontFamily: MONO, fontSize: 14, letterSpacing: 1.5,
+        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+    },
+    bigBtn: {
+        color: '#fff', border: 'none', borderRadius: 4,
+        minHeight: 68, minWidth: 158, fontFamily: MONO, fontSize: 21, fontWeight: 700, letterSpacing: 2,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, cursor: 'pointer',
+    },
+
+    partsWrap: { marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${D.line}` },
+    partsHead: {
+        // D.muted, not D.dim: this labels something technicians actually read
+        // off the screen, so it stays above the contrast the rest of the card
+        // holds. D.dim is kept for the device identifier in the footer.
+        fontFamily: MONO, fontSize: 13.5, letterSpacing: 2, color: D.muted,
+        display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8,
+    },
+    partChip: {
+        fontSize: 16.5, background: 'rgba(34,211,238,0.07)', border: `1px solid ${D.line}`,
+        borderRadius: 3, padding: '6px 12px', color: D.text,
+    },
+    footer: { padding: '0 26px 18px', color: D.dim, fontFamily: MONO, fontSize: 12, letterSpacing: 1.5 },
 };
 
 function BayBoard({ device }) {
@@ -133,118 +259,143 @@ function BayBoard({ device }) {
     }
 
     const status = offline
-        ? { icon: <WifiOff size={20} />, text: 'Offline — retrying', color: D.bad }
+        ? { icon: <WifiOff size={20} />, text: 'OFFLINE — RETRYING', color: D.bad }
         : live
-            ? { icon: <Wifi size={20} />, text: 'Live', color: D.done }
-            : { icon: <Wifi size={20} />, text: 'Updates every 15 s', color: D.warn };
+            ? { icon: <Wifi size={20} />, text: 'LIVE', color: D.accent }
+            : { icon: <Wifi size={20} />, text: 'SYNC 15s', color: D.warn };
 
     const cards = data?.jobCards || [];
 
     return (
-        <div style={{ minHeight: '100vh', background: D.bg, color: D.text, fontFamily: S.page.fontFamily }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '14px 24px', borderBottom: `1px solid ${D.line}`, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: 0.5 }}>{data?.bay?.BayName || device.bayName}</div>
-                <div style={{ color: D.muted, fontSize: 17 }}>{cards.length} job card{cards.length === 1 ? '' : 's'}</div>
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 18 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: status.color, fontSize: 16 }}>{status.icon} {status.text}</span>
+        <div style={S2.screen}>
+            <style>{BAY_CSS}</style>
+
+            {/* ---- HUD strip ---- */}
+            <div style={S2.hud}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
+                    <span style={S2.bayTag}>BAY</span>
+                    <span style={S2.bayName}>{data?.bay?.BayName || device.bayName}</span>
+                </div>
+                <div style={S2.jobCount}>
+                    <span style={S2.jobCountNum}>{String(cards.length).padStart(2, '0')}</span>
+                    <span style={S2.jobCountWord}>job card{cards.length === 1 ? '' : 's'}</span>
+                </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 26 }}>
+                    <span style={{ ...S2.status, color: status.color }}>
+                        <span className={offline ? 'bay-led bay-led-bad' : 'bay-led'} style={{ background: status.color }} />
+                        {status.icon} {status.text}
+                    </span>
                     {data?.server && (
                         <span style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: 28, fontWeight: 700 }}>{data.server.TimeText}</div>
-                            <div style={{ fontSize: 14, color: D.muted }}>{data.server.DateText}</div>
+                            <div style={S2.clock}>{data.server.TimeText}</div>
+                            <div style={S2.clockDate}>{data.server.DateText}</div>
                         </span>
                     )}
                 </div>
             </div>
+            <div className="bay-scan" />
 
-            {message && (
-                <div style={{ margin: '14px 24px 0', padding: '14px 18px', borderRadius: 10, background: '#3b1d1d', color: '#fecaca', fontSize: 18 }}>
-                    {message}
+            {message && <div style={S2.alert}>{message}</div>}
+
+            {!data && (
+                <div style={{ display: 'grid', placeItems: 'center', minHeight: 300 }}>
+                    <Loader2 size={40} className="animate-spin" color={D.accent} />
                 </div>
             )}
-
-            {!data && <div style={{ display: 'grid', placeItems: 'center', minHeight: 300 }}><Loader2 size={36} className="animate-spin" /></div>}
 
             {data && !cards.length && (
-                <div style={{ textAlign: 'center', padding: '80px 24px', color: D.muted }}>
-                    <CheckCircle2 size={56} />
-                    <div style={{ fontSize: 26, marginTop: 12 }}>No jobs on this bay right now</div>
+                <div style={{ textAlign: 'center', padding: '90px 24px', color: D.muted }}>
+                    <CheckCircle2 size={60} color={D.done} />
+                    <div style={S2.emptyBig}>BAY CLEAR</div>
+                    <div style={{ fontSize: 20, marginTop: 6 }}>No jobs on this bay right now</div>
                 </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 18, padding: 24 }}>
-                {cards.map(card => (
-                    <div key={card.JobCardId} style={{ background: D.card, borderRadius: 14, padding: 20, border: `1px solid ${D.line}` }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 34, fontWeight: 800 }}>{card.VehicleRegNo || '—'}</span>
-                            <span style={{ fontSize: 17, color: D.muted }}>{card.JobCardNo}</span>
-                        </div>
-                        <div style={{ fontSize: 18, color: '#cbd5e1', marginTop: 2 }}>
-                            {[card.VehicleModel, card.CustomerName].filter(Boolean).join(' · ')}
-                        </div>
-                        <div style={{ fontSize: 15, color: D.muted, marginTop: 4, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                            {card.ServiceAdvisor && <span><User size={14} style={{ verticalAlign: -2 }} /> {card.ServiceAdvisor}</span>}
-                            {card.PromisedText && <span><Clock size={14} style={{ verticalAlign: -2 }} /> Promised {card.PromisedText}</span>}
-                        </div>
+            <div style={S2.grid}>
+                {cards.map(card => {
+                    // The card's edge colour says, from across the workshop,
+                    // whether anything here needs a hand.
+                    const state = card.Lines.some(l => l.State === 'working') ? 'working'
+                                : card.Lines.some(l => l.State === 'waiting') ? 'waiting' : 'done';
+                    const edge = state === 'working' ? D.accent : state === 'waiting' ? D.warn : D.done;
+                    return (
+                        <div key={card.JobCardId} className="bay-card" style={{ ...S2.card, borderColor: edge + '55' }}>
+                            <span className={state === 'working' ? 'bay-edge bay-edge-live' : 'bay-edge'}
+                                  style={{ background: edge }} />
 
-                        {card.Lines.map(line => (
-                            <div key={line.DetailId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0 4px', marginTop: 10, borderTop: `1px solid ${D.line}` }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 21, fontWeight: 600, color: line.State === 'done' ? D.muted : D.text }}>{line.Job}</div>
-                                    <div style={{ fontSize: 15, color: D.muted, marginTop: 2 }}>
-                                        {line.State === 'waiting' && 'Not started'}
-                                        {line.State === 'working' && <span style={{ color: '#93c5fd' }}>Started {line.StartText} · {line.Minutes} min</span>}
-                                        {line.State === 'done' && <span style={{ color: D.done }}>Done {line.EndText} · {line.Minutes} min</span>}
-                                        {line.PerformedByName ? ` · ${line.PerformedByName}` : ''}
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+                                <span style={S2.reg}>{card.VehicleRegNo || '—'}</span>
+                                <span style={S2.jcNo}>{card.JobCardNo}</span>
+                            </div>
+                            <div style={S2.vehicle}>
+                                {[card.VehicleModel, card.CustomerName].filter(Boolean).join('  ·  ')}
+                            </div>
+                            <div style={S2.meta}>
+                                {card.ServiceAdvisor && <span><User size={14} style={{ verticalAlign: -2 }} /> {card.ServiceAdvisor}</span>}
+                                {card.PromisedText && <span><Clock size={14} style={{ verticalAlign: -2 }} /> PROMISED {card.PromisedText}</span>}
+                            </div>
+
+                            {card.Lines.map(line => (
+                                <div key={line.DetailId} style={S2.lineRow}>
+                                    <span style={{ ...S2.lineDot,
+                                                   background: line.State === 'done' ? D.done
+                                                             : line.State === 'working' ? D.accent : D.warn }} />
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ ...S2.lineJob, color: line.State === 'done' ? D.muted : D.text }}>{line.Job}</div>
+                                        <div style={S2.lineMeta}>
+                                            {line.State === 'waiting' && <span style={{ color: D.warn }}>NOT STARTED</span>}
+                                            {line.State === 'working' && <span style={{ color: D.accent }}>RUNNING {line.StartText} · {line.Minutes} MIN</span>}
+                                            {line.State === 'done' && <span style={{ color: D.done }}>DONE {line.EndText} · {line.Minutes} MIN</span>}
+                                            {line.PerformedByName ? <span style={{ color: D.muted }}> · {line.PerformedByName}</span> : ''}
+                                        </div>
+                                    </div>
+                                    {line.CanUndo && (
+                                        <button type="button" onClick={() => act(line, 'undo')} disabled={busyLine === line.DetailId}
+                                                style={S2.undoBtn}>
+                                            <Undo2 size={18} /> UNDO
+                                        </button>
+                                    )}
+                                    {line.State === 'waiting' && (
+                                        <button type="button" onClick={() => act(line, 'start')} disabled={busyLine === line.DetailId}
+                                                className="bay-btn" style={{ ...S2.bigBtn, background: D.start, boxShadow: `0 0 0 1px ${D.start}, 0 0 22px ${D.start}55` }}>
+                                            {busyLine === line.DetailId ? <Loader2 className="animate-spin" /> : <><Play size={24} /> START</>}
+                                        </button>
+                                    )}
+                                    {line.State === 'working' && (
+                                        <button type="button" onClick={() => act(line, 'finish')} disabled={busyLine === line.DetailId}
+                                                className="bay-btn" style={{ ...S2.bigBtn, background: D.finish, boxShadow: `0 0 0 1px ${D.finish}, 0 0 22px ${D.finish}55` }}>
+                                            {busyLine === line.DetailId ? <Loader2 className="animate-spin" /> : <><Square size={22} /> FINISH</>}
+                                        </button>
+                                    )}
+                                    {line.State === 'done' && <CheckCircle2 size={40} color={D.done} />}
+                                </div>
+                            ))}
+
+                            {/* What the parts counter has sent out for this vehicle
+                                (owner ask 2026-09-25). Names and quantities only —
+                                what a part costs is not a technician's business,
+                                and the API does not send it. */}
+                            {card.Parts?.length > 0 && (
+                                <div style={S2.partsWrap}>
+                                    <div style={S2.partsHead}>
+                                        <Package size={16} /> PARTS ISSUED
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                        {card.Parts.map((p, i) => (
+                                            <span key={i} style={S2.partChip}>
+                                                {p.PartName}
+                                                {p.Qty > 1 && <strong style={{ color: D.accent }}> ×{p.Qty}</strong>}
+                                            </span>
+                                        ))}
                                     </div>
                                 </div>
-                                {line.CanUndo && (
-                                    <button type="button" onClick={() => act(line, 'undo')} disabled={busyLine === line.DetailId}
-                                            style={{ background: 'transparent', color: D.muted, border: `1px solid ${D.line}`, borderRadius: 10, minHeight: 52, padding: '0 14px', fontSize: 16, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                                        <Undo2 size={18} /> Undo
-                                    </button>
-                                )}
-                                {line.State === 'waiting' && (
-                                    <button type="button" onClick={() => act(line, 'start')} disabled={busyLine === line.DetailId}
-                                            style={{ background: D.start, color: '#fff', border: 'none', borderRadius: 12, minHeight: 68, minWidth: 150, fontSize: 22, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}>
-                                        {busyLine === line.DetailId ? <Loader2 className="animate-spin" /> : <><Play size={24} /> Start</>}
-                                    </button>
-                                )}
-                                {line.State === 'working' && (
-                                    <button type="button" onClick={() => act(line, 'finish')} disabled={busyLine === line.DetailId}
-                                            style={{ background: D.finish, color: '#fff', border: 'none', borderRadius: 12, minHeight: 68, minWidth: 150, fontSize: 22, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}>
-                                        {busyLine === line.DetailId ? <Loader2 className="animate-spin" /> : <><Square size={22} /> Finish</>}
-                                    </button>
-                                )}
-                                {line.State === 'done' && <CheckCircle2 size={40} color={D.done} />}
-                            </div>
-                        ))}
-
-                        {/* What the parts counter has sent out for this vehicle
-                            (owner ask 2026-09-25). Names and quantities only —
-                            what a part costs is not a technician's business,
-                            and the API does not send it. */}
-                        {card.Parts?.length > 0 && (
-                            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${D.line}` }}>
-                                <div style={{ fontSize: 15, color: D.muted, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                                    <Package size={16} /> Parts issued
-                                </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                    {card.Parts.map((p, i) => (
-                                        <span key={i}
-                                              style={{ fontSize: 17, background: '#1e293b', border: `1px solid ${D.line}`,
-                                                       borderRadius: 8, padding: '6px 12px', color: D.text }}>
-                                            {p.PartName}
-                                            {p.Qty > 1 && <strong style={{ color: '#93c5fd' }}> × {p.Qty}</strong>}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                ))}
+                            )}
+                        </div>
+                    );
+                })}
             </div>
 
-            <div style={{ padding: '0 24px 18px', color: '#475569', fontSize: 13 }}>{data?.device || device.deviceName}</div>
+            <div style={S2.footer}>{data?.device || device.deviceName}</div>
         </div>
     );
 }
