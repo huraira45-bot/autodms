@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const wc = require('../controllers/workshopController');
 const { requirePerm, requireAccess, requireAnyAccess } = require('../middleware/permissions');
+const si = require('../controllers/serviceIntakeController');
 
 // ── Customers (workshop_customers) ─────────────────────────────────────────
 router.get(   '/customers',                 requirePerm('workshop_customers', 'view'),   wc.getCustomers);
@@ -38,6 +39,12 @@ router.get(   '/vehicle-history',           requirePerm('workshop_jobs', 'view')
 // having full workshop_jobs view rights. Both are read-only.
 router.get(   '/job-cards/resolve-ro',      requireAnyAccess('workshop_jobs:view', 'payments'), wc.resolveByRO);
 router.get(   '/job-cards/:id/print-data',  requirePerm('workshop_jobs', 'view'),        wc.getJobCardPrintData);
+// What the customer signed at the vehicle, and the walk-around video, reached
+// from the job card rather than the tablet (owner ask 2026-09-25). Same
+// permission as the job card itself — an advisor or cashier holds
+// workshop_jobs, not workshop_tablet.
+router.get(   '/job-cards/:id/signature/:signatureId', requirePerm('workshop_jobs', 'view'), si.getJobCardSignatureImage);
+router.get(   '/job-cards/:id/media/:mediaId/ticket',  requirePerm('workshop_jobs', 'view'), si.getJobCardMediaTicket);
 router.get(   '/job-cards/:id/invoice-data', requirePerm('workshop_jobs', 'view'),       wc.getJobCardInvoiceData);
 router.get(   '/job-cards/:id',             requirePerm('workshop_jobs', 'view'),        wc.getJobCardById);
 router.post(  '/job-cards',                 requirePerm('workshop_jobs', 'insert'),      wc.saveJobCard);

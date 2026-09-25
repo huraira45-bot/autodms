@@ -15,6 +15,8 @@ const API_BASE = '/api';
 const FUEL_LEVELS = ['Empty', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8', 'Full'];
 const PM_TYPES = ['None', 'Monthly', 'Quarterly', 'Annual'];
 const BRING_BY_TYPES = ['Self', 'Driver', 'Towing', 'Other'];
+import ServiceAuthorisation from '../components/ServiceAuthorisation';
+
 const TABS = ['General', 'Vehicle Info', 'Job Card Info', 'Spares', 'Sublet Repair', 'Insurance'];
 
 const PRE_DELIVERY = ['Cleanliness', 'Mirror Position', 'Courtesy Item Removal', 'Clock Adjustment'];
@@ -58,6 +60,10 @@ export default function JobCardForm() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('General');
+  // What the customer signed at the vehicle, and the walk-around video, for a
+  // job card opened from the service tablet (owner ask 2026-09-25).
+  const [signatures, setSignatures] = useState([]);
+  const [media, setMedia] = useState([]);
   const [kycCleared, setKycCleared] = useState(true);  // true when no flag exists; false if open flags require ack
   const [jobTypes, setJobTypes] = useState([]);
   // GLCAID of the GENERAL_CUSTOMER system role. Used to detect whether the
@@ -210,6 +216,10 @@ export default function JobCardForm() {
         if (isEdit) {
           const jcRes = await axios.get(`${API}/job-cards/${id}`);
           const jc = jcRes.data;
+          // Present only on a job card that was authorised on the tablet;
+          // a desk job card has neither, and the panel then draws nothing.
+          setSignatures(jc.Signatures || []);
+          setMedia(jc.Media || []);
           setForm({
             JobCardNo: jc.JobCardNo || '',
             jobCode: jc.jobCode || '',
@@ -1411,6 +1421,9 @@ export default function JobCardForm() {
           </div>
 
           </fieldset>
+
+          {/* Draws nothing unless this job card came from the tablet. */}
+          <ServiceAuthorisation jobCardId={id} signatures={signatures} media={media} />
 
           {/* Tabs — navigation buttons rendered OUTSIDE the disabled fieldset
               so they remain clickable when the JC is finalized. Each tab's

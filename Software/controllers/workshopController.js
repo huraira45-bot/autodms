@@ -893,8 +893,37 @@ exports.getJobCardById = async (req, res) => {
                 LEFT   JOIN GLChartOFAccount gl ON c.GLAccountID = gl.GLCAID
                 WHERE  a.JobCardId = @id AND a.Status = 'Active'`);
 
+        // What the customer authorised at the vehicle, if this job card came
+        // from a tablet estimate (owner ask 2026-09-25). The job card print has
+        // carried the authorisation paragraph and an empty signature box for
+        // years; when the work was authorised on a tablet, that box is filled
+        // in from here instead of by hand.
+        //
+        // All of them, not just the first: additional work found during the
+        // repair is a new revision with its own signature, and the paper has
+        // to show each thing the customer agreed to separately.
+        const signatures = await pool.request().input('id', sql.Int, req.params.id).query(`
+            SELECT s.SignatureID, s.EstimateID, e.EstimateNo, s.RevisionNo,
+                   s.SignerName, s.SignerMobile, s.SignedAt, s.GrandTotal,
+                   s.BayName, s.CapturedByName
+            FROM   dms_ServiceEstimateSignatures s
+            LEFT   JOIN dms_ServiceEstimates e ON e.EstimateID = s.EstimateID
+            WHERE  s.JobCardID = @id
+            ORDER  BY s.RevisionNo, s.SignatureID`);
+
+        // Walk-around videos and photos taken at reception. Names and sizes
+        // only — the file itself is fetched through its own ticketed route.
+        const media = await pool.request().input('id', sql.Int, req.params.id).query(`
+            SELECT MediaID, MediaType, OriginalName, MimeType, SizeBytes,
+                   CapturedAt, CapturedByName, EstimateID
+            FROM   dms_ServiceMedia
+            WHERE  JobCardID = @id AND DeletedAt IS NULL
+            ORDER  BY CapturedAt, MediaID`);
+
         res.json({
             ...jc.recordset[0],
+            Signatures: signatures.recordset,
+            Media: media.recordset,
             LabourItems: labour.recordset,
             PartsItems: parts.recordset,
             SubletItems: sublets.recordset,

@@ -34,6 +34,8 @@ const CSS = `
 .est-totals td { padding: 2pt 4pt; }
 .est-totals tr.grand td { border-top: 1.5px solid #000; font-size: 11pt; font-weight: 700; padding-top: 4pt; }
 .est-note { margin-top: 10pt; font-size: 8pt; color: #334155; border-top: 1px dashed #94a3b8; padding-top: 5pt; }
+.est-auth { margin-top: 10pt; font-size: 9pt; color: #0f172a; line-height: 1.45;
+            border: 1pt solid #0f172a; padding: 6pt 8pt; }
 .est-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 24mm; margin-top: 20mm; }
 .est-sign div { border-top: 1px solid #000; padding-top: 3pt; text-align: center; font-size: 8.5pt; }
 .est-void { position: absolute; top: 45%; left: 0; right: 0; text-align: center; font-size: 64pt; font-weight: 800;
@@ -109,7 +111,10 @@ export default function TabletEstimatePrint() {
     const parts = lines.filter(l => l.LineType === 'PART');
 
     const header = businessHeaderHtml(data.business, {
-        docTitle: 'Service Estimate',
+        // Once the customer has signed, this paper is no longer a quotation —
+        // it is what they authorised, and the heading has to say so (owner ask
+        // 2026-09-25). Unsigned, it stays an estimate.
+        docTitle: signed ? 'Service Estimate — Authorised' : 'Service Estimate',
         docSubtitle: e.EstimateNo + (e.RevisionNo > 1 ? ` · Revision ${e.RevisionNo}` : '') + (e.JobCardNo ? ` · Job card ${e.JobCardNo}` : ''),
         docMetaLeft: `Date: ${fmtDate(e.UpdatedAt || e.CreatedAt)}`,
         docMetaRight: e.AdvisorName ? `Service advisor: ${e.AdvisorName}` : '',
@@ -221,6 +226,14 @@ export default function TabletEstimatePrint() {
                         <tr className="grand"><td>Estimated total (Rs)</td><td className="est-num">{money(e.GrandTotal)}</td></tr>
                     </tbody>
                 </table>
+
+                {signed && (
+                    <div className="est-auth">
+                        I hereby authorize the repair work set forth to be done along with necessary parts &amp; material.
+                        I grant you and your employee permission to operate the vehicle in your premises &amp; public area
+                        for road testing at my risk. I agree with terms &amp; conditions overleaf.
+                    </div>
+                )}
 
                 <div className="est-note">
                     This is an estimate, not an invoice. Prices are at today's rates and include tax as shown; parts are subject

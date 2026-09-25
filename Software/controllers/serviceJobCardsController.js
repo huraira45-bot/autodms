@@ -200,8 +200,30 @@ exports.getJobCard = async (req, res) => {
             if (open) warnings.push(`${open} job${open === 1 ? ' is' : 's are'} not marked finished on the bay screen.`);
         }
 
+        // The signature itself and the walk-around, so the tablet's job card
+        // screen can show the same panel the web app shows (owner ask
+        // 2026-09-25). The estimate list above already names who signed; this
+        // is what is needed to put the picture and the video on the screen.
+        const signatures = (await pool.request().input('id', sql.Int, id).query(`
+            SELECT s.SignatureID, s.EstimateID, e.EstimateNo, s.RevisionNo,
+                   s.SignerName, s.SignerMobile, s.SignedAt, s.GrandTotal,
+                   s.BayName, s.CapturedByName
+            FROM   dms_ServiceEstimateSignatures s
+            LEFT   JOIN dms_ServiceEstimates e ON e.EstimateID = s.EstimateID
+            WHERE  s.JobCardID = @id
+            ORDER  BY s.RevisionNo, s.SignatureID`)).recordset;
+
+        const media = (await pool.request().input('id', sql.Int, id).query(`
+            SELECT MediaID, MediaType, OriginalName, MimeType, SizeBytes,
+                   CapturedAt, CapturedByName, EstimateID
+            FROM   dms_ServiceMedia
+            WHERE  JobCardID = @id AND DeletedAt IS NULL
+            ORDER  BY CapturedAt, MediaID`)).recordset;
+
         res.json({
             ...head,
+            Signatures: signatures,
+            Media: media,
             Labour: labour,
             Parts: parts,
             Requisitions: requisitions,

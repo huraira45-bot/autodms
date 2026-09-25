@@ -20,6 +20,7 @@ import { T, tStyles as S } from '../../tablet/tabletStyles';
 import { API, money, errText, fmtDateTime, statusStyle, pill } from '../../tablet/estimateFormat';
 import WorkOrderPrint from '../WorkOrderPrint';
 import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
+import ServiceAuthorisation from '../../components/ServiceAuthorisation';
 
 const qty = (n) => String(+Number(n || 0).toFixed(2));
 
@@ -240,6 +241,12 @@ export default function TabletJobCard() {
                     );
                 })}
             </div>
+
+            {/* The signature itself and the walk-around video, alongside the
+                list of estimates above (owner ask 2026-09-25). Draws nothing
+                on a job card that has neither. */}
+            <ServiceAuthorisation jobCardId={id} signatures={jc.Signatures || []} media={jc.Media || []}
+                                  apiBase={`${API}/job-cards`} size="tablet" />
 
             <div style={S.card}>
                 {[

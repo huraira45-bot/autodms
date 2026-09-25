@@ -14,6 +14,10 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
     const [jc, setJc] = useState(null);
     const [ins, setIns] = useState(null);
     const [err, setErr] = useState(null);
+    // The signature the customer gave on the tablet, if this job card was
+    // authorised there. Fetched as a blob because the image route needs the
+    // login, and an <img src> sends no Authorization header.
+    const [sigUrl, setSigUrl] = useState(null);
 
     useEffect(() => {
         // Insurance depreciation totals (owner report 2026-08-07: a
@@ -25,12 +29,35 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
             axios.get(`${apiBase}/${id}/print-data`),
             axios.get(`${apiBase}/${id}/insurance`).catch(() => ({ data: null })),
         ])
-            .then(([jcRes, insRes]) => { setJc(jcRes.data); setIns(insRes.data); setTimeout(() => window.print(), 400); })
+            .then(async ([jcRes, insRes]) => {
+                setJc(jcRes.data);
+                setIns(insRes.data);
+                // The original authorisation — the lowest revision. Later
+                // revisions are additional work found during the repair and
+                // are listed under it, each with its own date.
+                const first = (jcRes.data?.Signatures || [])[0];
+                if (first) {
+                    try {
+                        const img = await axios.get(`${apiBase}/${id}/signature/${first.SignatureID}`,
+                                                    { responseType: 'blob' });
+                        setSigUrl(URL.createObjectURL(img.data));
+                    } catch { /* printed with an empty box, as it always was */ }
+                }
+                // Printing is deliberately after the signature has arrived;
+                // firing it earlier prints the box empty.
+                setTimeout(() => window.print(), 400);
+            })
             .catch(e => setErr(e.response?.data?.error || e.message));
     }, [id, apiBase]);
 
     if (err) return <div style={{ padding: 40, color: '#b91c1c', fontFamily: 'Arial' }}>Cannot print: {err}</div>;
     if (!jc) return <div style={{ padding: 40, fontFamily: 'Arial' }}>Loading…</div>;
+
+    // What the customer authorised at the vehicle. The first is the original
+    // authorisation; anything after it is additional work found during the
+    // repair, which is re-signed rather than added silently.
+    const authSig = (jc.Signatures || [])[0] || null;
+    const extraSigs = (jc.Signatures || []).slice(1);
 
     // Totals from labour + parts items.
     //
@@ -189,10 +216,29 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                                 I grant you and your employee permission to operate the vehicle in your premises &amp; public area
                                 for road testing at my risk. I agree with terms &amp; conditions overleaf.
                             </div>
+                            {/* Signed on the tablet at the vehicle, the box is filled
+                                in from that signature (owner ask 2026-09-25). Signed at
+                                the desk on paper, it prints empty exactly as before.
+                                Only THIS box — the one below it is the handover
+                                receipt, signed when the customer collects the car. */}
                             <table className="sig-tbl">
                                 <thead><tr><th>Customer Name</th><th>Signature</th><th>Date</th></tr></thead>
-                                <tbody><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody>
+                                <tbody><tr>
+                                    <td>{authSig ? authSig.SignerName : ' '}</td>
+                                    <td style={{ height: 34 }}>
+                                        {sigUrl
+                                            ? <img src={sigUrl} alt="" style={{ maxHeight: 30, maxWidth: '100%' }} />
+                                            : ' '}
+                                    </td>
+                                    <td>{authSig ? d(authSig.SignedAt) : ' '}</td>
+                                </tr></tbody>
                             </table>
+                            {extraSigs.length > 0 && (
+                                <div style={{ fontSize: 8, padding: '2px 4px' }}>
+                                    Additional work authorised:{' '}
+                                    {extraSigs.map(sg => `${sg.SignerName} ${d(sg.SignedAt)}`).join('; ')}
+                                </div>
+                            )}
                         </td>
                     </tr>
                 </tbody>

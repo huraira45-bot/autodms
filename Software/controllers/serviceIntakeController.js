@@ -1076,3 +1076,198 @@ exports.deleteEstimateMedia = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+// ---------------------------------------------------------------------------
+// Watching a walk-around video
+// ---------------------------------------------------------------------------
+//
+// Until now a video could be recorded and stored but never watched: nothing
+// served it, and server.js deliberately answers 404 for /uploads/service-media
+// so a customer's vehicle footage is never sitting on a public URL. Owner ask
+// 2026-09-25 — the video has to be watchable on the tablet and in the web app.
+//
+// A <video> tag cannot send an Authorization header, and putting the session
+// token in the URL would write it into the access log of every proxy on the
+// way. So the player first asks for a TICKET: a token good for one video, for
+// five minutes, and for nothing else. It carries a scope, and middleware/auth
+// refuses any scoped token outright, so a ticket can never stand in for a
+// login.
+//
+// Streaming answers Range requests. A walk-around runs to a couple of hundred
+// megabytes; without Range the browser has to fetch the whole file before it
+// shows a frame, and the customer cannot skip to the scratch being discussed.
+const jwt = require('jsonwebtoken');
+
+const MEDIA_TICKET_SECONDS = 300;
+
+const findMedia = async (pool, mediaId) => {
+    const r = await pool.request().input('m', sql.Int, mediaId).query(`
+        SELECT MediaID, FileName, MimeType, OriginalName, MediaType,
+               EstimateID, JobCardID, SizeBytes, CapturedAt, CapturedByName, DeletedAt
+        FROM   dms_ServiceMedia
+        WHERE  MediaID = @m`);
+    return r.recordset[0] || null;
+};
+
+/** GET /api/service-intake/media/:mediaId/ticket */
+exports.getMediaTicket = async (req, res) => {
+    try {
+        const mediaId = parseInt(req.params.mediaId);
+        if (!Number.isInteger(mediaId)) return res.status(400).json({ error: 'Which video?' });
+
+        const pool = await getPool();
+        const m = await findMedia(pool, mediaId);
+        if (!m || m.DeletedAt) return res.status(404).json({ error: 'That video is no longer here.' });
+
+        const t = jwt.sign({ scope: 'service_media', mediaId, by: req.user?.userId || null },
+                           process.env.JWT_SECRET, { expiresIn: MEDIA_TICKET_SECONDS });
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            MediaID: mediaId,
+            MediaType: m.MediaType,
+            MimeType: m.MimeType,
+            OriginalName: m.OriginalName,
+            SizeBytes: m.SizeBytes,
+            CapturedAt: m.CapturedAt,
+            CapturedByName: m.CapturedByName,
+            url: `/api/service-intake/media/${mediaId}/stream?t=${encodeURIComponent(t)}`,
+            expiresInSeconds: MEDIA_TICKET_SECONDS,
+        });
+    } catch (err) {
+        console.error('getMediaTicket:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * GET /api/service-intake/media/:mediaId/stream?t=<ticket>
+ * Mounted in server.js ahead of the auth middleware — the ticket IS the
+ * authorisation, and it is checked against the id in the path so a ticket for
+ * one video cannot fetch another.
+ */
+exports.streamMedia = async (req, res) => {
+    try {
+        const mediaId = parseInt(req.params.mediaId);
+        let claims;
+        try {
+            claims = jwt.verify(String(req.query.t || ''), process.env.JWT_SECRET);
+        } catch {
+            return res.status(401).json({ error: 'This video link has expired. Open it again.' });
+        }
+        if (claims.scope !== 'service_media' || claims.mediaId !== mediaId) {
+            return res.status(403).json({ error: 'That link is not for this video.' });
+        }
+
+        const pool = await getPool();
+        const m = await findMedia(pool, mediaId);
+        if (!m || m.DeletedAt) return res.status(404).json({ error: 'That video is no longer here.' });
+
+        // basename() again: a stored name can never reach outside the folder.
+        const file = path.join(UPLOAD_DIR, path.basename(m.FileName));
+        let stat;
+        try { stat = fs.statSync(file); }
+        catch { return res.status(404).json({ error: 'The file is recorded but missing from the disk.' }); }
+
+        res.set('Content-Type', m.MimeType || 'application/octet-stream');
+        res.set('Accept-Ranges', 'bytes');
+        res.set('Cache-Control', 'private, no-store');
+
+        const header = req.headers.range;
+        if (!header) {
+            res.set('Content-Length', String(stat.size));
+            return fs.createReadStream(file).pipe(res);
+        }
+
+        const parsed = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
+        const unsatisfiable = () => {
+            res.set('Content-Range', `bytes */${stat.size}`);
+            return res.status(416).end();
+        };
+        if (!parsed) return unsatisfiable();
+
+        let start = parsed[1] === '' ? null : parseInt(parsed[1]);
+        let end   = parsed[2] === '' ? null : parseInt(parsed[2]);
+        if (start === null) {
+            // "bytes=-500" means the LAST 500 bytes, not "from 0 to 500".
+            if (!end) return unsatisfiable();
+            start = Math.max(0, stat.size - end);
+            end = stat.size - 1;
+        } else if (end === null || end >= stat.size) {
+            end = stat.size - 1;
+        }
+        if (!(start <= end) || start >= stat.size) return unsatisfiable();
+
+        res.status(206);
+        res.set('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+        res.set('Content-Length', String(end - start + 1));
+        fs.createReadStream(file, { start, end }).pipe(res);
+    } catch (err) {
+        console.error('streamMedia:', err);
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+};
+
+// ---------------------------------------------------------------------------
+// The same signature and video, reached from the job card
+// ---------------------------------------------------------------------------
+//
+// The two handlers above are for the tablet, and are gated on workshop_tablet.
+// A cashier printing the work order, or an advisor opening the job card in the
+// web app, holds workshop_jobs and not workshop_tablet — so the job card needs
+// its own way in. These are mounted on the workshop routes at that permission.
+//
+// Both are scoped by the job card in the path: a signature or a video that
+// belongs to a different job card is a 404 here, whichever id is asked for.
+
+/** GET /api/workshop/job-cards/:id/signature/:signatureId — the signature PNG. */
+exports.getJobCardSignatureImage = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request()
+            .input('jc',  sql.Int, parseInt(req.params.id))
+            .input('sig', sql.Int, parseInt(req.params.signatureId))
+            .query(`SELECT SignatureFile FROM dms_ServiceEstimateSignatures
+                    WHERE SignatureID = @sig AND JobCardID = @jc`);
+        if (!r.recordset.length) return res.status(404).json({ error: 'No signature was taken for this job card.' });
+        res.set('Cache-Control', 'private, no-store');
+        res.sendFile(path.join(SIGNATURE_DIR, path.basename(r.recordset[0].SignatureFile)), (err) => {
+            if (err && !res.headersSent) res.status(404).json({ error: 'The signature image file is missing.' });
+        });
+    } catch (err) {
+        console.error('getJobCardSignatureImage:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/** GET /api/workshop/job-cards/:id/media/:mediaId/ticket — a ticket to watch it. */
+exports.getJobCardMediaTicket = async (req, res) => {
+    try {
+        const jobCardId = parseInt(req.params.id);
+        const mediaId = parseInt(req.params.mediaId);
+        if (!Number.isInteger(jobCardId) || !Number.isInteger(mediaId)) {
+            return res.status(400).json({ error: 'Which video?' });
+        }
+        const pool = await getPool();
+        const m = await findMedia(pool, mediaId);
+        if (!m || m.DeletedAt || m.JobCardID !== jobCardId) {
+            return res.status(404).json({ error: 'That video is not on this job card.' });
+        }
+        const t = jwt.sign({ scope: 'service_media', mediaId, by: req.user?.userId || null },
+                           process.env.JWT_SECRET, { expiresIn: MEDIA_TICKET_SECONDS });
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            MediaID: mediaId,
+            MediaType: m.MediaType,
+            MimeType: m.MimeType,
+            OriginalName: m.OriginalName,
+            SizeBytes: m.SizeBytes,
+            CapturedAt: m.CapturedAt,
+            CapturedByName: m.CapturedByName,
+            url: `/api/service-intake/media/${mediaId}/stream?t=${encodeURIComponent(t)}`,
+            expiresInSeconds: MEDIA_TICKET_SECONDS,
+        });
+    } catch (err) {
+        console.error('getJobCardMediaTicket:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

@@ -81,6 +81,14 @@ app.get('/api/service-intake/ping', (req, res) => {
     res.json({ app: 'DealerDesk', ok: true, serverTime: new Date().toISOString() });
 });
 
+// Walk-around video playback (owner ask 2026-09-25). A <video> tag cannot
+// send an Authorization header, so the player fetches a short-lived ticket
+// from the authenticated API and streams with that. Mounted here, ahead of
+// the auth middleware, because the ticket is the authorisation; the handler
+// checks it against the video id in the path.
+app.get('/api/service-intake/media/:mediaId/stream',
+        require('./controllers/serviceIntakeController').streamMedia);
+
 // Bay screens (plan 2026-09-14, Phase 3). They hold a device token, not a user
 // login, so they mount before the auth middleware; routes/bayScreenRoutes.js
 // accepts device tokens only, and the auth middleware refuses them.

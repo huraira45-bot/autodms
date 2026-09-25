@@ -52,6 +52,11 @@ router.delete('/estimates/:id/media/:mediaId',    tablet, c.deleteEstimateMedia)
 router.post(  '/estimates/:id/sign',              tablet, signatureUpload, c.signEstimate);
 router.get(   '/estimates/:id/signature',         tablet, c.getSignatureImage);
 
+// Watching a walk-around video. The ticket is issued here, to a signed-in
+// user; the stream itself is mounted in server.js ahead of the auth
+// middleware, because a <video> tag cannot send an Authorization header.
+router.get(   '/media/:mediaId/ticket',           tablet, c.getMediaTicket);
+
 // Phase 3 — parts counter: requisitions from signed estimates
 const counter = requireAccess('parts_requisition');
 router.get(   '/requisitions',                    counter, requisitions.listRequisitions);
@@ -76,6 +81,10 @@ router.post(  '/job-cards/:id/additional-work',   ...tabletJobCard, jobCards.sta
 router.post(  '/job-cards/:id/finalize',          tablet, requireAccess('finalize'), jobCards.tabletJobCardOnly, jobCards.finalizeJobCard);
 router.post(  '/job-cards/:id/dms-number',        ...tabletJobCard, jobCards.setDmsNumber);
 router.get(   '/job-cards/:id/print-data',        ...tabletJobCard, workshop.getJobCardPrintData);
+// The same signature and walk-around video from the job card, so the tablet's
+// own copy of the work-order print and its job card screen can show them.
+router.get(   '/job-cards/:id/signature/:signatureId', ...tabletJobCard, c.getJobCardSignatureImage);
+router.get(   '/job-cards/:id/media/:mediaId/ticket',  ...tabletJobCard, c.getJobCardMediaTicket);
 router.get(   '/job-cards/:id/insurance',         ...tabletJobCard, workshop.getJobCardInsurance);
 
 module.exports = router;
