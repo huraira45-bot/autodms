@@ -106,6 +106,12 @@ router.get( '/historical/bookings/:id/linkable-vouchers', requireAny('sales_admi
 // ledger voucher whenever it is found.
 router.patch('/historical/bookings/:id/date',             requireAny('sales_admin_settings', 'sales_gm'), hist.setBookingDate);
 router.post('/historical/bookings/:id/payment',           requireAny('sales_admin_settings', 'sales_gm'), hist.recordPayment);
+// Money forwarded to Master on an old deal: already in the ledger, so it is
+// matched to that voucher rather than posted again (owner report 2026-09-25).
+router.get( '/historical/bookings/:id/linkable-master-vouchers', requireAny('sales_admin_settings', 'sales_gm'), hist.linkableMasterVouchers);
+router.get( '/historical/bookings/:id/linked-master',     requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.linkedMasterPayments);
+router.post('/historical/bookings/:id/link-master',       requireAny('sales_admin_settings', 'sales_gm'), hist.linkMasterPayment);
+router.post('/historical/bookings/:id/unlink-master',     requireAny('sales_admin_settings', 'sales_gm'), hist.unlinkMasterPayment);
 router.post('/historical/payments/:paymentId/link',       requireAny('sales_admin_settings', 'sales_gm'), hist.linkPayment);
 router.post('/historical/payments/:paymentId/unlink',     requireAny('sales_admin_settings', 'sales_gm'), hist.unlinkPayment);
 

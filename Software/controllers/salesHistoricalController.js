@@ -538,3 +538,233 @@ exports.linkableVouchers = async (req, res) => {
         res.status(err.statusCode || 500).json({ error: err.message });
     }
 };
+
+// ---------------------------------------------------------------------------
+// Money already forwarded to Master, on an old deal
+// ---------------------------------------------------------------------------
+//
+// Owner report 2026-09-25: Pay Master on a historical booking was posting a
+// fresh voucher into the ledger. On an old deal the remittance was made and
+// posted long ago, so posting again counts it twice.
+//
+// What a booking has forwarded to Master is not stored anywhere: it is read
+// back out of the ledger as the BOOKING_VARIANT_RECEIVABLE debits carrying
+// that BookingID (salesBookingController, AmountPaidToMaster). An old voucher
+// predates DealerDesk and carries no BookingID, which is exactly why the
+// booking looks unpaid and somebody reaches for Pay Master.
+//
+// So linking here means tagging that existing debit with this booking. No new
+// voucher and no new table, and AmountPaidToMaster, the remaining-to-pay
+// figure and the delivery posting all pick it up on their own.
+
+/** The system account Master remittances are debited to. */
+async function masterReceivableGL(pool) {
+    const r = await pool.request().query(
+        `SELECT GLCAID FROM dms_SystemAccounts WHERE RoleKey = 'BOOKING_VARIANT_RECEIVABLE'`);
+    if (!r.recordset.length) {
+        fail('BOOKING_VARIANT_RECEIVABLE is not mapped in Accounting Setup, so nothing can be matched against it.');
+    }
+    return r.recordset[0].GLCAID;
+}
+
+/**
+ * GET /api/sales/historical/bookings/:id/linkable-master-vouchers
+ *     ?amount=&search=&all=1
+ *
+ * Posted vouchers carrying a Master-receivable debit that no booking has
+ * claimed yet.
+ */
+exports.linkableMasterVouchers = async (req, res) => {
+    try {
+        const bookingId = parseInt(req.params.id);
+        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
+        const wantsAll = req.query.all === '1' || req.query.all === 'true';
+        const amount = Number(req.query.amount);
+        if (!wantsAll && !(amount > 0)) {
+            return res.status(400).json({ error: 'Enter the amount first — vouchers are matched to it.' });
+        }
+
+        const pool = await getPool();
+        const booking = await loadBooking(pool, bookingId);
+        assertHistorical(booking);
+        const masterGL = await masterReceivableGL(pool);
+
+        const rq = pool.request().input('gl', sql.Int, masterGL);
+        let amountClause = '';
+        if (!wantsAll) {
+            rq.input('amt', sql.Decimal(18, 2), amount);
+            // Matched on the Master leg rather than the voucher total: one
+            // remittance often covers several vehicles on a single voucher.
+            amountClause = ` AND EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d5
+                                          WHERE d5.VoucherID = v.VoucherID AND d5.GLCAID = @gl
+                                            AND d5.BookingID IS NULL AND d5.Debit = @amt)`;
+        }
+        let searchClause = '';
+        if (req.query.search) {
+            rq.input('s', sql.NVarChar(80), `%${String(req.query.search).trim()}%`);
+            searchClause = ' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)';
+        }
+
+        const r = await rq.query(`
+            SELECT TOP 50 v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Remarks,
+                   vt.Title AS VoucherType,
+                   (SELECT SUM(d2.Debit) FROM data_FinanceVoucherDetail d2
+                     WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gl AND d2.BookingID IS NULL)
+                     AS UnclaimedToMaster
+            FROM   data_FinanceVoucherInfo v
+            LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
+            WHERE  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+              AND  EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d
+                            WHERE d.VoucherID = v.VoucherID AND d.GLCAID = @gl
+                              AND d.Debit > 0 AND d.BookingID IS NULL)
+              ${amountClause} ${searchClause}
+            ORDER  BY v.VoucherDate DESC, v.VoucherID DESC`);
+
+        res.json({ bookingNo: booking.BookingNo, vouchers: r.recordset });
+    } catch (err) {
+        console.error('linkableMasterVouchers:', err);
+        res.status(err.statusCode || 500).json({ error: err.message });
+    }
+};
+
+/**
+ * POST /api/sales/historical/bookings/:id/link-master   { VoucherID }
+ *
+ * Claims the unclaimed Master-receivable debits on that voucher for this
+ * booking. Nothing is posted.
+ */
+exports.linkMasterPayment = async (req, res) => {
+    try {
+        const bookingId = parseInt(req.params.id);
+        const voucherId = parseInt(req.body?.VoucherID);
+        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
+        if (!Number.isInteger(voucherId)) return res.status(400).json({ error: 'Pick the voucher to link.' });
+
+        const pool = await getPool();
+        const booking = await loadBooking(pool, bookingId);
+        assertHistorical(booking);
+        const masterGL = await masterReceivableGL(pool);
+
+        const v = (await pool.request().input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL)
+            .query(`SELECT vi.VoucherNo, vi.VoucherDate, vi.Status, vi.ReversesVoucherID,
+                           (SELECT ISNULL(SUM(d.Debit), 0) FROM data_FinanceVoucherDetail d
+                             WHERE d.VoucherID = vi.VoucherID AND d.GLCAID = @gl AND d.BookingID IS NULL)
+                             AS Unclaimed
+                    FROM   data_FinanceVoucherInfo vi WHERE vi.VoucherID = @v`)).recordset[0];
+        if (!v) fail('That voucher does not exist.', 404);
+        if (v.Status !== 'Posted') {
+            fail(`${v.VoucherNo} is ${v.Status}, not posted — only a posted voucher can back an old remittance.`);
+        }
+        if (v.ReversesVoucherID) {
+            fail(`${v.VoucherNo} reverses another voucher; it is not a payment to Master.`);
+        }
+        if (!(Number(v.Unclaimed) > 0)) {
+            fail(`${v.VoucherNo} has nothing left on the Master receivable that another booking has not already claimed.`);
+        }
+
+        // Claiming more than the vehicle is worth would break the delivery
+        // posting, which refuses to settle until master-paid equals the price.
+        const priced = (await pool.request().input('b', sql.Int, bookingId)
+            .query(`SELECT NegotiatedPrice FROM dms_SalesBookings WHERE BookingID = @b`)).recordset[0];
+        const already = (await pool.request().input('b', sql.Int, bookingId).input('gl', sql.Int, masterGL)
+            .query(`SELECT ISNULL(SUM(d.Debit - d.Credit), 0) AS Paid
+                    FROM   data_FinanceVoucherDetail d
+                    JOIN   data_FinanceVoucherInfo vi ON vi.VoucherID = d.VoucherID
+                    WHERE  vi.Status = 'Posted' AND d.GLCAID = @gl AND d.BookingID = @b`)).recordset[0];
+        const after = Number(already.Paid) + Number(v.Unclaimed);
+        if (after - Number(priced?.NegotiatedPrice || 0) > 0.01) {
+            fail(`Linking ${v.VoucherNo} would put PKR ${money(after)} against a vehicle priced at `
+               + `PKR ${money(priced?.NegotiatedPrice || 0)}. Pick the voucher that matches this booking.`);
+        }
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            const tagged = await new sql.Request(tx)
+                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
+                .query(`UPDATE data_FinanceVoucherDetail
+                        SET BookingID = @b
+                        WHERE VoucherID = @v AND GLCAID = @gl AND Debit > 0 AND BookingID IS NULL`);
+
+            // The subsidiary row is what party statements read.
+            await new sql.Request(tx)
+                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
+                .query(`UPDATE dms_PartyLedger
+                        SET BookingID = @b
+                        WHERE VoucherID = @v AND GLCAID = @gl AND BookingID IS NULL`);
+
+            await logBookingTransition(tx, bookingId, booking.Status, booking.Status, req.user,
+                `Payment to Master matched to ${v.VoucherNo} of `
+                + `${new Date(v.VoucherDate).toISOString().slice(0, 10)}, PKR ${money(v.Unclaimed)}. `
+                + `The money was remitted and posted before DealerDesk; nothing new was posted.`);
+            await tx.commit();
+
+            res.json({
+                message: `Linked to ${v.VoucherNo}. PKR ${money(v.Unclaimed)} now counts as paid to Master.`,
+                VoucherNo: v.VoucherNo,
+                Amount: Number(v.Unclaimed),
+                LinesTagged: tagged.rowsAffected[0],
+            });
+        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
+    } catch (err) {
+        console.error('linkMasterPayment:', err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
+/** POST /api/sales/historical/bookings/:id/unlink-master   { VoucherID } */
+exports.unlinkMasterPayment = async (req, res) => {
+    try {
+        const bookingId = parseInt(req.params.id);
+        const voucherId = parseInt(req.body?.VoucherID);
+        if (!Number.isInteger(bookingId) || !Number.isInteger(voucherId)) {
+            return res.status(400).json({ error: 'Invalid booking or voucher id.' });
+        }
+        const pool = await getPool();
+        const booking = await loadBooking(pool, bookingId);
+        assertHistorical(booking);
+        const masterGL = await masterReceivableGL(pool);
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            const r = await new sql.Request(tx)
+                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
+                .query(`UPDATE data_FinanceVoucherDetail SET BookingID = NULL
+                        WHERE VoucherID = @v AND GLCAID = @gl AND BookingID = @b`);
+            if (!r.rowsAffected[0]) fail('That voucher is not linked to this booking.', 404);
+            await new sql.Request(tx)
+                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
+                .query(`UPDATE dms_PartyLedger SET BookingID = NULL
+                        WHERE VoucherID = @v AND GLCAID = @gl AND BookingID = @b`);
+            await logBookingTransition(tx, bookingId, booking.Status, booking.Status, req.user,
+                'Payment to Master unlinked from its voucher. Nothing was posted or reversed.');
+            await tx.commit();
+            res.json({ message: 'Unlinked.' });
+        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
+    } catch (err) {
+        console.error('unlinkMasterPayment:', err);
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
+/** GET /api/sales/historical/bookings/:id/linked-master — what is matched so far. */
+exports.linkedMasterPayments = async (req, res) => {
+    try {
+        const bookingId = parseInt(req.params.id);
+        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
+        const pool = await getPool();
+        const masterGL = await masterReceivableGL(pool);
+        const r = await pool.request().input('b', sql.Int, bookingId).input('gl', sql.Int, masterGL)
+            .query(`SELECT vi.VoucherID, vi.VoucherNo, vi.VoucherDate, SUM(d.Debit - d.Credit) AS Amount
+                    FROM   data_FinanceVoucherDetail d
+                    JOIN   data_FinanceVoucherInfo vi ON vi.VoucherID = d.VoucherID
+                    WHERE  d.BookingID = @b AND d.GLCAID = @gl AND vi.Status = 'Posted'
+                    GROUP  BY vi.VoucherID, vi.VoucherNo, vi.VoucherDate
+                    ORDER  BY vi.VoucherDate DESC`);
+        res.json(r.recordset);
+    } catch (err) {
+        console.error('linkedMasterPayments:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

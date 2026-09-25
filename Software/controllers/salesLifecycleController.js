@@ -37,6 +37,22 @@ exports.payMaster = async (req, res) => {
     if (!['Cash', 'Bank'].includes(Mode))   return res.status(400).json({ error: 'Mode must be Cash or Bank.' });
 
     const pool = await getPool();
+
+    // A historical booking's remittance to Master was made and posted long
+    // before DealerDesk. Posting another voucher would count the same money
+    // twice (owner report 2026-09-25) — it is matched to the voucher already
+    // in the ledger instead, on the booking's Pay Master panel.
+    const hist = await pool.request().input('b', sql.Int, bookingId)
+        .query('SELECT IsHistorical, BookingNo FROM dms_SalesBookings WHERE BookingID = @b');
+    if (!hist.recordset.length) return res.status(404).json({ error: 'Booking not found.' });
+    if (hist.recordset[0].IsHistorical) {
+        return res.status(409).json({
+            error: `${hist.recordset[0].BookingNo} is a historical booking. Its payment to Master is already `
+                 + `in the ledger — link it to that voucher instead of posting a new one.`,
+            historical: true,
+        });
+    }
+
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {

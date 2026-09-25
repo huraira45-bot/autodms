@@ -21,7 +21,7 @@ import {
 import SearchableSelect from '../../components/SearchableSelect';
 import { printGatePass } from '../../utils/gatePassPrint';
 import BookingDocumentDrop from './BookingDocumentDrop';
-import { HistoricalPaymentModal } from './HistoricalPaymentModals';
+import { HistoricalPaymentModal, LinkMasterVoucherModal } from './HistoricalPaymentModals';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -273,8 +273,13 @@ export default function BookingDetail() {
                     )}
                     {canPayMaster && (
                         <button onClick={() => setShowPayMaster(true)}
+                            title={data.IsHistorical
+                                ? 'This money left the bank before DealerDesk — match it to the voucher already in the ledger'
+                                : 'Post the payment forwarded to Master Motors'}
                             style={{ padding: '8px 14px', background: '#0e7490', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                            <CreditCard size={14} /> Pay Master Motors
+                            {data.IsHistorical
+                                ? <><Link2 size={14} /> Match Master Payment</>
+                                : <><CreditCard size={14} /> Pay Master Motors</>}
                         </button>
                     )}
                     {canPostMasterInvoice && (
@@ -632,7 +637,12 @@ export default function BookingDetail() {
                     onClose={() => setShowAllocate(false)}
                     onSaved={() => { setShowAllocate(false); flash('ok', 'Vehicle allocated'); load(); }} />
             )}
-            {showPayMaster && (
+            {showPayMaster && data.IsHistorical && (
+                <LinkMasterVoucherModal booking={data} stillOwed={masterStillOwed}
+                    onClose={() => setShowPayMaster(false)}
+                    onSaved={(msg) => { setShowPayMaster(false); flash('ok', msg); load(); }} />
+            )}
+            {showPayMaster && !data.IsHistorical && (
                 <PayMasterModal booking={data}
                     onClose={() => setShowPayMaster(false)}
                     onSaved={(out) => { setShowPayMaster(false); flash('ok', `Master paid — voucher ${out.VoucherNo}`); load(); }} />
