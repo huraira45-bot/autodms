@@ -42,7 +42,7 @@ const PAYMENT_TYPES = ['Cash', 'Credit', 'POS', 'Bank Transfer'];
  * Fields belonging to the other modes are dropped, not kept: a party left over
  * from a Credit draft would otherwise ride along on a Cash job card and print.
  */
-const paymentFromBody = (b) => {
+exports.paymentFromBody = (b) => {
     const raw = b.PaymentType == null || b.PaymentType === '' ? 'Cash' : String(b.PaymentType);
     if (!PAYMENT_TYPES.includes(raw)) {
         return { error: `"${raw}" is not a payment mode. Choose ${PAYMENT_TYPES.join(', ')}.` };
@@ -598,7 +598,7 @@ exports.updateEstimate = async (req, res) => {
         // hands them to the job card. Anything not recognised is refused rather
         // than quietly stored, because PaymentType decides which ledger the
         // finalized job card posts to.
-        const payment = paymentFromBody(b);
+        const payment = exports.paymentFromBody(b);
         if (payment.error) return res.status(400).json({ error: payment.error });
         const fuel = FUEL_LEVELS.includes(String(b.FuelLevel || '')) ? String(b.FuelLevel) : null;
 
@@ -817,7 +817,15 @@ const jobCardBodyFor = (est, { jobCode, promised, signerName, vehicleColor, user
     VehicleColor: vehicleColor || null,
     KiloMeter: est.KiloMeter,
     PromisedDate: promised || null,
-    Remarks: `Opened on the service tablet from estimate ${est.EstimateNo}, signed by ${signerName}.`,
+    // What the customer actually said, in the advisor's words. The work order
+    // prints `WACResults || Remarks` in its VOC box, and a tablet job card has
+    // no WACResults yet -- so this used to hold "Opened on the service tablet
+    // from estimate EST-xxxx, signed by ...", and the VOC box printed that
+    // bookkeeping line instead of the complaint (owner report 2026-09-26).
+    //
+    // Nothing is lost by dropping that sentence: the job card already carries
+    // its estimate and its signature, both shown on the job card screen.
+    Remarks: est.CustomerRemarks || '',
     VOCRemarks: est.CustomerRemarks || '',
     // Settled at the vehicle and stored on the estimate; NULL on an estimate
     // drafted before this existed, which reads as Cash — what the tablet was

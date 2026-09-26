@@ -23,6 +23,7 @@ import {
 import { useFeedback } from '../../context/FeedbackContext';
 import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
+import SearchableSelect from '../../components/SearchableSelect';
 import {
     API, MAX_MEDIA_BYTES, money, mb, rateLabel, errText, fmtDateTime, statusStyle, pill,
 } from '../../tablet/estimateFormat';
@@ -803,11 +804,16 @@ function CustomerStep({ draft, change, editable }) {
                                   gap: 12, marginBottom: 12 }}>
                         <div>
                             <label style={S.label}>Party charged *</label>
-                            <select style={S.input} value={draft.PartyID}
-                                    onChange={e => { const v = e.target.value; change(d => ({ ...d, PartyID: v })); }}>
-                                <option value="">— Select —</option>
-                                {parties.map(p => <option key={p.PartyID} value={String(p.PartyID)}>{p.PartyName}</option>)}
-                            </select>
+                            <SearchableSelect touch
+                                value={draft.PartyID}
+                                onChange={v => change(d => ({ ...d, PartyID: v ? String(v) : '' }))}
+                                placeholder="Search parties..."
+                                title="Pick the party charged"
+                                options={parties.map(p => ({
+                                    id: p.PartyID,
+                                    label: p.PartyName,
+                                    sub: p.PhoneOne || undefined,
+                                }))} />
                         </div>
                         <div>
                             <label style={S.label}>C/O</label>
@@ -820,11 +826,12 @@ function CustomerStep({ draft, change, editable }) {
                 {draft.PaymentType === 'Bank Transfer' && (
                     <div style={{ marginBottom: 12 }}>
                         <label style={S.label}>Bank account *</label>
-                        <select style={S.input} value={draft.PaymentBankID}
-                                onChange={e => { const v = e.target.value; change(d => ({ ...d, PaymentBankID: v })); }}>
-                            <option value="">— Select —</option>
-                            {banks.map(b => <option key={b.GLCAID} value={String(b.GLCAID)}>{b.GLTitle}</option>)}
-                        </select>
+                        <SearchableSelect touch
+                            value={draft.PaymentBankID}
+                            onChange={v => change(d => ({ ...d, PaymentBankID: v ? String(v) : '' }))}
+                            placeholder="Search bank accounts..."
+                            title="Pick the bank account"
+                            options={banks.map(b => ({ id: b.GLCAID, label: b.GLTitle, sub: b.GLCode }))} />
                         {!banks.length && (
                             <div style={{ fontSize: 13, color: '#a16207', marginTop: 4 }}>
                                 No bank accounts are set up. Mark them as banks in Chart of Accounts.

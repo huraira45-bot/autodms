@@ -12,6 +12,7 @@
  * left unsigned.
  */
 const { sql, getPool } = require('../config/db');
+const { paymentFromBody } = require('./serviceIntakeController');
 const finalizeController = require('./finalizeController');
 const { loadRequisition } = require('./partsRequisitionController');
 const events = require('../services/serviceEvents');
@@ -137,6 +138,11 @@ exports.getJobCard = async (req, res) => {
                    j.KiloMeter, ISNULL(j.WorkshopStatus, 'Waiting For Service') AS WorkshopStatus,
                    ISNULL(j.IsFinalized, 0) AS IsFinalized, j.FinalizedAt, j.FinalizedByName,
                    j.EntryUserDateTime AS OpenedAt, j.PromisedDate, j.ServiceAdvisor, j.CreatedByName, j.VOCRemarks,
+                   -- How this is being paid for. The job card keeps it in
+                   -- Status; the rest of the system reads it back out under
+                   -- names like PaymentMode (gatePass) and PaymentType (CRD).
+                   j.Status AS PaymentType, j.PartyID, j.PaymentCO, j.PaymentBankID,
+                   pty.PartyName AS PaymentPartyName, bnk.GLTitle AS PaymentBankName,
                    c.endUserName AS CustomerName, c.PhoneNo AS CustomerPhone,
                    CASE WHEN ISNULL(c.CNIC, '') <> '' THEN 1 ELSE 0 END AS HasCNIC,
                    CASE WHEN c.DOB IS NOT NULL THEN 1 ELSE 0 END AS HasDOB,
@@ -144,6 +150,8 @@ exports.getJobCard = async (req, res) => {
             FROM   Addata_JobCardInfo j
             LEFT   JOIN addata_CustomerInfo c ON c.ProfileID = j.EndUserID
             LEFT   JOIN gen_JobCardType t     ON t.JobCardTypeId = j.JobTypeId
+            LEFT   JOIN gen_PartiesInfo pty   ON pty.PartyID = j.PartyID
+            LEFT   JOIN GLChartOFAccount bnk  ON bnk.GLCAID = j.PaymentBankID
             WHERE  j.JobCardId = @id`)).recordset[0];
 
         const labour = (await pool.request().input('id', sql.Int, id).query(`
@@ -244,6 +252,67 @@ exports.getJobCard = async (req, res) => {
  * card. If unsigned additional work is already open, that one is returned
  * instead of starting a second.
  */
+/**
+ * PUT /api/service-intake/job-cards/:id/payment
+ * Body: { PaymentType, PartyID?, PaymentCO?, PaymentBankID? }
+ *
+ * How the customer is paying is often not settled at the vehicle -- it is
+ * settled when they come back for the car. Owner ask 2026-09-26: this must be
+ * changeable on the tablet for as long as the job card is open.
+ *
+ * Refused once the job card is finalized, because by then the mode has
+ * decided which ledger the work posted to; changing it afterwards would put
+ * the job card and its voucher out of step. That needs an unfinalize, which
+ * is a different, audited road.
+ */
+exports.setPayment = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (req.tabletJobCard?.IsFinalized) {
+            return res.status(423).json({
+                error: 'This job card is finalized. Its payment mode decided where the work posted, '
+                     + 'so it can only be changed by unfinalizing first.' });
+        }
+
+        const payment = paymentFromBody(req.body || {});
+        if (payment.error) return res.status(400).json({ error: payment.error });
+
+        const pool = await getPool();
+
+        // A party or bank that does not exist would leave the job card
+        // pointing at nothing and fail at finalize instead of here.
+        if (payment.PartyID) {
+            const ok = await pool.request().input('p', sql.Int, payment.PartyID)
+                .query('SELECT 1 AS ok FROM gen_PartiesInfo WHERE PartyID = @p');
+            if (!ok.recordset.length) return res.status(400).json({ error: 'That party no longer exists.' });
+        }
+        if (payment.PaymentBankID) {
+            const ok = await pool.request().input('b', sql.Int, payment.PaymentBankID)
+                .query('SELECT 1 AS ok FROM GLChartOFAccount WHERE GLCAID = @b');
+            if (!ok.recordset.length) return res.status(400).json({ error: 'That bank account no longer exists.' });
+        }
+
+        const r = await pool.request()
+            .input('id',    sql.Int,           id)
+            .input('pay',   sql.NVarChar(50),  payment.PaymentType)
+            .input('party', sql.Int,           payment.PartyID)
+            .input('co',    sql.NVarChar(100), payment.PaymentCO)
+            .input('bank',  sql.Int,           payment.PaymentBankID)
+            .query(`UPDATE Addata_JobCardInfo
+                    SET    Status = @pay, PartyID = @party, PaymentCO = @co, PaymentBankID = @bank
+                    OUTPUT INSERTED.JobCardId, INSERTED.Status AS PaymentType, INSERTED.PartyID,
+                           INSERTED.PaymentCO, INSERTED.PaymentBankID
+                    WHERE  JobCardId = @id AND ISNULL(IsFinalized, 0) = 0`);
+        if (!r.recordset.length) {
+            return res.status(423).json({ error: 'This job card was finalized a moment ago; nothing was changed.' });
+        }
+        res.json(r.recordset[0]);
+    } catch (err) {
+        console.error('setPayment:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
 exports.startAdditionalWork = async (req, res) => {
     try {
         const jc = req.tabletJobCard;

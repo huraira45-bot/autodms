@@ -87,6 +87,9 @@ router.get(   '/job-cards/:id',                   ...tabletJobCard, jobCards.get
 router.post(  '/job-cards/:id/additional-work',   ...tabletJobCard, jobCards.startAdditionalWork);
 router.post(  '/job-cards/:id/finalize',          tablet, requireAccess('finalize'), jobCards.tabletJobCardOnly, jobCards.finalizeJobCard);
 router.post(  '/job-cards/:id/dms-number',        ...tabletJobCard, jobCards.setDmsNumber);
+// How the customer is paying, settled when they collect the car rather than
+// at the vehicle (owner ask 2026-09-26). Refused once finalized.
+router.put(   '/job-cards/:id/payment',           ...tabletJobCard, jobCards.setPayment);
 router.get(   '/job-cards/:id/print-data',        ...tabletJobCard, workshop.getJobCardPrintData);
 // The same signature and walk-around video from the job card, so the tablet's
 // own copy of the work-order print and its job card screen can show them.

@@ -30,6 +30,11 @@ import { ChevronDown, Search, X } from 'lucide-react';
 
 export default function SearchableSelect({
     value, onChange, options = [], placeholder = '— Pick one —', disabled = false, title,
+    // Bigger trigger and rows for the service tablet, which is used standing
+    // at a vehicle with a thumb rather than sitting at a desk with a mouse
+    // (owner ask 2026-09-26). Everything else is identical, so both screens
+    // keep the same picker rather than growing a second one.
+    touch = false,
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -125,12 +130,12 @@ export default function SearchableSelect({
             onClick={openModal}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModal(); } }}
             style={{
-                width: '100%', padding: '8px 10px', border: '1px solid #cbd5e1',
+                width: '100%', padding: touch ? '12px 14px' : '8px 10px', border: '1px solid #cbd5e1',
                 borderRadius: 6, background: disabled ? '#f1f5f9' : 'white',
-                fontSize: '0.875rem', textAlign: 'left',
+                fontSize: touch ? '1.05rem' : '0.875rem', textAlign: 'left',
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 cursor: disabled ? 'not-allowed' : 'pointer',
-                minHeight: 38,
+                minHeight: touch ? 56 : 38,
             }}>
             <span style={{
                 flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -207,6 +212,7 @@ export default function SearchableSelect({
                                             onClick={() => { onChange(o.id); closeModal(); }}
                                             style={{
                                                 ...styles.row,
+                                                ...(touch ? { padding: '15px 16px', fontSize: '1.02rem' } : null),
                                                 background: isSel ? '#eff6ff' : (isHi ? '#f1f5f9' : 'white'),
                                                 fontWeight: isSel ? 600 : 400,
                                             }}>

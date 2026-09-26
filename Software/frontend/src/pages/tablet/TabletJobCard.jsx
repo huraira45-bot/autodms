@@ -22,6 +22,7 @@ import WorkOrderPrint from '../WorkOrderPrint';
 import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 import ServiceAuthorisation from '../../components/ServiceAuthorisation';
 import QCChecksheet from '../../components/QCChecksheet';
+import PaymentModeBox from '../../components/PaymentModeBox';
 
 const qty = (n) => String(+Number(n || 0).toFixed(2));
 
@@ -248,6 +249,10 @@ export default function TabletJobCard() {
                 on a job card that has neither. */}
             <ServiceAuthorisation jobCardId={id} signatures={jc.Signatures || []} media={jc.Media || []}
                                   apiBase={`${API}/job-cards`} size="tablet" />
+
+            {/* How the customer is paying, often only settled when they come
+                back for the car (owner ask 2026-09-26). */}
+            <PaymentModeBox jobCardId={id} apiBase={API} jobCard={jc} size="tablet" onChanged={load} />
 
             {/* The checksheet walked round the car before handing it back. */}
             <QCChecksheet jobCardId={id} apiBase={API} size="tablet" canEdit={!jc.IsFinalized} />
