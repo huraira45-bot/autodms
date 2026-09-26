@@ -101,6 +101,20 @@ export default function BayCamera({ bayName }) {
     // this machine, so it is released when the screen goes away.
     useEffect(() => stop, [stop]);
 
+    // Attach the running stream once the <video> element actually exists.
+    // This has to be an effect rather than part of start(): the element is
+    // rendered only when `on` is true, so nothing can be attached to it until
+    // React has put it on the page.
+    useEffect(() => {
+        const v = videoRef.current;
+        if (!on || !v || !streamRef.current) return;
+        v.srcObject = streamRef.current;
+        // muted + playsInline, so autoplay should not be refused -- but if it
+        // is, say so rather than leaving a black rectangle with no reason.
+        v.play().catch(err => setProblem(
+            `The camera is running but the picture could not be shown: ${err.message}`));
+    }, [on]);
+
     // Labels are blank until permission has been given once, so the list is
     // only worth reading after the camera has been turned on.
     const listDevices = useCallback(async () => {
@@ -129,10 +143,12 @@ export default function BayCamera({ bayName }) {
                 audio: false,   // nobody consented to being recorded talking
             });
             streamRef.current = stream;
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                await videoRef.current.play().catch(() => { /* autoplay guard; muted so it should not fire */ });
-            }
+            // The stream is attached by the effect below, NOT here. The
+            // <video> element only exists once `on` is true, so at this point
+            // videoRef.current is still null -- an earlier version assigned
+            // srcObject behind an `if (videoRef.current)` guard, which
+            // silently did nothing and left a black rectangle on screen while
+            // the camera really was running (owner report 2026-09-26).
             setOn(true);
             await listDevices();
 
