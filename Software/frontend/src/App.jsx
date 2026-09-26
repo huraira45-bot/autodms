@@ -113,6 +113,7 @@ import JobCardList        from './pages/JobCardList';
 import JobCardForm        from './pages/JobCardForm';
 import WorkOrderPrint     from './pages/WorkOrderPrint';
 import QCChecksheetPrint from './pages/QCChecksheetPrint';
+import WatchStream from './pages/WatchStream';
 import StoreSalePrint     from './pages/StoreSalePrint';
 import GRNPrint           from './pages/GRNPrint';
 import GRTNPrint          from './pages/GRTNPrint';
@@ -1432,6 +1433,15 @@ function RootDispatcher() {
     if (pathname === '/kiosk/jobs') return <JobKiosk />;
     // Survey needs its :token path param exposed via useParams, so it stays
     // inside a matched <Route>.
+    // The bay camera link a customer is given (owner ask 2026-09-26). Public
+    // by design and outside AuthProvider: the token is the only credential.
+    if (matchPath('/watch/:token', pathname)) {
+        return (
+            <Routes>
+                <Route path="/watch/:token" element={<WatchStream />} />
+            </Routes>
+        );
+    }
     if (matchPath('/survey/:token', pathname)) {
         return (
             <Routes>
