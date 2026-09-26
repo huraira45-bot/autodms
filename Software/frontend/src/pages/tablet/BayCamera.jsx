@@ -138,8 +138,19 @@ export default function BayCamera({ bayName }) {
         setBusy(true);
         try {
             const id = wantedId ?? deviceId;
+            // The resolution preference applies whether or not a particular
+            // camera was chosen. Asking for a deviceId ALONE, as an earlier
+            // version did, let the camera fall back to its default -- a 2MP
+            // webcam handed back 640x480, which is not enough to see what is
+            // being done to a car. `ideal` degrades on its own if the camera
+            // cannot manage it, so this never fails for asking too much.
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: id ? { deviceId: { exact: id } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
+                video: {
+                    ...(id ? { deviceId: { exact: id } } : null),
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 },
+                },
                 audio: false,   // nobody consented to being recorded talking
             });
             streamRef.current = stream;
