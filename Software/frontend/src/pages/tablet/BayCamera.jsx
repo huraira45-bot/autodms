@@ -22,6 +22,7 @@
  * the right one every morning would not survive contact with a workshop.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import axios from 'axios';
 import { io as socketIO } from 'socket.io-client';
 import { Camera, CameraOff, AlertTriangle, Loader2, RefreshCw, Lock, Radio } from 'lucide-react';
 
@@ -122,7 +123,9 @@ export default function BayCamera({ bayName, deviceToken, jobCardIds = [] }) {
     // watch link for a car on this bay. Nothing is sent until that happens.
     useEffect(() => {
         if (!deviceToken) return undefined;
-        const socket = socketIO('/service', {
+        // Same reason as the watch page: the socket has to go where the
+        // server is, not where the page happens to be served from.
+        const socket = socketIO(`${axios.defaults.baseURL || ''}/service`, {
             path: '/socket.io',
             auth: { token: deviceToken },
             transports: ['websocket', 'polling'],

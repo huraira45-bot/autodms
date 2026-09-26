@@ -70,7 +70,11 @@ export default function WatchStream() {
     // nothing else.
     useEffect(() => {
         if (state.status !== 'ok') return undefined;
-        const socket = socketIO('/watch', {
+        // axios.defaults.baseURL is where the server actually is -- empty when
+        // the page is served by the server itself, and http://localhost:5000
+        // under the Vite dev server, where the page is on 5173. A relative
+        // namespace would connect to 5173, which has no socket server.
+        const socket = socketIO(`${axios.defaults.baseURL || ''}/watch`, {
             path: '/socket.io',
             auth: { token },
             transports: ['websocket', 'polling'],
