@@ -52,7 +52,8 @@ const S = {
         border: `1px solid ${D.line}`, borderRadius: 4, fontFamily: MONO, fontSize: 13,
         letterSpacing: 1, cursor: 'pointer',
     },
-    video: { width: '100%', maxWidth: 520, borderRadius: 4, background: '#000', display: 'block', marginTop: 12 },
+    video: { width: '100%', maxWidth: 520, minHeight: 200, borderRadius: 4, background: '#000',
+             display: 'block', marginTop: 12, objectFit: 'contain' },
     note: { fontSize: 13, color: D.muted, marginTop: 8, lineHeight: 1.5 },
     problem: {
         marginTop: 10, padding: '11px 14px', borderRadius: 4, fontSize: 14, lineHeight: 1.5,
@@ -72,6 +73,10 @@ export default function BayCamera({ bayName }) {
     const [busy, setBusy] = useState(false);
     const [problem, setProblem] = useState(null);
     const [devices, setDevices] = useState([]);
+    // What the camera is actually delivering. A granted camera that sends a
+    // black picture looks identical to a working one, so the panel has to say
+    // which it is rather than leave someone staring at a black rectangle.
+    const [feed, setFeed] = useState(null);
     const [deviceId, setDeviceId] = useState(() => {
         try { return localStorage.getItem(LS_DEVICE) || ''; } catch { return ''; }
     });
@@ -88,6 +93,7 @@ export default function BayCamera({ bayName }) {
             streamRef.current = null;
         }
         if (videoRef.current) videoRef.current.srcObject = null;
+        setFeed(null);
         setOn(false);
     }, []);
 
@@ -129,6 +135,25 @@ export default function BayCamera({ bayName }) {
             }
             setOn(true);
             await listDevices();
+
+            const track = stream.getVideoTracks()[0];
+            const settings = track?.getSettings?.() || {};
+            setFeed({
+                label: track?.label || 'Camera',
+                width: settings.width, height: settings.height,
+                frameRate: settings.frameRate ? Math.round(settings.frameRate) : null,
+                frames: null,
+            });
+
+            // A camera can be granted, report a resolution, and still send
+            // nothing -- a closed privacy shutter, or a driver blocked in
+            // Windows camera settings, both look exactly like this. The only
+            // way to tell is to wait and see whether any frame arrives.
+            setTimeout(() => {
+                const v = videoRef.current;
+                if (!v || !streamRef.current) return;
+                setFeed(f => f && ({ ...f, frames: v.videoWidth > 0 && v.videoHeight > 0 }));
+            }, 2500);
         } catch (e) {
             // These are the four that actually happen on a workshop machine.
             const msg =
@@ -157,7 +182,7 @@ export default function BayCamera({ bayName }) {
                 <span style={S.tag}>BAY CAMERA{bayName ? ` · ${bayName}` : ''}</span>
 
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    {devices.length > 1 && (
+                    {devices.length > 0 && (
                         <select value={deviceId} style={S.select} onChange={e => pick(e.target.value)}>
                             <option value="">Default camera</option>
                             {devices.map((d, i) => (
@@ -205,6 +230,28 @@ export default function BayCamera({ bayName }) {
             )}
 
             {on && <video ref={videoRef} style={S.video} muted playsInline autoPlay />}
+
+            {on && feed && (
+                <div style={{ ...S.note, fontFamily: MONO, fontSize: 12, letterSpacing: 0.5 }}>
+                    {feed.label}
+                    {feed.width ? ` · ${feed.width}x${feed.height}` : ''}
+                    {feed.frameRate ? ` · ${feed.frameRate}fps` : ''}
+                    {feed.frames === true && <span style={{ color: D.accent }}> · PICTURE OK</span>}
+                    {feed.frames === null && <span style={{ color: D.muted }}> · checking…</span>}
+                </div>
+            )}
+
+            {on && feed?.frames === false && (
+                <div style={{ ...S.problem, background: 'rgba(120,53,15,0.35)', color: '#fde68a',
+                              border: `1px solid ${D.warn}66`, borderLeft: `4px solid ${D.warn}` }}>
+                    <AlertTriangle size={15} style={{ verticalAlign: -2, marginRight: 6 }} />
+                    The camera is switched on but sending no picture. Three things do this, in the
+                    order they usually turn out to be: a privacy shutter closed over the lens, the
+                    camera switched off for apps in Windows Settings &rarr; Privacy &amp; security
+                    &rarr; Camera, or another program already holding it.
+                    {devices.length > 1 && ' If this machine has more than one camera, try the other one above.'}
+                </div>
+            )}
 
             <div style={S.note}>
                 {on
