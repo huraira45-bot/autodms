@@ -17,6 +17,7 @@ const PM_TYPES = ['None', 'Monthly', 'Quarterly', 'Annual'];
 const BRING_BY_TYPES = ['Self', 'Driver', 'Towing', 'Other'];
 import ServiceAuthorisation from '../components/ServiceAuthorisation';
 import QCChecksheet from '../components/QCChecksheet';
+import EstimateAndRequisitions from '../components/EstimateAndRequisitions';
 
 const TABS = ['General', 'Vehicle Info', 'Job Card Info', 'Spares', 'Sublet Repair', 'Insurance'];
 
@@ -65,6 +66,10 @@ export default function JobCardForm() {
   // job card opened from the service tablet (owner ask 2026-09-25).
   const [signatures, setSignatures] = useState([]);
   const [media, setMedia] = useState([]);
+  // The signed estimate and what it sent to the parts counter (owner ask
+  // 2026-09-26). Both were only visible on the tablet before.
+  const [estimates, setEstimates] = useState([]);
+  const [requisitions, setRequisitions] = useState([]);
   const [kycCleared, setKycCleared] = useState(true);  // true when no flag exists; false if open flags require ack
   const [jobTypes, setJobTypes] = useState([]);
   // GLCAID of the GENERAL_CUSTOMER system role. Used to detect whether the
@@ -221,6 +226,8 @@ export default function JobCardForm() {
           // a desk job card has neither, and the panel then draws nothing.
           setSignatures(jc.Signatures || []);
           setMedia(jc.Media || []);
+          setEstimates(jc.Estimates || []);
+          setRequisitions(jc.Requisitions || []);
           setForm({
             JobCardNo: jc.JobCardNo || '',
             jobCode: jc.jobCode || '',
@@ -1425,6 +1432,9 @@ export default function JobCardForm() {
 
           {/* Draws nothing unless this job card came from the tablet. */}
           <ServiceAuthorisation jobCardId={id} signatures={signatures} media={media} />
+
+          {/* Draws nothing on a job card written at the desk. */}
+          <EstimateAndRequisitions estimates={estimates} requisitions={requisitions} />
 
           {/* The delivery checksheet (owner ask 2026-09-25). Only on a saved
               job card -- there is nothing to inspect before one exists. */}

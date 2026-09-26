@@ -920,10 +920,35 @@ exports.getJobCardById = async (req, res) => {
             WHERE  JobCardID = @id AND DeletedAt IS NULL
             ORDER  BY CapturedAt, MediaID`);
 
+        // The estimate the customer signed and what went to the parts counter
+        // because of it (owner ask 2026-09-26: both have to be visible from the
+        // web job card, not only on the tablet). Empty on a desk job card.
+        const estimates = await pool.request().input('id', sql.Int, req.params.id).query(`
+            SELECT e.EstimateID, e.EstimateNo, e.RevisionNo, e.Status, e.GrandTotal,
+                   e.LabourTotal, e.LabourTax, e.PartsTotal, e.PartsTax,
+                   e.CreatedAt, e.AdvisorName,
+                   s.SignerName, s.SignedAt, s.BayName,
+                   (SELECT COUNT(*) FROM dms_ServiceEstimateLines l WHERE l.EstimateID = e.EstimateID) AS LineCount
+            FROM   dms_ServiceEstimates e
+            LEFT   JOIN dms_ServiceEstimateSignatures s ON s.EstimateID = e.EstimateID
+            WHERE  e.JobCardID = @id
+            ORDER  BY e.RevisionNo, e.EstimateID`);
+
+        // Through the parts counter's own loader, so the quantity issued is the
+        // live figure read off the Parts Issue lines rather than a stored one
+        // that could go stale when an issue line is edited.
+        const { loadRequisition } = require('./partsRequisitionController');
+        const reqIds = await pool.request().input('id', sql.Int, req.params.id).query(
+            'SELECT RequisitionID FROM dms_PartsRequisitions WHERE JobCardID = @id ORDER BY RequisitionID');
+        const requisitions = [];
+        for (const row of reqIds.recordset) requisitions.push(await loadRequisition(pool, row.RequisitionID));
+
         res.json({
             ...jc.recordset[0],
             Signatures: signatures.recordset,
             Media: media.recordset,
+            Estimates: estimates.recordset,
+            Requisitions: requisitions,
             LabourItems: labour.recordset,
             PartsItems: parts.recordset,
             SubletItems: sublets.recordset,
