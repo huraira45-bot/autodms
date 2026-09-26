@@ -213,17 +213,34 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
   // Warm up heavy report queries so the first user request isn't penalized
   // by msnodesqlv8 cold-cache + plan compilation. Runs in the background;
   // failures here are non-fatal.
+  //
+  // The handler is called directly, not fetched over HTTP. This used to sign a
+  // token with groupId 0 and carry a hand-written modules list, but
+  // middleware/auth re-reads permissions from the database on every request
+  // and overwrites whatever the token claims -- so group 0 held nothing, the
+  // request was refused 403, and "[warmup] failed: ERR_BAD_REQUEST" printed on
+  // every single boot while nothing was ever actually warmed. Compiling a
+  // query plan needs the query, not the HTTP stack or a login.
   setTimeout(async () => {
+    const t0 = Date.now();
     try {
-      const axios = require('axios');
-      const jwt = require('jsonwebtoken');
-      const token = jwt.sign({ userId: 0, userName: 'warmup', groupId: 0, groupTitle: 'warmup',
-                               employeeId: 0, modules: ['reports','parts_spare','inventory_settings'] },
-                              process.env.JWT_SECRET, { expiresIn: '1m' });
-      const t0 = Date.now();
-      await axios.get(`http://localhost:${PORT}/api/reports/inventory-valuation`,
-                      { headers: { Authorization: 'Bearer ' + token }, timeout: 90000 });
-      console.log(`[warmup] inventory report ready (${Date.now()-t0}ms)`);
+      const reports = require('./controllers/reportsController');
+      // The handler answers through res, so stand in for just enough of it.
+      // getInventoryValuation reads req.query only -- it never touches req.user.
+      await new Promise((resolve, reject) => {
+        const res = {
+          statusCode: 200,
+          status(code) { this.statusCode = code; return this; },
+          set() { return this; },
+          json(body) {
+            if (this.statusCode >= 400) reject(new Error(body && body.error ? body.error : `status ${this.statusCode}`));
+            else resolve(body);
+          },
+          send(body) { this.json(body); },
+        };
+        Promise.resolve(reports.getInventoryValuation({ query: {} }, res)).catch(reject);
+      });
+      console.log(`[warmup] inventory report ready (${Date.now() - t0}ms)`);
     } catch (e) {
       console.warn('[warmup] failed:', e.code || e.message);
     }
