@@ -178,6 +178,10 @@ const io = chatSocket.attach(httpServer);
 // Live updates for the service tablet, the parts counter and bay screens
 // (plan 2026-09-14, Phase 3) share the socket.io server with chat.
 require('./services/serviceEvents').attach(io);
+// Bay camera relay (owner ask 2026-09-26) — PROOF OF CONCEPT. JPEG frames
+// from a bay screen to whoever holds that car's watch link. Not how this
+// should ship; see services/bayStreamRelay.js.
+require('./services/bayStreamRelay').attach(io, require('./services/serviceEvents').namespace());
 // ---- HTTPS, for the service tablets (owner ask 2026-09-23) ----
 // Chrome only installs a page as an app — the thing that takes away the
 // address bar and the tabs — over HTTPS. So the tablets get a TLS port,

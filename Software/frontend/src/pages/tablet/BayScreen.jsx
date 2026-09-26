@@ -303,7 +303,9 @@ function BayBoard({ device }) {
                 recorded yet. It sits under the alert so a bay with no camera
                 set up is not staring at an error all day. */}
             <div style={{ marginTop: 16 }}>
-                <BayCamera bayName={data?.bay?.BayName || device.bayName} />
+                <BayCamera bayName={data?.bay?.BayName || device.bayName}
+                           deviceToken={device.token}
+                           jobCardIds={(data?.jobCards || []).map(c => c.JobCardId)} />
             </div>
 
             {!data && (

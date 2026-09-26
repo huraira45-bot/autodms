@@ -71,6 +71,8 @@ const emit = (room, event, payload) => {
 
 module.exports = {
     attach,
+    /** The /service namespace, once attached — the bay camera relay sends on it. */
+    namespace: () => nsp,
     /** Job lines on some bay changed (opened, added, started, finished). */
     bayJobsChanged: (payload) => emit('bay-screens', 'bay:jobs-changed', payload),
     /** A parts requisition was created, issued against or cancelled. */

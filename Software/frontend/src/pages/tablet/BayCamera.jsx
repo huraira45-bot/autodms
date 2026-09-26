@@ -22,7 +22,8 @@
  * the right one every morning would not survive contact with a workshop.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, CameraOff, AlertTriangle, Loader2, RefreshCw, Lock } from 'lucide-react';
+import { io as socketIO } from 'socket.io-client';
+import { Camera, CameraOff, AlertTriangle, Loader2, RefreshCw, Lock, Radio } from 'lucide-react';
 
 const LS_DEVICE = 'dms_bay_camera_device';
 
@@ -66,7 +67,18 @@ const S = {
     },
 };
 
-export default function BayCamera({ bayName }) {
+// PROOF OF CONCEPT sending (owner ask 2026-09-26). A frame every 200ms as a
+// JPEG over the socket this screen already holds. This is a slide show, not
+// video -- see services/bayStreamRelay.js for why it is like this and what
+// shipping would actually take.
+//
+// Frames are only encoded while somebody is watching. Encoding into an empty
+// room would cost this machine CPU all day for nothing.
+const FRAME_MS = 200;
+const FRAME_WIDTH = 640;
+const FRAME_QUALITY = 0.5;
+
+export default function BayCamera({ bayName, deviceToken, jobCardIds = [] }) {
     const videoRef = useRef(null);
     const streamRef = useRef(null);
     const [on, setOn] = useState(false);
@@ -77,6 +89,11 @@ export default function BayCamera({ bayName }) {
     // black picture looks identical to a working one, so the panel has to say
     // which it is rather than leave someone staring at a black rectangle.
     const [feed, setFeed] = useState(null);
+    // Cars on this bay that someone is currently watching.
+    const [watched, setWatched] = useState([]);
+    const socketRef = useRef(null);
+    const canvasRef = useRef(null);
+    const sendTimer = useRef(null);
     const [deviceId, setDeviceId] = useState(() => {
         try { return localStorage.getItem(LS_DEVICE) || ''; } catch { return ''; }
     });
@@ -100,6 +117,56 @@ export default function BayCamera({ bayName }) {
     // A camera left running holds the device against every other program on
     // this machine, so it is released when the screen goes away.
     useEffect(() => stop, [stop]);
+
+    // The socket this screen already holds tells it when a customer opens the
+    // watch link for a car on this bay. Nothing is sent until that happens.
+    useEffect(() => {
+        if (!deviceToken) return undefined;
+        const socket = socketIO('/service', {
+            path: '/socket.io',
+            auth: { token: deviceToken },
+            transports: ['websocket', 'polling'],
+        });
+        socketRef.current = socket;
+        socket.on('watch:viewers', ({ JobCardId, viewers }) => {
+            setWatched(prev => (viewers > 0
+                ? (prev.includes(JobCardId) ? prev : [...prev, JobCardId])
+                : prev.filter(id => id !== JobCardId)));
+        });
+        return () => { socket.disconnect(); socketRef.current = null; };
+    }, [deviceToken]);
+
+    // Only cars that are BOTH on this bay and being watched. A viewer count
+    // arrives for every car, not only this bay's.
+    const sending = watched.filter(id => jobCardIds.includes(id));
+    const sendingKey = sending.join(',');
+
+    useEffect(() => {
+        const socket = socketRef.current;
+        if (sendTimer.current) { clearInterval(sendTimer.current); sendTimer.current = null; }
+        if (!socket || !on || !sending.length) return undefined;
+
+        // Ask permission once per car rather than proving it on every frame.
+        sending.forEach(id => socket.emit('bay:stream-begin', { JobCardId: id }));
+
+        sendTimer.current = setInterval(() => {
+            const v = videoRef.current;
+            if (!v || !v.videoWidth) return;
+            const canvas = canvasRef.current || (canvasRef.current = document.createElement('canvas'));
+            const scale = FRAME_WIDTH / v.videoWidth;
+            canvas.width = FRAME_WIDTH;
+            canvas.height = Math.round(v.videoHeight * scale);
+            canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+            const frame = canvas.toDataURL('image/jpeg', FRAME_QUALITY);
+            sending.forEach(id => socket.emit('bay:frame', { JobCardId: id, frame }));
+        }, FRAME_MS);
+
+        return () => {
+            if (sendTimer.current) { clearInterval(sendTimer.current); sendTimer.current = null; }
+            sending.forEach(id => socket.emit('bay:stream-end', { JobCardId: id }));
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [on, sendingKey]);
 
     // Attach the running stream once the <video> element actually exists.
     // This has to be an effect rather than part of start(): the element is
@@ -258,6 +325,14 @@ export default function BayCamera({ bayName }) {
 
             {on && <video ref={videoRef} style={S.video} muted playsInline autoPlay />}
 
+            {on && sending.length > 0 && (
+                <div style={{ ...S.note, display: 'flex', alignItems: 'center', gap: 7,
+                              color: D.accent, fontFamily: MONO, fontSize: 13, letterSpacing: 1 }}>
+                    <Radio size={15} />
+                    SENDING TO {sending.length} CUSTOMER{sending.length === 1 ? '' : 'S'} WATCHING
+                </div>
+            )}
+
             {on && feed && (
                 <div style={{ ...S.note, fontFamily: MONO, fontSize: 12, letterSpacing: 0.5 }}>
                     {feed.label}
@@ -282,9 +357,13 @@ export default function BayCamera({ bayName }) {
 
             <div style={S.note}>
                 {on
-                    ? 'This is only shown on this screen. Nothing is being sent anywhere and nothing is being recorded.'
+                    ? (sending.length
+                        ? 'A customer has opened the link for a car on this bay, so the picture is being sent to them. '
+                          + 'Nothing is being recorded.'
+                        : 'This is only shown on this screen. Nobody is watching, so nothing is being sent, '
+                          + 'and nothing is being recorded.')
                     : 'Turning the camera on checks that it works and grants it to this screen. '
-                      + 'Nothing is sent or recorded yet.'}
+                      + 'Nothing is sent or recorded until a customer opens their link.'}
             </div>
         </div>
     );

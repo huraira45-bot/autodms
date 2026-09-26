@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { io as socketIO } from 'socket.io-client';
 import { Video, VideoOff, Wrench, AlertTriangle, Loader2 } from 'lucide-react';
 
 const CSS = `
@@ -42,6 +43,12 @@ const CSS = `
 export default function WatchStream() {
     const { token } = useParams();
     const [state, setState] = useState({ status: 'loading' });
+    // The picture, as it arrives. PROOF OF CONCEPT: these are JPEG frames over
+    // a socket, not video -- see services/bayStreamRelay.js. `live` is true
+    // only while frames are actually arriving, so a camera switched off at the
+    // bay stops claiming to be live.
+    const [frame, setFrame] = useState(null);
+    const [live, setLive] = useState(false);
 
     const load = useCallback(async () => {
         try {
@@ -57,6 +64,30 @@ export default function WatchStream() {
             });
         }
     }, [token]);
+
+    // The picture comes over its own socket, authorised by the same token in
+    // the address -- the customer has no login, and this namespace accepts
+    // nothing else.
+    useEffect(() => {
+        if (state.status !== 'ok') return undefined;
+        const socket = socketIO('/watch', {
+            path: '/socket.io',
+            auth: { token },
+            transports: ['websocket', 'polling'],
+        });
+        let idle = null;
+        const seen = () => {
+            setLive(true);
+            clearTimeout(idle);
+            // No frame for two seconds means the bay stopped sending. Saying
+            // "live" over a frozen picture would be worse than saying nothing.
+            idle = setTimeout(() => setLive(false), 2000);
+        };
+        socket.on('watch:frame', ({ frame: f }) => { setFrame(f); seen(); });
+        socket.on('watch:stopped', () => { setLive(false); });
+        socket.on('disconnect', () => setLive(false));
+        return () => { clearTimeout(idle); socket.disconnect(); };
+    }, [state.status, token]);
 
     useEffect(() => {
         load();
@@ -106,9 +137,20 @@ export default function WatchStream() {
                 {d.JobCardNo ? ` · ${d.JobCardNo}` : ''}
             </div>
 
-            <div className="w-stage">
-                {d.live ? (
-                    <div className="w-row"><Video size={20} color="#22d3ee" /> Live</div>
+            <div className="w-stage" style={frame ? { padding: 0, border: 'none' } : null}>
+                {frame ? (
+                    <>
+                        <img src={frame} alt="Your vehicle in the workshop"
+                             style={{ width: '100%', borderRadius: 10, display: 'block' }} />
+                        <div className="w-row" style={{ justifyContent: 'center', marginTop: 8 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: '50%',
+                                           background: live ? '#22d3ee' : '#475569',
+                                           boxShadow: live ? '0 0 10px #22d3ee' : 'none' }} />
+                            <span className="w-muted" style={{ fontSize: 13 }}>
+                                {live ? 'Live from the workshop' : 'Paused — waiting for the camera'}
+                            </span>
+                        </div>
+                    </>
                 ) : (
                     <>
                         <VideoOff size={30} color="#475569" />
