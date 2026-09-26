@@ -20,6 +20,7 @@ import { isNativeApp, getServerUrl } from '../../tablet/serverConfig';
 import { useServiceEvents } from '../../tablet/useServiceEvents';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
 import { API, errText, fmtDateTime } from '../../tablet/estimateFormat';
+import BayCamera from './BayCamera';
 
 const STORE_KEY = 'dms_bay_device';
 
@@ -296,6 +297,14 @@ function BayBoard({ device }) {
             <div className="bay-scan" />
 
             {message && <div style={S2.alert}>{message}</div>}
+
+            {/* The camera on this machine (owner report 2026-09-26: nothing
+                ever asked for permission). Capture only -- nothing is sent or
+                recorded yet. It sits under the alert so a bay with no camera
+                set up is not staring at an error all day. */}
+            <div style={{ marginTop: 16 }}>
+                <BayCamera bayName={data?.bay?.BayName || device.bayName} />
+            </div>
 
             {!data && (
                 <div style={{ display: 'grid', placeItems: 'center', minHeight: 300 }}>
