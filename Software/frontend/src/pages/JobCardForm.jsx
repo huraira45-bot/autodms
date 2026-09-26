@@ -18,6 +18,7 @@ const BRING_BY_TYPES = ['Self', 'Driver', 'Towing', 'Other'];
 import ServiceAuthorisation from '../components/ServiceAuthorisation';
 import QCChecksheet from '../components/QCChecksheet';
 import EstimateAndRequisitions from '../components/EstimateAndRequisitions';
+import BayStreamLink from '../components/BayStreamLink';
 
 const TABS = ['General', 'Vehicle Info', 'Job Card Info', 'Spares', 'Sublet Repair', 'Insurance'];
 
@@ -1435,6 +1436,9 @@ export default function JobCardForm() {
 
           {/* Draws nothing on a job card written at the desk. */}
           <EstimateAndRequisitions estimates={estimates} requisitions={requisitions} />
+
+          {/* Opened by the bay screen when work starts; draws nothing until then. */}
+          {isEdit && <BayStreamLink jobCardId={id} />}
 
           {/* The delivery checksheet (owner ask 2026-09-25). Only on a saved
               job card -- there is nothing to inspect before one exists. */}

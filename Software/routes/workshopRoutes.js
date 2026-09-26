@@ -4,6 +4,7 @@ const wc = require('../controllers/workshopController');
 const { requirePerm, requireAccess, requireAnyAccess } = require('../middleware/permissions');
 const si = require('../controllers/serviceIntakeController');
 const qc = require('../controllers/qcInspectionController');
+const bay = require('../controllers/bayScreenController');
 
 // ── Customers (workshop_customers) ─────────────────────────────────────────
 router.get(   '/customers',                 requirePerm('workshop_customers', 'view'),   wc.getCustomers);
@@ -46,6 +47,10 @@ router.get(   '/job-cards/:id/print-data',  requirePerm('workshop_jobs', 'view')
 // workshop_jobs, not workshop_tablet.
 router.get(   '/job-cards/:id/signature/:signatureId', requirePerm('workshop_jobs', 'view'), si.getJobCardSignatureImage);
 router.get(   '/job-cards/:id/media/:mediaId/ticket',  requirePerm('workshop_jobs', 'view'), si.getJobCardMediaTicket);
+
+// The bay camera watch link for this car, and killing one that went astray.
+router.get(   '/job-cards/:id/stream-link',        requirePerm('workshop_jobs', 'view'), bay.getJobCardStreamLink);
+router.post(  '/job-cards/:id/stream-link/revoke', requirePerm('workshop_jobs', 'edit'), bay.revokeJobCardStreamLink);
 
 // QC Inspection Checksheet, worked through before the car is handed back
 // (owner ask 2026-09-25). Record only -- nothing here is called from the

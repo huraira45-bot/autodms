@@ -89,6 +89,13 @@ app.get('/api/service-intake/ping', (req, res) => {
 app.get('/api/service-intake/media/:mediaId/stream',
         require('./controllers/serviceIntakeController').streamMedia);
 
+// The bay camera watch link (owner ask 2026-09-26). Public by design: the
+// customer opening it has no account. Nothing streams down it yet -- it
+// answers live:false -- but the token is unguessable, expires and can be
+// revoked, which is the part that is hard to change later.
+app.get('/api/stream/:token',
+        require('./controllers/bayScreenController').resolveStream);
+
 // Bay screens (plan 2026-09-14, Phase 3). They hold a device token, not a user
 // login, so they mount before the auth middleware; routes/bayScreenRoutes.js
 // accepts device tokens only, and the auth middleware refuses them.

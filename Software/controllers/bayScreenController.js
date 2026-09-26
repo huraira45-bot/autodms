@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 /**
  * Bay screens — service tablet app, Phase 3 (plan 2026-09-14).
  *
@@ -198,6 +199,52 @@ exports.getBayJobs = async (req, res) => {
     }
 };
 
+// A watch link lasts a working day. Long enough that a car in all morning
+// keeps one link, short enough that a link found later is already dead.
+const STREAM_LINK_HOURS = 12;
+
+/**
+ * Opens the watch link for a car, or leaves the existing one alone.
+ *
+ * Per JOB CARD, not per labour line: the customer wants to watch their car,
+ * not one operation on it, so the first job started opens the link and every
+ * later job on the same car reuses it. A unique filtered index enforces one
+ * Active link per job card, so two bay screens starting jobs on the same car
+ * at the same moment cannot produce two links to the same camera.
+ */
+async function ensureStreamLink(tx, line, device) {
+    const existing = (await new sql.Request(tx).input('jc', sql.Int, line.JobCardId).query(`
+        SELECT TOP 1 StreamLinkID FROM dms_BayStreamLinks
+        WHERE  JobCardID = @jc AND Status = 'Active' AND ExpiresAt > GETDATE()`)).recordset[0];
+    if (existing) return;
+
+    // An expired link is retired rather than left Active, so the index below
+    // stays free for the new one.
+    await new sql.Request(tx).input('jc', sql.Int, line.JobCardId).query(`
+        UPDATE dms_BayStreamLinks SET Status = 'Revoked', RevokedAt = GETDATE(),
+               RevokedByName = 'expired'
+        WHERE  JobCardID = @jc AND Status = 'Active' AND ExpiresAt <= GETDATE()`);
+
+    const vehicle = (await new sql.Request(tx).input('jc', sql.Int, line.JobCardId).query(
+        'SELECT VehicleRegNo FROM Addata_JobCardInfo WHERE JobCardId = @jc')).recordset[0];
+
+    await new sql.Request(tx)
+        .input('tok',  sql.NVarChar(64),  crypto.randomBytes(32).toString('base64url'))
+        .input('jc',   sql.Int,           line.JobCardId)
+        .input('jcno', sql.NVarChar(100), line.JobCardNo || null)
+        .input('reg',  sql.NVarChar(150), vehicle?.VehicleRegNo || null)
+        .input('bid',  sql.Int,           device?.BayID || null)
+        .input('bay',  sql.NVarChar(50),  device?.BayName || null)
+        .input('dev',  sql.Int,           device?.DeviceID || null)
+        .input('det',  sql.Int,           line.DetailId)
+        .input('hrs',  sql.Int,           STREAM_LINK_HOURS)
+        .query(`INSERT INTO dms_BayStreamLinks
+                    (Token, JobCardID, JobCardNo, VehicleRegNo, BayID, BayName,
+                     DeviceID, StartedDetailID, ExpiresAt)
+                VALUES (@tok, @jc, @jcno, @reg, @bid, @bay, @dev, @det,
+                        DATEADD(HOUR, @hrs, GETDATE()))`);
+}
+
 async function changeLine(req, res, action) {
     const detailId = parseInt(req.params.detailId);
     const bayName = req.device.BayName;
@@ -240,6 +287,16 @@ async function changeLine(req, res, action) {
                     UPDATE Addata_JobCardInfoDetail SET JobStartTime = GETDATE() WHERE DetailId = @id;
                     UPDATE Addata_JobCardInfo SET WorkshopStatus = 'Being Serviced', ModifyDate = GETDATE()
                     WHERE  JobCardId = @jc AND ISNULL(WorkshopStatus, 'Waiting For Service') = 'Waiting For Service';`);
+
+                // ...and opens the watch link for this car's bay camera
+                // (owner ask 2026-09-26). In the same transaction as the
+                // start: a job that is running with no link, or a link for a
+                // job that never started, would both be wrong.
+                //
+                // Nothing streams down it yet -- the streaming and the
+                // recording are a later job. What exists now is a token that
+                // is unguessable, expires, and can be revoked.
+                await ensureStreamLink(tx, line, req.device);
             } else if (action === 'finish') {
                 // The last job finished moves the car on to Final Inspection.
                 await rq.query(`
@@ -274,3 +331,103 @@ exports.startLine = (req, res) => changeLine(req, res, 'start');
 exports.finishLine = (req, res) => changeLine(req, res, 'finish');
 /** POST /api/bay-screen/lines/:detailId/undo — the last tap, within 5 minutes */
 exports.undoLine = (req, res) => changeLine(req, res, 'undo');
+
+// ---------------------------------------------------------------------------
+// The watch link
+// ---------------------------------------------------------------------------
+//
+// Owner ask 2026-09-26. A link is opened when work starts on a car; streaming
+// the bay camera down it and keeping the footage are a later job, by the
+// owner's own instruction. What is here is deliberately the part that is
+// awkward to change once links are circulating: an unguessable token, an
+// expiry, and a way to revoke one.
+
+/**
+ * GET /api/stream/:token  -- public, no login.
+ *
+ * Mounted ahead of the auth middleware: the whole point is that a customer
+ * can open it without an account. It says live: false, because nothing
+ * streams yet -- an honest answer rather than a page that looks broken.
+ *
+ * A token that is wrong, expired or revoked all answer the same way, and none
+ * of them say which: telling the holder of a bad token that it merely expired
+ * confirms it was once real, and that a car with that link exists.
+ */
+exports.resolveStream = async (req, res) => {
+    const gone = () => res.status(404).json({
+        valid: false,
+        error: 'This link is not valid. Ask the service advisor for a new one.',
+    });
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length > 64) return gone();
+
+        const pool = await getPool();
+        const r = await pool.request().input('t', sql.NVarChar(64), token).query(`
+            SELECT JobCardNo, VehicleRegNo, BayName, CreatedAt, ExpiresAt
+            FROM   dms_BayStreamLinks
+            WHERE  Token = @t AND Status = 'Active' AND ExpiresAt > GETDATE()`);
+        if (!r.recordset.length) return gone();
+
+        const row = r.recordset[0];
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            valid: true,
+            // Nothing streams yet. When it does, this is what turns on.
+            live: false,
+            message: 'The camera for this bay is not streaming yet.',
+            JobCardNo: row.JobCardNo,
+            VehicleRegNo: row.VehicleRegNo,
+            BayName: row.BayName,
+            ExpiresAt: row.ExpiresAt,
+        });
+    } catch (err) {
+        console.error('resolveStream:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/** GET /api/workshop/job-cards/:id/stream-link — what to hand the customer. */
+exports.getJobCardStreamLink = async (req, res) => {
+    try {
+        const pool = await getPool();
+        const r = await pool.request().input('jc', sql.Int, parseInt(req.params.id)).query(`
+            SELECT TOP 1 StreamLinkID, Token, BayName, CreatedAt, ExpiresAt
+            FROM   dms_BayStreamLinks
+            WHERE  JobCardID = @jc AND Status = 'Active' AND ExpiresAt > GETDATE()
+            ORDER  BY StreamLinkID DESC`);
+        if (!r.recordset.length) return res.json(null);
+        const row = r.recordset[0];
+        res.json({
+            ...row,
+            // Relative on purpose: the server does not know which address the
+            // customer reached it on, and guessing would hand out a link to
+            // the wrong one.
+            path: `/watch/${row.Token}`,
+        });
+    } catch (err) {
+        console.error('getJobCardStreamLink:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * POST /api/workshop/job-cards/:id/stream-link/revoke
+ * A link that has gone to the wrong person cannot be recalled, so killing it
+ * is the only remedy -- which is why it exists before anything streams.
+ */
+exports.revokeJobCardStreamLink = async (req, res) => {
+    try {
+        const r = await (await getPool()).request()
+            .input('jc',   sql.Int,          parseInt(req.params.id))
+            .input('name', sql.NVarChar(100), req.user?.userName || 'staff')
+            .query(`UPDATE dms_BayStreamLinks
+                    SET    Status = 'Revoked', RevokedAt = GETDATE(), RevokedByName = @name
+                    OUTPUT INSERTED.StreamLinkID
+                    WHERE  JobCardID = @jc AND Status = 'Active'`);
+        res.json({ ok: true, revoked: r.recordset.length });
+    } catch (err) {
+        console.error('revokeJobCardStreamLink:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
