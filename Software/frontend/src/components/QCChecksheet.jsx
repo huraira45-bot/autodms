@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { ClipboardCheck, Check, X, Loader2, AlertTriangle, Printer } from 'lucide-react';
+import { ClipboardCheck, Check, X, Loader2, AlertTriangle, Printer, ChevronDown, ChevronRight } from 'lucide-react';
 
 const when = v => v ? new Date(v).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '';
 
@@ -38,6 +38,12 @@ export default function QCChecksheet({
     const big = size === 'tablet';
     const f = (n) => (big ? Math.round(n * 1.3) : n);
 
+    // Folded away on the desk, open on the tablet. On a desk the job card is
+    // the task and 44 points is a long way to scroll past; on the tablet the
+    // checksheet IS the task (owner ask 2026-09-26). The summary in the
+    // header stays visible either way, so the state of the sheet can be read
+    // without opening it.
+    const [open, setOpen] = useState(size === 'tablet');
     const [sheets, setSheets] = useState(null);
     const [active, setActive] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -161,9 +167,18 @@ export default function QCChecksheet({
     return (
         <div style={{ border: `1px solid #c8d4e4`, borderRadius: 6, background: '#f7fafc',
                       padding: big ? 16 : 12, marginTop: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 10 }}>
-                <ClipboardCheck size={f(17)} color={C.head} />
-                <span style={{ fontSize: f(13), fontWeight: 700, color: C.head }}>QC Inspection Checksheet</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+                          marginBottom: open ? 10 : 0 }}>
+                <button type="button" onClick={() => setOpen(o => !o)}
+                        aria-expanded={open}
+                        title={open ? 'Hide the checksheet' : 'Show the checksheet'}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 7,
+                                 background: 'transparent', border: 'none', padding: 0,
+                                 cursor: 'pointer', color: C.head, font: 'inherit' }}>
+                    {open ? <ChevronDown size={f(16)} /> : <ChevronRight size={f(16)} />}
+                    <ClipboardCheck size={f(17)} color={C.head} />
+                    <span style={{ fontSize: f(13), fontWeight: 700, color: C.head }}>QC Inspection Checksheet</span>
+                </button>
 
                 {sheets.length > 1 && (
                     <select value={active?.InspectionID || ''} style={{ fontSize: f(12), padding: '3px 6px' }}
@@ -174,6 +189,10 @@ export default function QCChecksheet({
                             </option>
                         ))}
                     </select>
+                )}
+
+                {!active && (
+                    <span style={{ fontSize: f(12), color: C.muted }}>not started</span>
                 )}
 
                 {p && (
@@ -208,7 +227,7 @@ export default function QCChecksheet({
                 </div>
             )}
 
-            {!active && (
+            {open && !active && (
                 <div>
                     <div style={{ fontSize: f(13), color: C.muted, marginBottom: 8 }}>
                         No checksheet has been started for this vehicle.
@@ -224,7 +243,7 @@ export default function QCChecksheet({
                 </div>
             )}
 
-            {active && sections.map(sec => (
+            {open && active && sections.map(sec => (
                 <div key={sec.name} style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: f(11), fontWeight: 700, letterSpacing: 0.6, color: C.head,
                                   textTransform: 'uppercase', borderBottom: `1px solid ${C.line}`,
@@ -259,7 +278,7 @@ export default function QCChecksheet({
                 </div>
             ))}
 
-            {active && (
+            {open && active && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                               borderTop: `1px solid ${C.line}`, paddingTop: 10 }}>
                     <input
