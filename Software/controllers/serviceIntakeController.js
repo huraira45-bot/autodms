@@ -42,6 +42,26 @@ const PAYMENT_TYPES = ['Cash', 'Credit', 'POS', 'Bank Transfer'];
  * Fields belonging to the other modes are dropped, not kept: a party left over
  * from a Credit draft would otherwise ride along on a Cash job card and print.
  */
+/**
+ * The care-off standing behind a discount, read live from dms_CareOff.
+ *
+ * Only active care-offs can authorise something new. One that was
+ * deactivated after an old estimate was signed stays on that estimate -- the
+ * name is snapshotted there -- but cannot approve a fresh discount.
+ */
+const careOffFor = async (pool, rawId) => {
+    if (rawId === undefined || rawId === null || rawId === '') return { row: null };
+    const id = parseInt(rawId);
+    if (!Number.isInteger(id)) return { error: 'That care-off is not valid.' };
+    const r = await pool.request().input('c', sql.Int, id).query(`
+        SELECT c.CareOffID, c.MaxDiscountPct, e.EmployeeName
+        FROM   dms_CareOff c
+        JOIN   gen_EmployeeInfo e ON e.EmployeeID = c.EmployeeID
+        WHERE  c.CareOffID = @c AND c.IsActive = 1`);
+    if (!r.recordset.length) return { error: 'That care-off is no longer active.' };
+    return { row: r.recordset[0] };
+};
+
 exports.paymentFromBody = (b) => {
     const raw = b.PaymentType == null || b.PaymentType === '' ? 'Cash' : String(b.PaymentType);
     if (!PAYMENT_TYPES.includes(raw)) {
@@ -635,15 +655,38 @@ exports.updateEstimate = async (req, res) => {
 
             const rate = r2(item.ItemSalesPrice);
             const gross = r2(rate * qty);
+
+            // What the advisor took off this line (owner ask 2026-09-26).
+            // Percent or a straight amount, the same two the desk offers.
+            // Capped at the line: a discount larger than the line would be
+            // giving money back, not a discount.
+            let discAmt = 0;
+            const rawDisc = Number(l.Discount);
+            if (rawDisc > 0) {
+                discAmt = String(l.DiscType || 'Amount').toLowerCase() === 'percent'
+                    ? r2(gross * Math.min(rawDisc, 100) / 100)
+                    : r2(rawDisc);
+                if (discAmt > gross) {
+                    problems.push(`Line ${n}: the discount is more than the line is worth.`);
+                    return;
+                }
+            } else if (rawDisc < 0) {
+                problems.push(`Line ${n}: a discount cannot be negative.`);
+                return;
+            }
+
             const taxRate = type === 'LABOUR' ? pst : gst;
-            const taxAmount = lineTax(gross, 0, taxRate);
+            // Tax on the line AFTER discount -- identical to the desk's
+            // snapshotTax, so the estimate's total is what the job card
+            // will charge.
+            const taxAmount = lineTax(gross, discAmt, taxRate);
             lines.push({
                 type,
                 itemId: item.ItemId,
                 description: String(item.ItenName || '').slice(0, 300),
                 partNumber: item.ManualNumber || (item.ItemNumber != null ? String(item.ItemNumber) : null),
-                qty, rate, taxRate, taxAmount,
-                lineTotal: r2(gross + taxAmount),
+                qty, rate, taxRate, taxAmount, discAmt,
+                lineTotal: r2(gross - discAmt + taxAmount),
             });
         });
         if (problems.length) return res.status(400).json({ error: problems.join(' ') });
@@ -651,11 +694,36 @@ exports.updateEstimate = async (req, res) => {
         const sum = (arr, f) => r2(arr.reduce((s, x) => s + f(x), 0));
         const labour = lines.filter(l => l.type === 'LABOUR');
         const parts  = lines.filter(l => l.type === 'PART');
-        const labourTotal = sum(labour, l => l.rate * l.qty);
+        const labourDiscount = sum(labour, l => l.discAmt);
+        const partsDiscount  = sum(parts,  l => l.discAmt);
+        // Stored NET of discount, so GrandTotal is what the customer signs for
+        // and what the job card goes on to charge.
+        const labourTotal = r2(sum(labour, l => l.rate * l.qty) - labourDiscount);
         const labourTax   = sum(labour, l => l.taxAmount);
-        const partsTotal  = sum(parts,  l => l.rate * l.qty);
+        const partsTotal  = r2(sum(parts,  l => l.rate * l.qty) - partsDiscount);
         const partsTax    = sum(parts,  l => l.taxAmount);
         const grandTotal  = r2(labourTotal + labourTax + partsTotal + partsTax);
+
+        // Who stands behind the discount. The cap is a percentage of the
+        // labour BEFORE discount, matching the desk's capAmountFor, and it is
+        // read live rather than stored so the two can never drift apart.
+        const careOff = await careOffFor(pool, b.CareOffID);
+        if (careOff.error) return res.status(400).json({ error: careOff.error });
+        const totalDiscount = r2(labourDiscount + partsDiscount);
+        if (totalDiscount > 0) {
+            if (!careOff.row) {
+                return res.status(400).json({
+                    error: 'A discount needs a care-off to authorise it. Pick who is approving it.' });
+            }
+            const labourGross = sum(labour, l => l.rate * l.qty);
+            const cap = r2(labourGross * (Number(careOff.row.MaxDiscountPct) || 0) / 100);
+            if (totalDiscount > cap + 0.005) {
+                return res.status(400).json({
+                    error: `${careOff.row.EmployeeName} can approve up to PKR ${cap.toFixed(2)} on this estimate `
+                         + `(${careOff.row.MaxDiscountPct}% of labour). This is PKR ${totalDiscount.toFixed(2)}.`,
+                    code: 'careoff_cap' });
+            }
+        }
 
         const km = b.KiloMeter === '' || b.KiloMeter == null ? null : Number(b.KiloMeter);
         if (km != null && !(km >= 0)) return res.status(400).json({ error: 'Odometer reading must be a positive number.' });
@@ -695,6 +763,10 @@ exports.updateEstimate = async (req, res) => {
                 .input('co',     sql.NVarChar(150),    payment.PaymentCO)
                 .input('bank',   sql.Int,              payment.PaymentBankID)
                 .input('fuel',   sql.NVarChar(20),     fuel)
+                .input('ldisc',  sql.Decimal(18, 2),   labourDiscount)
+                .input('pdisc',  sql.Decimal(18, 2),   partsDiscount)
+                .input('coid',   sql.Int,              careOff.row ? careOff.row.CareOffID : null)
+                .input('coname', sql.NVarChar(200),    careOff.row ? careOff.row.EmployeeName : null)
                 .query(`UPDATE dms_ServiceEstimates SET
                             EndUserID = @eu, VehicleID = @vid,
                             VehicleRegNo = @reg, ChasisNo = @ch, EngineNo = @eng, VehicleModel = @model,
@@ -703,7 +775,9 @@ exports.updateEstimate = async (req, res) => {
                             LabourTotal = @lt, LabourTax = @ltax, PartsTotal = @pt, PartsTax = @ptax,
                             GrandTotal = @gt, UpdatedAt = GETDATE(),
                             PaymentType = @pay, PartyID = @party, PaymentCO = @co,
-                            PaymentBankID = @bank, FuelLevel = @fuel
+                            PaymentBankID = @bank, FuelLevel = @fuel,
+                            LabourDiscount = @ldisc, PartsDiscount = @pdisc,
+                            CareOffID = @coid, CareOffName = @coname
                         WHERE EstimateID = @id`);
 
             await new sql.Request(tx).input('id', sql.Int, id)
@@ -720,6 +794,7 @@ exports.updateEstimate = async (req, res) => {
                     .input('pn',   sql.NVarChar(100),  l.partNumber ? String(l.partNumber).slice(0, 100) : null)
                     .input('qty',  sql.Decimal(18, 2), l.qty)
                     .input('rate', sql.Decimal(18, 2), l.rate)
+                    .input('disc', sql.Decimal(18, 2), l.discAmt || 0)
                     .input('tr',   sql.Decimal(8, 4),  l.taxRate)
                     .input('ta',   sql.Decimal(18, 2), l.taxAmount)
                     .input('tot',  sql.Decimal(18, 2), l.lineTotal)
@@ -727,7 +802,7 @@ exports.updateEstimate = async (req, res) => {
                                 (EstimateID, LineSeq, LineType, ItemID, Description, PartNumber,
                                  Quantity, Rate, DiscAmt, TaxRate, TaxAmount, LineTotal)
                             VALUES (@id, @seq, @type, @item, @desc, @pn,
-                                    @qty, @rate, 0, @tr, @ta, @tot)`);
+                                    @qty, @rate, @disc, @tr, @ta, @tot)`);
             }
             await tx.commit();
         } catch (e) {
@@ -797,9 +872,13 @@ const labourItemsFor = (est, bayName) => est.Lines
         JobInfoId: l.ItemID,
         WorkDescription: l.Description,
         Price: Number(l.Rate),
-        Discount: 0,
-        DiscAmt: 0,
-        DiscType: null,
+        // The discount the customer signed for, carried across as an AMOUNT
+        // even when it was entered as a percentage: the estimate already
+        // resolved it against this line's price, and re-deriving a percentage
+        // here could land a paisa away from the total that was signed.
+        Discount: Number(l.DiscAmt) || 0,
+        DiscAmt: Number(l.DiscAmt) || 0,
+        DiscType: Number(l.DiscAmt) > 0 ? 'Amount' : null,
         BayNo: bayName,
     }));
 
@@ -835,6 +914,10 @@ const jobCardBodyFor = (est, { jobCode, promised, signerName, vehicleColor, user
     PaymentCO: est.PaymentCO || null,
     PaymentBankID: est.PaymentBankID || null,
     FuelLevel: est.FuelLevel || null,
+    // Who authorised the discount, carried across so the job card shows the
+    // same name the customer signed under.
+    CareOffID: est.CareOffID || null,
+    CareOffName: est.CareOffName || null,
     CustomerType: 'Walk-in',
     ServiceAdvisor: user?.employeeName || user?.userName || null,
     ServiceAdvisorID: user?.employeeId || null,

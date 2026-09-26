@@ -23,6 +23,7 @@ import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 import ServiceAuthorisation from '../../components/ServiceAuthorisation';
 import QCChecksheet from '../../components/QCChecksheet';
 import PaymentModeBox from '../../components/PaymentModeBox';
+import CampaignBox from '../../components/CampaignBox';
 
 const qty = (n) => String(+Number(n || 0).toFixed(2));
 
@@ -249,6 +250,23 @@ export default function TabletJobCard() {
                 on a job card that has neither. */}
             <ServiceAuthorisation jobCardId={id} signatures={jc.Signatures || []} media={jc.Media || []}
                                   apiBase={`${API}/job-cards`} size="tablet" />
+
+            {/* A service campaign the customer qualifies for. Campaigns attach
+                to a job card rather than an estimate, so this lives here
+                rather than in the estimate editor (owner ask 2026-09-26).
+                It is the same component and the same endpoints the desk job
+                card uses, so a campaign cannot be applied twice or differently
+                depending on which screen it was done from. */}
+            <div style={S.card}>
+                <CampaignBox
+                    type="jobcard"
+                    id={id}
+                    labourGross={jc.Totals?.labourNet || 0}
+                    partsGross={jc.Totals?.partsNet || 0}
+                    taxAmount={(jc.Totals?.labourTax || 0) + (jc.Totals?.partsTax || 0)}
+                    grossAmount={(jc.Totals?.labourNet || 0) + (jc.Totals?.partsNet || 0)}
+                    onChange={() => load()} />
+            </div>
 
             {/* How the customer is paying, often only settled when they come
                 back for the car (owner ask 2026-09-26). */}

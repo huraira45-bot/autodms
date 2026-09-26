@@ -9,8 +9,11 @@ const requireAny = (...mods) => (req, res, next) => {
 };
 
 // Admins (workshop_settings) manage campaigns. Anyone in workshop/parts can list.
+// workshop_tablet included so the service advisor can apply a campaign from
+// the tablet at the vehicle (owner ask 2026-09-26) -- a campaign attaches to a
+// job card, and the tablet holds its own job card screen.
 const canRead   = requireAny('workshop_settings', 'workshop_jobs', 'workshop_labour',
-                              'parts_spare', 'sales_store', 'reports');
+                              'parts_spare', 'sales_store', 'reports', 'workshop_tablet');
 const canWrite  = requireAny('workshop_settings', 'admin_users');
 
 // Lookups used by the admin form

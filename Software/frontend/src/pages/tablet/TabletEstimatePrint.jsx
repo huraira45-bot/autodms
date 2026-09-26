@@ -230,6 +230,15 @@ export default function TabletEstimatePrint() {
                 <table className="est-totals">
                     <tbody>
                         <tr><td>Labour</td><td className="est-num">{money(e.LabourTotal)}</td></tr>
+                        {/* Shown as its own line so the customer can see what
+                            came off and who allowed it, rather than only the
+                            figure that was left. */}
+                        {Number(e.LabourDiscount) > 0 && (
+                            <tr>
+                                <td>Discount{e.CareOffName ? ` (${e.CareOffName})` : ''}</td>
+                                <td className="est-num">-{money(e.LabourDiscount)}</td>
+                            </tr>
+                        )}
                         <tr><td>PST {rateLabel(e.PSTRate)}</td><td className="est-num">{money(e.LabourTax)}</td></tr>
                         <tr><td>Parts</td><td className="est-num">{money(e.PartsTotal)}</td></tr>
                         <tr><td>GST {rateLabel(e.GSTRate)}</td><td className="est-num">{money(e.PartsTax)}</td></tr>

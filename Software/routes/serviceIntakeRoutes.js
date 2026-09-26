@@ -6,6 +6,7 @@ const requisitions = require('../controllers/partsRequisitionController');
 const bayScreens = require('../controllers/bayScreenController');
 const accounts = require('../controllers/accountController');
 const qc = require('../controllers/qcInspectionController');
+const careOffs = require('../controllers/careOffController');
 const jobCards = require('../controllers/serviceJobCardsController');
 const { requireAccess } = require('../middleware/permissions');
 const { uploadDiagnostic, uploadServiceMedia, withUploadErrors } = require('../middleware/serviceMediaUpload');
@@ -38,6 +39,9 @@ router.get(   '/lookups/bays',                    tablet, workshop.getBays);
 // and the desk form offer exactly the same lists.
 router.get(   '/lookups/parties',                 tablet, workshop.getParties);
 router.get(   '/lookups/banks',                   tablet, accounts.getBanks);
+// Who can authorise a discount at the vehicle. Read-only: the tablet picks
+// from the list, it never edits it.
+router.get(   '/lookups/care-offs',               tablet, careOffs.getActiveCareOffs);
 router.get(   '/catalog',                         tablet, c.searchCatalog);
 router.get(   '/customers',                       tablet, workshop.getCustomers);
 router.post(  '/customers',                       tablet, c.createCustomer);

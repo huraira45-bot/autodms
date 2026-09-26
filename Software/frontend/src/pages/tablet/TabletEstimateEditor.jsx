@@ -63,9 +63,14 @@ const fromEstimate = (e) => ({
     PartyID: e.PartyID ? String(e.PartyID) : '',
     PaymentCO: e.PaymentCO || '',
     PaymentBankID: e.PaymentBankID ? String(e.PaymentBankID) : '',
+    // Who stands behind any discount given (owner ask 2026-09-26).
+    CareOffID: e.CareOffID ? String(e.CareOffID) : '',
     lines: (e.Lines || []).map(l => ({
         key: `s${l.LineID}`, LineType: l.LineType, ItemID: l.ItemID, Description: l.Description,
         PartNumber: l.PartNumber, Quantity: Number(l.Quantity), Rate: Number(l.Rate),
+        // Kept as the resolved amount, the way the server stored it, so a
+        // reopened estimate shows the money actually taken off.
+        Discount: Number(l.DiscAmt) || 0,
         OnHand: l.OnHand == null ? null : Number(l.OnHand),
     })),
 });
@@ -84,7 +89,13 @@ const toPayload = (d) => ({
     PartyID: d.PartyID ? Number(d.PartyID) : null,
     PaymentCO: d.PaymentCO || null,
     PaymentBankID: d.PaymentBankID ? Number(d.PaymentBankID) : null,
-    Lines: d.lines.map(l => ({ LineType: l.LineType, ItemID: l.ItemID, Quantity: Number(l.Quantity) })),
+    CareOffID: d.CareOffID ? Number(d.CareOffID) : null,
+    // Always an amount: the tablet resolves a percentage against the line as
+    // it is typed, so what the customer sees is what is sent.
+    Lines: d.lines.map(l => ({
+        LineType: l.LineType, ItemID: l.ItemID, Quantity: Number(l.Quantity),
+        Discount: Number(l.Discount) || 0, DiscType: 'Amount',
+    })),
 });
 
 const firstStep = (e) => {
@@ -459,6 +470,7 @@ function CustomerStep({ draft, change, editable }) {
     const [jobTypes, setJobTypes] = useState([]);
     const [parties, setParties] = useState([]);
     const [banks, setBanks] = useState([]);
+    const [careOffs, setCareOffs] = useState([]);
     const [busy, setBusy] = useState(false);
     const justPicked = useRef(false);
 
@@ -471,6 +483,7 @@ function CustomerStep({ draft, change, editable }) {
         // advisor is at the vehicle and may be on a weak corner of the Wi-Fi.
         axios.get(`${API}/lookups/parties`).then(r => setParties(r.data || [])).catch(() => setParties([]));
         axios.get(`${API}/lookups/banks`).then(r => setBanks(r.data || [])).catch(() => setBanks([]));
+        axios.get(`${API}/lookups/care-offs`).then(r => setCareOffs(r.data || [])).catch(() => setCareOffs([]));
     }, []);
 
     useEffect(() => {
@@ -854,6 +867,9 @@ function JobsStep({ draft, change, editable, est, saveState }) {
     const { warning } = useFeedback();
     const labour = draft.lines.filter(l => l.LineType === 'LABOUR');
     const parts = draft.lines.filter(l => l.LineType === 'PART');
+    // What has been taken off in total. The care-off picker appears only once
+    // something has actually been discounted.
+    const labourDiscount = draft.lines.reduce((sum, l) => sum + (Number(l.Discount) || 0), 0);
 
     const addLabour = (item) => {
         if (draft.lines.some(l => l.LineType === 'LABOUR' && l.ItemID === item.ItemId)) {
@@ -889,6 +905,10 @@ function JobsStep({ draft, change, editable, est, saveState }) {
     };
 
     const setQty = (key, qty) => change(d => ({ ...d, lines: d.lines.map(l => (l.key === key ? { ...l, Quantity: qty } : l)) }));
+    const setDiscount = (key, value) => change(d => ({
+        ...d,
+        lines: d.lines.map(l => (l.key === key ? { ...l, Discount: value === '' ? 0 : Number(value) } : l)),
+    }));
     const removeLine = (key) => change(d => ({ ...d, lines: d.lines.filter(l => l.key !== key) }));
 
     const removeBtn = (key) => editable && (
@@ -904,13 +924,75 @@ function JobsStep({ draft, change, editable, est, saveState }) {
                 <h2 style={S.h2}><Wrench size={20} /> Jobs</h2>
                 {editable && <CatalogPicker type="LABOUR" onAdd={addLabour} placeholder="Search the labour catalog" />}
                 {!labour.length && <div style={{ color: T.muted, fontSize: 15, marginTop: 10 }}>No jobs added.</div>}
-                {labour.map(l => (
-                    <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderTop: `1px solid ${T.line}` }}>
-                        <div style={{ flex: 1, fontSize: 16 }}>{l.Description}</div>
-                        <div style={{ fontSize: 16, fontWeight: 600 }}>{money(l.Rate)}</div>
-                        {removeBtn(l.key)}
+                {labour.map(l => {
+                    const disc = Number(l.Discount) || 0;
+                    return (
+                        <div key={l.key} style={{ padding: '12px 0', borderTop: `1px solid ${T.line}` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ flex: 1, fontSize: 16 }}>{l.Description}</div>
+                                <div style={{ fontSize: 16, fontWeight: 600, textAlign: 'right' }}>
+                                    {disc > 0 && (
+                                        <span style={{ textDecoration: 'line-through', color: T.muted,
+                                                       fontWeight: 400, marginRight: 8 }}>
+                                            {money(l.Rate)}
+                                        </span>
+                                    )}
+                                    {money(Math.max(0, Number(l.Rate) - disc))}
+                                </div>
+                                {removeBtn(l.key)}
+                            </div>
+                            {editable && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                    <span style={{ fontSize: 13, color: T.muted }}>Discount</span>
+                                    <input inputMode="decimal" value={l.Discount || ''}
+                                           placeholder="0"
+                                           onChange={e => {
+                                               const v = e.target.value.replace(/[^0-9.]/g, '');
+                                               setDiscount(l.key, v);
+                                           }}
+                                           style={{ ...S.input, width: 120, minHeight: 44 }} />
+                                    <span style={{ fontSize: 13, color: T.muted }}>Rs off</span>
+                                    {/* The two everyone reaches for; anything else is typed. */}
+                                    {[5, 10].map(pct => (
+                                        <button key={pct} type="button"
+                                                onClick={() => setDiscount(l.key, String(Math.round(Number(l.Rate) * pct) / 100))}
+                                                style={{ ...S.btnGhost, minHeight: 44, padding: '0 12px', fontSize: 13 }}>
+                                            {pct}%
+                                        </button>
+                                    ))}
+                                    {disc > 0 && (
+                                        <button type="button" onClick={() => setDiscount(l.key, '')}
+                                                style={{ ...S.btnGhost, minHeight: 44, padding: '0 12px', fontSize: 13 }}>
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+
+                {/* A discount is nobody's to give without a name against it --
+                    the server refuses one with no care-off, and refuses any
+                    that goes past that care-off's cap. */}
+                {editable && labourDiscount > 0 && (
+                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+                        <label style={S.label}>Discount approved by *</label>
+                        <SearchableSelect touch
+                            value={draft.CareOffID}
+                            onChange={v => change(d => ({ ...d, CareOffID: v ? String(v) : '' }))}
+                            placeholder="Search care-off…"
+                            title="Who is approving this discount?"
+                            options={careOffs.map(c => ({
+                                id: c.CareOffID,
+                                label: c.EmployeeName,
+                                sub: `up to ${c.MaxDiscountPct}%`,
+                            }))} />
+                        <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>
+                            Total discount {money(labourDiscount)} — their cap is a percentage of the labour total.
+                        </div>
                     </div>
-                ))}
+                )}
             </div>
 
             <div style={S.card}>
