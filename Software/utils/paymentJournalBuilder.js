@@ -223,19 +223,36 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
                 // No subsidiary write — rounding is a GL-only bucket, not a
                 // party-owed balance.
             } else {
-                // Tag by PartyID (named customer) or JobCardID (walk-in deposit against specific RO)
+                // Tag by PartyID (named customer), JobCardID (walk-in deposit
+                // against a specific RO), or neither for a walk-in store sale.
+                const advanceNarration =
+                      partyId         ? `Customer advance — ${ref}`
+                    : walkInJobCardID ? `Walk-in advance for JC #${walkInJobCardID} — ${ref}`
+                    : walkInSaleID    ? `Walk-in advance for sale #${walkInSaleID} — ${ref}`
+                    :                   `Walk-in advance — ${ref}`;
                 journalLines.push({
                     GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
                     Debit: 0, Credit: advanceAmount,
-                    Narration: partyId ? `Customer advance — ${ref}` : `Walk-in advance for JC #${walkInJobCardID} — ${ref}`,
+                    Narration: advanceNarration,
                     PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
                 });
-                subsidiaryWrites.push({
-                    GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
-                    Debit: 0, Credit: advanceAmount,
-                    PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
-                    Narration: partyId ? `Customer advance — ${ref}` : `Walk-in advance for JC #${walkInJobCardID} — ${ref}`,
-                });
+                // Same CK constraint as the settlement leg above: the
+                // subsidiary ledger needs a PartyID or a JobCardID. A walk-in
+                // paying over the top of a store sale has neither, and this
+                // push was unguarded -- so overpaying a walk-in store sale
+                // failed with a raw SQL constraint error on the screen
+                // (live, 2026-09-28: SAL-00891, 1,150 outstanding, 1,350
+                // tendered). The GL line above still records the advance and
+                // the voucher still balances; what is skipped is the
+                // per-party row, because there is no party it belongs to.
+                if (partyId || walkInJobCardID) {
+                    subsidiaryWrites.push({
+                        GLCAID: accounts.CUSTOMER_ADVANCE_RECEIVED.GLCAID,
+                        Debit: 0, Credit: advanceAmount,
+                        PartyID: partyId, JobCardID: walkInJobCardID, AllocatedToVoucherID: null,
+                        Narration: advanceNarration,
+                    });
+                }
             }
         }
     }
