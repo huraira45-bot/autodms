@@ -24,6 +24,7 @@ import TabletDiagnostics from './TabletDiagnostics';
 import TabletEstimates, { NewIntakeButton } from './TabletEstimates';
 import TabletEstimateEditor from './TabletEstimateEditor';
 import TabletEstimatePrint from './TabletEstimatePrint';
+import { MediaUploader } from '../../tablet/useMediaQueue';
 import QCChecksheetPrint from '../QCChecksheetPrint';
 import TabletEstimateSign from './TabletEstimateSign';
 import BayScreen, { hasBayDevice } from './BayScreen';
@@ -93,6 +94,9 @@ export default function TabletApp() {
                     <LogOut size={22} />
                 </button>
             </div>
+            {/* Sends what the tablet is holding, whatever screen is open. */}
+            <MediaUploader />
+
             <Routes>
                 <Route path="/tablet" element={<TabletHome user={user} />} />
                 <Route path="/tablet/estimates" element={<TabletEstimates />} />

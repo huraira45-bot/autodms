@@ -17,13 +17,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-    Video, Image as ImageIcon, Trash2, Loader2, Search, UserPlus, Car, Plus, Minus, X,
-    ChevronLeft, ChevronRight, Printer, AlertTriangle, CheckCircle2, RefreshCw, Package, Wrench, ClipboardList, PenLine,
+    AlertTriangle, Car, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, HardDrive, Image as ImageIcon, Loader2, Minus, Package, PenLine, Plus, Printer, RefreshCw, Search, Trash2, UserPlus, Video, Wrench, X,
 } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import MissingCustomerDetails from '../../tablet/MissingCustomerDetails';
 import { T, tStyles as S } from '../../tablet/tabletStyles';
 import SearchableSelect from '../../components/SearchableSelect';
+import { useMediaQueue } from '../../tablet/useMediaQueue';
 import {
     API, MAX_MEDIA_BYTES, money, mb, rateLabel, errText, fmtDateTime, statusStyle, pill,
 } from '../../tablet/estimateFormat';
@@ -331,40 +331,30 @@ function SaveIndicator({ state, error, onRetry, onReload }) {
 // ---------------------------------------------------------------------------
 function VideoStep({ est, setEst, editable }) {
     const { confirm, error } = useFeedback();
-    const [upload, setUpload] = useState(null);   // { name, size, pct }
-    const [failed, setFailed] = useState(null);   // the File that failed, for retry
     const media = est.Media || [];
 
-    const send = async (file) => {
+    // Recording and uploading are separate jobs (owner report 2026-09-30).
+    // A walk-around happens outside the workshop where the Wi-Fi is weakest,
+    // so what is recorded is written to the tablet FIRST and uploaded in the
+    // background, retrying until it lands. Before this it lived only in React
+    // state, and a failed upload lost the recording for good.
+    const { pending, sending, add, drop, retryNow } = useMediaQueue(est.EstimateID, {
+        onUploaded: (row) => setEst(e => ({ ...e, Media: [...(e.Media || []), row] })),
+    });
+
+    const pick = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';   // lets the same file be chosen again
         if (!file) return;
         if (file.size > MAX_MEDIA_BYTES) {
             error('File too large', `This recording is ${mb(file.size)}; the limit is ${mb(MAX_MEDIA_BYTES)}. Record a shorter walk-around.`);
             return;
         }
-        const fd = new FormData();
-        fd.append('media', file, file.name || (String(file.type).startsWith('image/') ? 'photo.jpg' : 'walkaround.mp4'));
-        setFailed(null);
-        setUpload({ name: file.name, size: file.size, pct: 0 });
         try {
-            const { data } = await axios.post(`${API}/estimates/${est.EstimateID}/media`, fd, {
-                timeout: 0,   // a long video over Wi-Fi can take minutes
-                onUploadProgress: (e) => {
-                    if (e.total) setUpload(u => u && { ...u, pct: Math.round((e.loaded * 100) / e.total) });
-                },
-            });
-            setEst(e => ({ ...e, Media: [...(e.Media || []), data] }));
+            await add(file);
         } catch (err) {
-            setFailed(file);
-            error('Upload failed', errText(err));
-        } finally {
-            setUpload(null);
+            error('Could not keep the recording', err.message);
         }
-    };
-
-    const pick = (e) => {
-        const f = e.target.files?.[0];
-        e.target.value = '';   // lets the same file be chosen again
-        send(f);
     };
 
     const remove = async (m) => {
@@ -383,6 +373,19 @@ function VideoStep({ est, setEst, editable }) {
         }
     };
 
+    const dropPending = async (row) => {
+        const ok = await confirm({
+            title: 'Throw this recording away?',
+            message: 'It has not reached the server yet. Once deleted it is gone from the tablet too.',
+            confirmLabel: 'Delete',
+            tone: 'danger',
+        });
+        if (ok) drop(row.id);
+    };
+
+    const waiting = pending.filter(p => p.state !== 'blocked');
+    const blocked = pending.filter(p => p.state === 'blocked');
+
     return (
         <div style={S.card}>
             <h2 style={S.h2}><Video size={20} /> Walk-around video</h2>
@@ -391,43 +394,98 @@ function VideoStep({ est, setEst, editable }) {
                 then the odometer and fuel gauge. It is the record of the car's condition on arrival.
             </p>
 
+            {/* Capture is never blocked by an upload — the advisor has to be
+                able to photograph the next panel while the video is still
+                going up, which is exactly what they could not do before. */}
             {editable && (
                 <div style={{ ...S.row, marginBottom: 14 }}>
-                    <label style={{ ...S.btn, opacity: upload ? 0.6 : 1, pointerEvents: upload ? 'none' : 'auto' }}>
+                    <label style={S.btn}>
                         <Video size={20} /> Record video
                         <input type="file" accept="video/*" capture="environment" style={{ display: 'none' }} onChange={pick} />
                     </label>
-                    <label style={{ ...S.btnGhost, opacity: upload ? 0.6 : 1, pointerEvents: upload ? 'none' : 'auto' }}>
+                    <label style={S.btnGhost}>
                         <ImageIcon size={20} /> Take photo
                         <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={pick} />
                     </label>
                 </div>
             )}
 
-            {upload && (
+            {waiting.length > 0 && (
+                <div style={{ ...S.result('warn'), marginBottom: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <HardDrive size={18} />
+                        <span style={{ flex: 1 }}>
+                            <strong>{waiting.length} recording{waiting.length === 1 ? '' : 's'} held on this tablet.</strong>
+                            {' '}They upload on their own once the signal is good enough. It is safe to carry on,
+                            and safe to lock the tablet.
+                        </span>
+                        <button type="button" style={{ ...S.btnGhost, minHeight: 44 }} onClick={retryNow}>
+                            <RefreshCw size={18} /> Try now
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {sending && (
                 <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 15, marginBottom: 6 }}>
-                        <Loader2 size={16} className="animate-spin" style={{ verticalAlign: -3 }} /> Uploading {mb(upload.size)} — {upload.pct}%.
-                        {' '}You can carry on to the customer step while it uploads.
+                        <Loader2 size={16} className="animate-spin" style={{ verticalAlign: -3 }} />
+                        {' '}Uploading {mb(sending.size)} — {sending.pct}%.
+                        {' '}You can keep recording while this goes up.
                     </div>
                     <div style={{ height: 14, background: T.line, borderRadius: 7, overflow: 'hidden' }}>
-                        <div style={{ width: `${upload.pct}%`, height: '100%', background: T.brand, transition: 'width 0.2s' }} />
+                        <div style={{ width: `${sending.pct}%`, height: '100%', background: T.brand, transition: 'width 0.2s' }} />
                     </div>
                 </div>
             )}
 
-            {failed && !upload && (
-                <div style={{ ...S.result('bad'), display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-                    <span style={{ flex: 1 }}>The last recording ({mb(failed.size)}) did not upload.</span>
-                    <button type="button" style={{ ...S.btnGhost, minHeight: 44 }} onClick={() => send(failed)}>
-                        <RefreshCw size={18} /> Try again
+            {blocked.map(row => (
+                <div key={row.id} style={{ ...S.result('bad'), display: 'flex', alignItems: 'center',
+                                           gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+                    <span style={{ flex: 1 }}>
+                        This {row.type.startsWith('image/') ? 'photo' : 'video'} ({mb(row.size)}) cannot be uploaded.
+                        {row.lastError ? ` ${row.lastError}` : ''}
+                    </span>
+                    <button type="button" style={{ ...S.btnGhost, minHeight: 44, color: T.bad }}
+                            onClick={() => dropPending(row)}>
+                        <Trash2 size={18} /> Discard
                     </button>
                 </div>
-            )}
+            ))}
 
-            {!media.length && !upload && (
+            {!media.length && !pending.length && (
                 <div style={S.result('warn')}>No video recorded yet.</div>
             )}
+
+            {/* Held on the tablet, not yet on the server. Shown alongside the
+                uploaded ones so the advisor can see the walk-around is safe. */}
+            {waiting.map(row => (
+                <div key={`q${row.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12,
+                                                 padding: '12px 0', borderTop: `1px solid ${T.line}` }}>
+                    {row.type.startsWith('image/')
+                        ? <ImageIcon size={24} color={T.muted} />
+                        : <Video size={24} color={T.muted} />}
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 16, fontWeight: 600 }}>
+                            {row.type.startsWith('image/') ? 'Photo' : 'Video'} · {mb(row.size)}
+                        </div>
+                        <div style={{ fontSize: 14, color: T.muted }}>
+                            {sending?.id === row.id
+                                ? `Uploading — ${sending.pct}%`
+                                : row.attempts > 0
+                                    ? 'Waiting for a better signal'
+                                    : 'Held on this tablet'}
+                        </div>
+                    </div>
+                    <HardDrive size={20} color={T.muted} />
+                    {editable && (
+                        <button type="button" onClick={() => dropPending(row)} title="Discard"
+                                style={{ ...S.btnGhost, minHeight: 44, padding: '0 12px', color: T.bad }}>
+                            <Trash2 size={18} />
+                        </button>
+                    )}
+                </div>
+            ))}
 
             {media.map(m => (
                 <div key={m.MediaID} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderTop: `1px solid ${T.line}` }}>
