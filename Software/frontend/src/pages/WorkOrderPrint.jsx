@@ -415,9 +415,17 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
                 .checklist { list-style: none; padding: 4px 8px; margin: 0; }
                 .checklist li { font-size: 9px; padding: 2px 0; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; }
                 .checklist li span { font-weight: 700; }
-                .amt-tbl { width: 100%; border-collapse: collapse; }
+                /* Fixed layout with a reserved amount column (owner report
+                   2026-10-01: printed totals broke mid-number -- 6,729.67 came
+                   out as "6,72" over "9.67"). A long label, such as
+                   "Campaign - PERIODIC MAINTENANCE 30 % OFF ON LABOUR ONLY
+                   (discount)", was squeezing the figures until they wrapped.
+                   On screen there is more width, which is why only the print
+                   was wrong. The label wraps now; a number never does. */
+                .amt-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
                 .amt-tbl td { padding: 3px 6px; font-size: 10px; border-bottom: 1px dotted #999; }
-                .amt-tbl td:nth-child(2) { text-align: right; }
+                .amt-tbl td:first-child { overflow-wrap: break-word; }
+                .amt-tbl td:nth-child(2) { text-align: right; width: 84px; white-space: nowrap; }
                 .amt-tbl tr.grand td { background: #f0f0f0; font-size: 11px; padding: 5px 6px; }
                 .qa-tbl { width: 100%; border-collapse: collapse; margin-top: 4px; }
                 .qa-tbl td { padding: 3px 6px; font-size: 9px; border-bottom: 1px dotted #aaa; }
