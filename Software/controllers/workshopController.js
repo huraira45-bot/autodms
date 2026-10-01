@@ -13,46 +13,137 @@ const {
 const { issuePartsInTx } = require('../services/partsIssueService');
 
 // ============== CUSTOMERS ==============
+
+/**
+ * Searching for a customer, usually by the car's number.
+ *
+ * Owner report 2026-10-01: searching was slow and finding a car by its
+ * registration was hard. Both came from the same thing -- every term was
+ * wrapped as '%term%', and a leading wildcard makes SQL Server unable to seek
+ * an index. addata_CustomerInfo HAS indexes on the registration, the name,
+ * the phone, the CNIC, the chassis and the customer code, and the old query
+ * walked straight past all six and scanned the lot, twice (once for the rows
+ * and again for the count).
+ *
+ * Now a prefix search runs first -- 'AUF%' instead of '%AUF%' -- which seeks
+ * those indexes. That is also what people actually type: the start of a
+ * registration, the start of a name, the start of a phone number. Only if
+ * that finds too little does it fall back to the old contains search, so
+ * nothing that used to be findable has stopped being findable.
+ *
+ * Registrations are written inconsistently -- AUF-457, AUF 457, auf457 -- so
+ * the term and the stored value are both squashed down to letters and digits
+ * before being compared.
+ *
+ * Results are ranked rather than returned in id order. An exact registration
+ * match used to come back buried under two dozen name matches, which is what
+ * made finding a car by its number feel broken.
+ */
 exports.getCustomers = async (req, res) => {
     try {
-        const { search } = req.query;
-        // Owner report 2026-07-18: this endpoint used to return every row in
-        // vw_WorkshopCustomers (~9k rows) on every open — took ~15s and grew
-        // linearly with new customers. Cap server-side and return a total
-        // count so the UI can nudge users to refine when the cap bites.
+        const raw = (req.query.search || '').trim();
         const limit = Math.min(parseInt(req.query.limit) || 200, 500);
-
         const pool = await getPool();
-        const request = pool.request();
-        request.input('lim', sql.Int, limit);
-        let where = '';
-        if (search && search.trim()) {
-            request.input('search', sql.NVarChar(200), `%${search.trim()}%`);
-            where = ` WHERE CustomerName LIKE @search
-                          OR PhoneNo         LIKE @search
-                          OR CNIC            LIKE @search
-                          OR CustomerCode    LIKE @search
-                          OR RegistrationNo  LIKE @search
-                          OR ChasisNo        LIKE @search`;
+
+        if (!raw) {
+            // No term: the old behaviour, newest first.
+            const r = await pool.request().input('lim', sql.Int, limit)
+                .query('SELECT TOP (@lim) * FROM vw_WorkshopCustomers ORDER BY ProfileID DESC');
+            const c = await pool.request().query('SELECT COUNT(*) AS Total FROM vw_WorkshopCustomers');
+            return res.json({ rows: r.recordset, total: c.recordset[0].Total, limit });
         }
-        const [rowsRes, countRes] = await Promise.all([
-            request.query(`SELECT TOP (@lim) * FROM vw_WorkshopCustomers${where} ORDER BY ProfileID DESC`),
-            pool.request()
-                .input('search', sql.NVarChar(200), search?.trim() ? `%${search.trim()}%` : null)
-                .query(`SELECT COUNT(*) AS Total FROM vw_WorkshopCustomers
-                        WHERE @search IS NULL OR (
-                             CustomerName    LIKE @search
-                          OR PhoneNo         LIKE @search
-                          OR CNIC            LIKE @search
-                          OR CustomerCode    LIKE @search
-                          OR RegistrationNo  LIKE @search
-                          OR ChasisNo        LIKE @search)`),
-        ]);
-        res.json({
-            rows: rowsRes.recordset,
-            total: countRes.recordset[0].Total,
-            limit,
-        });
+
+        // AUF-457, AUF 457 and auf457 are the same car. Normalising in SQL
+        // was tried and was a mistake: REPLACE() on the column cannot use an
+        // index, and adding it to the WHERE took the same search from 243ms to
+        // 4,463ms. So the TERM is normalised here, in JavaScript, where it is
+        // free, and turned into prefixes the indexes can still seek.
+        const squashed = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+        // Registrations here read LLL-NNN. Someone typing AUF457 means
+        // AUF-457, so that spelling is searched for as well.
+        const split = /^([A-Za-z]+)[-\s]?(\d+)$/.exec(raw.trim());
+        const dashed = split ? `${split[1].toUpperCase()}-${split[2]}` : null;
+
+        const RANK = `
+            CASE
+                WHEN RegistrationNo = @raw      THEN 0
+                WHEN RegistrationNo = @dashed   THEN 0
+                WHEN RegistrationNo LIKE @prefix  THEN 1
+                WHEN RegistrationNo LIKE @dprefix THEN 1
+                WHEN CustomerCode   LIKE @prefix  THEN 2
+                WHEN PhoneNo        LIKE @prefix  THEN 3
+                WHEN CustomerName   LIKE @prefix  THEN 4
+                WHEN CNIC           LIKE @prefix  THEN 5
+                WHEN ChasisNo       LIKE @prefix  THEN 6
+                ELSE 7
+            END`;
+
+        const bind = (rq) => rq
+            .input('raw',      sql.NVarChar(200), raw)
+            .input('dashed',   sql.NVarChar(200), dashed || raw)
+            .input('prefix',   sql.NVarChar(200), `${raw}%`)
+            .input('dprefix',  sql.NVarChar(200), `${dashed || raw}%`)
+            .input('contains', sql.NVarChar(200), `%${raw}%`)
+            .input('lim',      sql.Int,           limit);
+
+        // Pass one: prefixes only, so every index can be seeked.
+        const fast = await bind(pool.request()).query(`
+            SELECT TOP (@lim) * FROM vw_WorkshopCustomers
+            WHERE  RegistrationNo LIKE @prefix
+               OR  RegistrationNo LIKE @dprefix
+               OR  CustomerName   LIKE @prefix
+               OR  PhoneNo        LIKE @prefix
+               OR  CNIC           LIKE @prefix
+               OR  CustomerCode   LIKE @prefix
+               OR  ChasisNo       LIKE @prefix
+            ORDER  BY ${RANK}, ProfileID DESC`);
+
+        let rows = fast.recordset;
+
+        // Did pass one already find the exact car? Compared here rather than
+        // in SQL, for the same reason as above.
+        const strong = rows.some(r => String(r.RegistrationNo || '')
+            .replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === squashed);
+
+        // Pass two, only when pass one did not settle it: the old contains
+        // search, so a word from the middle of a name still finds its
+        // customer. Skipped on the common case, which is what makes the
+        // common case quick.
+        if (!strong && rows.length < limit) {
+            const seen = new Set(rows.map(r => r.ProfileID));
+            const slow = await bind(pool.request()).query(`
+                SELECT TOP (@lim) * FROM vw_WorkshopCustomers
+                WHERE  CustomerName   LIKE @contains
+                   OR  PhoneNo        LIKE @contains
+                   OR  CNIC           LIKE @contains
+                   OR  CustomerCode   LIKE @contains
+                   OR  RegistrationNo LIKE @contains
+                   OR  ChasisNo       LIKE @contains
+                ORDER  BY ${RANK}, ProfileID DESC`);
+            for (const r of slow.recordset) {
+                if (rows.length >= limit) break;
+                if (!seen.has(r.ProfileID)) { rows.push(r); seen.add(r.ProfileID); }
+            }
+        }
+
+        // The count is only used to say "refine your search", which matters
+        // once the cap bites. Counting every match cost as much as the search
+        // itself, so below the cap the answer is simply how many came back.
+        let total = rows.length;
+        if (rows.length >= limit) {
+            const c = await bind(pool.request()).query(`
+                SELECT COUNT(*) AS Total FROM vw_WorkshopCustomers
+                WHERE  CustomerName   LIKE @contains
+                   OR  PhoneNo        LIKE @contains
+                   OR  CNIC           LIKE @contains
+                   OR  CustomerCode   LIKE @contains
+                   OR  RegistrationNo LIKE @contains
+                   OR  ChasisNo       LIKE @contains`);
+            total = c.recordset[0].Total;
+        }
+
+        res.json({ rows, total, limit });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
