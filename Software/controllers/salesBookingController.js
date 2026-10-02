@@ -172,9 +172,35 @@ exports.getBooking = async (req, res) => {
               AND sa.RoleKey='BOOKING_VARIANT_RECEIVABLE'
               AND d.BookingID=@id`);
 
+        // AmountPaidToDate is a running total kept on the booking, added to
+        // when a payment is taken. It is NOT derived from the ledger -- so
+        // unfinalizing a payment's voucher takes the money out of the books and
+        // leaves the booking still claiming it (owner report 2026-10-02,
+        // BRV-2010). Voiding a payment corrects the total; unfinalizing its
+        // voucher does not, and nothing said so.
+        //
+        // What is actually in the GL is worked out here and sent alongside, so
+        // the screen can show the difference instead of quietly counting money
+        // that is not there.
+        // A payment's own status is 'Posted' or 'Reversed' (CK_SalesPayments_
+        // Status) -- there is no 'Active'. Getting that wrong would have made
+        // every booking report 0.00 in the books and raise a false alarm.
+        const livePayments = payments.recordset.filter(p =>
+            p.Status === 'Posted' && p.VoucherStatus === 'Posted');
+        const notInGL = payments.recordset.filter(p =>
+            p.Status === 'Posted' && p.VoucherStatus && p.VoucherStatus !== 'Posted');
+        const amountPaidInGL =
+            Math.round(livePayments.reduce((t, p) => t + Number(p.Amount || 0), 0) * 100) / 100;
+
         res.json({
             ...bk.recordset[0],
             AmountPaidToMaster: Number(masterPaidR.recordset[0]?.AmountPaidToMaster || 0),
+            AmountPaidInGL: amountPaidInGL,
+            // Payments the booking still counts whose voucher is not posted.
+            PaymentsNotInGL: notInGL.map(p => ({
+                PaymentID: p.PaymentID, VoucherNo: p.VoucherNo,
+                VoucherStatus: p.VoucherStatus, Amount: Number(p.Amount || 0),
+            })),
             payments: payments.recordset,
             masterPayments: masterPayments.recordset,
             transitions: transitions.recordset,

@@ -127,6 +127,16 @@ export default function BookingDetail() {
     const vehicleRemaining = (data.NegotiatedPrice || 0) - (data.AmountPaidToDate || 0);
     const remaining = vehicleRemaining;
     const paidPct = data.NegotiatedPrice > 0 ? (data.AmountPaidToDate / data.NegotiatedPrice * 100) : 0;
+
+    // The booking's paid total is a running figure kept on the booking, not
+    // read from the ledger. Unfinalizing a payment's voucher takes the money
+    // out of the books and leaves this total untouched, so the booking goes on
+    // claiming it (owner report 2026-10-02, BRV-2010). The server now says
+    // what is really posted; when the two disagree, say so rather than show a
+    // figure that is not in the books.
+    const paidInGL = Number(data.AmountPaidInGL ?? data.AmountPaidToDate ?? 0);
+    const notInGL = data.PaymentsNotInGL || [];
+    const paidMismatch = Math.abs(paidInGL - Number(data.AmountPaidToDate || 0)) > 0.01;
     const canPay = ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
     const canSetBookingDate = data.IsHistorical &&
         (hasModule('sales_admin_settings') || hasModule('sales_gm'));
@@ -233,6 +243,20 @@ export default function BookingDetail() {
 
             {msg && <FlashMsg msg={msg} />}
 
+            {notInGL.length > 0 && (
+                <div style={{ padding: '11px 14px', borderRadius: 6, marginBottom: 12, fontSize: '0.84rem',
+                              background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }}>
+                    <strong>This booking counts money that is not in the books.</strong>
+                    {' '}{notInGL.map(p => `${p.VoucherNo || 'a voucher'} (${p.VoucherStatus}, ${fmtN(p.Amount)})`).join(', ')}
+                    {notInGL.length === 1 ? ' is' : ' are'} no longer posted, but the payment is still counted —
+                    so the booking shows {fmtN(data.AmountPaidToDate)} while {fmtN(paidInGL)} is actually in the GL.
+                    <div style={{ marginTop: 5 }}>
+                        Unfinalizing a voucher does not correct the booking. Either post it again, or void the
+                        payment on this page, which does correct the total.
+                    </div>
+                </div>
+            )}
+
             {/* Header card */}
             <div className="card">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
@@ -290,7 +314,11 @@ export default function BookingDetail() {
                     <Stat label="Set Price (Vehicle)" value={fmtN(data.NegotiatedPrice)} color="#1e40af" />
                     {data.PremiumAmount > 0 && <Stat label="Premium (on top)" value={fmtN(data.PremiumAmount)} color="#7c3aed" sub="+ additive" />}
                     <Stat label="Customer Total" value={fmtN((data.NegotiatedPrice || 0) + (data.PremiumAmount || 0))} color="#0f172a" sub="vehicle + premium" />
-                    <Stat label="Vehicle Paid" value={fmtN(data.AmountPaidToDate)} color="#15803d" sub={`${paidPct.toFixed(1)}% of set price`} />
+                    <Stat label="Vehicle Paid" value={fmtN(data.AmountPaidToDate)}
+                          color={paidMismatch ? '#b45309' : '#15803d'}
+                          sub={paidMismatch
+                              ? `only ${fmtN(paidInGL)} is in the books`
+                              : `${paidPct.toFixed(1)}% of set price`} />
                     <Stat label="Vehicle Remaining" value={fmtN(vehicleRemaining)} color={vehicleRemaining > 0 ? '#b45309' : '#94a3b8'} />
                     <Stat label="Paid to Master" value={fmtN(data.AmountPaidToMaster)} color="#0e7490"
                           sub={`of ${fmtN(data.NegotiatedPrice || 0)} set price`} />
