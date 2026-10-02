@@ -109,7 +109,9 @@ exports.listJobCards = async (req, res) => {
             conds.push('(j.JobCardNo LIKE @s OR j.jobCode LIKE @s OR j.VehicleRegNo LIKE @s OR c.endUserName LIKE @s OR c.PhoneNo LIKE @s)');
         }
         const r = await rq.query(`
-            SELECT TOP 100
+            -- Raised from 100: the tablet now lists finalized job cards too
+            -- (owner ask 2026-10-02), so the same cap covered far less history.
+            SELECT TOP 250
                    j.JobCardId, j.JobCardNo, j.jobCode, j.VehicleRegNo, j.VersionCode AS VehicleModel,
                    ISNULL(j.WorkshopStatus, 'Waiting For Service') AS WorkshopStatus,
                    ISNULL(j.IsFinalized, 0) AS IsFinalized,

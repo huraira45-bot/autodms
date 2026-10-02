@@ -21,7 +21,11 @@ const qty = (n) => String(+Number(n || 0).toFixed(2));
 export default function TabletJobCards() {
     const [q, setQ] = useState('');
     const [mine, setMine] = useState(true);
-    const [openOnly, setOpenOnly] = useState(true);
+    // Everything opened on the tablet is listed, finalized included (owner ask
+    // 2026-10-02). A job that closed used to disappear from this screen, which
+    // made it look as though it had never been done here. The chips below
+    // narrow it back down to the day's open work in one tap.
+    const [openOnly, setOpenOnly] = useState(false);
     const [rows, setRows] = useState(null);
     const [err, setErr] = useState('');
 
@@ -62,8 +66,8 @@ export default function TabletJobCards() {
                     <button type="button" style={chip(mine)} onClick={() => setMine(true)}>Mine</button>
                     <button type="button" style={chip(!mine)} onClick={() => setMine(false)}>All advisors</button>
                     <span style={{ width: 12 }} />
-                    <button type="button" style={chip(openOnly)} onClick={() => setOpenOnly(true)}>Open</button>
-                    <button type="button" style={chip(!openOnly)} onClick={() => setOpenOnly(false)}>Include finalized</button>
+                    <button type="button" style={chip(openOnly)} onClick={() => setOpenOnly(true)}>Still open</button>
+                    <button type="button" style={chip(!openOnly)} onClick={() => setOpenOnly(false)}>All, incl. finalized</button>
                 </div>
             </div>
 
