@@ -502,7 +502,19 @@ export default function BookingDetail() {
                                     Paid to Master ({data.masterPayments.length})
                                 </h4>
                                 <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                    Total PKR {fmtN(data.masterPayments.reduce((s, m) => s + Number(m.TotalAmount || 0), 0))}
+                                    {/* Only what actually reached the GL. This used to add up
+                                        every row, so a reversal was counted as a second payment
+                                        and -- now Pay Master leaves a draft -- an unposted one
+                                        looked paid. */}
+                                    Total PKR {fmtN(data.masterPayments
+                                        .filter(m => m.CountsAsPaid)
+                                        .reduce((s, m) => s + Number(m.TotalAmount || 0), 0))}
+                                    {data.masterPayments.some(m => !m.CountsAsPaid) && (
+                                        <span style={{ fontWeight: 400, color: '#92400e', marginLeft: 8 }}>
+                                            · {data.masterPayments.filter(m => !m.CountsAsPaid).length} not counted
+                                            (draft or reversed)
+                                        </span>
+                                    )}
                                 </span>
                             </div>
                             <table style={{ width: '100%', fontSize: '0.82rem' }}>

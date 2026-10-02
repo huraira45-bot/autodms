@@ -124,13 +124,13 @@ async function postPayMasterVoucher({ bookingId, amount, mode, bankAccountGLCAID
         .query(`INSERT INTO dms_PartyLedger (PartyID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
                 VALUES (@pid, @bid, @vid, @gl, @dr, 0, @nar)`);
 
-    await new sql.Request(tx)
-        .input('vid', sql.Int, voucherId)
-        .input('pby', sql.Int, userInfo?.userId || null)
-        .query(`UPDATE data_FinanceVoucherInfo
-                SET Status='Posted', Posted=1, PostedBy=@pby, PostedAt=GETDATE()
-                WHERE VoucherID=@vid`);
-
+    // Left in DRAFT on purpose (owner ask 2026-10-02). Every other sales
+    // voucher was moved to draft-and-finalize on 2026-08-07 so money reaches
+    // the GL only after someone has reviewed it; Pay Master was the one that
+    // still posted itself the instant the button was pressed. It now goes
+    // through the same posting criteria as the rest, which is also why the
+    // booking does not count it as paid until it is posted --
+    // AmountPaidToMaster sums Posted vouchers only.
     return { voucherId, voucherNo };
 }
 

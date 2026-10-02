@@ -146,7 +146,14 @@ exports.getBooking = async (req, res) => {
         // 2026-09-18: show these next to the customer's payments).
         const masterPayments = await pool.request().input('id', sql.Int, id).query(`
             SELECT v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Status,
-                   v.Remarks, v.CreatedByName, vt.Title AS VoucherType
+                   v.Remarks, v.CreatedByName, vt.Title AS VoucherType,
+                   -- So the screen can tell a draft and a reversal apart from
+                   -- money that actually went. Without it the panel counted
+                   -- every row as paid, which double-counted a reversal and,
+                   -- once Pay Master became draft-only, counted unposted ones.
+                   v.ReversesVoucherID,
+                   CASE WHEN v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+                        THEN 1 ELSE 0 END AS CountsAsPaid
             FROM   data_FinanceVoucherInfo v
             LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
             WHERE  v.SourceDocType = 'PAY_MASTER' AND v.SourceDocID = @id
