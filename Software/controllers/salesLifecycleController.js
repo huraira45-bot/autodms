@@ -53,6 +53,26 @@ exports.payMaster = async (req, res) => {
         });
     }
 
+    // Pay Master leaves a DRAFT voucher now, and the booking counts posted
+    // vouchers only -- so a booking that has been paid but not yet posted
+    // still reads as owing. Without this, pressing the button again raises a
+    // SECOND voucher for the same money (owner report 2026-10-02,
+    // BK-2026-0179). The screen withholds the button, but a stale page or a
+    // direct call would not know that.
+    const pending = await pool.request().input('b', sql.Int, bookingId).query(`
+        SELECT VoucherNo, TotalAmount
+        FROM   data_FinanceVoucherInfo
+        WHERE  SourceDocType = 'PAY_MASTER' AND SourceDocID = @b AND Status = 'Draft'
+        ORDER  BY VoucherID`);
+    if (pending.recordset.length) {
+        const list = pending.recordset.map(v => v.VoucherNo).join(', ');
+        return res.status(409).json({
+            error: `A payment to Master for this booking is already waiting to be posted (${list}). `
+                 + 'Post that voucher rather than raising another one for the same money.',
+            pendingVouchers: pending.recordset.map(v => v.VoucherNo),
+        });
+    }
+
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {

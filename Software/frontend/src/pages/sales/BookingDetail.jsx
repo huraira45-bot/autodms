@@ -147,8 +147,20 @@ export default function BookingDetail() {
     const wholesaleDue   = Math.max(0, definedRate);
     const masterPaidSoFar = Number(data.AmountPaidToMaster || 0);
     const masterStillOwed = Math.round((wholesaleDue - masterPaidSoFar) * 100) / 100;
+
+    // Pay Master leaves a DRAFT voucher now (owner ask 2026-10-02), and the
+    // paid figure counts posted vouchers only -- so a booking that has been
+    // paid but not yet posted still reads as owing, and kept offering the
+    // button. Pressing it again would raise a SECOND voucher for the same
+    // money (owner report, BK-2026-0179). While a draft is sitting there the
+    // button is withheld and the screen says what is actually needed: someone
+    // has to post it.
+    const masterDrafts = (data.masterPayments || []).filter(m => m.Status === 'Draft');
+    const masterDraftTotal = masterDrafts.reduce((t, m) => t + Number(m.TotalAmount || 0), 0);
+
     const canPayMaster = (data.AmountPaidToDate || 0) > 0
         && masterStillOwed > 0.01
+        && masterDrafts.length === 0
         && !['Closed', 'Cancelled'].includes(data.Status)
         && (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'));
 
@@ -276,7 +288,8 @@ export default function BookingDetail() {
             </div>
 
             {/* Workflow actions row */}
-            {(canAllocate || canPayMaster || canPostMasterInvoice || canIssueGatePass) && (
+            {(canAllocate || canPayMaster || canPostMasterInvoice || canIssueGatePass
+              || masterDrafts.length > 0) && (
                 <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Next steps:</div>
                     {canAllocate && (
@@ -285,6 +298,15 @@ export default function BookingDetail() {
                             <Link2 size={14} /> Allocate Vehicle
                         </button>
                     )}
+                    {masterDrafts.length > 0 && (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8,
+                                      padding: '7px 12px', borderRadius: 6, fontSize: '0.8rem',
+                                      background: '#fef3c7', border: '1px solid #fcd34d', color: '#92400e' }}>
+                            Paid to Master — {masterDrafts.map(m => m.VoucherNo).join(', ')} is waiting to be
+                            posted ({fmtN(masterDraftTotal)}). It counts once the voucher is posted.
+                        </div>
+                    )}
+
                     {canPayMaster && (
                         <button onClick={() => setShowPayMaster(true)}
                             title={data.IsHistorical
