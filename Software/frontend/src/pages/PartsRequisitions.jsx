@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { PackageCheck, Search, Loader2, RefreshCw, Wifi, ExternalLink, XCircle } from 'lucide-react';
+import { PackageCheck, Search, Loader2, RefreshCw, Wifi, ExternalLink, XCircle, PenLine, Plus } from 'lucide-react';
+import SearchableSelect from '../components/SearchableSelect';
 import { useFeedback } from '../context/FeedbackContext';
 import { useServiceEvents } from '../tablet/useServiceEvents';
 import { fmtDT } from '../utils/datetime';
@@ -92,6 +93,41 @@ export default function PartsRequisitions() {
         setSelId(id);
         setCancelReason('');
         loadSel(id, true);
+    };
+
+    // Turning a written parts request into real parts (owner ask 2026-10-01).
+    // The advisor wrote what the car needs; the counter knows the catalogue.
+    const [catalog, setCatalog] = useState([]);
+    const [pickItem, setPickItem] = useState('');
+    const [pickQty, setPickQty] = useState('1');
+    const [adding, setAdding] = useState(false);
+
+    useEffect(() => {
+        if (!sel || catalog.length) return;
+        axios.get('/api/items', { params: { type: 'Part', limit: 500 } })
+            .then(r => setCatalog(Array.isArray(r.data) ? r.data : (r.data?.rows || [])))
+            .catch(() => setCatalog([]));
+    }, [sel, catalog.length]);
+
+    const addParts = async () => {
+        const qty = Number(pickQty);
+        if (!pickItem || !(qty > 0)) {
+            notify({ type: 'warning', title: 'Nothing to add', message: 'Pick a part and a quantity.' });
+            return;
+        }
+        setAdding(true);
+        try {
+            const { data } = await axios.post(`${API}/${sel.RequisitionID}/lines`, {
+                Lines: [{ ItemID: Number(pickItem), Quantity: qty }],
+            });
+            setSel(data);
+            setPickItem('');
+            setPickQty('1');
+            notify({ type: 'success', title: 'Part added', message: 'It can be issued now.' });
+        } catch (err) {
+            notify({ type: 'error', title: 'Could not add the part',
+                     message: err.response?.data?.error || err.message });
+        } finally { setAdding(false); }
     };
 
     const issue = async () => {
@@ -223,6 +259,71 @@ export default function PartsRequisitions() {
                                 {sel.BayName ? ` · ${sel.BayName}` : ''}{sel.EstimateNo ? ` · from ${sel.EstimateNo}` : ''}
                                 {sel.Status === 'Cancelled' && <><br />Cancelled by {sel.CancelledByName} on {fmtDT(sel.CancelledAt)}: {sel.CancelReason}</>}
                             </div>
+
+                            {/* What the advisor wrote at the car. Shown before
+                                the parts table because on a written request
+                                there is nothing in that table yet, and this is
+                                the whole instruction. */}
+                            {sel.RequestText && (
+                                <div style={{ border: '1px solid #fcd34d', background: '#fffbeb',
+                                              borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12,
+                                                  fontWeight: 700, color: '#92400e', marginBottom: 5 }}>
+                                        <PenLine size={14} /> What the advisor asked for
+                                    </div>
+                                    <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', color: '#0f172a' }}>
+                                        {sel.RequestText}
+                                    </div>
+                                    {Number(sel.EstimatedAmount) > 0 && (
+                                        <div style={{ fontSize: 12, color: '#92400e', marginTop: 6 }}>
+                                            The customer was quoted about{' '}
+                                            <strong>{Number(sel.EstimatedAmount).toLocaleString('en-PK',
+                                                { minimumFractionDigits: 2 })}</strong> for these.
+                                            Price the real parts from the catalogue — this figure was the
+                                            advisor's estimate, not a price.
+                                        </div>
+                                    )}
+                                    {!sel.Lines.length && sel.Status === 'Open' && (
+                                        <div style={{ fontSize: 12, color: '#92400e', marginTop: 6 }}>
+                                            Nothing has been added against it yet. The job card cannot be
+                                            finalized until you add the parts, or cancel the request.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {sel.Status === 'Open' && !sel.JobCardFinalized && (
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end',
+                                              flexWrap: 'wrap', marginBottom: 14 }}>
+                                    <div style={{ flex: '1 1 260px', minWidth: 220 }}>
+                                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 3 }}>
+                                            Add the actual part
+                                        </div>
+                                        <SearchableSelect
+                                            value={pickItem}
+                                            onChange={v => setPickItem(v ? String(v) : '')}
+                                            placeholder="Search the parts catalogue…"
+                                            title="Pick the part"
+                                            options={catalog.map(i => ({
+                                                id: i.ItemId,
+                                                label: i.ItenName,
+                                                sub: i.ManualNumber || (i.ItemNumber != null ? String(i.ItemNumber) : undefined),
+                                            }))} />
+                                    </div>
+                                    <div style={{ width: 90 }}>
+                                        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 3 }}>Qty</div>
+                                        <input value={pickQty} inputMode="decimal"
+                                               onChange={e => setPickQty(e.target.value.replace(/[^0-9.]/g, ''))}
+                                               style={{ width: '100%', padding: '8px 10px', fontSize: 14,
+                                                        border: '1px solid #cbd5e1', borderRadius: 6 }} />
+                                    </div>
+                                    <button type="button" className="btn" onClick={addParts} disabled={adding}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 6,
+                                                     padding: '9px 14px', fontSize: 14 }}>
+                                        {adding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Add
+                                    </button>
+                                </div>
+                            )}
 
                             {!!sel.JobCardFinalized && (
                                 <div style={{ padding: 10, borderRadius: 6, background: '#fef2f2', color: '#991b1b', fontSize: 13, marginBottom: 12 }}>

@@ -65,6 +65,10 @@ const fromEstimate = (e) => ({
     PaymentBankID: e.PaymentBankID ? String(e.PaymentBankID) : '',
     // Who stands behind any discount given (owner ask 2026-09-26).
     CareOffID: e.CareOffID ? String(e.CareOffID) : '',
+    // Parts written in words, for when the advisor knows the part but not its
+    // catalogue number (owner ask 2026-10-01).
+    PartsRequestText: e.PartsRequestText || '',
+    PartsEstimateAmount: Number(e.PartsEstimateAmount) > 0 ? String(Number(e.PartsEstimateAmount)) : '',
     lines: (e.Lines || []).map(l => ({
         key: `s${l.LineID}`, LineType: l.LineType, ItemID: l.ItemID, Description: l.Description,
         PartNumber: l.PartNumber, Quantity: Number(l.Quantity), Rate: Number(l.Rate),
@@ -90,6 +94,8 @@ const toPayload = (d) => ({
     PaymentCO: d.PaymentCO || null,
     PaymentBankID: d.PaymentBankID ? Number(d.PaymentBankID) : null,
     CareOffID: d.CareOffID ? Number(d.CareOffID) : null,
+    PartsRequestText: d.PartsRequestText ? d.PartsRequestText.trim() : null,
+    PartsEstimateAmount: d.PartsEstimateAmount === '' ? 0 : Number(d.PartsEstimateAmount),
     // Always an amount: the tablet resolves a percentage against the line as
     // it is typed, so what the customer sees is what is sent.
     Lines: d.lines.map(l => ({
@@ -1059,7 +1065,9 @@ function JobsStep({ draft, change, editable, est, saveState }) {
                     Parts are only estimated here. Once the customer signs, the request goes to the parts counter, which issues them.
                 </p>
                 {editable && <CatalogPicker type="PART" onAdd={addPart} placeholder="Search by part number or name" />}
-                {!parts.length && <div style={{ color: T.muted, fontSize: 15, marginTop: 10 }}>No parts added.</div>}
+                {!parts.length && !draft.PartsRequestText && (
+                    <div style={{ color: T.muted, fontSize: 15, marginTop: 10 }}>No parts added.</div>
+                )}
                 {parts.map(l => {
                     const qty = Number(l.Quantity) || 0;
                     const short = l.OnHand != null && l.OnHand < qty;
@@ -1099,6 +1107,55 @@ function JobsStep({ draft, change, editable, est, saveState }) {
                         </div>
                     );
                 })}
+
+                {/* Parts written in words (owner ask 2026-10-01). An advisor
+                    at a car knows "front bumper, LH headlight, the clips" but
+                    not the catalogue numbers, and hunting for them holds up
+                    the customer. The counter turns these into real parts.
+
+                    The figure beside it is what keeps the signed total
+                    complete -- without it the customer would be signing for
+                    labour alone. */}
+                {(editable || draft.PartsRequestText) && (
+                    <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
+                        <label style={S.label}>Parts needed, in your own words</label>
+                        <textarea
+                            style={{ ...S.input, minHeight: 100, resize: 'vertical' }}
+                            value={draft.PartsRequestText}
+                            disabled={!editable}
+                            placeholder="e.g. front bumper, LH headlight, and the clips for both"
+                            onChange={e => { const v = e.target.value; change(d => ({ ...d, PartsRequestText: v })); }} />
+                        <div style={{ fontSize: 14, color: T.muted, marginTop: 4 }}>
+                            The parts counter will add the actual parts against this.
+                        </div>
+
+                        {draft.PartsRequestText.trim() !== '' && (
+                            <div style={{ marginTop: 12 }}>
+                                <label style={S.label}>Roughly what will these parts cost? *</label>
+                                <input
+                                    style={{ ...S.input, maxWidth: 220 }}
+                                    inputMode="decimal"
+                                    value={draft.PartsEstimateAmount}
+                                    disabled={!editable}
+                                    placeholder="0"
+                                    onChange={e => {
+                                        const v = e.target.value.replace(/[^0-9.]/g, '');
+                                        change(d => ({ ...d, PartsEstimateAmount: v }));
+                                    }} />
+                                <div style={{ fontSize: 14, color: T.muted, marginTop: 4 }}>
+                                    Before GST, which is added as it is on any other part. This is what the
+                                    customer signs for, so give your best figure -- the counter will price the
+                                    real parts afterwards.
+                                </div>
+                                {Number(draft.PartsEstimateAmount) > 0 && (
+                                    <div style={{ fontSize: 15, marginTop: 6 }}>
+                                        Estimated parts <strong>{money(Number(draft.PartsEstimateAmount))}</strong>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             <Totals est={est} pending={editable && saveState !== 'saved'} />
