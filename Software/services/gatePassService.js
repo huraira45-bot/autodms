@@ -132,6 +132,51 @@ async function loadJobCardPaymentModes(tx, genCustGL, jcId) {
     return q.recordset;
 }
 
+/**
+ * What a store sale is still owed.
+ *
+ * Money taken at the till never becomes a receivable, so the amount the
+ * finalize voucher debited to the customer account IS the unpaid part. Later
+ * receipts allocate against that voucher, exactly as the Receive Payment
+ * screen records them.
+ *
+ *   taken at the till = invoice - receivable raised
+ *   received          = taken at the till + allocated receipts
+ */
+async function loadStoreSaleBalance(tx, genCustGL, saleId, netPayable) {
+    const vq = await new sql.Request(tx).input('sl', sql.Int, saleId).query(`
+        SELECT TOP 1 VoucherID, TotalAmount
+        FROM   data_FinanceVoucherInfo
+        WHERE  SourceDocType='STORE_SALE' AND SourceDocID=@sl
+          AND  Status='Posted' AND ReversesVoucherID IS NULL
+        ORDER  BY VoucherID DESC`);
+    const voucher = vq.recordset[0];
+    const invoiced = voucher ? Number(voucher.TotalAmount) : Number(netPayable || 0);
+
+    // No posted voucher means nothing has been received against it either.
+    if (!voucher) return { invoiced, received: 0 };
+
+    const drq = await new sql.Request(tx)
+        .input('vid', sql.Int, voucher.VoucherID)
+        .input('gl',  sql.Int, genCustGL)
+        .query(`SELECT ISNULL(SUM(d.Debit), 0) AS DrReceivable
+                FROM   data_FinanceVoucherDetail d
+                WHERE  d.VoucherID=@vid AND d.GLCAID=@gl AND d.Debit > 0`);
+    const receivable = Number(drq.recordset[0]?.DrReceivable || 0);
+
+    const alq = await new sql.Request(tx).input('vid', sql.Int, voucher.VoucherID).query(`
+        SELECT ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Allocated
+        FROM   data_FinanceVoucherDetail d
+        INNER  JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+        WHERE  d.AllocatedToVoucherID=@vid
+          AND  v.Status='Posted' AND v.ReversesVoucherID IS NULL`);
+    const allocated = Number(alq.recordset[0]?.Allocated || 0);
+
+    const atTill = Math.max(0, invoiced - receivable);
+    const received = Math.min(invoiced, atTill + allocated);
+    return { invoiced, received };
+}
+
 // Which payment-mode accounts were touched on the store-sale's finalize voucher?
 // Store sales bundle the receipt into the finalize voucher, so we look at the
 // voucher whose SourceDocType='STORE_SALE' and SourceDocID=SaleID.
@@ -273,12 +318,21 @@ async function checkEligibility({ docType, docId }) {
         ({ invoiced, received } = await loadJobCardWalkOutBalance(tx, genCustGL, doc.docId, advGL));
         modesTouched = await loadJobCardPaymentModes(tx, genCustGL, doc.docId);
     } else {
-        // Store sales bundle the receipt into the finalize voucher. If finalized
-        // and the party isn't a credit party, the cash is already in the till —
-        // outstanding is zero. For credit-party sales, the amount sits on the
-        // party's PartyGLID and is settled via party statement (rule 1 bypass).
-        invoiced = doc.netPayable;
-        received = (doc.isFinalized && !isCreditParty) ? doc.netPayable : 0;
+        // A store sale bundles the receipt into its finalize voucher ONLY when
+        // the money is taken at the till. It often is not -- the Receive
+        // Payment screen has a "walk-in deposit against Store Sale" mode
+        // precisely because a sale can be finalized and still owed for -- and
+        // then the finalize voucher debits the customer receivable instead.
+        //
+        // This used to assume that finalized and not-a-credit-party meant
+        // paid, and handed out a gate pass for goods nobody had paid for.
+        // Owner report 2026-10-02; SAL-00891 was finalized with 1,150.00
+        // outstanding and would have walked.
+        //
+        // What is really owed is the receivable that voucher raised, less
+        // whatever has been allocated against it since -- the same measure the
+        // Receive Payment screen shows the cashier.
+        ({ invoiced, received } = await loadStoreSaleBalance(tx, genCustGL, doc.docId, doc.netPayable));
         modesTouched = await loadStoreSalePaymentModes(tx, doc.docId);
     }
     const outstanding = Math.round((invoiced - received) * 100) / 100;

@@ -320,7 +320,14 @@ exports.getUnfinalizeLog = async (req, res) => {
         const { from, to, status, search, requester } = req.query;
         const pool = await getPool();
         const request = pool.request();
-        const where = [`ur.EntityType = 'JOBCARD'`];
+        // Was pinned to JOBCARD, so a store sale unfinalize never appeared in
+        // the audit report at all -- which mattered more once store sales
+        // started going through this workflow (owner ask 2026-10-02).
+        const where = [];
+        if (req.query.entity && req.query.entity !== 'ALL') {
+            request.input('ent', sql.NVarChar(20), String(req.query.entity));
+            where.push('ur.EntityType = @ent');
+        }
 
         if (from) { request.input('from', sql.NVarChar(10), String(from).slice(0,10)); where.push('CAST(ur.RequestedAt AS DATE) >= @from'); }
         if (to)   { request.input('to',   sql.NVarChar(10), String(to).slice(0,10));   where.push('CAST(ur.RequestedAt AS DATE) <= @to'); }
@@ -337,7 +344,7 @@ exports.getUnfinalizeLog = async (req, res) => {
             where.push('ur.RequestedByName LIKE @rq');
         }
 
-        const whereSql = 'WHERE ' + where.join(' AND ');
+        const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
         const r = await request.query(`
             SELECT ur.RequestID, ur.EntityType, ur.EntityID, ur.EntityRef,

@@ -12,7 +12,12 @@ export default function StoreSale() {
   const { notify, confirm } = useFeedback();
   const { canInsert, canEdit } = useCan('sales_store');
   const { user, hasPermission } = useAuth();
-  const canUnfinalize = user?.groupId === 1 || hasPermission('admin_unfinalize');
+  // Raising the request needs 'finalize', which is what the endpoint checks.
+  // This was gated on admin_unfinalize back when the button did the
+  // unfinalizing itself; now it only asks, so the people who would ask can see
+  // it (owner ask 2026-10-02).
+  const canUnfinalize = user?.groupId === 1
+      || hasPermission('finalize') || hasPermission('admin_unfinalize');
   const [parties, setParties] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [parts, setParts] = useState([]);
@@ -355,24 +360,42 @@ export default function StoreSale() {
     } finally { setLoading(false); }
   };
 
+  // Unfinalizing a store sale goes the same way as a job card now (owner ask
+  // 2026-10-02): the sale is requested, the Account Manager approves, an admin
+  // completes it. It used to be one button that undid a posted sale on the
+  // spot -- and it DELETED the vouchers rather than reversing them, taking the
+  // party-ledger rows for payments already received with them.
   const handleUnfinalize = async () => {
     if (!editingId) return;
     const ok = await confirm({
-      title: `Unfinalize sale ${invoiceNo || `#${editingId}`}?`,
-      message: 'The Store Sale GL voucher will be reversed and the sale becomes editable. Saving again will repost a fresh voucher with the new amounts.',
-      details: 'For admin use when a posted sale needs correction.',
-      confirmLabel: 'Unfinalize',
+      title: `Request to unfinalize sale ${invoiceNo || `#${editingId}`}?`,
+      message: 'This asks for approval; it does not unfinalize the sale now. '
+             + 'The Account Manager approves it, then an admin completes it, and the '
+             + 'GL vouchers are reversed rather than deleted.',
+      details: 'You will be asked for a reason, which the approver sees.',
+      confirmLabel: 'Request',
       tone: 'warning',
     });
     if (!ok) return;
+
+    const reason = window.prompt('Why does this sale need unfinalizing?');
+    if (reason === null) return;
+    if (!reason.trim()) {
+      notify({ type: 'warning', title: 'A reason is needed',
+               message: 'The approver has to be able to see why.' });
+      return;
+    }
+
     setLoading(true);
     try {
-      await axios.post(`${API_BASE}/sales/store-sale/${editingId}/unfinalize`);
-      notify({ type: 'success', title: 'Sale unfinalized', message: 'You can now edit the sale.' });
-      // Reload the now-editable sale
+      await axios.post(`${API_BASE}/finalize/STORE_SALE/${editingId}/request-unfinalize`,
+                       { reason: reason.trim() });
+      notify({ type: 'success', title: 'Request sent',
+               message: 'The Account Manager has to approve it before the sale can be edited.' });
       await openSale(editingId);
     } catch (err) {
-      notify({ type: 'error', title: 'Unfinalize failed', message: err.response?.data?.error || err.message });
+      notify({ type: 'error', title: 'Could not send the request',
+               message: err.response?.data?.error || err.message });
     } finally { setLoading(false); }
   };
 
@@ -403,8 +426,9 @@ export default function StoreSale() {
               on the print view; a finalized print is the customer invoice. */}
           <button className="btn" onClick={() => editingId && window.open(`/store-sale/${editingId}/print`, '_blank')} style={{ background: '#0f766e', opacity: editingId ? 1 : 0.4, cursor: editingId ? 'pointer' : 'not-allowed' }} disabled={!editingId} title={editingId ? (isFinalizedEdit ? 'Open sale invoice print view' : 'Open draft sale print view') : 'Save the sale first to print'}><Printer size={16} /> Print</button>
           {editingId && isFinalizedEdit && canUnfinalize && (
-            <button className="btn" onClick={handleUnfinalize} disabled={loading} style={{ background: '#b45309' }} title="Reverse the GL voucher and reopen the sale for editing">
-              <Unlock size={16} /> Unfinalize
+            <button className="btn" onClick={handleUnfinalize} disabled={loading} style={{ background: '#b45309' }}
+                    title="Ask for approval to reopen this sale. The Account Manager approves, then an admin completes it.">
+              <Unlock size={16} /> Request unfinalize
             </button>
           )}
           {!disabled && (editingId ? canEdit : canInsert) && <button className="btn" onClick={handleSave} disabled={loading}><ShoppingCart size={18} /> {loading ? 'Processing...' : (editingId ? 'Save Changes' : 'Finalize Sale')}</button>}
