@@ -643,9 +643,16 @@ export default function BookingDetail() {
                             <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
                                 Nothing changes yet. The request goes to the <strong>Accounts Manager</strong> for approval,
                                 and an <strong>admin</strong> executes it from Sales › Payment Voids. Only then is the payment
-                                marked Voided, the booking's paid total reduced by PKR {fmtN(voidFor.Amount)}
-                                {voidFor.VoucherNo ? `, and draft voucher ${voidFor.VoucherNo} removed.` : '.'}
-                                {' '}A voucher that has already been finalized cannot be voided at all — that one needs an unfinalize.
+                                marked Voided and the booking's paid total reduced by PKR {fmtN(voidFor.Amount)}
+                                {/* A reversed voucher is NOT removed -- it is posted history, and the
+                                    ledger has already been corrected. Saying it would be deleted was
+                                    wrong and alarming. */}
+                                {voidFor.VoucherStatus === 'Reversed'
+                                    ? `. ${voidFor.VoucherNo} has already been reversed in the ledger and stays exactly as it is — this only takes the payment off the booking.`
+                                    : voidFor.VoucherNo ? `, and draft voucher ${voidFor.VoucherNo} removed.` : '.'}
+                                {voidFor.VoucherStatus !== 'Reversed' && (
+                                    <> A voucher that has already been posted cannot be voided — that one needs an unfinalize.</>
+                                )}
                             </div>
                             <Field label="Why should this payment be voided? *">
                                 <textarea rows={3} value={voidReason} onChange={e => setVoidReason(e.target.value)}

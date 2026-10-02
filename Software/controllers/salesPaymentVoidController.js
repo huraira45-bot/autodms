@@ -166,10 +166,18 @@ exports.propose = async (req, res) => {
                 error: `This booking is ${p.BookingStatus} — a payment cannot be voided once the vehicle has gone. Record a refund, or reverse the voucher in Accounting.`,
             });
         }
-        // A finalized voucher is never voided — that correction belongs to the
+        // A POSTED voucher is never voided — that correction belongs to the
         // unfinalize loop (owner rule 2026-09-18). A linked voucher is exempt:
         // voiding only removes the link, the voucher itself is untouched.
-        if (!p.IsLinkedVoucher && p.VoucherStatus && p.VoucherStatus !== 'Draft') {
+        //
+        // A REVERSED one is exempt too, and this guard missing that was the
+        // dead end: the ledger correction has already been made, the payment
+        // was still counted on the booking, and there was nothing that could
+        // take it off (owner report 2026-10-02, BRV-2010). assertVoucherVoidable
+        // was fixed for the execution step; this is the matching rule on the
+        // request step, which is what the screen actually hits first.
+        if (!p.IsLinkedVoucher && p.VoucherStatus
+            && p.VoucherStatus !== 'Draft' && p.VoucherStatus !== 'Reversed') {
             return res.status(409).json({
                 error: `Voucher ${p.VoucherNo || ''} has been finalized (${p.VoucherStatus}), so this payment cannot be voided. Request an unfinalize for the voucher, or post a reversing entry in Accounting.`,
                 VoucherStatus: p.VoucherStatus,
