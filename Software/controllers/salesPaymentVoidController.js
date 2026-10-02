@@ -53,7 +53,13 @@ const SELECT_PAYMENT = `
 
 /** Refuses anything but a voucher that is still a Draft. */
 function assertVoucherVoidable(voucher, voucherNo) {
-    if (!voucher || voucher.Status === 'Draft') return;
+    // Draft: never reached the GL, so it can be removed outright.
+    // Reversed: the GL correction has ALREADY been made by whoever reversed
+    //   it. Refusing here left the payment counted on the booking with no way
+    //   to undo it -- the row showed "Finalized" and offered nothing (owner
+    //   report 2026-10-02, BRV-2010). Voiding it now is a booking-side
+    //   correction only; the voucher and its reversal are left untouched.
+    if (!voucher || voucher.Status === 'Draft' || voucher.Status === 'Reversed') return;
     throw Object.assign(new Error(
         `Voucher ${voucher.VoucherNo || voucherNo || ''} has been finalized (${voucher.Status}) — a finalized voucher cannot be voided. ` +
         `Request an unfinalize for it, or post a reversing entry in Accounting.`), { statusCode: 409 });
@@ -76,6 +82,11 @@ async function applyVoid(tx, payment, user, reason) {
         assertVoucherVoidable(voucher, payment.VoucherNo);
         if (!voucher) {
             voucherAction = 'missing';
+        } else if (voucher.Status === 'Reversed') {
+            // Already corrected in the ledger by the reversal. Both vouchers
+            // stay exactly where they are -- they are posted history, and the
+            // link is kept so the booking still shows which voucher this was.
+            voucherAction = 'already_reversed';
         } else {
             // Still a Draft: it never reached the GL. Everything pointing at it
             // goes first, or SQL Server refuses with a bare

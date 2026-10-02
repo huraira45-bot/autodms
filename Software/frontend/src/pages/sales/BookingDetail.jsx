@@ -506,7 +506,15 @@ export default function BookingDetail() {
                                   // A finalized voucher is never voided — that correction goes through unfinalize.
                                   // A linked voucher is exempt: it was already in the ledger, and voiding a
                                   // historical payment only removes the link.
-                                  const finalizedVoucher = !p.IsLinkedVoucher && !!p.VoucherStatus && p.VoucherStatus !== 'Draft';
+                                  // A REVERSED voucher is not "finalized" for this
+                                  // purpose: the GL correction has already been made,
+                                  // and the payment still needs taking off the booking.
+                                  // Treating it as finalized left the row showing
+                                  // "Finalized" with nothing to click, while the money
+                                  // stayed counted (owner report 2026-10-02, BRV-2010).
+                                  const finalizedVoucher = !p.IsLinkedVoucher && !!p.VoucherStatus
+                                      && p.VoucherStatus !== 'Draft' && p.VoucherStatus !== 'Reversed';
+                                  const reversedVoucher = !p.IsLinkedVoucher && p.VoucherStatus === 'Reversed';
                                   return (
                                     <tr key={p.PaymentID} style={{ borderBottom: '1px solid #f1f5f9', opacity: voided ? 0.65 : 1 }}>
                                         <Td style={{ fontSize: '0.75rem' }}>{new Date(p.ReceivedAt).toLocaleString()}</Td>
@@ -556,9 +564,11 @@ export default function BookingDetail() {
                                                     </span>
                                                 ) : !voided && (
                                                     <button type="button" onClick={() => { setVoidFor(p); setVoidReason(''); setVoidErr(null); }}
-                                                            title="Ask for this payment to be voided — it was recorded by mistake"
-                                                            style={{ background: 'none', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
-                                                        Request void
+                                                            title={reversedVoucher
+                                                                ? `${p.VoucherNo} has already been reversed in the ledger. Voiding takes the payment off the booking so it stops being counted.`
+                                                                : 'Ask for this payment to be voided — it was recorded by mistake'}
+                                                            style={{ background: 'none', border: `1px solid ${reversedVoucher ? '#fcd34d' : '#fecaca'}`, color: reversedVoucher ? '#92400e' : '#b91c1c', borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
+                                                        {reversedVoucher ? 'Void (reversed)' : 'Request void'}
                                                     </button>
                                                 )}
                                             </Td>
