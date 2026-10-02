@@ -135,6 +135,10 @@ router.delete('/bookings/:id/documents/:docId',      requireAny('sales_agm', 'sa
 // Lifecycle — allocation, Master invoice posting, delivery, gate pass
 router.get( '/bookings/:id/allocation-readiness',    requireAny(...SALES_READERS), lc.allocationReadiness);
 router.post('/bookings/:id/allocate',                requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), lc.allocateVehicle);
+// Correcting the allocated vehicle at any stage, gate pass included (owner
+// ask 2026-10-02). Admin-only: the ordinary allocate/unallocate pair cannot
+// do it once a booking has moved past Allocated.
+router.post('/bookings/:id/swap-vehicle',            requireAny('sales_admin_settings', 'admin_unfinalize'), lc.swapAllocatedVehicle);
 router.post('/bookings/:id/unallocate',              requireAny('sales_agm', 'sales_gm'), lc.unallocateVehicle);
 router.post('/bookings/:id/pay-master',              requireAny('sales_master_settlement', 'sales_admin_settings'), lc.payMaster);
 router.post('/bookings/:id/post-master-invoice',     requireAny('sales_master_settlement'), lc.postMasterInvoice);

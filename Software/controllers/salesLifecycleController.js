@@ -988,3 +988,133 @@ exports.listDraftVouchers = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+/**
+ * POST /api/sales/bookings/:id/swap-vehicle   body: { VehicleID, Reason }
+ *
+ * Putting a booking on a different vehicle, at any stage.
+ *
+ * Owner ask 2026-10-02: an admin must be able to correct the allocated
+ * vehicle even after the gate pass has been issued. The ordinary route cannot
+ * do it -- allocate refuses a booking that already has a vehicle, and
+ * unallocate only works from Allocated -- so once a booking reached
+ * GatePassIssued the vehicle was fixed.
+ *
+ * Unlike allocate, this does NOT move the booking's stage. A booking that had
+ * its gate pass issued still has it; only the vehicle underneath changes.
+ * Sending it back to Allocated would undo a delivery that really happened.
+ *
+ * What it will not do:
+ *   - put the booking on a vehicle of a different variant. The price was
+ *     negotiated for the variant, and quietly swapping it changes what the
+ *     customer owes.
+ *   - take a vehicle that belongs to another booking.
+ *
+ * What it cannot do, and says so: documents already posted or printed -- the
+ * master invoice, the delivery voucher, the gate pass -- carry the OLD
+ * chassis number. Changing the allocation does not rewrite them. They are
+ * listed back so the admin knows what still has to be corrected by hand.
+ */
+exports.swapAllocatedVehicle = async (req, res) => {
+    const bookingId = parseInt(req.params.id);
+    const vehicleId = parseInt(req.body?.VehicleID);
+    const reason = String(req.body?.Reason || '').trim();
+
+    if (!Number.isInteger(bookingId) || !Number.isInteger(vehicleId)) {
+        return res.status(400).json({ error: 'Which booking, and which vehicle?' });
+    }
+    if (reason.length < 5) {
+        return res.status(400).json({ error: 'Say why the vehicle is being changed — it goes on the record.' });
+    }
+
+    try {
+        const pool = await getPool();
+
+        const booking = (await pool.request().input('id', sql.Int, bookingId).query(`
+            SELECT b.BookingID, b.BookingNo, b.Status, b.AllocatedVehicleID, b.VehicleVariantID,
+                   v.ChasisNo AS CurrentChasisNo
+            FROM   dms_SalesBookings b
+            LEFT   JOIN dms_Vehicle v ON v.VehicleID = b.AllocatedVehicleID
+            WHERE  b.BookingID = @id`)).recordset[0];
+        if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+        if (!booking.AllocatedVehicleID) {
+            return res.status(409).json({
+                error: 'This booking has no vehicle allocated yet. Allocate one the normal way.' });
+        }
+        if (booking.AllocatedVehicleID === vehicleId) {
+            return res.status(409).json({ error: 'That is already the vehicle on this booking.' });
+        }
+
+        const vehicle = (await pool.request().input('v', sql.Int, vehicleId).query(`
+            SELECT VehicleID, VariantID, Status, CurrentBookingID, ChasisNo
+            FROM   dms_Vehicle WHERE VehicleID = @v`)).recordset[0];
+        if (!vehicle) return res.status(404).json({ error: 'That vehicle does not exist.' });
+        if (vehicle.VariantID !== booking.VehicleVariantID) {
+            return res.status(409).json({
+                error: 'That vehicle is a different variant from the one booked. '
+                     + 'The price was agreed for the booked variant, so the booking would no longer match '
+                     + 'what the customer owes.' });
+        }
+        if (vehicle.CurrentBookingID && vehicle.CurrentBookingID !== bookingId) {
+            return res.status(409).json({
+                error: `That vehicle is already on booking #${vehicle.CurrentBookingID}.` });
+        }
+
+        // Everything that already names the old chassis and will not change.
+        const stale = (await pool.request().input('id', sql.Int, bookingId).query(`
+            SELECT v.VoucherNo AS Ref, v.SourceDocType AS Kind
+            FROM   data_FinanceVoucherInfo v
+            WHERE  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+              AND  v.SourceDocID = @id
+              AND  v.SourceDocType IN ('MASTER_INVOICE', 'SALES_DELIVERY')
+            UNION ALL
+            SELECT g.GatePassNo, 'GATE_PASS'
+            FROM   dms_GatePasses g
+            WHERE  g.DocType = 'BOOKING' AND g.DocID = @id AND g.RevokedAt IS NULL`)).recordset;
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            // The old vehicle goes back on the yard.
+            await new sql.Request(tx).input('v', sql.Int, booking.AllocatedVehicleID).query(`
+                UPDATE dms_Vehicle SET CurrentBookingID = NULL, Status = 'AtDealer', UpdatedAt = GETDATE()
+                WHERE  VehicleID = @v`);
+
+            await new sql.Request(tx)
+                .input('v', sql.Int, vehicleId)
+                .input('b', sql.Int, bookingId)
+                .query(`UPDATE dms_Vehicle SET CurrentBookingID = @b, Status = 'Allocated', UpdatedAt = GETDATE()
+                        WHERE VehicleID = @v`);
+
+            // The booking keeps its stage; only the vehicle moves.
+            await new sql.Request(tx)
+                .input('b', sql.Int, bookingId)
+                .input('v', sql.Int, vehicleId)
+                .query(`UPDATE dms_SalesBookings SET AllocatedVehicleID = @v, UpdatedAt = GETDATE()
+                        WHERE BookingID = @b`);
+
+            await logAudit(tx, {
+                bookingId, entityType: 'Booking', entityId: bookingId,
+                action: 'SwapVehicle',
+                oldValue: { VehicleID: booking.AllocatedVehicleID, ChasisNo: booking.CurrentChasisNo },
+                newValue: { VehicleID: vehicleId, ChasisNo: vehicle.ChasisNo },
+                actor: req.user, notes: reason,
+            });
+            await tx.commit();
+        } catch (err) {
+            try { await tx.rollback(); } catch { /* already gone */ }
+            throw err;
+        }
+
+        res.json({
+            message: `${booking.BookingNo} is now on ${vehicle.ChasisNo}.`,
+            PreviousChasisNo: booking.CurrentChasisNo || null,
+            ChasisNo: vehicle.ChasisNo,
+            // Named, not hidden: these still carry the old chassis.
+            stillNamingOldVehicle: stale.map(s => `${s.Ref} (${s.Kind})`),
+        });
+    } catch (err) {
+        console.error('swapAllocatedVehicle:', err);
+        res.status(500).json({ error: err.message });
+    }
+};

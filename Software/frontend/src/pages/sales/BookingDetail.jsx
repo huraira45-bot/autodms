@@ -63,6 +63,7 @@ export default function BookingDetail() {
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
     const [showChangeCustomer, setShowChangeCustomer] = useState(false);
+    const [showSwapVehicle, setShowSwapVehicle] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
     const [showGatePass, setShowGatePass] = useState(false);
     const [showExecutive, setShowExecutive] = useState(false);
@@ -167,6 +168,12 @@ export default function BookingDetail() {
     // Admin-only, and the server refuses it anyway once anything has posted.
     const canChangeCustomer = hasModule('sales_admin_settings') || hasModule('admin_unfinalize');
 
+    // Correcting the allocated vehicle at any stage, gate pass included
+    // (owner ask 2026-10-02). The ordinary allocate/unallocate pair cannot do
+    // it once a booking has moved past Allocated.
+    const canSwapVehicle = !!data.AllocatedVehicleID
+        && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
+
     const canPostMasterInvoice = data.AllocatedVehicleID
         && !['Closed', 'Cancelled'].includes(data.Status)
         && hasModule('sales_master_settlement');
@@ -255,6 +262,14 @@ export default function BookingDetail() {
                                 Chassis: <strong style={{ fontFamily: 'monospace' }}>{data.AllocatedChasisNo}</strong>
                                 {data.AllocatedColor && <span> · {data.AllocatedColor}</span>}
                             </div>
+                        )}
+                                            {canSwapVehicle && (
+                            <button onClick={() => setShowSwapVehicle(true)}
+                                    style={{ marginTop: 8, fontSize: '0.74rem', background: 'none',
+                                             border: '1px solid #cbd5e1', borderRadius: 4,
+                                             padding: '3px 8px', cursor: 'pointer', color: '#475569' }}>
+                                Change vehicle
+                            </button>
                         )}
                     </Block>
                     <Block icon={Briefcase} title="Sales Executive">
@@ -685,6 +700,14 @@ export default function BookingDetail() {
                     onClose={() => setShowAllocate(false)}
                     onSaved={() => { setShowAllocate(false); flash('ok', 'Vehicle allocated'); load(); }} />
             )}
+            {showSwapVehicle && (
+                <SwapVehicleModal
+                    booking={data}
+                    onClose={() => setShowSwapVehicle(false)}
+                    onDone={(msg) => { setShowSwapVehicle(false); flash('ok', msg); load(); }}
+                />
+            )}
+
             {showChangeCustomer && (
                 <ChangeCustomerModal
                     booking={data}
@@ -1671,6 +1694,109 @@ function ChangeCustomerModal({ booking, onClose, onDone }) {
                                 disabled={busy || !partyId || reason.trim().length < 5}
                                 style={{ padding: '8px 16px' }}>
                             {busy ? 'Changing…' : 'Change customer'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
+/**
+ * Putting a booking on a different vehicle.
+ *
+ * Owner ask 2026-10-02: allowed at any stage, gate pass included. The server
+ * reports what still carries the OLD chassis -- the master invoice, the
+ * delivery voucher, the gate pass -- because changing the allocation does not
+ * rewrite them, and someone has to correct those by hand.
+ */
+function SwapVehicleModal({ booking, onClose, onDone }) {
+    const [vehicles, setVehicles] = useState([]);
+    const [vehicleId, setVehicleId] = useState('');
+    const [reason, setReason] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+
+    useEffect(() => {
+        // Same variant only -- the server refuses anything else, because the
+        // price was agreed for the booked variant. No status filter: an admin
+        // correcting an allocation may need a unit that is not sitting at the
+        // dealer, and the server refuses one that belongs to another booking.
+        axios.get(`${API}/sales/vehicles`, { params: { variantId: booking.VehicleVariantID } })
+            .then(r => setVehicles(Array.isArray(r.data) ? r.data : (r.data?.rows || [])))
+            .catch(() => setVehicles([]));
+    }, [booking.VehicleVariantID]);
+
+    const save = async () => {
+        setBusy(true); setErr(null);
+        try {
+            const { data } = await axios.post(`${API}/sales/bookings/${booking.BookingID}/swap-vehicle`,
+                                              { VehicleID: Number(vehicleId), Reason: reason.trim() });
+            const stale = data.stillNamingOldVehicle || [];
+            onDone(stale.length
+                ? `${data.message} These still show the old chassis and need correcting by hand: ${stale.join(', ')}.`
+                : data.message);
+        } catch (e) {
+            setErr(e.response?.data?.error || e.message);
+        } finally { setBusy(false); }
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" style={{ width: 460, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h3>Change the vehicle on {booking.BookingNo}</h3>
+                    <button onClick={onClose}><X size={18} /></button>
+                </div>
+                <div style={{ padding: 18 }}>
+                    <div style={{ fontSize: '0.82rem', color: '#475569', marginBottom: 12 }}>
+                        Currently <strong>{booking.ChasisNo || booking.AllocatedVehicleID}</strong>. The old
+                        vehicle goes back on the yard and the booking keeps its stage.
+                    </div>
+
+                    {['GatePassIssued', 'Delivered', 'Closed'].includes(booking.Status) && (
+                        <div style={{ marginBottom: 12, padding: '9px 11px', borderRadius: 6, fontSize: '0.8rem',
+                                      background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }}>
+                            This booking is <strong>{booking.Status}</strong> — the vehicle has already left on
+                            paperwork that names its chassis. Those documents will not change; you will be told
+                            which ones to correct.
+                        </div>
+                    )}
+
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>New vehicle</div>
+                    <SearchableSelect
+                        value={vehicleId}
+                        onChange={v => setVehicleId(v ? String(v) : '')}
+                        placeholder="Search by chassis…"
+                        title="Pick the vehicle"
+                        options={vehicles
+                            .filter(v => v.VehicleID !== booking.AllocatedVehicleID)
+                            .map(v => ({ id: v.VehicleID, label: v.ChasisNo,
+                                         sub: v.EngineNo || v.Status || undefined }))} />
+
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', margin: '12px 0 4px' }}>
+                        Why? This goes on the record.
+                    </div>
+                    <textarea value={reason} onChange={e => setReason(e.target.value)}
+                              placeholder="e.g. the wrong unit was handed over at the gate"
+                              style={{ width: '100%', minHeight: 70, padding: 8, fontSize: '0.85rem',
+                                       border: '1px solid #cbd5e1', borderRadius: 6, resize: 'vertical' }} />
+
+                    {err && (
+                        <div style={{ marginTop: 12, padding: '9px 11px', borderRadius: 6, fontSize: '0.82rem',
+                                      background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>
+                            {err}
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                        <button onClick={onClose} style={{ padding: '8px 14px', background: '#fff',
+                                border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
+                        <button className="btn" onClick={save}
+                                disabled={busy || !vehicleId || reason.trim().length < 5}
+                                style={{ padding: '8px 16px' }}>
+                            {busy ? 'Changing…' : 'Change vehicle'}
                         </button>
                     </div>
                 </div>
