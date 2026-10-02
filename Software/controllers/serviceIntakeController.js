@@ -618,6 +618,21 @@ exports.updateEstimate = async (req, res) => {
         // hands them to the job card. Anything not recognised is refused rather
         // than quietly stored, because PaymentType decides which ledger the
         // finalized job card posts to.
+        // Parts written in words, with the advisor's estimate of what they
+        // will come to (owner ask 2026-10-01). The figure is taxed exactly as
+        // catalogue parts are, so the customer signs a total arrived at the
+        // same way whichever route the advisor used.
+        const partsRequestText = b.PartsRequestText ? String(b.PartsRequestText).trim() : null;
+        const partsEstimateRaw = Number(b.PartsEstimateAmount);
+        if (b.PartsEstimateAmount != null && b.PartsEstimateAmount !== '' && !(partsEstimateRaw >= 0)) {
+            return res.status(400).json({ error: 'The estimated parts amount must be a number, and not a negative one.' });
+        }
+        const partsEstimate = r2(partsEstimateRaw > 0 ? partsEstimateRaw : 0);
+        if (partsEstimate > 0 && !partsRequestText) {
+            return res.status(400).json({
+                error: 'Write what parts are needed before putting a figure against them.' });
+        }
+
         const payment = exports.paymentFromBody(b);
         if (payment.error) return res.status(400).json({ error: payment.error });
         const fuel = FUEL_LEVELS.includes(String(b.FuelLevel || '')) ? String(b.FuelLevel) : null;
@@ -700,8 +715,10 @@ exports.updateEstimate = async (req, res) => {
         // and what the job card goes on to charge.
         const labourTotal = r2(sum(labour, l => l.rate * l.qty) - labourDiscount);
         const labourTax   = sum(labour, l => l.taxAmount);
-        const partsTotal  = r2(sum(parts,  l => l.rate * l.qty) - partsDiscount);
-        const partsTax    = sum(parts,  l => l.taxAmount);
+        // The written estimate sits alongside the catalogue lines and is taxed
+        // with them, so Parts Total still means the same thing on the paper.
+        const partsTotal  = r2(sum(parts,  l => l.rate * l.qty) - partsDiscount + partsEstimate);
+        const partsTax    = r2(sum(parts,  l => l.taxAmount) + lineTax(partsEstimate, 0, gst));
         const grandTotal  = r2(labourTotal + labourTax + partsTotal + partsTax);
 
         // Who stands behind the discount. The cap is a percentage of the
@@ -767,6 +784,8 @@ exports.updateEstimate = async (req, res) => {
                 .input('pdisc',  sql.Decimal(18, 2),   partsDiscount)
                 .input('coid',   sql.Int,              careOff.row ? careOff.row.CareOffID : null)
                 .input('coname', sql.NVarChar(200),    careOff.row ? careOff.row.EmployeeName : null)
+                .input('preq',   sql.NVarChar(sql.MAX), partsRequestText)
+                .input('pest',   sql.Decimal(18, 2),   partsEstimate)
                 .query(`UPDATE dms_ServiceEstimates SET
                             EndUserID = @eu, VehicleID = @vid,
                             VehicleRegNo = @reg, ChasisNo = @ch, EngineNo = @eng, VehicleModel = @model,
@@ -777,7 +796,8 @@ exports.updateEstimate = async (req, res) => {
                             PaymentType = @pay, PartyID = @party, PaymentCO = @co,
                             PaymentBankID = @bank, FuelLevel = @fuel,
                             LabourDiscount = @ldisc, PartsDiscount = @pdisc,
-                            CareOffID = @coid, CareOffName = @coname
+                            CareOffID = @coid, CareOffName = @coname,
+                            PartsRequestText = @preq, PartsEstimateAmount = @pest
                         WHERE EstimateID = @id`);
 
             await new sql.Request(tx).input('id', sql.Int, id)
@@ -1050,7 +1070,12 @@ exports.signEstimate = async (req, res) => {
 
             let requisitionNo = null;
             const partLines = est.Lines.filter(l => l.LineType === 'PART');
-            if (partLines.length) {
+            // A requisition is raised for catalogue lines OR for parts written
+            // in words. Without the second condition a written request would
+            // be signed by the customer and never reach the parts counter,
+            // which is the whole point of letting it be written (owner ask
+            // 2026-10-01).
+            if (partLines.length || est.PartsRequestText) {
                 const n = (await new sql.Request(tx).query('SELECT NEXT VALUE FOR dbo.seq_PartsRequisitionNo AS n')).recordset[0].n;
                 requisitionNo = 'PR-' + String(n).padStart(5, '0');
                 const reqIns = await new sql.Request(tx)
@@ -1061,10 +1086,17 @@ exports.signEstimate = async (req, res) => {
                     .input('sig',   sql.Int,           signatureId)
                     .input('uid',   sql.Int,           req.user?.userId || null)
                     .input('uname', sql.NVarChar(100), req.user?.userName || null)
+                    // Copied onto the requisition rather than read back off the
+                    // estimate: the counter needs the words the customer signed
+                    // for, not whatever a later revision says.
+                    .input('rtext', sql.NVarChar(sql.MAX), est.PartsRequestText || null)
+                    .input('ramt',  sql.Decimal(18, 2),
+                           Number(est.PartsEstimateAmount) > 0 ? Number(est.PartsEstimateAmount) : null)
                     .query(`INSERT INTO dms_PartsRequisitions
-                                (RequisitionNo, JobCardID, JobCardNo, EstimateID, SignatureID, RequestedByUserID, RequestedByName)
+                                (RequisitionNo, JobCardID, JobCardNo, EstimateID, SignatureID,
+                                 RequestedByUserID, RequestedByName, RequestText, EstimatedAmount)
                             OUTPUT INSERTED.RequisitionID
-                            VALUES (@no, @jc, @jcNo, @est, @sig, @uid, @uname)`);
+                            VALUES (@no, @jc, @jcNo, @est, @sig, @uid, @uname, @rtext, @ramt)`);
                 const requisitionId = reqIns.recordset[0].RequisitionID;
                 for (let i = 0; i < partLines.length; i++) {
                     const l = partLines[i];

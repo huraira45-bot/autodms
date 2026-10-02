@@ -72,6 +72,9 @@ router.get(   '/media/:mediaId/ticket',           tablet, c.getMediaTicket);
 const counter = requireAccess('parts_requisition');
 router.get(   '/requisitions',                    counter, requisitions.listRequisitions);
 router.get(   '/requisitions/:id',                counter, requisitions.getRequisition);
+// The counter turning a written parts request into real catalogue parts
+// (owner ask 2026-10-01).
+router.post(  '/requisitions/:id/lines',          counter, requisitions.addRequisitionLines);
 router.post(  '/requisitions/:id/issue',          counter, requisitions.issueRequisition);
 router.post(  '/requisitions/:id/cancel',         counter, requisitions.cancelRequisition);
 

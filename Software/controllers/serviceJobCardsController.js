@@ -55,6 +55,19 @@ async function tabletBlockers(executor, jobCardId) {
         JOIN   dms_PartsRequisitionLines l ON l.RequisitionID = r.RequisitionID
         WHERE  r.JobCardID = @id AND r.Status = 'Open' AND ${ISSUED_SQL} < l.QtyRequested
         ORDER  BY r.RequisitionID, l.LineSeq`)).recordset;
+
+    // Parts written in words that the counter has not yet turned into real
+    // parts. The query above joins to lines, so a request with none produced
+    // no blocker at all -- the job card could be finalized with the customer's
+    // parts request never acted on (owner ask 2026-10-01).
+    const unactioned = (await executor.request().input('id', sql.Int, jobCardId).query(`
+        SELECT r.RequisitionNo, r.RequestText
+        FROM   dms_PartsRequisitions r
+        WHERE  r.JobCardID = @id AND r.Status = 'Open'
+          AND  ISNULL(r.RequestText, '') <> ''
+          AND  NOT EXISTS (SELECT 1 FROM dms_PartsRequisitionLines l
+                            WHERE l.RequisitionID = r.RequisitionID)
+        ORDER  BY r.RequisitionID`)).recordset;
     const unsigned = (await executor.request().input('id', sql.Int, jobCardId).query(`
         SELECT EstimateNo FROM dms_ServiceEstimates
         WHERE  JobCardID = @id AND Status = 'Draft'
@@ -64,6 +77,11 @@ async function tabletBlockers(executor, jobCardId) {
     if (waiting.length) {
         const list = waiting.map(w => `${w.Description} × ${+Number(w.Waiting).toFixed(2)} (${w.RequisitionNo})`).join(', ');
         blockers.push(`Not issued yet: ${list}. The parts counter has to issue ${waiting.length === 1 ? 'it' : 'them'}, or cancel the request if ${waiting.length === 1 ? "it isn't" : "they aren't"} needed.`);
+    }
+    if (unactioned.length) {
+        const list = unactioned.map(u => `${u.RequisitionNo} ("${String(u.RequestText).slice(0, 60)}")`).join(', ');
+        blockers.push(`The parts counter has not turned the written parts request into parts yet: ${list}. `
+                    + `They have to add the actual parts, or cancel the request if none are needed.`);
     }
     if (unsigned.length) {
         blockers.push(`Additional work ${unsigned.join(', ')} has not been signed. Get it signed or cancel it.`);

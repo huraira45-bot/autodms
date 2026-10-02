@@ -36,6 +36,7 @@ const httpError = (statusCode, message) => Object.assign(new Error(message), { s
 async function loadRequisition(executor, id) {
     const head = (await executor.request().input('id', sql.Int, id).query(`
         SELECT r.RequisitionID, r.RequisitionNo, r.JobCardID, r.JobCardNo, r.EstimateID, r.Status,
+               r.RequestText, r.EstimatedAmount,
                r.RequestedByUserID, r.RequestedByName, r.RequestedAt, r.CancelledAt, r.CancelledByName, r.CancelReason,
                j.VehicleRegNo, j.VersionCode AS VehicleModel, j.ServiceAdvisor, ISNULL(j.IsFinalized, 0) AS JobCardFinalized,
                c.endUserName AS CustomerName, s.BayName, e.EstimateNo
@@ -249,3 +250,94 @@ exports.cancelRequisition = async (req, res) => {
 };
 
 exports.loadRequisition = loadRequisition;
+
+/**
+ * POST /api/service-intake/requisitions/:id/lines
+ * Body: { Lines: [{ ItemID, Quantity }] }
+ *
+ * The parts counter turning a written request into real parts.
+ *
+ * Owner ask 2026-10-01: the advisor at the car writes "front bumper, LH
+ * headlight, the clips" rather than hunting for catalogue numbers, and the
+ * counter — who knows the catalogue — adds the actual items here.
+ *
+ * Added lines are priced from the catalogue, not from the advisor's estimate.
+ * The estimate was a guess made at the car; what the customer is charged is
+ * the real part at the real price, and the two are deliberately not conflated.
+ */
+exports.addRequisitionLines = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const wanted = Array.isArray(req.body?.Lines) ? req.body.Lines : [];
+        if (!wanted.length) return res.status(400).json({ error: 'No parts were sent.' });
+
+        const pool = await getPool();
+        const head = (await pool.request().input('id', sql.Int, id).query(`
+            SELECT r.RequisitionID, r.Status, ISNULL(j.IsFinalized, 0) AS JobCardFinalized
+            FROM   dms_PartsRequisitions r
+            JOIN   Addata_JobCardInfo j ON j.JobCardId = r.JobCardID
+            WHERE  r.RequisitionID = @id`)).recordset[0];
+        if (!head) return res.status(404).json({ error: 'That requisition no longer exists.' });
+        if (head.Status !== 'Open') {
+            return res.status(423).json({ error: `This requisition is ${head.Status.toLowerCase()}.` });
+        }
+        if (head.JobCardFinalized) {
+            return res.status(423).json({ error: 'That job card is finalized; parts can no longer be added to it.' });
+        }
+
+        const ids = [...new Set(wanted.map(l => parseInt(l.ItemID)).filter(n => Number.isInteger(n) && n > 0))];
+        if (!ids.length) return res.status(400).json({ error: 'No part was recognised.' });
+
+        // Safe to inline: every id passed Number.isInteger above.
+        const items = new Map((await pool.request().query(`
+            SELECT ItemId, ItenName, ManualNumber, ItemNumber, ItemSalesPrice, ItemType
+            FROM   InventItems WHERE ItemId IN (${ids.join(',')})`)).recordset.map(i => [i.ItemId, i]));
+
+        const rows = [];
+        for (let i = 0; i < wanted.length; i++) {
+            const item = items.get(parseInt(wanted[i].ItemID));
+            const qty = Number(wanted[i].Quantity);
+            if (!item) return res.status(400).json({ error: `Line ${i + 1}: that part is not in the catalogue.` });
+            if (String(item.ItemType || 'Part').trim().toLowerCase() !== 'part') {
+                return res.status(400).json({ error: `Line ${i + 1}: ${item.ItenName} is not a spare part.` });
+            }
+            if (!(qty > 0)) return res.status(400).json({ error: `Line ${i + 1}: quantity must be more than zero.` });
+            rows.push({ item, qty });
+        }
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            const seqRow = (await new sql.Request(tx).input('id', sql.Int, id).query(
+                'SELECT ISNULL(MAX(LineSeq), 0) AS m FROM dms_PartsRequisitionLines WHERE RequisitionID = @id')).recordset[0];
+            let seq = seqRow.m;
+            for (const { item, qty } of rows) {
+                seq += 1;
+                // A fresh request per row — the "parameter already declared"
+                // trap this codebase avoids inside a transaction loop.
+                await new sql.Request(tx)
+                    .input('req',  sql.Int,            id)
+                    .input('seq',  sql.Int,            seq)
+                    .input('item', sql.Int,            item.ItemId)
+                    .input('desc', sql.NVarChar(300),  String(item.ItenName || '').slice(0, 300))
+                    .input('pn',   sql.NVarChar(100),
+                           item.ManualNumber || (item.ItemNumber != null ? String(item.ItemNumber) : null))
+                    .input('qty',  sql.Decimal(18, 2), qty)
+                    .input('rate', sql.Decimal(18, 2), Number(item.ItemSalesPrice) || 0)
+                    .query(`INSERT INTO dms_PartsRequisitionLines
+                                (RequisitionID, LineSeq, ItemID, Description, PartNumber, QtyRequested, Rate)
+                            VALUES (@req, @seq, @item, @desc, @pn, @qty, @rate)`);
+            }
+            await tx.commit();
+        } catch (err) {
+            try { await tx.rollback(); } catch { /* already gone */ }
+            throw err;
+        }
+
+        events.requisitionsChanged?.({ RequisitionID: id });
+        res.status(201).json(await loadRequisition(pool, id));
+    } catch (err) {
+        console.error('addRequisitionLines:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
