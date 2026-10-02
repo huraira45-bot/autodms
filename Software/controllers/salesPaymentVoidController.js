@@ -25,7 +25,20 @@ const { logBookingTransition } = require('./salesBookingController');
 
 const OPEN_STATES = ['Pending', 'AMApproved'];
 // Once the vehicle has gone, a payment is history — correct it in Accounting.
-const BOOKING_LOCKED = ['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'];
+// States where the vehicle has gone and the money has to be dealt with as a
+// refund rather than by unwinding the receipt.
+//
+// 'Cancelled' used to be in here, and the refusal it produced read "a payment
+// cannot be voided once the vehicle has gone" -- which is true of Delivered,
+// GatePassIssued and Closed, and is the opposite of what a cancellation
+// means. The vehicle did NOT go, and cancelling is exactly when a receipt
+// needs undoing. It left a cancelled booking with the customer's money still
+// posted and no way to unwind it (owner report 2026-10-02, BK-2026-0189).
+//
+// Voiding stays protected either way: it still needs a request, the Accounts
+// Manager's approval and an admin to execute, and a POSTED voucher is still
+// refused separately -- that correction belongs to the unfinalize loop.
+const BOOKING_LOCKED = ['Closed', 'Delivered', 'GatePassIssued'];
 
 const SELECT_PAYMENT = `
     SELECT p.PaymentID, p.BookingID, p.Amount, p.Status, p.VoucherID, p.VoucherNo,
