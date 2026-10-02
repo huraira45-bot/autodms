@@ -72,6 +72,10 @@ router.delete('/vehicles/:id',     requireAny('sales_admin_settings'), cat.delet
 router.get(   '/bookings',                 requireAny(...SALES_READERS),       bk.listBookings);
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
+// Moving a booking to the right customer. Admin-only, refused once anything
+// has posted against it, and the reason goes on the audit trail (owner ask
+// 2026-10-02).
+router.put(   '/bookings/:id/party',  requireAny('sales_admin_settings', 'admin_unfinalize'), bk.changeBookingParty);
 router.post(  '/bookings/:id/cancel',      requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing'), bk.cancelBooking);
 
 // Reassign the sales executive on a live booking (owner ask 2026-09-11).

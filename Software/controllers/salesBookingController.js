@@ -16,6 +16,7 @@
  */
 const { sql, getPool } = require('../config/db');
 const incentive = require('./salesIncentiveController');
+const { logAudit } = require('../services/salesAuditService');
 
 // ============================================================================
 // Helpers
@@ -883,6 +884,111 @@ exports.changeSalesExecutive = async (req, res) => {
         });
     } catch (err) {
         console.error('changeSalesExecutive:', err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * PUT /api/sales/bookings/:id/party   body: { PartyID, Reason }
+ *
+ * Moving a booking to the right customer.
+ *
+ * Owner ask 2026-10-02. A booking taken against the wrong customer could only
+ * be corrected by someone running a script against the database -- which is
+ * how MUHAMMAD AHMAD's booking was freed from account 201002062 on
+ * 2026-09-25. This puts it in the hands of an admin.
+ *
+ * Refused once anything has POSTED against the booking. The ledger entries
+ * carry the old customer and their GL leaf, and moving the booking would not
+ * move them -- the booking would name one customer while the books named
+ * another, which is worse than the wrong name on its own. Reverse those
+ * vouchers first and the change is allowed.
+ *
+ * The new customer must have a GL account of their own, because that is what
+ * the delivery and invoice postings debit. Letting a booking point at a
+ * customer with no account just moves the failure to finalize time.
+ */
+exports.changeBookingParty = async (req, res) => {
+    const bookingId = parseInt(req.params.id);
+    const partyId = parseInt(req.body?.PartyID);
+    const reason = String(req.body?.Reason || '').trim();
+
+    if (!Number.isInteger(bookingId) || !Number.isInteger(partyId)) {
+        return res.status(400).json({ error: 'Which booking, and which customer?' });
+    }
+    if (reason.length < 5) {
+        return res.status(400).json({ error: 'Say why the customer is being changed — it goes on the record.' });
+    }
+
+    try {
+        const pool = await getPool();
+
+        const booking = (await pool.request().input('id', sql.Int, bookingId).query(`
+            SELECT b.BookingID, b.BookingNo, b.Status, b.PartyID,
+                   p.PartyName AS CurrentPartyName
+            FROM   dms_SalesBookings b
+            LEFT   JOIN gen_PartiesInfo p ON p.PartyID = b.PartyID
+            WHERE  b.BookingID = @id`)).recordset[0];
+        if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+        if (booking.PartyID === partyId) {
+            return res.status(409).json({ error: 'That is already the customer on this booking.' });
+        }
+
+        const party = (await pool.request().input('p', sql.Int, partyId).query(`
+            SELECT PartyID, PartyName, PartyGLID FROM gen_PartiesInfo WHERE PartyID = @p`)).recordset[0];
+        if (!party) return res.status(400).json({ error: 'That customer does not exist.' });
+        if (!party.PartyGLID) {
+            return res.status(400).json({
+                error: `${party.PartyName} has no account in the chart of accounts. `
+                     + 'Give them one first, or the booking cannot be invoiced later.' });
+        }
+
+        // Anything already in the books names the old customer.
+        const posted = (await pool.request().input('id', sql.Int, bookingId).query(`
+            SELECT DISTINCT v.VoucherNo, v.SourceDocType
+            FROM   data_FinanceVoucherInfo v
+            LEFT   JOIN data_FinanceVoucherDetail d ON d.VoucherID = v.VoucherID
+            WHERE  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
+              AND  (d.BookingID = @id OR (v.SourceDocID = @id AND v.SourceDocType IN
+                        ('PAY_MASTER','MASTER_INVOICE','SALES_DELIVERY','SALES_PAYMENT')))
+            ORDER  BY v.VoucherNo`)).recordset;
+        if (posted.length) {
+            return res.status(409).json({
+                error: 'This booking already has posted vouchers, which carry the current customer. '
+                     + 'Reverse them first, then change the customer and post again.',
+                vouchers: posted.map(v => v.VoucherNo),
+            });
+        }
+
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+            await new sql.Request(tx)
+                .input('id', sql.Int, bookingId)
+                .input('p',  sql.Int, partyId)
+                .query('UPDATE dms_SalesBookings SET PartyID = @p WHERE BookingID = @id');
+
+            await logAudit(tx, {
+                bookingId, entityType: 'Booking', entityId: bookingId,
+                action: 'ChangeCustomer',
+                oldValue: { PartyID: booking.PartyID, PartyName: booking.CurrentPartyName },
+                newValue: { PartyID: partyId, PartyName: party.PartyName },
+                actor: req.user, notes: reason,
+            });
+            await tx.commit();
+        } catch (err) {
+            try { await tx.rollback(); } catch { /* already gone */ }
+            throw err;
+        }
+
+        res.json({
+            message: `${booking.BookingNo} is now against ${party.PartyName}.`,
+            PartyID: partyId,
+            PartyName: party.PartyName,
+            PreviousPartyName: booking.CurrentPartyName || null,
+        });
+    } catch (err) {
+        console.error('changeBookingParty:', err);
         res.status(500).json({ error: err.message });
     }
 };

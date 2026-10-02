@@ -62,6 +62,7 @@ export default function BookingDetail() {
     const [showBookingDate, setShowBookingDate] = useState(false);
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
+    const [showChangeCustomer, setShowChangeCustomer] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
     const [showGatePass, setShowGatePass] = useState(false);
     const [showExecutive, setShowExecutive] = useState(false);
@@ -151,6 +152,9 @@ export default function BookingDetail() {
         && !['Closed', 'Cancelled'].includes(data.Status)
         && (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'));
 
+    // Admin-only, and the server refuses it anyway once anything has posted.
+    const canChangeCustomer = hasModule('sales_admin_settings') || hasModule('admin_unfinalize');
+
     const canPostMasterInvoice = data.AllocatedVehicleID
         && !['Closed', 'Cancelled'].includes(data.Status)
         && hasModule('sales_master_settlement');
@@ -219,6 +223,16 @@ export default function BookingDetail() {
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PhoneOne}</div>
                         {data.CorporatePONumber && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>PO: <strong>{data.CorporatePONumber}</strong></div>}
                         <CustomerCoaPill partyId={data.PartyID} onLinked={load} />
+                        {/* A booking taken against the wrong customer used to need
+                            someone running a script (owner ask 2026-10-02). */}
+                        {canChangeCustomer && (
+                            <button onClick={() => setShowChangeCustomer(true)}
+                                    style={{ marginTop: 8, fontSize: '0.74rem', background: 'none',
+                                             border: '1px solid #cbd5e1', borderRadius: 4,
+                                             padding: '3px 8px', cursor: 'pointer', color: '#475569' }}>
+                                Change customer
+                            </button>
+                        )}
                     </Block>
                     <Block icon={Car} title="Vehicle">
                         <div style={{ fontWeight: 600 }}>{data.BrandName} · {data.ModelCode}</div>
@@ -649,6 +663,14 @@ export default function BookingDetail() {
                     onClose={() => setShowAllocate(false)}
                     onSaved={() => { setShowAllocate(false); flash('ok', 'Vehicle allocated'); load(); }} />
             )}
+            {showChangeCustomer && (
+                <ChangeCustomerModal
+                    booking={data}
+                    onClose={() => setShowChangeCustomer(false)}
+                    onDone={(msg) => { setShowChangeCustomer(false); flash('ok', msg); load(); }}
+                />
+            )}
+
             {showPayMaster && data.IsHistorical && (
                 <LinkMasterVoucherModal booking={data} stillOwed={masterStillOwed}
                     onClose={() => setShowPayMaster(false)}
@@ -1497,5 +1519,98 @@ function ChangeExecutiveModal({ booking, onClose, onSaved }) {
             </div>
             <Actions onCancel={onClose} onConfirm={save} confirmLabel="Save" busy={busy} disabled={!exeId} />
         </Shell>
+    );
+}
+
+
+/**
+ * Moving a booking to the right customer.
+ *
+ * Owner ask 2026-10-02. The server refuses this once anything has posted
+ * against the booking -- the ledger carries the old customer -- and says
+ * which vouchers are in the way, so that is shown here rather than a bare
+ * failure.
+ */
+function ChangeCustomerModal({ booking, onClose, onDone }) {
+    const [parties, setParties] = useState([]);
+    const [partyId, setPartyId] = useState('');
+    const [reason, setReason] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+    const [blocking, setBlocking] = useState([]);
+
+    useEffect(() => {
+        axios.get('/api/workshop/parties')
+            .then(r => setParties(Array.isArray(r.data) ? r.data : (r.data?.rows || [])))
+            .catch(() => setParties([]));
+    }, []);
+
+    const save = async () => {
+        setBusy(true); setErr(null); setBlocking([]);
+        try {
+            const { data } = await axios.put(`/api/sales/bookings/${booking.BookingID}/party`,
+                                             { PartyID: Number(partyId), Reason: reason.trim() });
+            onDone(data.message || 'Customer changed.');
+        } catch (e) {
+            setErr(e.response?.data?.error || e.message);
+            setBlocking(e.response?.data?.vouchers || []);
+        } finally { setBusy(false); }
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" style={{ width: 460, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h3>Change the customer on {booking.BookingNo}</h3>
+                    <button onClick={onClose}><X size={18} /></button>
+                </div>
+                <div style={{ padding: 18 }}>
+                    <div style={{ fontSize: '0.82rem', color: '#475569', marginBottom: 12 }}>
+                        Currently <strong>{booking.PartyName}</strong>. This moves the booking only —
+                        anything already posted keeps the customer it was posted against.
+                    </div>
+
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>New customer</div>
+                    <SearchableSelect
+                        value={partyId}
+                        onChange={v => setPartyId(v ? String(v) : '')}
+                        placeholder="Search customers…"
+                        title="Pick the customer"
+                        options={parties
+                            .filter(p => p.PartyID !== booking.PartyID)
+                            .map(p => ({ id: p.PartyID, label: p.PartyName, sub: p.PhoneOne || undefined }))} />
+
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', margin: '12px 0 4px' }}>
+                        Why? This goes on the record.
+                    </div>
+                    <textarea value={reason} onChange={e => setReason(e.target.value)}
+                              placeholder="e.g. booked against the wrong customer at the counter"
+                              style={{ width: '100%', minHeight: 70, padding: 8, fontSize: '0.85rem',
+                                       border: '1px solid #cbd5e1', borderRadius: 6, resize: 'vertical' }} />
+
+                    {err && (
+                        <div style={{ marginTop: 12, padding: '9px 11px', borderRadius: 6, fontSize: '0.82rem',
+                                      background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b' }}>
+                            {err}
+                            {blocking.length > 0 && (
+                                <div style={{ marginTop: 6 }}>
+                                    In the way: <strong>{blocking.join(', ')}</strong>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                        <button onClick={onClose} style={{ padding: '8px 14px', background: '#fff',
+                                border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
+                        <button className="btn" onClick={save}
+                                disabled={busy || !partyId || reason.trim().length < 5}
+                                style={{ padding: '8px 16px' }}>
+                            {busy ? 'Changing…' : 'Change customer'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 }
