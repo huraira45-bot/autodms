@@ -112,6 +112,42 @@ exports.linkCoa = async (req, res) => {
             throw new Error(`This leaf is already linked to ${taken.recordset[0].PartyName}.`);
         }
 
+        // Moving a customer OFF an account that has already been used leaves
+        // that balance behind on the old leaf -- the entries name it, and
+        // changing the link does not move them. That is sometimes exactly what
+        // is wanted and sometimes a mistake nobody notices for a month, so it
+        // is refused unless the person doing it says they know (owner ask
+        // 2026-10-02).
+        const current = await new sql.Request(tx).input('id', sql.Int, partyId).query(`
+            SELECT p.PartyGLID, g.GLCode, g.GLTitle
+            FROM   gen_PartiesInfo p
+            LEFT   JOIN GLChartOFAccount g ON g.GLCAID = p.PartyGLID
+            WHERE  p.PartyID = @id`);
+        const was = current.recordset[0];
+
+        if (was?.PartyGLID && was.PartyGLID !== glcaid && !req.body?.Acknowledge) {
+            const used = await new sql.Request(tx).input('gl', sql.Int, was.PartyGLID).query(`
+                SELECT COUNT(*) AS Entries,
+                       ISNULL(SUM(d.Debit - d.Credit), 0) AS Balance
+                FROM   data_FinanceVoucherDetail d
+                INNER  JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
+                WHERE  d.GLCAID = @gl AND v.Status = 'Posted' AND v.ReversesVoucherID IS NULL`);
+            const { Entries, Balance } = used.recordset[0];
+            if (Entries > 0) {
+                await tx.rollback();
+                return res.status(409).json({
+                    error: `${was.GLCode} ${was.GLTitle} already has ${Entries} posted entr`
+                         + `${Entries === 1 ? 'y' : 'ies'} on it, with a balance of `
+                         + `${Number(Balance).toLocaleString('en-PK', { minimumFractionDigits: 2 })}. `
+                         + 'Those entries stay on that account — changing the link does not move them. '
+                         + 'Confirm if that is what you intend.',
+                    code: 'old_account_in_use',
+                    Entries, Balance: Number(Balance),
+                    GLCode: was.GLCode, GLTitle: was.GLTitle,
+                });
+            }
+        }
+
         await new sql.Request(tx)
             .input('id', sql.Int, partyId)
             .input('gl', sql.Int, glcaid)
@@ -119,8 +155,11 @@ exports.linkCoa = async (req, res) => {
 
         await tx.commit();
         res.json({
-            message: 'Customer linked to COA leaf.',
+            message: was?.PartyGLID && was.PartyGLID !== glcaid
+                ? `Customer moved from ${was.GLCode} to ${leaf.recordset[0].GLCode}.`
+                : 'Customer linked to COA leaf.',
             GLCAID: glcaid, GLCode: leaf.recordset[0].GLCode, GLTitle: leaf.recordset[0].GLTitle,
+            PreviousGLCode: was?.PartyGLID ? was.GLCode : null,
         });
     } catch (err) {
         try { await tx.rollback(); } catch {}

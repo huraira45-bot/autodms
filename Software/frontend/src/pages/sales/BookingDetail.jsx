@@ -741,7 +741,27 @@ function UploadDocModal({ bookingId, onClose, onSaved }) {
 
     return (
         <Shell title="Upload Booking Document" onClose={onClose}>
+            {/* Which account the customer is on now, so it is clear this is a
+                move and not a first-time link (owner ask 2026-10-02). */}
+            {currentGLCode && (
+                <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 10 }}>
+                    Currently on <code style={{ fontFamily: 'monospace' }}>{currentGLCode}</code>
+                    {currentGLTitle ? ` · ${currentGLTitle}` : ''}. Picking another moves the
+                    customer onto it. Entries already posted stay where they are.
+                </div>
+            )}
+
             {err && <Err>{err}</Err>}
+
+            {inUse && (
+                <div style={{ margin: '8px 0', padding: '9px 11px', borderRadius: 6, fontSize: '0.8rem',
+                              background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }}>
+                    <strong>{inUse.GLCode}</strong> has {inUse.Entries} posted
+                    entr{inUse.Entries === 1 ? 'y' : 'ies'} on it, balance{' '}
+                    {Number(inUse.Balance).toLocaleString('en-PK', { minimumFractionDigits: 2 })}.
+                    That balance stays on that account. Press the button again to go ahead anyway.
+                </div>
+            )}
             <p style={{ fontSize: '0.85rem', color: '#475569' }}>
                 Attach supporting paperwork. <strong>PBO</strong> and <strong>CNIC</strong> are mandatory before this booking can be allocated.
             </p>
@@ -1303,6 +1323,9 @@ function Stat({ label, value, color = '#475569', sub }) {
 }
 
 function CustomerCoaPill({ partyId, onLinked }) {
+    const { hasModule } = useAuth();
+    // Same roles the link endpoint itself accepts.
+    const canRelink = hasModule('sales_admin_settings') || hasModule('finance_coa') || hasModule('crm_parties');
     const [status, setStatus] = useState(null);
     const [showModal, setShowModal] = useState(false);
 
@@ -1322,9 +1345,16 @@ function CustomerCoaPill({ partyId, onLinked }) {
         <>
             <div style={{ marginTop: 8 }}>
                 {status.linked ? (
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: '#dcfce7', color: '#166534', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600 }}>
+                    /* Clickable for an admin, so a customer linked to the wrong
+                       account can be moved (owner ask 2026-10-02). It used to be
+                       a static badge: once an account was set, nothing on this
+                       screen could change it. */
+                    <div onClick={canRelink ? () => setShowModal(true) : undefined}
+                         title={canRelink ? 'Change the account this customer posts to' : undefined}
+                         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: '#dcfce7', color: '#166534', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600, cursor: canRelink ? 'pointer' : 'default' }}>
                         <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 99, background: '#16a34a' }} />
                         COA: <code style={{ fontFamily: 'monospace' }}>{status.GLCode}</code> · {status.GLTitle}
+                        {canRelink && <span style={{ opacity: 0.7, fontWeight: 400 }}>· change</span>}
                     </div>
                 ) : (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: '#fef3c7', color: '#92400e', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}
@@ -1336,6 +1366,8 @@ function CustomerCoaPill({ partyId, onLinked }) {
             </div>
             {showModal && (
                 <CoaLinkModal partyId={partyId} partyName={status.PartyName}
+                    currentGLCode={status.linked ? status.GLCode : null}
+                    currentGLTitle={status.linked ? status.GLTitle : null}
                     onClose={() => setShowModal(false)}
                     onSaved={() => { setShowModal(false); load(); onLinked?.(); }} />
             )}
@@ -1343,7 +1375,11 @@ function CustomerCoaPill({ partyId, onLinked }) {
     );
 }
 
-function CoaLinkModal({ partyId, partyName, onClose, onSaved }) {
+function CoaLinkModal({ partyId, partyName, currentGLCode, currentGLTitle, onClose, onSaved }) {
+    // Set when the server refuses because the account being left already has
+    // posted entries on it. Those entries stay where they are; the person
+    // doing this has to say they know that.
+    const [inUse, setInUse] = useState(null);
     const [tab, setTab] = useState('existing');   // 'existing' | 'auto'
     const [leaves, setLeaves] = useState([]);
     const [selected, setSelected] = useState('');
@@ -1359,9 +1395,15 @@ function CoaLinkModal({ partyId, partyName, onClose, onSaved }) {
         if (!selected) { setErr('Pick a leaf to link.'); return; }
         setBusy(true); setErr(null);
         try {
-            await axios.post(`${API}/sales/parties/${partyId}/link-coa`, { GLCAID: Number(selected) });
+            await axios.post(`${API}/sales/parties/${partyId}/link-coa`,
+                             { GLCAID: Number(selected), Acknowledge: !!inUse });
             onSaved();
-        } catch (e) { setErr(e.response?.data?.error || e.message); }
+        } catch (e) {
+            setErr(e.response?.data?.error || e.message);
+            // The account being left still has posted entries on it. Say so,
+            // and let them confirm rather than silently moving the link.
+            if (e.response?.data?.code === 'old_account_in_use') setInUse(e.response.data);
+        }
         setBusy(false);
     };
 
