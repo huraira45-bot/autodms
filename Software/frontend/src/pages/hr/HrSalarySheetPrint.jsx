@@ -248,6 +248,10 @@ function legacyRow(r, i) {
         tax: c.tax,
         hold: c.hold,
         netPay: c.net,
+        // Deductions this month's pay could not cover — net was floored at
+        // zero and this much is still owed. Carried onto the row so the
+        // department and grand totals can account for themselves.
+        unrecovered: Number(c.unrecovered) || 0,
         holdNetAdv: +(c.hold + c.net + c.advance).toFixed(2),
         adj: 0,
         remarks: r.Entry?.Remarks || '',
@@ -255,7 +259,14 @@ function legacyRow(r, i) {
 }
 
 const LEGACY_SUM_FIELDS = ['basic', 'totalSalary', 'fuel', 'absent', 'absentFine', 'lateMin', 'lateFine',
-    'leave', 'adv', 'workDays', 'messDeduct', 'fine', 'eobi', 'tax', 'hold', 'netPay', 'holdNetAdv', 'adj'];
+    'leave', 'adv', 'workDays', 'messDeduct', 'fine', 'eobi', 'tax', 'hold', 'netPay', 'unrecovered',
+    'holdNetAdv', 'adj'];
+
+// What a total row's own columns say the net should be. The sheet prints
+// every deduction in full, so this is additions less deductions — and it
+// only equals the Net column once the unrecovered shortfall is added back.
+const impliedNet = (t) => +(t.totalSalary + t.fuel
+    - t.absentFine - t.lateFine - t.adv - t.messDeduct - t.fine - t.eobi - t.tax - t.hold).toFixed(2);
 
 function sumLegacyRows(rows) {
     const t = {};
@@ -285,6 +296,11 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
     })), [grouped]);
     const grand = useMemo(() => sumLegacyRows(deptRows.flatMap(g => g.rows)), [deptRows]);
     const empCount = deptRows.reduce((s, g) => s + g.rows.length, 0);
+    // Everyone whose deductions came to more than the month paid. Named rather
+    // than left as a lump in the total — each one is money still owed.
+    const overDeducted = useMemo(
+        () => deptRows.flatMap(g => g.rows.filter(r => r.unrecovered > 0).map(r => ({ ...r, dept: g.name }))),
+        [deptRows]);
 
     return (
         <div className="lsheet">
@@ -332,7 +348,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                             </thead>
                             <tbody>
                                 {g.rows.map(r => (
-                                    <tr key={r.key}>
+                                    <tr key={r.key} className={r.unrecovered ? 'overdeducted' : undefined}>
                                         <td>{r.sr}</td>
                                         <td className="emp">{r.name}</td>
                                         <td className="desig">{r.designation}</td>
@@ -353,10 +369,20 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                         <td className="num">{r.eobi ? money(r.eobi) : '-'}</td>
                                         <td className="num">{r.tax ? money(r.tax) : '0'}</td>
                                         <td className="num">{r.hold ? money(r.hold) : '0'}</td>
-                                        <td className="num net">{money(r.netPay)}</td>
+                                        <td className="num net">{money(r.netPay)}{r.unrecovered ? ' *' : ''}</td>
                                         <td className="num">{money(r.holdNetAdv)}</td>
                                         <td className="num">{money(r.adj)}</td>
-                                        <td className="remarks">{r.remarks}</td>
+                                        {/* The shortfall is said on the row itself, not only in a
+                                            footnote — whoever reads this line needs to know the
+                                            zero is a floor and that money is still owed. */}
+                                        <td className="remarks">
+                                            {r.remarks}
+                                            {r.unrecovered ? (
+                                                <span className="short">
+                                                    {r.remarks ? ' · ' : ''}deductions exceeded pay by {money(r.unrecovered)} — still owed
+                                                </span>
+                                            ) : null}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -373,7 +399,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                     <td className="num">{money(t.fuel)}</td>
                                     <td className="num">{days(t.absent)}</td>
                                     <td className="num">{money(t.absentFine)}</td>
-                                    <td className="num">{days(t.lateMin)}</td>
+                                    <td className="num">{money(t.lateMin)}</td>
                                     <td className="num">{money(t.lateFine)}</td>
                                     <td className="num">{days(t.leave)}</td>
                                     <td className="num">{money(t.adv)}</td>
@@ -386,7 +412,14 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                                     <td className="num net">{money(t.netPay)}</td>
                                     <td className="num">{money(t.holdNetAdv)}</td>
                                     <td className="num">{money(t.adj)}</td>
-                                    <td></td>
+                                    {/* The remarks cell is empty on a total row, so the shortfall
+                                        goes there — no new column, and the department total says
+                                        why its Net is above what its own columns come to. */}
+                                    <td className="remarks">
+                                        {t.unrecovered
+                                            ? <span className="short">+{money(t.unrecovered)} not recovered</span>
+                                            : null}
+                                    </td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -413,7 +446,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                         <td className="num">{money(grand.fuel)}</td>
                         <td className="num">{days(grand.absent)}</td>
                         <td className="num">{money(grand.absentFine)}</td>
-                        <td className="num">{days(grand.lateMin)}</td>
+                        <td className="num">{money(grand.lateMin)}</td>
                         <td className="num">{money(grand.lateFine)}</td>
                         <td className="num">{days(grand.leave)}</td>
                         <td className="num">{money(grand.adv)}</td>
@@ -426,10 +459,54 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                         <td className="num net">{money(grand.netPay)}</td>
                         <td className="num">{money(grand.holdNetAdv)}</td>
                         <td className="num">{money(grand.adj)}</td>
-                        <td></td>
+                        <td className="remarks">
+                            {grand.unrecovered
+                                ? <span className="short">+{money(grand.unrecovered)} not recovered</span>
+                                : null}
+                        </td>
                     </tr>
                 </tbody>
             </table>
+
+            {/* Owner report 2026-10-05: the grand total would not cross-foot —
+                total salary plus fuel less every deduction came to 2,457 under
+                the Net it printed. The gap is real money: deductions that the
+                month's pay could not cover, floored out of Net but still
+                totalled in full in their own columns. Net Payable is the cash
+                that genuinely goes out; this strip shows how the row gets
+                there, and who is still short. */}
+            {grand.unrecovered > 0 && (
+                <div className="lrecon">
+                    <div className="lrecon-head">HOW THE GRAND TOTAL ADDS UP</div>
+                    <table className="lrecon-tbl">
+                        <tbody>
+                            <tr>
+                                <td>Total salary + fuel, less every deduction column</td>
+                                <td className="num">{money(impliedNet(grand))}</td>
+                            </tr>
+                            <tr>
+                                <td>Add back: deductions the month&rsquo;s pay could not cover
+                                    ({overDeducted.length} employee{overDeducted.length === 1 ? '' : 's'},
+                                    net floored at zero &mdash; still owed)</td>
+                                <td className="num">{money(grand.unrecovered)}</td>
+                            </tr>
+                            <tr className="lrecon-tot">
+                                <td>NET PAY as printed above</td>
+                                <td className="num">{money(grand.netPay)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div className="lrecon-who">
+                        {overDeducted.map(r => (
+                            <div key={r.key}>
+                                <b>{r.name}</b> ({r.dept}) &mdash; pay {money(r.totalSalary + r.fuel)},
+                                deductions {money(r.totalSalary + r.fuel + r.unrecovered)},
+                                short <b>{money(r.unrecovered)}</b>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <div className="lnetpay">
                 <span>NET PAYABLE:</span>
@@ -437,6 +514,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
             </div>
             <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>
                 {deptRows.length} department{deptRows.length === 1 ? '' : 's'} · {empCount} employees
+                {grand.unrecovered > 0 && <> · <b>{money(grand.unrecovered)}</b> of deductions not recovered</>}
             </div>
 
             <div className="lsigs">
@@ -516,6 +594,28 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
                 .ltbl tr.grandrow td { background: #111827; color: #fff; font-weight: 700; font-size: 9.5px; padding: 4px 6px;
                                         white-space: nowrap; overflow: visible; text-overflow: clip; }
                 .grand-tbl { margin-top: 4px; }
+                /* A row whose deductions came to more than the month paid: its
+                   Net is a floor, not a figure. Tinted so it is found by eye
+                   on a hundred-line sheet. */
+                .ltbl tr.overdeducted td { background: #fff1f2; }
+                .ltbl tr.overdeducted td.net { background: #fee2e2; }
+                .ltbl .short { color: #b91c1c; font-style: normal; font-weight: 700; }
+                .ltbl tr.grandrow .short { color: #fca5a5; }
+                /* The total rows are nowrap for the money columns; the shortfall
+                   note needs to wrap inside its cell instead of running over. */
+                .ltbl tr.subtot td.remarks, .ltbl tr.grandrow td.remarks {
+                    white-space: normal; overflow-wrap: break-word; word-break: break-word;
+                    font-style: normal;
+                }
+                .lrecon { margin-top: 8px; border: 1px solid #94a3b8; break-inside: avoid; page-break-inside: avoid; }
+                .lrecon-head { background: #f1f3f5; font-size: 8.5px; font-weight: 700; letter-spacing: 0.4px;
+                               padding: 3px 6px; border-bottom: 1px solid #94a3b8; }
+                .lrecon-tbl { width: 100%; border-collapse: collapse; }
+                .lrecon-tbl td { font-size: 8.5px; padding: 2px 6px; border-bottom: 1px solid #e2e8f0; }
+                .lrecon-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 110px; }
+                .lrecon-tbl tr.lrecon-tot td { font-weight: 700; border-top: 1px solid #94a3b8; border-bottom: none; }
+                .lrecon-who { font-size: 8px; color: #7f1d1d; padding: 3px 6px; border-top: 1px solid #94a3b8;
+                              background: #fff1f2; }
                 .lnetpay { display: flex; gap: 10px; align-items: baseline; justify-content: flex-end;
                            margin-top: 10px; padding-right: 8px; font-weight: 700; font-size: 12px; white-space: nowrap; }
                 .lnetpay-amt { font-size: 15px; white-space: nowrap; }

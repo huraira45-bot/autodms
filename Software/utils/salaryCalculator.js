@@ -134,6 +134,15 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
 
     const net = Math.max(0, r2(additions - deductions));
 
+    // What the floor above swallowed. When somebody's advance, hold and fines
+    // come to more than the month paid, you can only recover what there is —
+    // net stops at zero and the rest is still owed. The deduction columns go
+    // on showing the FULL amounts, so without this figure a salary sheet's
+    // total row cannot be cross-footed: additions − deductions comes out
+    // lower than the net it prints (owner report 2026-10-05, September
+    // combined sheet, short by 2,457).
+    const unrecovered = r2(Math.max(0, deductions - additions));
+
     return {
         monthDays, baseDays, paidDays, effectiveWorkingDays, empWorkingDays, monthWorkingDays,
         basic, prorated, fuel, adjustment,
@@ -141,7 +150,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
         lateRate, absentRate,
         absentFine, lateFine, advance, messRate, messDeduction: messDeduc, manualFine, eobi, hold, tax,
         deductions,
-        net,
+        net, unrecovered,
     };
 }
 

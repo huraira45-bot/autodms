@@ -53,14 +53,25 @@ function rowFor(r, indexInSheet) {
         absent, num(c.absentFine), num(att.LateMinutes), num(c.lateFine), leave, num(c.advance),
         workDays, num(c.messDeduction), num(c.manualFine), num(c.eobi), num(c.tax), num(c.hold),
         num(c.net), num(num(c.hold) + num(c.net) + num(c.advance)), 0,
-        r.Entry?.Remarks || '',
+        // Deductions the month's pay could not cover are floored out of Net
+        // but still totalled in full in their own columns, so the row is said
+        // on the line itself — same wording as the print (owner report
+        // 2026-10-05).
+        [r.Entry?.Remarks || '',
+         num(c.unrecovered) > 0 ? `deductions exceeded pay by ${num(c.unrecovered)} — still owed` : '']
+            .filter(Boolean).join(' · '),
     ];
 }
 
-const totalRow = (label, rows) => {
+// REMARKS is the last column and is blank on a total row, so the shortfall
+// note goes there — the Excel keeps the same 24 columns as the print.
+const REMARKS_COL = HEADERS.length - 1;
+
+const totalRow = (label, rows, unrecovered = 0) => {
     const out = new Array(HEADERS.length).fill('');
     out[0] = label;
     for (const i of SUM_COLS) out[i] = +rows.reduce((s, r) => s + (Number(r[i]) || 0), 0).toFixed(2);
+    if (unrecovered > 0) out[REMARKS_COL] = `+${+unrecovered.toFixed(2)} not recovered`;
     return out;
 };
 
@@ -86,23 +97,47 @@ function buildSalarySheetWorkbook(sheet, businessName = 'Changan Multan Motors')
     // Departments in the order the sheet already returns them (the query
     // orders by department then Sr No), with unassigned employees last.
     const groups = new Map();
+    const overDeducted = [];
     (sheet.rows || []).forEach((r, i) => {
         const name = r.DepartmentName || 'UNASSIGNED';
-        if (!groups.has(name)) groups.set(name, []);
-        groups.get(name).push(rowFor(r, i));
+        if (!groups.has(name)) groups.set(name, { rows: [], unrecovered: 0 });
+        const g = groups.get(name);
+        g.rows.push(rowFor(r, i));
+        const short = num(r.Calc?.unrecovered);
+        if (short > 0) {
+            g.unrecovered += short;
+            overDeducted.push({ name: r.Name, dept: name, unrecovered: short });
+        }
     });
 
     const everyRow = [];
-    for (const [name, rows] of groups) {
+    let grandUnrecovered = 0;
+    for (const [name, g] of groups) {
         aoa.push([`${String(name).toUpperCase()} DEPARTMENT`]);
         aoa.push(HEADERS);
-        rows.forEach(r => { aoa.push(r); everyRow.push(r); });
-        aoa.push(totalRow(`${String(name).toUpperCase()} DEPARTMENT TOTAL`, rows));
+        g.rows.forEach(r => { aoa.push(r); everyRow.push(r); });
+        aoa.push(totalRow(`${String(name).toUpperCase()} DEPARTMENT TOTAL`, g.rows, g.unrecovered));
         aoa.push([]);
+        grandUnrecovered += g.unrecovered;
     }
 
-    if (everyRow.length) aoa.push(totalRow('GRAND TOTAL', everyRow));
+    if (everyRow.length) aoa.push(totalRow('GRAND TOTAL', everyRow, grandUnrecovered));
     else aoa.push([`No employees in this payroll for ${monthLabel(sheet.monthId)}.`]);
+
+    // How the grand total gets from its own columns to the Net it prints.
+    if (grandUnrecovered > 0) {
+        const impliedNet = +(everyRow.reduce((s, r) =>
+            s + Number(r[6]) + Number(r[7])
+              - Number(r[9]) - Number(r[11]) - Number(r[13]) - Number(r[15])
+              - Number(r[16]) - Number(r[17]) - Number(r[18]) - Number(r[19]), 0).toFixed(2));
+        aoa.push([]);
+        aoa.push(['HOW THE GRAND TOTAL ADDS UP']);
+        aoa.push(['Total salary + fuel, less every deduction column', impliedNet]);
+        aoa.push([`Add back: deductions the month's pay could not cover (${overDeducted.length} employee${overDeducted.length === 1 ? '' : 's'}, net floored at zero — still owed)`, +grandUnrecovered.toFixed(2)]);
+        aoa.push(['NET PAY as printed above', +(impliedNet + grandUnrecovered).toFixed(2)]);
+        aoa.push([]);
+        overDeducted.forEach(e => aoa.push([`${e.name} (${e.dept}) — short`, e.unrecovered]));
+    }
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     // Enough width to read names and account titles without dragging columns.

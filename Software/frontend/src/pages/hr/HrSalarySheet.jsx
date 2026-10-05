@@ -168,23 +168,31 @@ export default function HrSalarySheet() {
                 if (!idx.has(name)) { idx.set(name, cat.groups.length); cat.groups.push({ name, rows: [] }); }
                 cat.groups[idx.get(name)].rows.push(r);
             });
+            // Net is floored at zero per employee, so Additions − Deductions
+            // does not reach it whenever somebody's deductions came to more
+            // than the month paid. That shortfall is carried alongside rather
+            // than left to look like an arithmetic error (owner report
+            // 2026-10-05).
+            const short = rs => rs.reduce((s, r) => s + (Number(r.Calc.unrecovered) || 0), 0);
             cat.groups = cat.groups.map(g => ({
                 ...g,
                 additions:  g.rows.reduce((s, r) => s + r.Calc.additions, 0),
                 deductions: g.rows.reduce((s, r) => s + r.Calc.deductions, 0),
                 net:        g.rows.reduce((s, r) => s + r.Calc.net, 0),
+                unrecovered: short(g.rows),
             }));
             cat.count      = rows.length;
             cat.additions  = rows.reduce((s, r) => s + r.Calc.additions, 0);
             cat.deductions = rows.reduce((s, r) => s + r.Calc.deductions, 0);
             cat.net        = rows.reduce((s, r) => s + r.Calc.net, 0);
+            cat.unrecovered = short(rows);
         });
         return cats;
     }, [sheet]);
 
     const totals = useMemo(() => {
         if (!sheet) return null;
-        const t = { additions: 0, deductions: 0, net: 0,
+        const t = { additions: 0, deductions: 0, net: 0, unrecovered: 0,
                     // Owner ask 2026-08-04: segregate the single Deductions
                     // total into its components — same 8 fields
                     // salaryCalculator.js already sums into r.Calc.deductions.
@@ -198,6 +206,7 @@ export default function HrSalarySheet() {
             t.additions  += r.Calc.additions;
             t.deductions += r.Calc.deductions;
             t.net        += r.Calc.net;
+            t.unrecovered += Number(r.Calc.unrecovered) || 0;
             t.absentFine    += r.Calc.absentFine;
             t.lateFine      += r.Calc.lateFine;
             t.advance       += r.Calc.advance;
@@ -256,6 +265,13 @@ export default function HrSalarySheet() {
                         <Kpi label="Additions" value={fmt(totals?.additions)} />
                         <Kpi label="Deductions" value={fmt(totals?.deductions)} tone="down" />
                         <Kpi label="Net Payable" value={fmt(totals?.net)} tone="net" />
+                        {/* Additions − Deductions only reaches Net Payable once this
+                            is added back: deductions the month's pay could not cover,
+                            floored out of net and still owed (owner report 2026-10-05). */}
+                        {totals?.unrecovered > 0 && (
+                            <Kpi label="Not Recovered" value={fmt(totals.unrecovered)} tone="down"
+                                 sub="deductions over pay — still owed" />
+                        )}
                         <Kpi label="Bank — EOBI"     value={fmt(totals?.bankEobi)}     sub={`${totals?.bankEobiCount} emp`} />
                         <Kpi label="Cash — EOBI"     value={fmt(totals?.cashEobi)}     sub={`${totals?.cashEobiCount} emp`} />
                         <Kpi label="Cash — Non-EOBI" value={fmt(totals?.cashNon)}      sub={`${totals?.cashNonCount} emp`} />
@@ -343,6 +359,7 @@ export default function HrSalarySheet() {
                                     <span className="hr-cat-name">{cat.label}</span>
                                     <span className="hr-cat-meta">
                                         {cat.count} employees · Net <b>{fmt(cat.net)}</b> · Add {fmt(cat.additions)} · Ded {fmt(cat.deductions)}
+                                        {cat.unrecovered > 0 && <> · Not recovered {fmt(cat.unrecovered)}</>}
                                     </span>
                                 </div>
                                 {cat.groups.map(g => (
@@ -353,6 +370,7 @@ export default function HrSalarySheet() {
                                     <span className="hr-dept-count">{g.rows.length} employees</span>
                                     <span className="hr-dept-tot">
                                         Net: <b>{fmt(g.net)}</b> · Add: {fmt(g.additions)} · Ded: {fmt(g.deductions)}
+                                        {g.unrecovered > 0 && <> · Not recovered: {fmt(g.unrecovered)}</>}
                                     </span>
                                 </header>
                                 {!collapsedDepts[`${cat.key}:${g.name}`] && (
