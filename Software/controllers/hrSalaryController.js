@@ -227,7 +227,7 @@ async function buildSheet(pool, monthId) {
                    e.HasFuelAllowance, e.FuelAllowance,
                    e.HasMess, e.MessAmount,
                    e.HasCustomLateFine, e.CustomLateFineAmount,
-                   e.IsPaidByBank, e.BankAccountNumber,
+                   e.IsPaidByBank, e.BankPortionAmount, e.BankAccountNumber,
                    e.PaymentBankGLCAID, pb.GLTitle AS PaymentBankTitle, pb.GLCode AS PaymentBankCode,
                    e.EmployeeGLID, gl.GLCode AS AccountCode, gl.GLTitle AS AccountTitle,
                    e.IsActive
@@ -258,7 +258,8 @@ async function buildSheet(pool, monthId) {
             EmployeeID: emp.EmployeeID, SrNo: emp.SrNo, Name: emp.EmployeeName,
             Designation: emp.Designation, DepartmentName: emp.DepartmentName,
             AccountCode: emp.AccountCode, AccountTitle: emp.AccountTitle,
-            IsPaidByBank: !!emp.IsPaidByBank, BankAccountNumber: emp.BankAccountNumber,
+            IsPaidByBank: !!emp.IsPaidByBank, BankPortionAmount: emp.BankPortionAmount,
+            BankAccountNumber: emp.BankAccountNumber,
             PaymentBankGLCAID: emp.PaymentBankGLCAID, PaymentBankTitle: emp.PaymentBankTitle, PaymentBankCode: emp.PaymentBankCode,
             Employee: emp,
             Attendance: attByE.get(emp.EmployeeID) || null,
@@ -601,7 +602,12 @@ exports.postDisbursement = async (req, res) => {
 
         const cashGL = await loadRoleOrThrow('CASH_BOOK');
 
-        const buildAndPost = async (label, postingType, creditGL, rows) => {
+        // `amountOf` is how much of this employee's net belongs to THIS
+        // voucher. Before splits that was always the whole net; now an
+        // employee paid part to the bank and part in cash appears in two
+        // vouchers, for the two halves (owner ask 2026-10-05). The two still
+        // add up to the net, so the total disbursed is unchanged.
+        const buildAndPost = async (label, postingType, creditGL, rows, amountOf = (r) => r.Calc.net) => {
             if (!rows.length) return null;
             if (alreadyKeys.has(postingType)) {
                 throw new Error(`${label} has already been disbursed this month. Reverse that voucher first if you need to redo it.`);
@@ -609,7 +615,7 @@ exports.postDisbursement = async (req, res) => {
             const lines = [];
             let total = 0;
             for (const row of rows) {
-                const amt = r2(row.Calc.net);
+                const amt = r2(amountOf(row));
                 if (amt <= 0) continue;
                 lines.push({ glCAID: row.Employee.EmployeeGLID, dr: amt, cr: 0, narration: `Salary ${MonthID} paid — ${row.Name}` });
                 total = r2(total + amt);
@@ -632,25 +638,33 @@ exports.postDisbursement = async (req, res) => {
             return { voucherNo, voucherId, totalAmount: total, employees: rows.length, label };
         };
 
-        const nonEobiRows  = payable.filter(r => !r.Employee.HasEOBI);
-        const eobiCashRows = payable.filter(r => r.Employee.HasEOBI && !r.Employee.IsPaidByBank);
-        const eobiBankRows = payable.filter(r => r.Employee.HasEOBI && r.Employee.IsPaidByBank);
+        // Grouped by where the money actually goes, not by who the employee
+        // is. Someone on a split is in both a cash voucher and a bank one.
+        // The cash vouchers stay separated by EOBI because that is how the
+        // cash letters are handed out; the bank ones are separated by bank,
+        // because each bank only sees its own list. The posting-type keys are
+        // unchanged, so the "already disbursed" guard still recognises them.
+        const cashOf = (r) => r.Calc.cashShare;
+        const bankOf = (r) => r.Calc.bankShare;
+        const nonEobiRows  = payable.filter(r => !r.Employee.HasEOBI && r.Calc.cashShare > 0);
+        const eobiCashRows = payable.filter(r =>  r.Employee.HasEOBI && r.Calc.cashShare > 0);
+        const bankRows     = payable.filter(r =>  r.Calc.bankShare > 0);
 
         const results = [];
-        const nonEobiRes = await buildAndPost('Non-EOBI Cash', 'PAY_CASH_NONEOBI', cashGL, nonEobiRows);
+        const nonEobiRes = await buildAndPost('Non-EOBI Cash', 'PAY_CASH_NONEOBI', cashGL, nonEobiRows, cashOf);
         if (nonEobiRes) results.push(nonEobiRes);
-        const eobiCashRes = await buildAndPost('EOBI Cash', 'PAY_CASH_EOBI', cashGL, eobiCashRows);
+        const eobiCashRes = await buildAndPost('EOBI Cash', 'PAY_CASH_EOBI', cashGL, eobiCashRows, cashOf);
         if (eobiCashRes) results.push(eobiCashRes);
 
         const byBank = new Map();
-        for (const row of eobiBankRows) {
+        for (const row of bankRows) {
             const key = row.Employee.PaymentBankGLCAID;
             if (!byBank.has(key)) byBank.set(key, []);
             byBank.get(key).push(row);
         }
         for (const [bankGL, rows] of byBank) {
             const bankTitle = rows[0]?.PaymentBankTitle || `Bank #${bankGL}`;
-            const bankRes = await buildAndPost(`EOBI Bank — ${bankTitle}`, `PAY_BANK_${bankGL}`, bankGL, rows);
+            const bankRes = await buildAndPost(`Bank — ${bankTitle}`, `PAY_BANK_${bankGL}`, bankGL, rows, bankOf);
             if (bankRes) results.push(bankRes);
         }
 
@@ -661,7 +675,9 @@ exports.postDisbursement = async (req, res) => {
             ok: true,
             vouchers: results,
             totalPaid: r2(results.reduce((s, r) => s + r.totalAmount, 0)),
-            totalEmployees: results.reduce((s, r) => s + r.employees, 0),
+            // Headcount, not voucher lines — somebody on a split appears in
+            // two vouchers and must not be counted twice.
+            totalEmployees: payable.length,
         });
     } catch (err) {
         try { await tx.rollback(); } catch {}

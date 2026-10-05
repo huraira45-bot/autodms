@@ -29,7 +29,10 @@ export default function HrBankLetterPrint() {
 
     const byBank = useMemo(() => {
         if (!sheet) return [];
-        const rows = sheet.rows.filter(r => r.IsPaidByBank && r.Calc.net > 0);
+        // An employee paid part bank / part cash is on this letter for the
+        // bank half only (owner ask 2026-10-05) -- the bank is being told what
+        // to transfer, which is bankShare, not the whole net.
+        const rows = sheet.rows.filter(r => r.Calc.bankShare > 0);
         const groups = [];
         const idx = new Map();
         rows.forEach(r => {
@@ -50,8 +53,8 @@ export default function HrBankLetterPrint() {
             });
             return {
                 ...g,
-                deptGroups: deptGroups.map(dg => ({ ...dg, subtotal: dg.rows.reduce((s, r) => s + r.Calc.net, 0) })),
-                bankTotal: g.rows.reduce((s, r) => s + r.Calc.net, 0),
+                deptGroups: deptGroups.map(dg => ({ ...dg, subtotal: dg.rows.reduce((s, r) => s + r.Calc.bankShare, 0) })),
+                bankTotal: g.rows.reduce((s, r) => s + r.Calc.bankShare, 0),
                 empCount: g.rows.length,
             };
         });
@@ -107,7 +110,7 @@ export default function HrBankLetterPrint() {
                                             <td className="emp">{r.Name}</td>
                                             <td>{r.Designation || '—'}</td>
                                             <td className="acct">{r.BankAccountNumber || '—'}</td>
-                                            <td className="num">{fmt(r.Calc.net)}</td>
+                                            <td className="num">{fmt(r.Calc.bankShare)}</td>
                                         </tr>
                                     ))}
                                     <tr className="subtot">

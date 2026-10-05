@@ -27,7 +27,10 @@ export default function HrCashLetterPrint() {
     const categories = useMemo(() => {
         if (!sheet) return [];
         const cats = [];
-        const matches = (r, t) => !r.IsPaidByBank && r.Calc.net > 0 &&
+        // Whoever gets cash this month, for the cash part only. Somebody on
+        // a bank/cash split is here for their cash half and on the bank
+        // letter for the other (owner ask 2026-10-05).
+        const matches = (r, t) => r.Calc.cashShare > 0 &&
             (t === 'eobi' ? r.Employee.HasEOBI : !r.Employee.HasEOBI);
         for (const t of ['eobi', 'noneobi']) {
             if (type && type !== t) continue;
@@ -43,9 +46,9 @@ export default function HrCashLetterPrint() {
             cats.push({
                 key: t,
                 label: t === 'eobi' ? 'EOBI Payroll' : 'Non-EOBI Payroll',
-                subtotal: rows.reduce((s, r) => s + r.Calc.net, 0),
+                subtotal: rows.reduce((s, r) => s + r.Calc.cashShare, 0),
                 empCount: rows.length,
-                groups: groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + r.Calc.net, 0) })),
+                groups: groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + r.Calc.cashShare, 0) })),
             });
         }
         return cats;
@@ -103,7 +106,7 @@ export default function HrCashLetterPrint() {
                                             <td className="emp">{r.Name}</td>
                                             <td>{r.Designation || '—'}</td>
                                             <td className="cnic">{r.Employee.CNICno || '—'}</td>
-                                            <td className="num">{fmt(r.Calc.net)}</td>
+                                            <td className="num">{fmt(r.Calc.cashShare)}</td>
                                             <td></td>
                                         </tr>
                                     ))}

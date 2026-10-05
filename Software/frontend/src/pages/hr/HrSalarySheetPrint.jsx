@@ -12,6 +12,18 @@ const money = (n) => Math.round(Number(n) || 0).toLocaleString('en-PK');
 const days  = (n) => { const v = Number(n) || 0; return Number.isInteger(v) ? String(v) : v.toFixed(1); };
 const monthLabel = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
 
+// What this sheet is paying out per employee. The untyped combined sheet is
+// the whole net; a typed one is a pay run for one route, so it carries only
+// that route's share (owner ask 2026-10-05).
+const shareFor = (r, type) => {
+    switch (type) {
+        case 'eobi-bank': return r.Calc.bankShare;
+        case 'eobi-cash':
+        case 'noneobi':   return r.Calc.cashShare;
+        default:          return r.Calc.net;
+    }
+};
+
 // ?type=eobi-bank → EOBI employees paid via bank
 // ?type=eobi-cash → EOBI employees paid via cash
 // ?type=noneobi   → non-EOBI employees (always cash)
@@ -38,12 +50,15 @@ export default function HrSalarySheetPrint() {
     // Owner ask 2026-07-29: don't render EOBI / Non-EOBI labels on the sheet.
     const grouped = useMemo(() => {
         if (!sheet) return [];
+        // Owner ask 2026-10-05: an employee can be paid part bank, part cash.
+        // A typed sheet is a pay-run list, so it shows whoever has money
+        // coming by that route -- a split person is on both the bank sheet
+        // and the cash one, for their two halves.
         const rows = sheet.rows.filter(r => {
             const eobi = !!r.Employee.HasEOBI;
-            const bank = !!r.IsPaidByBank;
             switch (type) {
-                case 'eobi-bank': return eobi && bank;
-                case 'eobi-cash': return eobi && !bank;
+                case 'eobi-bank': return eobi && r.Calc.bankShare > 0;
+                case 'eobi-cash': return eobi && r.Calc.cashShare > 0;
                 case 'noneobi':   return !eobi;
                 case 'eobi':      return eobi;
                 default:          return true;
@@ -56,7 +71,7 @@ export default function HrSalarySheetPrint() {
             if (!idx.has(name)) { idx.set(name, groups.length); groups.push({ name, rows: [] }); }
             groups[idx.get(name)].rows.push(r);
         });
-        return groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + r.Calc.net, 0) }));
+        return groups.map(g => ({ ...g, subtotal: g.rows.reduce((s, r) => s + shareFor(r, type), 0) }));
     }, [sheet, type]);
 
     if (err)    return <div style={{ padding: 40, color: '#b91c1c' }}>Cannot print: {err}</div>;
@@ -130,8 +145,8 @@ export default function HrSalarySheetPrint() {
                                     <td className="num">{fmt(r.Calc.eobi)}</td>
                                     <td className="num">{fmt(r.Calc.tax)}</td>
                                     <td className="num">{fmt(r.Calc.hold)}</td>
-                                    <td className="num net">{fmt(r.Calc.net)}</td>
-                                    <td>{r.IsPaidByBank ? 'Bank' : 'Cash'}</td>
+                                    <td className="num net">{fmt(shareFor(r, type))}</td>
+                                    <td>{r.Calc.isSplit ? 'Bank + Cash' : r.Calc.bankShare > 0 ? 'Bank' : 'Cash'}</td>
                                     <td className="remarks">{r.Entry?.Remarks || ''}</td>
                                 </tr>
                             ))}

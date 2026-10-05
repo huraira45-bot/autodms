@@ -130,14 +130,25 @@ exports.setActive = async (req, res) => {
 
 // @route   PATCH /api/employees/:id/salary-settings
 // Updates the HR/salary-specific columns added by migration 095.
-// Owner rule 2026-07-29: non-EOBI employees are always paid in cash, so
-// IsPaidByBank is force-cleared server-side whenever HasEOBI is off.
+//
+// Owner rule 2026-07-29 said non-EOBI employees are always paid in cash, and
+// IsPaidByBank was force-cleared whenever HasEOBI was off. The owner dropped
+// that on 2026-10-05: whether somebody is on EOBI and how they are handed
+// their money are two different questions.
+//
+// A bank portion (migration 150) is the fixed amount that goes to the bank
+// each month, with the rest paid in cash. It only means anything when the
+// employee is paid by bank at all, so it is cleared alongside the account
+// number when they are not.
 exports.setSalarySettings = async (req, res) => {
   try {
     const pool = await getPool();
     const b = req.body || {};
     const hasEobi = !!b.HasEOBI;
-    const isBank  = hasEobi && !!b.IsPaidByBank;   // never bank without EOBI
+    const isBank  = !!b.IsPaidByBank;
+    const bankPortion = isBank && b.BankPortionAmount != null && b.BankPortionAmount !== ''
+      ? Math.max(0, Number(b.BankPortionAmount) || 0)
+      : null;
     await pool.request()
       .input('id',  sql.Int,          parseInt(req.params.id))
       .input('bs',  sql.Decimal(18,2), b.BasicSalary != null ? Number(b.BasicSalary) : null)
@@ -150,6 +161,7 @@ exports.setSalarySettings = async (req, res) => {
       .input('cl',  sql.Bit,          b.HasCustomLateFine ? 1 : 0)
       .input('cv',  sql.Decimal(10,4), Number(b.CustomLateFineAmount) || 0)
       .input('bk',  sql.Bit,          isBank ? 1 : 0)
+      .input('bp',  sql.Decimal(18,2), bankPortion)
       .input('ba',  sql.NVarChar(100), isBank ? (b.BankAccountNumber || null) : null)
       .input('pbg', sql.Int,          isBank && b.PaymentBankGLCAID ? parseInt(b.PaymentBankGLCAID) : null)
       .input('sn',  sql.NVarChar(50),  b.SrNo || null)
@@ -165,6 +177,7 @@ exports.setSalarySettings = async (req, res) => {
                      HasCustomLateFine    = @cl,
                      CustomLateFineAmount = @cv,
                      IsPaidByBank         = @bk,
+                     BankPortionAmount    = @bp,
                      BankAccountNumber    = @ba,
                      PaymentBankGLCAID    = @pbg,
                      SrNo                 = @sn,

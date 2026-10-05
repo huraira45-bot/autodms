@@ -38,6 +38,10 @@
  *      Attendance page)
  *   2. monthlySetting.WorkingDays (same for every employee that month)
  *   3. calendar days in the month
+ *
+ * How the net is handed over (owner ask 2026-10-05): employee.IsPaidByBank
+ * plus employee.BankPortionAmount split it into bankShare + cashShare, which
+ * always add back up to Net. See the comment at the split itself.
  */
 
 function daysInMonth(monthId) {
@@ -143,6 +147,25 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
     // combined sheet, short by 2,457).
     const unrecovered = r2(Math.max(0, deductions - additions));
 
+    // How the net is handed over (owner ask 2026-10-05). An employee can be
+    // paid partly into the bank and partly in cash: BankPortionAmount is a
+    // fixed figure that goes to the bank each month and the rest is cash.
+    //
+    //   not paid by bank            -> all cash
+    //   paid by bank, no portion    -> all bank (what "Bank" has always meant)
+    //   paid by bank, portion set   -> that much to the bank, remainder cash
+    //
+    // A short month is the case that matters: if the net comes to less than
+    // the bank portion, the bank takes what there is and cash gets nothing.
+    // The transfer is a standing mandate; the cash top-up is the variable
+    // part, so that is the one that absorbs a shortfall.
+    const bankPortion = Number(emp.BankPortionAmount) || 0;
+    let bankShare, cashShare;
+    if (!emp.IsPaidByBank)      { bankShare = 0;                        cashShare = net; }
+    else if (bankPortion > 0)   { bankShare = r2(Math.min(net, bankPortion)); cashShare = r2(net - bankShare); }
+    else                        { bankShare = net;                      cashShare = 0; }
+    const isSplit = bankShare > 0 && cashShare > 0;
+
     return {
         monthDays, baseDays, paidDays, effectiveWorkingDays, empWorkingDays, monthWorkingDays,
         basic, prorated, fuel, adjustment,
@@ -151,6 +174,7 @@ function computeNetPay({ employee, attendance, entry, global, monthly, monthId }
         absentFine, lateFine, advance, messRate, messDeduction: messDeduc, manualFine, eobi, hold, tax,
         deductions,
         net, unrecovered,
+        bankPortion, bankShare, cashShare, isSplit,
     };
 }
 

@@ -41,7 +41,14 @@ export default function HrSalarySlipPrint() {
                     </tr>
                     <tr>
                         <td><b>Designation:</b> {row.Designation || '—'}</td>
-                        <td><b>Payment:</b> {row.IsPaidByBank ? `Bank (${row.BankAccountNumber || '—'})` : 'Cash'}</td>
+                        {/* A split says both halves, so the employee can see what
+                            lands in the account and what to collect in cash
+                            (owner ask 2026-10-05). */}
+                        <td><b>Payment:</b> {
+                            row.Calc?.isSplit
+                                ? `Bank ${fmt(row.Calc.bankShare)} (${row.BankAccountNumber || '—'}) + Cash ${fmt(row.Calc.cashShare)}`
+                                : row.IsPaidByBank ? `Bank (${row.BankAccountNumber || '—'})` : 'Cash'
+                        }</td>
                         <td><b>GL:</b> {row.AccountCode ? `${row.AccountCode} — ${row.AccountTitle || ''}` : '—'}</td>
                     </tr>
                 </tbody>

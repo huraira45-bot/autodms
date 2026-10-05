@@ -35,13 +35,31 @@ export default function HrEmployeeSalary() {
         axios.get('/api/accounts/banks').then(r => setBanks(r.data || [])).catch(() => {});
     }, []);
 
+    // Pay mode is three choices stored in two columns. Bank and Split both
+    // mean "some of this goes to the bank", which is what IsPaidByBank has
+    // always meant; the portion is what tells them apart.
+    //   cash  -> IsPaidByBank 0, no portion
+    //   bank  -> IsPaidByBank 1, no portion (the whole net)
+    //   split -> IsPaidByBank 1, a fixed amount to the bank, rest in cash
+    const payModeOf = (id, e) => {
+        if (!val(id, 'IsPaidByBank', e.IsPaidByBank)) return 'cash';
+        return Number(val(id, 'BankPortionAmount', e.BankPortionAmount) || 0) > 0 ? 'split' : 'bank';
+    };
+
     const patch = (id, field, value) => setDrafts(prev => {
         const next = { ...(prev[id] || {}), [field]: value };
-        // Owner rule 2026-07-29: non-EOBI employees are ALWAYS paid in cash.
-        // Unchecking EOBI must force pay-mode back to Cash automatically so
-        // the UI can't send an invalid combination to the backend.
-        if (field === 'HasEOBI' && !value) { next.IsPaidByBank = false; next.PaymentBankGLCAID = null; }
-        if (field === 'IsPaidByBank' && !value) next.PaymentBankGLCAID = null;
+        // Owner dropped the EOBI rule on 2026-10-05 — turning EOBI off no
+        // longer forces pay mode back to Cash.
+        if (field === 'IsPaidByBank' && !value) { next.PaymentBankGLCAID = null; next.BankPortionAmount = null; }
+        return { ...prev, [id]: next };
+    });
+
+    const setPayMode = (id, mode) => setDrafts(prev => {
+        const next = { ...(prev[id] || {}) };
+        next.IsPaidByBank = mode !== 'cash';
+        if (mode === 'cash')  { next.PaymentBankGLCAID = null; next.BankPortionAmount = null; }
+        if (mode === 'bank')  { next.BankPortionAmount = null; }
+        if (mode === 'split' && !Number(next.BankPortionAmount || 0)) next.BankPortionAmount = '';
         return { ...prev, [id]: next };
     });
     const val = (id, key, fallback) => (drafts[id] && key in drafts[id]) ? drafts[id][key] : (employees.find(e => e.EmployeeID === id)?.[key] ?? fallback);
@@ -62,6 +80,8 @@ export default function HrEmployeeSalary() {
             HasCustomLateFine:    val(id, 'HasCustomLateFine',   !!emp.HasCustomLateFine),
             CustomLateFineAmount: val(id, 'CustomLateFineAmount', emp.CustomLateFineAmount || 0),
             IsPaidByBank:         val(id, 'IsPaidByBank',        !!emp.IsPaidByBank),
+            // '' clears it — that is how a split goes back to plain Bank.
+            BankPortionAmount:    val(id, 'BankPortionAmount',   emp.BankPortionAmount ?? ''),
             BankAccountNumber:    val(id, 'BankAccountNumber',   emp.BankAccountNumber || ''),
             PaymentBankGLCAID:    val(id, 'PaymentBankGLCAID',   emp.PaymentBankGLCAID || null),
             EmployeeGLID:         val(id, 'EmployeeGLID',        emp.EmployeeGLID || null),
@@ -137,7 +157,8 @@ export default function HrEmployeeSalary() {
                                             <th className="num" style={{ width: 90 }}>Mess/day</th>
                                             <th style={{ width: 55, textAlign: 'center' }}>Cust. Late</th>
                                             <th className="num" style={{ width: 80 }}>Late/min</th>
-                                            <th style={{ width: 75 }}>Pay Mode</th>
+                                            <th style={{ width: 95 }}>Pay Mode</th>
+                                            <th className="num" style={{ width: 95 }}>To Bank /mo</th>
                                             <th style={{ width: 140 }}>Bank Acct #</th>
                                             <th style={{ width: 200 }}>Pay Bank</th>
                                             <th style={{ width: 220 }}>Salary GL</th>
@@ -208,20 +229,30 @@ export default function HrEmployeeSalary() {
                                                             className="hr-inp num"/>
                                                     </td>
                                                     <td>
-                                                        {(() => {
-                                                            const eobiOn = !!val(id, 'HasEOBI', e.HasEOBI);
-                                                            const bankOn = !!val(id, 'IsPaidByBank', e.IsPaidByBank);
-                                                            return (
-                                                                <select disabled={!canEdit || !eobiOn}
-                                                                    value={bankOn ? '1' : '0'}
-                                                                    onChange={ev => patch(id, 'IsPaidByBank', ev.target.value === '1')}
-                                                                    className="hr-inp"
-                                                                    title={eobiOn ? '' : 'Non-EOBI employees are always paid in cash'}>
-                                                                    <option value="0">Cash</option>
-                                                                    <option value="1">Bank</option>
-                                                                </select>
-                                                            );
-                                                        })()}
+                                                        {/* Owner ask 2026-10-05: an employee can be paid part
+                                                            bank, part cash. The EOBI gate that used to grey
+                                                            this out is gone — EOBI and how somebody is handed
+                                                            their money are separate questions. */}
+                                                        <select disabled={!canEdit}
+                                                            value={payModeOf(id, e)}
+                                                            onChange={ev => setPayMode(id, ev.target.value)}
+                                                            className="hr-inp">
+                                                            <option value="cash">Cash</option>
+                                                            <option value="bank">Bank</option>
+                                                            <option value="split">Bank + Cash</option>
+                                                        </select>
+                                                    </td>
+                                                    <td className="num">
+                                                        {/* Fixed amount to the bank each month; the rest of the
+                                                            net is paid in cash. In a month where the net comes
+                                                            to less than this, the bank takes what there is. */}
+                                                        <input type="number" step="0.01" min={0}
+                                                            disabled={!canEdit || payModeOf(id, e) !== 'split'}
+                                                            value={val(id, 'BankPortionAmount', e.BankPortionAmount ?? '') ?? ''}
+                                                            onChange={ev => patch(id, 'BankPortionAmount', ev.target.value)}
+                                                            placeholder={payModeOf(id, e) === 'bank' ? 'all' : ''}
+                                                            title="Fixed amount transferred to the bank each month — the rest is paid in cash"
+                                                            className="hr-inp num"/>
                                                     </td>
                                                     <td>
                                                         <input type="text" disabled={!canEdit || !val(id, 'IsPaidByBank', e.IsPaidByBank)}

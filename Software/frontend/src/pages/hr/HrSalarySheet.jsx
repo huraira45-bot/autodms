@@ -201,7 +201,7 @@ export default function HrSalarySheet() {
                     // salaryCalculator.js already sums into r.Calc.deductions.
                     absentFine: 0, lateFine: 0, advance: 0, manualFine: 0,
                     eobiDeduction: 0, hold: 0, tax: 0, messDeduction: 0,
-                    bankEobi: 0, bankEobiCount: 0,
+                    bank: 0, bankCount: 0,
                     cashEobi: 0, cashEobiCount: 0,
                     cashNon:  0, cashNonCount:  0,
                     empCount: 0 };
@@ -220,11 +220,17 @@ export default function HrSalarySheet() {
             t.messDeduction += r.Calc.messDeduction;
             if (r.Calc.net <= 0) return;
             t.empCount++;
+            // These three mirror the disbursement vouchers exactly: one cash
+            // voucher per EOBI category, and the bank side grouped by bank.
+            // Somebody paid part bank / part cash (owner ask 2026-10-05) is
+            // counted in two of them, for their two halves — which is also
+            // how they appear in the vouchers.
             const eobi = !!r.Employee.HasEOBI;
-            if (r.IsPaidByBank && eobi)  { t.bankEobi += r.Calc.net; t.bankEobiCount++; }
-            else if (!r.IsPaidByBank && eobi) { t.cashEobi += r.Calc.net; t.cashEobiCount++; }
-            else if (!r.IsPaidByBank && !eobi) { t.cashNon += r.Calc.net; t.cashNonCount++; }
-            // (bank + non-EOBI is disallowed — see Employee Salary Settings)
+            if (r.Calc.bankShare > 0) { t.bank += r.Calc.bankShare; t.bankCount++; }
+            if (r.Calc.cashShare > 0) {
+                if (eobi) { t.cashEobi += r.Calc.cashShare; t.cashEobiCount++; }
+                else      { t.cashNon  += r.Calc.cashShare; t.cashNonCount++; }
+            }
         });
         return t;
     }, [sheet]);
@@ -275,7 +281,7 @@ export default function HrSalarySheet() {
                             <Kpi label="Not Recovered" value={fmt(totals.unrecovered)} tone="down"
                                  sub="deductions over pay — still owed" />
                         )}
-                        <Kpi label="Bank — EOBI"     value={fmt(totals?.bankEobi)}     sub={`${totals?.bankEobiCount} emp`} />
+                        <Kpi label="Bank"            value={fmt(totals?.bank)}         sub={`${totals?.bankCount} emp`} />
                         <Kpi label="Cash — EOBI"     value={fmt(totals?.cashEobi)}     sub={`${totals?.cashEobiCount} emp`} />
                         <Kpi label="Cash — Non-EOBI" value={fmt(totals?.cashNon)}      sub={`${totals?.cashNonCount} emp`} />
                         <Kpi label="Late / min" value={fmt(sheet.effectiveLateRate)} />
@@ -454,11 +460,18 @@ export default function HrSalarySheet() {
                                                             <td className="num muted">{fmt(r.Calc.eobi)}</td>
                                                             <td className="num net"><b>{fmt(r.Calc.net)}</b></td>
                                                             <td>
-                                                                {r.Employee.HasEOBI
-                                                                    ? (r.IsPaidByBank
-                                                                        ? <span className="hr-pill hr-pill-bank">Bank · EOBI</span>
-                                                                        : <span className="hr-pill hr-pill-cash">Cash · EOBI</span>)
-                                                                    : <span className="hr-pill hr-pill-cash-non">Cash · Non-EOBI</span>}
+                                                                {/* EOBI no longer decides the pay mode (owner ask
+                                                                    2026-10-05), so the two are shown separately. */}
+                                                                {r.Calc.isSplit
+                                                                    ? <span className="hr-pill hr-pill-bank"
+                                                                            title={`${fmt(r.Calc.bankShare)} to bank, ${fmt(r.Calc.cashShare)} cash`}>
+                                                                        Bank {fmt(r.Calc.bankShare)} + Cash
+                                                                      </span>
+                                                                    : r.Calc.bankShare > 0
+                                                                        ? <span className="hr-pill hr-pill-bank">Bank</span>
+                                                                        : <span className={`hr-pill ${r.Employee.HasEOBI ? 'hr-pill-cash' : 'hr-pill-cash-non'}`}>Cash</span>}
+                                                                {' '}
+                                                                <span className="hr-pill hr-pill-cash-non">{r.Employee.HasEOBI ? 'EOBI' : 'Non-EOBI'}</span>
                                                             </td>
                                                             <td>
                                                                 <input type="text" disabled={!canEdit}
