@@ -94,41 +94,69 @@ exports.listSalaryEntries = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
+// The one salary-entry row per employee per month. Two screens write to it —
+// the Salary Sheet and the Mess Sheet — and each one only owns a few of the
+// columns.
+//
+// Owner report 2026-10-05: a mess rate kept disappearing after it was set.
+// This used to overwrite EVERY column on every save, so a screen that didn't
+// send a field silently wiped it: the Salary Sheet never sent
+// MessAmountOverride (added later, in migration 111), so the next save of an
+// advance or a fine set the rate back to NULL and the deduction quietly fell
+// back to the employee's standing MessAmount.
+//
+// Only the fields the caller actually sends are written now. An absent field
+// is left exactly as it is; a field sent as '' or null is still cleared on
+// purpose, which is how a rate or a PaidDays override is removed.
+const SALARY_ENTRY_FIELDS = {
+    Advance:            { type: () => sql.Decimal(18, 2),   absent: 0,    parse: v => Number(v) || 0 },
+    Fine:               { type: () => sql.Decimal(18, 2),   absent: 0,    parse: v => Number(v) || 0 },
+    ManualFineRemarks:  { type: () => sql.NVarChar(300),    absent: null, parse: v => v || null },
+    Hold:               { type: () => sql.Decimal(18, 2),   absent: 0,    parse: v => Number(v) || 0 },
+    MessDays:           { type: () => sql.Decimal(6, 2),    absent: 0,    parse: v => Number(v) || 0 },
+    MessAmountOverride: { type: () => sql.Decimal(10, 2),   absent: null, parse: nullableNumber },
+    PaidDays:           { type: () => sql.Decimal(6, 2),    absent: null, parse: nullableNumber },
+    LateFineRate:       { type: () => sql.Decimal(10, 4),   absent: null, parse: nullableNumber },
+    Adjustment:         { type: () => sql.Decimal(18, 2),   absent: 0,    parse: v => Number(v) || 0 },
+    Tax:                { type: () => sql.Decimal(18, 2),   absent: 0,    parse: v => Number(v) || 0 },
+    Remarks:            { type: () => sql.NVarChar(sql.MAX), absent: null, parse: v => v || null },
+};
+
+function nullableNumber(v) {
+    return (v === null || v === undefined || v === '') ? null : Number(v);
+}
+
 exports.saveSalaryEntry = async (req, res) => {
     const b = req.body || {};
     if (!b.EmployeeID || !b.MonthID) return res.status(400).json({ error: 'EmployeeID and MonthID required' });
     try {
         const pool = await getPool();
-        await pool.request()
-            .input('e',   sql.Int,         b.EmployeeID)
-            .input('m',   sql.Char(7),     b.MonthID)
-            .input('ad',  sql.Decimal(18,2), Number(b.Advance) || 0)
-            .input('fi',  sql.Decimal(18,2), Number(b.Fine) || 0)
-            .input('mfr', sql.NVarChar(300), b.ManualFineRemarks || null)
-            .input('ho',  sql.Decimal(18,2), Number(b.Hold) || 0)
-            .input('md',  sql.Decimal(6,2),  Number(b.MessDays) || 0)
-            .input('mao', sql.Decimal(10,2), b.MessAmountOverride == null || b.MessAmountOverride === '' ? null : Number(b.MessAmountOverride))
-            .input('pd',  sql.Decimal(6,2),  b.PaidDays == null || b.PaidDays === '' ? null : Number(b.PaidDays))
-            .input('lfr', sql.Decimal(10,4), b.LateFineRate == null || b.LateFineRate === '' ? null : Number(b.LateFineRate))
-            .input('aj',  sql.Decimal(18,2), Number(b.Adjustment) || 0)
-            .input('tx',  sql.Decimal(18,2), Number(b.Tax) || 0)
-            .input('rm',  sql.NVarChar(sql.MAX), b.Remarks || null)
-            .input('un',  sql.NVarChar(100), req.user?.userName || null)
-            .query(`
-                MERGE hr_SalaryEntries AS tgt
-                USING (SELECT @e AS EmployeeID, @m AS MonthID) AS src
-                   ON tgt.EmployeeID = src.EmployeeID AND tgt.MonthID = src.MonthID
-                WHEN MATCHED THEN UPDATE SET Advance=@ad, Fine=@fi, ManualFineRemarks=@mfr,
-                                             Hold=@ho, MessDays=@md, MessAmountOverride=@mao,
-                                             PaidDays=@pd, LateFineRate=@lfr,
-                                             Adjustment=@aj, Tax=@tx, Remarks=@rm,
-                                             UpdatedAt=GETDATE(), UpdatedByName=@un
-                WHEN NOT MATCHED THEN INSERT (EmployeeID, MonthID, Advance, Fine, ManualFineRemarks,
-                                              Hold, MessDays, MessAmountOverride, PaidDays, LateFineRate,
-                                              Adjustment, Tax, Remarks, UpdatedByName)
-                                      VALUES (@e, @m, @ad, @fi, @mfr, @ho, @md, @mao, @pd, @lfr, @aj, @tx, @rm, @un);
-            `);
-        res.json({ ok: true });
+        const rq = pool.request()
+            .input('e',  sql.Int,          b.EmployeeID)
+            .input('m',  sql.Char(7),      b.MonthID)
+            .input('un', sql.NVarChar(100), req.user?.userName || null);
+
+        const cols = Object.keys(SALARY_ENTRY_FIELDS);
+        const sent = cols.filter(k => Object.prototype.hasOwnProperty.call(b, k));
+        for (const k of cols) {
+            const f = SALARY_ENTRY_FIELDS[k];
+            // A row that does not exist yet is inserted with every column, so
+            // each one still needs a parameter — the field's own default when
+            // the caller said nothing about it.
+            rq.input(k, f.type(), sent.includes(k) ? f.parse(b[k]) : f.absent);
+        }
+
+        const setList = sent.map(k => `${k}=@${k}`).join(', ');
+        await rq.query(`
+            MERGE hr_SalaryEntries AS tgt
+            USING (SELECT @e AS EmployeeID, @m AS MonthID) AS src
+               ON tgt.EmployeeID = src.EmployeeID AND tgt.MonthID = src.MonthID
+            WHEN MATCHED THEN UPDATE SET ${setList ? setList + ',' : ''}
+                                         UpdatedAt=GETDATE(), UpdatedByName=@un
+            WHEN NOT MATCHED THEN INSERT (EmployeeID, MonthID, ${cols.join(', ')}, UpdatedByName)
+                                  VALUES (@e, @m, ${cols.map(k => '@' + k).join(', ')}, @un);
+        `);
+        res.json({ ok: true, updated: sent });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 

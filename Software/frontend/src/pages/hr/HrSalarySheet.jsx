@@ -87,6 +87,9 @@ export default function HrSalarySheet() {
             Fine:     cur.Fine       ?? row.Entry?.Fine       ?? 0,
             Hold:     cur.Hold       ?? row.Entry?.Hold       ?? 0,
             MessDays: cur.MessDays   ?? row.Entry?.MessDays   ?? 0,
+            // The mess RATE is set on the Mess Sheet, not here — but it has to
+            // be echoed back or this save wipes it (owner report 2026-10-05).
+            MessAmountOverride: row.Entry?.MessAmountOverride ?? null,
             PaidDays: cur.PaidDays  === '' ? null : (cur.PaidDays ?? row.Entry?.PaidDays ?? null),
             LateFineRate: cur.LateFineRate === '' ? null : (cur.LateFineRate ?? row.Entry?.LateFineRate ?? null),
             Adjustment: cur.Adjustment ?? row.Entry?.Adjustment ?? 0,
