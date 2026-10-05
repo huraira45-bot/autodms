@@ -237,10 +237,15 @@ function ActionModal({ row, kind, onClose, onSaved }) {
     const [comments, setComments] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
-    // A finalized voucher is never voided — the admin cannot execute it. A
-    // linked voucher is the exception: it was already in the ledger, and
-    // voiding only removes the link.
-    const finalized = !row.IsLinkedVoucher && !!row.VoucherStatus && row.VoucherStatus !== 'Draft';
+    // A finalized voucher is never voided — the admin cannot execute it. Two
+    // exceptions. A linked voucher was already in the ledger before the
+    // booking existed, so voiding only removes the link. And a REVERSED one
+    // has already been corrected in the ledger — the accounting is done, the
+    // payment is just still sitting on the booking (owner report 2026-10-02,
+    // BRV-2010: unfinalized instead of voided, and then nothing to click).
+    const reversed  = !row.IsLinkedVoucher && row.VoucherStatus === 'Reversed';
+    const finalized = !row.IsLinkedVoucher && !!row.VoucherStatus
+        && row.VoucherStatus !== 'Draft' && row.VoucherStatus !== 'Reversed';
 
     const titles = {
         amApprove: `Approve void — ${row.BookingNo}`,
@@ -262,9 +267,11 @@ function ActionModal({ row, kind, onClose, onSaved }) {
                 onSaved('Rejected — the payment stands.');
             } else if (kind === 'execute') {
                 const { data } = await axios.post(`${API}/sales/payment-voids/${row.VoidID}/admin-execute`, { AdminNotes: comments });
-                onSaved(data.VoucherAction === 'draft_deleted'
-                    ? 'Payment voided — its draft voucher was removed.'
-                    : 'Payment voided.');
+                onSaved({
+                    draft_deleted:    'Payment voided — its draft voucher was removed.',
+                    already_reversed: 'Payment voided — the reversed voucher was left as it is.',
+                    link_removed:     'Payment voided — the voucher was left as it is, only the link removed.',
+                }[data.VoucherAction] || 'Payment voided.');
             } else if (kind === 'withdraw') {
                 await axios.post(`${API}/sales/payment-voids/${row.VoidID}/withdraw`);
                 onSaved('Request withdrawn.');
@@ -289,6 +296,12 @@ function ActionModal({ row, kind, onClose, onSaved }) {
                         Voucher {row.VoucherNo} has been finalized ({row.VoucherStatus}). A finalized voucher is never
                         voided — request an unfinalize for it, or post a reversing entry in Accounting. Reject this
                         request instead.
+                    </div>
+                ) : reversed ? (
+                    <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
+                        Voucher {row.VoucherNo} has already been reversed in the ledger, so the accounting is done.
+                        This step only takes the payment off the booking: it is marked Voided and the paid total
+                        drops by PKR {fmtN(row.Amount)}. The voucher itself is left exactly as it is.
                     </div>
                 ) : row.IsLinkedVoucher ? (
                     <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
