@@ -831,27 +831,7 @@ function UploadDocModal({ bookingId, onClose, onSaved }) {
 
     return (
         <Shell title="Upload Booking Document" onClose={onClose}>
-            {/* Which account the customer is on now, so it is clear this is a
-                move and not a first-time link (owner ask 2026-10-02). */}
-            {currentGLCode && (
-                <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 10 }}>
-                    Currently on <code style={{ fontFamily: 'monospace' }}>{currentGLCode}</code>
-                    {currentGLTitle ? ` · ${currentGLTitle}` : ''}. Picking another moves the
-                    customer onto it. Entries already posted stay where they are.
-                </div>
-            )}
-
             {err && <Err>{err}</Err>}
-
-            {inUse && (
-                <div style={{ margin: '8px 0', padding: '9px 11px', borderRadius: 6, fontSize: '0.8rem',
-                              background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }}>
-                    <strong>{inUse.GLCode}</strong> has {inUse.Entries} posted
-                    entr{inUse.Entries === 1 ? 'y' : 'ies'} on it, balance{' '}
-                    {Number(inUse.Balance).toLocaleString('en-PK', { minimumFractionDigits: 2 })}.
-                    That balance stays on that account. Press the button again to go ahead anyway.
-                </div>
-            )}
             <p style={{ fontSize: '0.85rem', color: '#475569' }}>
                 Attach supporting paperwork. <strong>PBO</strong> and <strong>CNIC</strong> are mandatory before this booking can be allocated.
             </p>
@@ -1509,7 +1489,27 @@ function CoaLinkModal({ partyId, partyName, currentGLCode, currentGLTitle, onClo
 
     return (
         <Shell title={`Link ${partyName} to Chart of Accounts`} onClose={onClose}>
+            {/* Which account the customer is on now, so it is clear this is a
+                move and not a first-time link (owner ask 2026-10-02). */}
+            {currentGLCode && (
+                <div style={{ fontSize: '0.8rem', color: '#475569', marginBottom: 10 }}>
+                    Currently on <code style={{ fontFamily: 'monospace' }}>{currentGLCode}</code>
+                    {currentGLTitle ? ` · ${currentGLTitle}` : ''}. Picking another moves the
+                    customer onto it. Entries already posted stay where they are.
+                </div>
+            )}
+
             {err && <Err>{err}</Err>}
+
+            {inUse && (
+                <div style={{ margin: '8px 0', padding: '9px 11px', borderRadius: 6, fontSize: '0.8rem',
+                              background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }}>
+                    <strong>{inUse.GLCode}</strong> has {inUse.Entries} posted
+                    entr{inUse.Entries === 1 ? 'y' : 'ies'} on it, balance{' '}
+                    {Number(inUse.Balance).toLocaleString('en-PK', { minimumFractionDigits: 2 })}.
+                    That balance stays on that account. Press the button again to go ahead anyway.
+                </div>
+            )}
             <p style={{ fontSize: '0.85rem', color: '#475569', marginTop: 0 }}>
                 Each customer's vehicle account lives under <code>201002</code> "Customer Advances - Vehicle Parties". Pick an existing leaf or auto-create one.
             </p>
