@@ -49,6 +49,42 @@ function userHasBackdatePermission(req) {
         && req.user.permissions.includes('finance_voucher_backdate');
 }
 
+// Owner ask 2026-10-05: an admin changes the date on ANY voucher at any
+// time — any type, any date, reversing and reversed ones included. This one
+// is NOT implied by groupId 1: it moves money documents between accounting
+// periods with nothing else standing in the way, so it has to be a
+// permission that can be seen and taken away (migration 149 grants it to
+// admin). Every use of it is recorded in dms_VoucherDateChanges.
+function userCanSetAnyVoucherDate(req) {
+    return Array.isArray(req?.user?.permissions)
+        && req.user.permissions.includes('finance_voucher_date_any');
+}
+
+// Every voucher date change goes on the record — override or not. Never
+// allowed to fail the change itself; a lost audit row is worth less than a
+// half-applied correction.
+async function recordVoucherDateChange(pool, req, { row, newDate, reason, override }) {
+    try {
+        await pool.request()
+            .input('vid', sql.Int, row.VoucherID)
+            .input('vno', sql.NVarChar(50), row.VoucherNo || null)
+            .input('vt',  sql.NVarChar(30), row.VoucherType || null)
+            .input('st',  sql.NVarChar(20), row.Status || null)
+            .input('od',  sql.DateTime, new Date(row.VoucherDate))
+            .input('nd',  sql.DateTime, newDate)
+            .input('rs',  sql.NVarChar(500), reason || null)
+            .input('ov',  sql.Bit, override ? 1 : 0)
+            .input('by',  sql.Int, req?.user?.userId || null)
+            .input('bn',  sql.NVarChar(100), req?.user?.userName || null)
+            .query(`INSERT INTO dms_VoucherDateChanges
+                        (VoucherID, VoucherNo, VoucherType, VoucherStatus, OldDate, NewDate,
+                         Reason, UsedAdminOverride, ChangedBy, ChangedByName)
+                    VALUES (@vid, @vno, @vt, @st, @od, @nd, @rs, @ov, @by, @bn)`);
+    } catch (err) {
+        console.error('recordVoucherDateChange (change still applied):', err.message);
+    }
+}
+
 exports.addAccount = async (req, res) => {
     try {
         const { GLTitle, GLLevel, GLNature, isParent, ParentCode, ClassRoot } = req.body;
@@ -473,52 +509,71 @@ exports.searchVouchers = async (req, res) => {
 };
 
 // PUT /accounts/vouchers/:id — update a Draft voucher (header + lines). Rejects non-Draft.
-// PATCH /api/vouchers/:id/date — change ONLY the VoucherDate on a posted
-// JV. Opening balances / prior-period adjustments / accruals live in JVs
-// and legitimately need a non-today date; owner ask 2026-07-07. The
-// today-only policy still applies to CPV/CRV/BPV/BRV (physical cash/bank
-// movement) and to fresh voucher creation. Lines are NOT touched.
+// PATCH /api/vouchers/:id/date — change ONLY the VoucherDate. Opening
+// balances / prior-period adjustments / accruals live in JVs and
+// legitimately need a non-today date; owner ask 2026-07-07. The today-only
+// policy still applies to CPV/CRV/BPV/BRV (physical cash/bank movement) and
+// to fresh voucher creation.
+//
+// Owner ask 2026-10-05: `finance_voucher_date_any` lifts every one of those
+// restrictions — any type, any date, a reversing voucher, a reversed one.
+// Lines are NOT touched either way, and the change is recorded.
 exports.updateVoucherDate = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { VoucherDate } = req.body;
+        const { VoucherDate, Reason } = req.body;
         if (!VoucherDate) return res.status(400).json({ error: 'VoucherDate is required.' });
         const d = new Date(VoucherDate);
         if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Voucher date is invalid.' });
 
         const pool = await getPool();
         const head = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT v.VoucherID, v.Status, v.ReversesVoucherID, v.VoucherDate, t.Title AS VoucherType
+            .query(`SELECT v.VoucherID, v.VoucherNo, v.Status, v.ReversesVoucherID, v.VoucherDate,
+                           t.Title AS VoucherType
                     FROM   data_FinanceVoucherInfo v
                     JOIN   GLVoucherType t ON v.VoucherTypeID = t.Voucherid
                     WHERE  v.VoucherID = @id`);
         if (!head.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
         const row = head.recordset[0];
-        if (row.ReversesVoucherID) {
-            return res.status(400).json({ error: 'Cannot change the date on a reversing voucher.' });
-        }
-        if (row.Status !== 'Posted' && row.Status !== 'Draft') {
-            return res.status(400).json({ error: `Voucher is in status "${row.Status}" and cannot be edited.` });
-        }
 
-        const isJV = row.VoucherType === 'JV';
-        if (!isJV) {
-            // CPV/CRV/BPV/BRV are gated behind finance_voucher_backdate and
-            // must sit inside the last 5 days (both original + new).
-            if (!userHasBackdatePermission(req)) {
-                return res.status(403).json({ error: `Editing ${row.VoucherType} dates requires the "Edit posted CPV/CRV/BPV/BRV" permission.` });
+        const isJV   = row.VoucherType === 'JV';
+        const anyDate = userCanSetAnyVoucherDate(req);
+        // What the ordinary rules would have refused. Recorded so an override
+        // can be told apart from a routine JV re-date when someone reads the
+        // log back.
+        const override = anyDate && (
+            !!row.ReversesVoucherID
+            || (row.Status !== 'Posted' && row.Status !== 'Draft')
+            || (!isJV && (!userHasBackdatePermission(req)
+                          || !!checkVoucherDateWithinBackdateWindow(row.VoucherDate)
+                          || !!checkVoucherDateWithinBackdateWindow(d))));
+
+        if (!anyDate) {
+            if (row.ReversesVoucherID) {
+                return res.status(400).json({ error: 'Cannot change the date on a reversing voucher.' });
             }
-            const originalErr = checkVoucherDateWithinBackdateWindow(row.VoucherDate);
-            if (originalErr) return res.status(409).json({ error: `This voucher was posted ${originalErr.replace(/^Edit is only allowed for vouchers /, '')}. Reverse it if a correction is needed.` });
-            const newErr = checkVoucherDateWithinBackdateWindow(d);
-            if (newErr) return res.status(400).json({ error: newErr });
+            if (row.Status !== 'Posted' && row.Status !== 'Draft') {
+                return res.status(400).json({ error: `Voucher is in status "${row.Status}" and cannot be edited.` });
+            }
+            if (!isJV) {
+                // CPV/CRV/BPV/BRV are gated behind finance_voucher_backdate and
+                // must sit inside the window (both original + new).
+                if (!userHasBackdatePermission(req)) {
+                    return res.status(403).json({ error: `Editing ${row.VoucherType} dates requires the "Edit posted CPV/CRV/BPV/BRV" permission, or "Change any voucher's date".` });
+                }
+                const originalErr = checkVoucherDateWithinBackdateWindow(row.VoucherDate);
+                if (originalErr) return res.status(409).json({ error: `This voucher was posted ${originalErr.replace(/^Edit is only allowed for vouchers /, '')}. Reverse it if a correction is needed.` });
+                const newErr = checkVoucherDateWithinBackdateWindow(d);
+                if (newErr) return res.status(400).json({ error: newErr });
+            }
         }
 
         await pool.request()
             .input('id', sql.Int, id)
             .input('dt', sql.DateTime, d)
             .query(`UPDATE data_FinanceVoucherInfo SET VoucherDate = @dt WHERE VoucherID = @id`);
-        res.json({ message: 'Voucher date updated', VoucherID: id });
+        await recordVoucherDateChange(pool, req, { row, newDate: d, reason: Reason, override });
+        res.json({ message: 'Voucher date updated', VoucherID: id, UsedAdminOverride: override });
     } catch (err) {
         console.error('updateVoucherDate:', err);
         res.status(500).json({ error: err.message });

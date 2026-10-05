@@ -349,23 +349,28 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         setMsg(null);
     };
 
-    // ---------- Change Date (JV only) ----------
+    // ---------- Change Date ----------
     // Opening balances / prior-period adjustments / accruals are always JVs
-    // and legitimately need a non-today date. Backend endpoint enforces
-    // JV-only + non-reversing + finance_vouchers:edit permission.
-    const [dateEditOpen, setDateEditOpen] = useState(false);
-    const [dateEditVal,  setDateEditVal]  = useState('');
+    // and legitimately need a non-today date. Backend enforces JV-only +
+    // non-reversing + finance_vouchers:edit — unless the user holds
+    // `finance_voucher_date_any`, which lifts all of it (owner ask
+    // 2026-10-05) and records the reason given here.
+    const [dateEditOpen,   setDateEditOpen]   = useState(false);
+    const [dateEditVal,    setDateEditVal]    = useState('');
+    const [dateEditReason, setDateEditReason] = useState('');
 
     const openDateEdit = () => {
         if (!active) return;
         setDateEditVal(new Date(active.VoucherDate).toISOString().split('T')[0]);
+        setDateEditReason('');
         setDateEditOpen(true);
     };
     const submitDateChange = async () => {
         if (!active || !dateEditVal) return;
         setBusy(true);
         try {
-            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/date`, { VoucherDate: dateEditVal });
+            await axios.patch(`${API_BASE}/accounts/vouchers/${active.VoucherID}/date`,
+                { VoucherDate: dateEditVal, Reason: dateEditReason.trim() || undefined });
             setDateEditOpen(false);
             await loadVoucher(active.VoucherID);
             setMsg({ kind: 'ok', text: 'Voucher date updated.' });
@@ -525,8 +530,13 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             && status === 'Posted'
             && !active.ReversesVoucherID
             && isWithinBackdateWindow(active.VoucherDate);
-        const canChangeDate = canEdit && !isReversed && !active.ReversesVoucherID
-            && (isJV || rpBackdateOk);
+        // Owner ask 2026-10-05: an admin with `finance_voucher_date_any`
+        // re-dates anything — any type, any date, reversing and reversed
+        // vouchers included. Everyone else keeps the JV / backdate-window
+        // rules. The server re-checks and records either way.
+        const canSetAnyDate = hasModule('finance_voucher_date_any');
+        const canChangeDate = canEdit && (canSetAnyDate
+            || (!isReversed && !active.ReversesVoucherID && (isJV || rpBackdateOk)));
         // Department tag — reporting-only, no GL impact, editable any time
         // on CPV/BPV/JV regardless of status (also how the historical
         // segregation form fixes up old vouchers one at a time).
@@ -609,29 +619,54 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         )}
                         {canChangeDate && (
                             <button type="button" className="erp-btn" onClick={openDateEdit} disabled={busy}
-                                title="Journal Vouchers can be back-dated (openings, prior-period adjustments).">
+                                title={canSetAnyDate
+                                    ? 'You can set any date on any voucher. Every change is recorded.'
+                                    : 'Journal Vouchers can be back-dated (openings, prior-period adjustments).'}>
                                 <Edit3 size={14} /> Change Date
                             </button>
                         )}
                         {dateEditOpen && (() => {
-                            // JV allows any date; CPV/CRV/BPV/BRV is capped to the 5-day window.
+                            // An admin with finance_voucher_date_any has no bounds at all.
+                            // Otherwise: JV allows any date; CPV/CRV/BPV/BRV is capped to
+                            // the backdate window.
                             const isJVRow = active.VoucherTypeCode === 'JV';
                             const cutoffDate = new Date(); cutoffDate.setDate(cutoffDate.getDate() - BACKDATE_WINDOW_DAYS);
-                            const minStr = isJVRow ? undefined : cutoffDate.toISOString().split('T')[0];
-                            const maxStr = isJVRow ? undefined : todayStr;
+                            const minStr = (canSetAnyDate || isJVRow) ? undefined : cutoffDate.toISOString().split('T')[0];
+                            const maxStr = (canSetAnyDate || isJVRow) ? undefined : todayStr;
+                            // Moving a voucher out of the period it was posted in changes
+                            // closed months, and a future date puts it in the ledger ahead
+                            // of time. Say so rather than let it happen quietly.
+                            const movingPeriod = dateEditVal && active.VoucherDate
+                                && new Date(dateEditVal).toISOString().slice(0, 7)
+                                   !== new Date(active.VoucherDate).toISOString().slice(0, 7);
+                            const future = dateEditVal && dateEditVal > todayStr;
                             return (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 8px', border: '1px solid var(--erp-border)', borderRadius: 4, background: 'var(--erp-surface-alt)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 8px', border: '1px solid var(--erp-border)', borderRadius: 4, background: 'var(--erp-surface-alt)', flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: 12, color: 'var(--erp-text-muted)' }}>New date:</span>
                                 <input type="date" value={dateEditVal}
                                        min={minStr} max={maxStr}
                                        onChange={e => setDateEditVal(e.target.value)}
                                        style={{ padding: '2px 6px', fontSize: 12 }} />
+                                {canSetAnyDate && (
+                                    <input type="text" value={dateEditReason}
+                                           onChange={e => setDateEditReason(e.target.value)}
+                                           placeholder="Why? (goes on the record)"
+                                           style={{ padding: '2px 6px', fontSize: 12, minWidth: 200 }} />
+                                )}
                                 <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={submitDateChange} disabled={busy || !dateEditVal}>
                                     {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
                                 </button>
                                 <button type="button" className="erp-btn erp-btn-sm" onClick={() => setDateEditOpen(false)} disabled={busy}>
                                     Cancel
                                 </button>
+                                {(future || movingPeriod) && (
+                                    <span style={{ fontSize: 11, color: '#b45309', width: '100%' }}>
+                                        {future ? 'That date is in the future — the voucher will sit in the ledger ahead of time. '
+                                                : ''}
+                                        {movingPeriod ? 'This moves the voucher into a different month, so both months’ reports change.'
+                                                      : ''}
+                                    </span>
+                                )}
                             </div>
                             );
                         })()}
