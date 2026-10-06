@@ -50,3 +50,4 @@ Thumbs.db
 # TLS for the tablet app — the private keys must never be committed, and each
 # server generates its own (scripts/make_tls_cert.js).
 Software/certs/
+Software/scripts/data/vehicle_model_map.tsv

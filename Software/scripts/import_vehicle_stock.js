@@ -33,10 +33,12 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { sql, getPool } = require('../config/db');
 
 const APPLY = process.argv.includes('--apply');
+const WRITE_MAP = process.argv.includes('--write-map');
 const fileArg = process.argv.indexOf('--file');
 const FILE = fileArg > -1 && process.argv[fileArg + 1]
     ? path.resolve(process.argv[fileArg + 1])
     : path.join(__dirname, 'data', 'vehicle_stock_2026_10_06.tsv');
+const MAP_FILE = path.join(__dirname, 'data', 'vehicle_model_map.tsv');
 
 // "KARVAAN POWER PLUS 1.2L (UG)" and "KARVAAN POWER PLUS UG 1.2L" are the same
 // car typed twice. Strip everything that is not a letter or digit and sort the
@@ -67,6 +69,12 @@ const parseDate = (s) => {
 };
 
 const STATUS = { 'IN STOCK': 'AtDealer', 'INSTOCK': 'AtDealer', 'TRANSIT': 'InTransit' };
+
+const label = (v) => {
+    const model = String(v.ModelName || '').trim();
+    const variant = String(v.VariantName || '').trim();
+    return (model && !norm(variant).startsWith(norm(model))) ? `${model} ${variant}` : variant;
+};
 
 function readSheet(file) {
     const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(l => l.trim());
@@ -101,27 +109,72 @@ function readSheet(file) {
         // variant name alone, since the sheet uses both shapes.
         const byBag = new Map();
         for (const v of variants) {
-            for (const label of [`${v.ModelName || ''} ${v.VariantName}`, v.VariantName, v.VariantCode]) {
-                const k = bag(label);
+            for (const name of [label(v), v.VariantName, v.VariantCode]) {
+                const k = bag(name);
                 if (k && !byBag.has(k)) byBag.set(k, v);
             }
         }
 
-        const match = (modelText) => {
+        // A SUGGESTION ONLY. The first dry run on live matched SHERPA POWER
+        // PICKUP to KARVAAN POWER PLUS at 60% and KARVAAN POWER COMFORT to
+        // KARVAAN POWER PLUS at 80%, because the words they share outnumber
+        // the one word that tells them apart. No similarity score can know
+        // that PLUS and COMFORT are different cars, so nothing is imported on
+        // a score -- the map file below is what decides.
+        const suggest = (modelText) => {
             const exact = byBag.get(bag(modelText));
-            if (exact) return { variant: exact, how: 'exact', score: 1 };
-            let best = null, bestScore = 0, tied = false;
+            if (exact) return { variant: exact, score: 1 };
+            let best = null, bestScore = 0;
             for (const v of variants) {
-                const score = Math.max(
-                    overlap(modelText, `${v.ModelName || ''} ${v.VariantName}`),
-                    overlap(modelText, v.VariantName));
-                if (score > bestScore) { best = v; bestScore = score; tied = false; }
-                else if (score === bestScore && score > 0 && best && v.VariantID !== best.VariantID) tied = true;
+                const score = Math.max(overlap(modelText, label(v)), overlap(modelText, v.VariantName));
+                if (score > bestScore) { best = v; bestScore = score; }
             }
-            if (!best || bestScore < 0.6) return { variant: null, how: 'no match', score: bestScore };
-            if (tied) return { variant: null, how: 'ambiguous', score: bestScore };
-            return { variant: best, how: bestScore === 1 ? 'contains' : 'closest', score: bestScore };
+            return { variant: bestScore > 0 ? best : null, score: bestScore };
         };
+
+        // sheet model -> VariantID, written by --write-map and edited by hand.
+        // A blank VariantID means "leave these rows alone for now".
+        const mapped = new Map();
+        if (fs.existsSync(MAP_FILE)) {
+            const lines = fs.readFileSync(MAP_FILE, 'utf8').split(/\r?\n/).filter(l => l.trim());
+            lines.shift();
+            for (const line of lines) {
+                const [sheetModel, variantId] = line.split('\t');
+                const id = parseInt(variantId);
+                if (sheetModel && Number.isFinite(id)) mapped.set(bag(sheetModel), id);
+            }
+        }
+        const byId = new Map(variants.map(v => [v.VariantID, v]));
+
+        if (WRITE_MAP) {
+            const distinct = [...new Set(rows.map(r => r.Model).filter(Boolean))];
+            const out = ['SheetModel\tVariantID\tSuggestion\tConfidence\tHowManyRows'];
+            for (const mdl of distinct) {
+                const sg = suggest(mdl);
+                const n = rows.filter(r => r.Model === mdl).length;
+                out.push([mdl, sg.variant ? sg.variant.VariantID : '',
+                          sg.variant ? label(sg.variant) : '(nothing close)',
+                          `${(sg.score * 100).toFixed(0)}%`, n].join('\t'));
+            }
+            fs.writeFileSync(MAP_FILE, out.join('\n') + '\n', 'utf8');
+            console.log(`Wrote ${MAP_FILE}\n`);
+            console.log('Every variant on this server, to choose from:');
+            for (const v of variants.sort((a, b) => label(a).localeCompare(label(b)))) {
+                console.log(`  ${String(v.VariantID).padStart(5)}  ${label(v)}`);
+            }
+            console.log('\nOpen the map, put the right VariantID against each sheet model, and');
+            console.log('leave the ID blank for any you do not want imported yet. Then re-run');
+            console.log('this script with no arguments to see the plan.');
+            process.exit(0);
+        }
+
+        if (!mapped.size) {
+            console.log('No model map yet. Run:\n\n    node scripts\\import_vehicle_stock.js --write-map\n');
+            console.log('That writes a file pairing each model in the sheet with a suggested');
+            console.log('variant, for you to correct. Nothing imports until it exists --');
+            console.log('a close name is not good enough to put a chassis against a variant.');
+            process.exit(1);
+        }
 
         const existingEngines = new Map();
         for (const v of (await pool.request().query(
@@ -148,9 +201,19 @@ function readSheet(file) {
             const status = STATUS[r.StockStatus.toUpperCase()];
             if (!status) { skipped.push({ r, why: `stock status "${r.StockStatus}" is not one I can map` }); continue; }
 
-            const m = match(r.Model);
-            if (!m.variant) { skipped.push({ r, why: `${m.how} for model "${r.Model}" (best ${(m.score * 100).toFixed(0)}%)` }); continue; }
-            if (m.how === 'closest') note(`model "${r.Model}" matched "${m.variant.ModelName || ''} ${m.variant.VariantName}" at ${(m.score * 100).toFixed(0)}% — check it`);
+            // Only the map decides. A model nobody has mapped is left alone.
+            const mapKey = bag(r.Model);
+            if (!mapped.has(mapKey)) {
+                const sg = suggest(r.Model);
+                skipped.push({ r, why: `model "${r.Model}" is not in the map`
+                    + (sg.variant ? ` (closest is ${sg.variant.VariantID} ${label(sg.variant)} at ${(sg.score * 100).toFixed(0)}% — confirm it in the map)` : '') });
+                continue;
+            }
+            const variant = byId.get(mapped.get(mapKey));
+            if (!variant) {
+                skipped.push({ r, why: `the map sends "${r.Model}" to VariantID ${mapped.get(mapKey)}, which does not exist` });
+                continue;
+            }
 
             // EngineNo is NOT NULL and UNIQUE, so blanks collide with each
             // other the moment there is more than one (caught rehearsing this
@@ -172,7 +235,7 @@ function readSheet(file) {
             seenEngines.add(eKey);
             planned.push({
                 chassis, engine, colour: r.Colour || null,
-                variant: m.variant, status,
+                variant, status,
                 receivedAt: parseDate(r.Date2) || parseDate(r.Date1),
                 marker: r.Marker || null, phone: r.Phone && r.Phone !== 'OVERFLOW' ? r.Phone : null,
                 line: r.__line,
@@ -182,7 +245,7 @@ function readSheet(file) {
         console.log(`Sheet: ${path.basename(FILE)} — ${rows.length} rows\n`);
         console.log(`WILL IMPORT (${planned.length})`);
         for (const p of planned) {
-            console.log(`  ${p.chassis.padEnd(20)} ${String(p.variant.VariantName).slice(0, 34).padEnd(34)} ${p.status.padEnd(10)} ${p.colour || ''}`);
+            console.log(`  ${p.chassis.padEnd(20)} ${label(p.variant).slice(0, 34).padEnd(34)} ${p.status.padEnd(10)} ${p.colour || ''}`);
         }
         if (skipped.length) {
             console.log(`\nSKIPPED (${skipped.length}) — nothing is guessed at`);
