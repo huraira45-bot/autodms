@@ -448,12 +448,18 @@ exports.makePayment = async (req, res) => {
 // Withholding-tax / write-off accounts the customer can deduct on their behalf
 // when settling an invoice. Resolved by GLCode (not system-account role) per the
 // codes the user dictated 2026-06-20.
+// Owner report 2026-10-06: "the tax and other things we subtract, can't find
+// their linkage in Accounting Setup." These were pinned to the GL codes the
+// owner dictated 2026-06-20 with no way to change them from the app. Each now
+// has a role that can be mapped there; the dictated code is only the fallback
+// for an installation that has not mapped it yet, so nothing moves until
+// somebody chooses to move it.
 const ADJUSTMENT_CODES = {
-    Salvage: { GLCode: '502002038', Label: 'Salvage Expense' },
-    WHTL:    { GLCode: '102005005', Label: 'Advance Tax on Service (WHT-Labour)' },
-    WHTP:    { GLCode: '102005006', Label: 'Advance Tax on Goods (WHT-Parts)' },
-    STWH:    { GLCode: '102005007', Label: 'Sales Tax Withheld' },
-    Short:   { GLCode: '502002039', Label: 'Shortage in RO (Service)' },
+    Salvage: { RoleKey: 'SALVAGE_EXPENSE',               GLCode: '502002038', Label: 'Salvage Expense' },
+    WHTL:    { RoleKey: 'WHT_RECEIVABLE_SERVICES',       GLCode: '102005005', Label: 'Advance Tax on Service (WHT-Labour)' },
+    WHTP:    { RoleKey: 'WHT_RECEIVABLE_GOODS',          GLCode: '102005006', Label: 'Advance Tax on Goods (WHT-Parts)' },
+    STWH:    { RoleKey: 'SALES_TAX_WITHHELD_RECEIVABLE', GLCode: '102005007', Label: 'Sales Tax Withheld' },
+    Short:   { RoleKey: 'RO_SHORTAGE_EXPENSE',           GLCode: '502002039', Label: 'Shortage in RO (Service)' },
 };
 
 // The mirror for Make Payment: tax WE withhold from a supplier and owe onward
@@ -467,10 +473,28 @@ const DEDUCTION_ROLES = {
     STW:  { RoleKey: 'SALES_TAX_WITHHELD_PAYABLE', Label: 'Sales Tax Withheld' },
 };
 
-async function resolveAdjustmentGL(pool, code) {
-    const r = await pool.request().input('c', sql.NVarChar(40), code)
+// resolveRole throws when a role has not been mapped, which is a normal state
+// here rather than an error -- both the fallback below and the Make Payment
+// deductions need to ask without blowing up.
+async function tryResolveRole(roleKey) {
+    try {
+        return await resolveRole(roleKey);
+    } catch (err) {
+        if (err.code === 'SYSTEM_ACCOUNT_NOT_CONFIGURED') return null;
+        throw err;
+    }
+}
+
+// Accounting Setup first, the dictated code second. When neither exists the
+// error names the role, because that is the thing the user can act on.
+async function resolveAdjustmentGL(pool, def) {
+    const mapped = await tryResolveRole(def.RoleKey);
+    if (mapped) return mapped;
+    const r = await pool.request().input('c', sql.NVarChar(40), def.GLCode)
         .query('SELECT TOP 1 GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND isParent=0');
-    if (!r.recordset.length) throw new Error(`GL leaf ${code} not found (or is a parent).`);
+    if (!r.recordset.length) {
+        throw new Error(`"${def.Label}" has no account mapped in Accounting Setup, and its default GL ${def.GLCode} does not exist.`);
+    }
     return r.recordset[0].GLCAID;
 }
 
@@ -563,7 +587,7 @@ async function postPayment(req, res, direction) {
             if (direction !== 'receive') {
                 return res.status(400).json({ error: `${type} is a Receive Payment adjustment. Use the deduction rows on Make Payment.` });
             }
-            const glcaid = await resolveAdjustmentGL(pool, def.GLCode);
+            const glcaid = await resolveAdjustmentGL(pool, def);
             adjustmentLines.push({
                 Type: type,
                 GLCAID: glcaid,
@@ -581,7 +605,7 @@ async function postPayment(req, res, direction) {
             if (direction !== 'make') {
                 return res.status(400).json({ error: `${def.Label} is a Make Payment deduction. Use the adjustment rows on Receive Payment.` });
             }
-            const glcaid = await resolveRole(def.RoleKey);
+            const glcaid = await tryResolveRole(def.RoleKey);
             if (!glcaid) {
                 return res.status(400).json({
                     error: `"${def.Label}" has no account mapped. Set it in Accounting Setup before withholding against it.`,

@@ -26,6 +26,15 @@ const ROLE_DEFS = [
     { key: 'WHT_PAYABLE_GOODS',        label: 'WHT Payable - Goods',      type: 'Liability', purpose: 'Income tax withheld from supplier payments on goods, s.153(1)(a), owed to FBR' },
     { key: 'WHT_PAYABLE_SERVICES',     label: 'WHT Payable - Services',   type: 'Liability', purpose: 'Income tax withheld from supplier payments on services, s.153(1)(b), owed to FBR' },
     { key: 'SALES_TAX_WITHHELD_PAYABLE', label: 'Sales Tax Withheld Payable', type: 'Liability', purpose: 'Sales tax withheld from a supplier invoice, owed to FBR' },
+    // The other half: tax a CUSTOMER withholds from us when settling, which we
+    // reclaim from FBR, plus the two write-offs allowed at settlement. These
+    // were pinned to dictated GL codes with no way to change them from the app
+    // (owner report 2026-10-06) -- mapping one here now wins over that default.
+    { key: 'WHT_RECEIVABLE_GOODS',     label: 'WHT Receivable - Goods',    type: 'Asset',     purpose: 'Advance tax a customer withheld on parts, claimable from FBR (default GL 102005006)' },
+    { key: 'WHT_RECEIVABLE_SERVICES',  label: 'WHT Receivable - Services', type: 'Asset',     purpose: 'Advance tax a customer withheld on labour, claimable from FBR (default GL 102005005)' },
+    { key: 'SALES_TAX_WITHHELD_RECEIVABLE', label: 'Sales Tax Withheld Receivable', type: 'Asset', purpose: 'Sales tax a customer withheld from our invoice (default GL 102005007)' },
+    { key: 'SALVAGE_EXPENSE',          label: 'Salvage Expense',           type: 'Expense',   purpose: 'Salvage deducted by a customer at settlement (default GL 502002038)' },
+    { key: 'RO_SHORTAGE_EXPENSE',      label: 'Shortage in RO (Service)',  type: 'Expense',   purpose: 'Shortfall written off when a job card is settled (default GL 502002039)' },
     { key: 'CHEQUES_ON_HAND',          label: 'Cheques on Hand',          type: 'Either',    purpose: 'Cheques received or issued before bank clearance' },
     // Sales module roles (migration 032). Admin maps each to a leaf account
     // in the 4xx / 5xx / 1xxxx / 2xxxx ranges via Accounting › System Accounts.
