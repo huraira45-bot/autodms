@@ -11,6 +11,7 @@
  *   Dr Trade Creditors (party subsidiary) — one line per allocated bill
  *   Dr Supplier Advance Paid (party tag) — excess if any
  *      Cr Cash Book / POS Clearing / Cheques on Hand / Bank
+ *      Cr WHT Payable / any deduction account (party tag) — withheld, not paid out
  *
  * Inputs:
  *   direction       — 'receive' | 'make'
@@ -69,12 +70,16 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
     if (totalAmount <= 0) {
         throw new Error('Payment total must be positive.');
     }
-    // Adjustments only make sense on the receive side and against a named party
-    if (adjAmount > 0 && direction !== 'receive') {
-        throw new Error('Tax/expense adjustments are only supported on Receive Payment.');
-    }
+    // Adjustments work both ways, and always against a named party (owner ask
+    // 2026-10-06). Receive: the customer withheld tax from us, so each one is a
+    // Dr — value we are owed or have borne. Make: we withhold tax from the
+    // supplier, so each one is a Cr — a liability to FBR. Either way the amount
+    // counts toward settling the document, because it is paid on the other
+    // party's behalf rather than kept.
     if (adjAmount > 0 && !party?.PartyID) {
-        throw new Error('Tax/expense adjustments require a named party (the customer whose WHT cert these belong to).');
+        throw new Error(direction === 'receive'
+            ? 'Tax/expense adjustments require a named party (the customer whose WHT cert these belong to).'
+            : 'Deductions require a named supplier (the party whose tax you are withholding).');
     }
 
     const allocatedSum = round2(allocations.reduce((a, x) => a + (Number(x.Amount) || 0), 0));
@@ -282,7 +287,32 @@ function buildPaymentJournalLines({ direction, party = null, walkInJobCardID = n
             });
         }
 
-        // (1b) Rounding SHORT-FALL — we paid the supplier less than allocated
+        // (1b) Cr deduction lines — withholding tax and anything else kept back
+        // from the supplier (owner ask 2026-10-06). The mirror of the receive
+        // side: there the customer withheld from us and the line is a Dr; here
+        // we withhold from the supplier and owe it onward, so it is a Cr. The
+        // supplier's bill is still settled in full above, because the money is
+        // paid to FBR on their behalf rather than kept. Tagged with PartyID so
+        // the WHT-payable subsidiary shows whose tax is sitting there, which is
+        // what a return is built from.
+        for (const adj of adjustments) {
+            const amt = round2(Number(adj.Amount) || 0);
+            if (amt <= 0) continue;
+            if (!adj.GLCAID) throw new Error(`Deduction ${adj.Type || ''} missing GLCAID`);
+            const narration = adj.Narration || `${adj.Type || 'Deduction'} — ${ref}`;
+            journalLines.push({
+                GLCAID: adj.GLCAID, Debit: 0, Credit: amt,
+                Narration: narration,
+                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
+            });
+            subsidiaryWrites.push({
+                GLCAID: adj.GLCAID, Debit: 0, Credit: amt,
+                PartyID: partyId, JobCardID: null, AllocatedToVoucherID: null,
+                Narration: narration,
+            });
+        }
+
+        // (1c) Rounding SHORT-FALL — we paid the supplier less than allocated
         //   (up to ROUNDING_TOLERANCE). Cr ROUNDING_ADJUSTMENT so the supplier
         //   bill is fully settled and the paisa becomes a small income for us.
         if (shortfallAmount > 0) {

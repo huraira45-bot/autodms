@@ -59,6 +59,13 @@ export default function MakePayment() {
     setSelectedParty(null); setPartySearch(''); setBills([]); setAdvanceBalance(0); setAllocations({});
   };
 
+  // Leaf accounts for the pick-any deduction rows.
+  useEffect(() => {
+    axios.get('/api/accounts/coa')
+      .then(r => setCoa((r.data || []).filter(x => !x.isParent && !x.IsParent)))
+      .catch(() => {});
+  }, []);
+
   const addPaymentLine = () => setPaymentLines([...paymentLines, { Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
   const removePaymentLine = (i) => setPaymentLines(paymentLines.filter((_, idx) => idx !== i));
   const updatePaymentLine = (i, field, value) => {
@@ -67,9 +74,23 @@ export default function MakePayment() {
     setPaymentLines(next);
   };
 
+  // Deductions kept back from the supplier (owner ask 2026-10-06). These never
+  // leave the bank, but they still settle the bill, because the money goes to
+  // FBR on the supplier's behalf. Accounts come from Accounting Setup.
+  const [coa, setCoa] = useState([]);
+  const [deductions, setDeductions] = useState({ WHTG: '', WHTS: '', STW: '' });
+  const [customDed, setCustomDed] = useState([]);   // [{ GLCAID, Amount, Narration }]
+
   const totalPayment = useMemo(() => paymentLines.reduce((s, p) => s + (parseFloat(p.Amount) || 0), 0), [paymentLines]);
+  const customDedTotal = useMemo(
+    () => customDed.reduce((s, r) => s + (parseFloat(r.Amount) || 0), 0), [customDed]);
+  const deductionTotal = useMemo(
+    () => Object.values(deductions).reduce((s, v) => s + (parseFloat(v) || 0), 0) + customDedTotal,
+    [deductions, customDedTotal]);
+  // What settles bills = cash out + everything withheld.
+  const settles = totalPayment + deductionTotal;
   const allocatedSum = useMemo(() => Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0), [allocations]);
-  const excess = totalPayment - allocatedSum;
+  const excess = settles - allocatedSum;
 
   const setAlloc = (voucherId, value) => {
     setAllocations(prev => {
@@ -81,7 +102,7 @@ export default function MakePayment() {
   };
 
   const autoAllocateFIFO = () => {
-    let remaining = totalPayment;
+    let remaining = settles;
     const next = {};
     for (const bill of bills) {
       if (remaining <= 0) break;
@@ -93,10 +114,13 @@ export default function MakePayment() {
 
   const handleSubmit = async () => {
     if (!selectedParty) { flash('Select a supplier first.', true); return; }
-    if (totalPayment <= 0) { flash('Enter at least one payment line.', true); return; }
+    if (settles <= 0) { flash('Enter a payment line or a deduction.', true); return; }
+    for (const row of customDed) {
+      if (parseFloat(row.Amount) > 0 && !row.GLCAID) { flash('Pick an account for each deduction row.', true); return; }
+    }
     // Small shortfall (≤ Rs 10) is booked to ROUNDING_ADJUSTMENT server-side
     // (owner ask 2026-07-05). Only reject bigger over-allocations.
-    if (allocatedSum > totalPayment + 10.01) { flash(`Allocations exceed payment total by more than the Rs 10 rounding tolerance.`, true); return; }
+    if (allocatedSum > settles + 10.01) { flash(`Allocations exceed payment plus deductions by more than the Rs 10 rounding tolerance.`, true); return; }
     for (const p of paymentLines) {
       if (p.Mode === 'Bank Transfer' && !p.BankGLCAID) { flash('Pick a bank for Bank Transfer line.', true); return; }
       if (p.Mode === 'Cheque') {
@@ -123,12 +147,29 @@ export default function MakePayment() {
           DrawerBank: p.Mode === 'Cheque' ? (p.DrawerBank || null) : null,
         })),
         allocations: allocArray,
+        adjustments: (() => {
+          const out = {};
+          for (const [k, v] of Object.entries(deductions)) {
+            if (parseFloat(v) > 0) out[k] = +parseFloat(v).toFixed(2);
+          }
+          const custom = customDed
+            .filter(r => r.GLCAID && parseFloat(r.Amount) > 0)
+            .map(r => ({
+              GLCAID: parseInt(r.GLCAID),
+              Amount: +parseFloat(r.Amount).toFixed(2),
+              Narration: (r.Narration || '').trim() || null,
+            }));
+          if (custom.length) out.custom = custom;
+          return out;
+        })(),
         narration: narration || null,
       });
       flash(`Payment posted as ${r.data.voucherNo}.`);
       setLastVoucher({ voucherId: r.data.voucherId, voucherNo: r.data.voucherNo });
       setPaymentLines([{ Mode: 'Cash', Amount: '', Reference: '', BankGLCAID: '', ChequeDate: '', DrawerBank: '' }]);
       setAllocations({});
+      setDeductions({ WHTG: '', WHTS: '', STW: '' });
+      setCustomDed([]);
       setNarration('');
       if (selectedParty) pickParty(selectedParty);
     } catch (e) {
@@ -338,9 +379,67 @@ export default function MakePayment() {
         );})}
       </div>
 
+      <div style={{ ...card, background: '#fffbeb', border: '1px solid #fde68a' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+          <strong style={{ color: '#92400e' }}>Deductions withheld</strong>
+          <span style={{ fontSize: 11.5, color: '#92400e' }}>
+            Kept back from the supplier and owed onward. The bill still settles in full.
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          {[['WHTG', 'WHT on Goods (153(1)(a))'],
+            ['WHTS', 'WHT on Services (153(1)(b))'],
+            ['STW',  'Sales Tax Withheld']].map(([k, label]) => (
+            <div key={k}>
+              <label style={lblStyle}>{label}</label>
+              <input type="number" step="0.01" min="0" value={deductions[k]}
+                onChange={e => setDeductions(d => ({ ...d, [k]: e.target.value }))}
+                placeholder="0.00"
+                style={{ ...inp, borderColor: '#fde68a', background: 'white', textAlign: 'right' }} />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '12px 0 4px' }}>
+          <span style={{ fontSize: 12, color: '#92400e', fontWeight: 600 }}>Anything else</span>
+          <button type="button"
+            onClick={() => setCustomDed(rows => [...rows, { GLCAID: '', Amount: '', Narration: '' }])}
+            style={{ background: '#f59e0b', color: 'white', border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11.5, cursor: 'pointer' }}>
+            + Add row
+          </button>
+        </div>
+        {customDed.length === 0 && (
+          <div style={{ fontSize: 11, color: '#78350f', fontStyle: 'italic', padding: '4px 2px' }}>
+            No other deductions. Click "Add row" to hold back an amount against any account.
+          </div>
+        )}
+        {customDed.map((row, idx) => (
+          <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 1.2fr 32px', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+            <SearchableSelect
+              value={row.GLCAID}
+              onChange={val => setCustomDed(rows => rows.map((r, i) => i === idx ? { ...r, GLCAID: val } : r))}
+              options={coa.map(x => ({ id: x.GLCAID, label: x.GLTitle, sub: x.GLCode }))}
+              placeholder="Pick the account to hold it in..." />
+            <input type="number" step="0.01" min="0" value={row.Amount}
+              onChange={e => setCustomDed(rows => rows.map((r, i) => i === idx ? { ...r, Amount: e.target.value } : r))}
+              placeholder="0.00"
+              style={{ ...inp, borderColor: '#fde68a', background: 'white', textAlign: 'right' }} />
+            <input type="text" value={row.Narration}
+              onChange={e => setCustomDed(rows => rows.map((r, i) => i === idx ? { ...r, Narration: e.target.value } : r))}
+              placeholder="Why (optional)"
+              style={{ ...inp, borderColor: '#fde68a', background: 'white' }} />
+            <button type="button" onClick={() => setCustomDed(rows => rows.filter((_, i) => i !== idx))}
+              style={{ background: 'transparent', color: '#b45309', border: '1px solid #fcd34d', borderRadius: 4, cursor: 'pointer', height: 30 }}
+              title="Remove">&times;</button>
+          </div>
+        ))}
+      </div>
+
       <div style={{ ...card, background: '#f8fafc' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <Stat label="Total paid" value={totalPayment} colour="#1e293b" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16 }}>
+          <Stat label="Cash out" value={totalPayment} colour="#1e293b" />
+          <Stat label="Withheld" value={deductionTotal} colour="#b45309" />
+          <Stat label="Settles" value={settles} colour="#15803d" />
           <Stat label="Allocated to bills" value={allocatedSum} colour="#dc2626" />
           <Stat
             label={

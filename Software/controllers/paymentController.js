@@ -456,6 +456,17 @@ const ADJUSTMENT_CODES = {
     Short:   { GLCode: '502002039', Label: 'Shortage in RO (Service)' },
 };
 
+// The mirror for Make Payment: tax WE withhold from a supplier and owe onward
+// to FBR (owner ask 2026-10-06). Unlike the receive side above, these resolve
+// through Accounting Setup rather than hard-coded codes, because the owner maps
+// the accounts themselves. Goods and services are separate roles: the
+// withholding statement reports them separately.
+const DEDUCTION_ROLES = {
+    WHTG: { RoleKey: 'WHT_PAYABLE_GOODS',          Label: 'WHT on Goods (s.153(1)(a))' },
+    WHTS: { RoleKey: 'WHT_PAYABLE_SERVICES',       Label: 'WHT on Services (s.153(1)(b))' },
+    STW:  { RoleKey: 'SALES_TAX_WITHHELD_PAYABLE', Label: 'Sales Tax Withheld' },
+};
+
 async function resolveAdjustmentGL(pool, code) {
     const r = await pool.request().input('c', sql.NVarChar(40), code)
         .query('SELECT TOP 1 GLCAID FROM GLChartOFAccount WHERE GLCode=@c AND isParent=0');
@@ -550,7 +561,7 @@ async function postPayment(req, res, direction) {
             const amount = Number(adj[type]) || 0;
             if (amount <= 0) continue;
             if (direction !== 'receive') {
-                return res.status(400).json({ error: 'Adjustments are only supported on Receive Payment.' });
+                return res.status(400).json({ error: `${type} is a Receive Payment adjustment. Use the deduction rows on Make Payment.` });
             }
             const glcaid = await resolveAdjustmentGL(pool, def.GLCode);
             adjustmentLines.push({
@@ -558,6 +569,29 @@ async function postPayment(req, res, direction) {
                 GLCAID: glcaid,
                 Amount: amount,
                 Narration: `${def.Label} — withheld by customer on settlement`,
+            });
+        }
+
+        // Deductions WE withhold when paying a supplier. The accounts come from
+        // Accounting Setup, so an unmapped one is a setup problem and says so by
+        // name rather than failing somewhere deeper.
+        for (const [type, def] of Object.entries(DEDUCTION_ROLES)) {
+            const amount = Number(adj[type]) || 0;
+            if (amount <= 0) continue;
+            if (direction !== 'make') {
+                return res.status(400).json({ error: `${def.Label} is a Make Payment deduction. Use the adjustment rows on Receive Payment.` });
+            }
+            const glcaid = await resolveRole(def.RoleKey);
+            if (!glcaid) {
+                return res.status(400).json({
+                    error: `"${def.Label}" has no account mapped. Set it in Accounting Setup before withholding against it.`,
+                });
+            }
+            adjustmentLines.push({
+                Type: type,
+                GLCAID: glcaid,
+                Amount: amount,
+                Narration: `${def.Label} — withheld from supplier on payment`,
             });
         }
         // Custom adjustments — owner ask 2026-07-08. Operator can pick any
@@ -569,9 +603,8 @@ async function postPayment(req, res, direction) {
             const amount = Number(row?.Amount) || 0;
             const glcaid = parseInt(row?.GLCAID);
             if (amount <= 0) continue;
-            if (direction !== 'receive') {
-                return res.status(400).json({ error: 'Custom adjustments are only supported on Receive Payment.' });
-            }
+            // Works both ways since 2026-10-06: a write-off against a customer
+            // invoice, or a deduction kept back from a supplier payment.
             if (!party?.PartyID) {
                 return res.status(400).json({ error: 'Custom adjustments require a named party.' });
             }
@@ -588,7 +621,7 @@ async function postPayment(req, res, direction) {
                 GLCAID: glcaid,
                 Amount: amount,
                 Narration: (row.Narration && String(row.Narration).trim())
-                    || `Write-off to ${acc.recordset[0].GLCode} ${acc.recordset[0].GLTitle}`,
+                    || `${direction === 'make' ? 'Deduction to' : 'Write-off to'} ${acc.recordset[0].GLCode} ${acc.recordset[0].GLTitle}`,
             });
         }
 

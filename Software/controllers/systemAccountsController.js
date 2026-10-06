@@ -20,6 +20,12 @@ const ROLE_DEFS = [
     { key: 'PURCHASE_RETURN_VARIANCE', label: 'Purchase Return Variance', type: 'Revenue',   purpose: 'Variance income from GTRN at landed cost' },
     { key: 'CUSTOMER_ADVANCE_RECEIVED',label: 'Customer Advance Received',type: 'Liability', purpose: 'Customer pre-payments and overpayments' },
     { key: 'SUPPLIER_ADVANCE_PAID',    label: 'Supplier Advance Paid',    type: 'Asset',     purpose: 'Prepayments to suppliers' },
+    // Tax withheld FROM a supplier when we pay them, owed onward to FBR
+    // (owner ask 2026-10-06). Goods and services stay apart because the
+    // withholding statement reports them separately.
+    { key: 'WHT_PAYABLE_GOODS',        label: 'WHT Payable - Goods',      type: 'Liability', purpose: 'Income tax withheld from supplier payments on goods, s.153(1)(a), owed to FBR' },
+    { key: 'WHT_PAYABLE_SERVICES',     label: 'WHT Payable - Services',   type: 'Liability', purpose: 'Income tax withheld from supplier payments on services, s.153(1)(b), owed to FBR' },
+    { key: 'SALES_TAX_WITHHELD_PAYABLE', label: 'Sales Tax Withheld Payable', type: 'Liability', purpose: 'Sales tax withheld from a supplier invoice, owed to FBR' },
     { key: 'CHEQUES_ON_HAND',          label: 'Cheques on Hand',          type: 'Either',    purpose: 'Cheques received or issued before bank clearance' },
     // Sales module roles (migration 032). Admin maps each to a leaf account
     // in the 4xx / 5xx / 1xxxx / 2xxxx ranges via Accounting › System Accounts.
