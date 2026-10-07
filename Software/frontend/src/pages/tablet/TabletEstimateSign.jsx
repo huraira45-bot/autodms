@@ -2,7 +2,7 @@
  * Customer signature — service tablet app, Phase 2 (plan 2026-09-14).
  *
  * The customer reads exactly what they are authorising and signs. The
- * advisor picks the bay (and, for a new visit, enters the job number, as on
+ * advisor picks the bay (the job number is the estimate number, as on
  * the desk form). One tap then opens the job card — or, for additional work,
  * adds it to the existing job card — and sends the parts to the parts counter.
  *
@@ -119,7 +119,7 @@ export default function TabletEstimateSign() {
         if (!form.SignerName.trim()) { warning('Name needed', 'Enter the name of the person signing.'); return; }
         if (!hasInk || padRef.current?.isEmpty()) { warning('Signature needed', 'Ask the customer to sign in the box.'); return; }
         if (!form.BayID) { warning('Bay needed', 'Pick the bay where the car will be worked on.'); return; }
-        if (!isRevision && !form.JobCode.trim()) { warning('Job number needed', 'Enter the job number, as on the desk job card form.'); return; }
+
 
         const bayName = bays.find(b => String(b.BayID) === String(form.BayID))?.BayName;
         const ok = await confirm({
@@ -242,8 +242,12 @@ export default function TabletEstimateSign() {
                     </div>
                     {!isRevision && (
                         <div>
-                            <label style={S.label}>Job number *</label>
-                            <input style={S.input} value={form.JobCode} onChange={set('JobCode')} placeholder="As on the desk form" />
+                            {/* Owner ask 2026-10-07: the job number IS the estimate
+                                number. Pre-filled, and editable only if a desk form
+                                has already been written with a different one. */}
+                            <label style={S.label}>Job number</label>
+                            <input style={S.input} value={form.JobCode || est.EstimateNo}
+                                   onChange={set('JobCode')} placeholder={est.EstimateNo} />
                         </div>
                     )}
                     {!isRevision && (

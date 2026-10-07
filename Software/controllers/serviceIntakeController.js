@@ -968,7 +968,13 @@ exports.signEstimate = async (req, res) => {
     try {
         const signerName = String(b.SignerName || '').trim();
         const signerMobile = String(b.SignerMobile || '').trim();
-        const jobCode = String(b.JobCode || '').trim();
+        // Owner ask 2026-10-07: the job number IS the estimate number. The
+        // advisor started the visit with EST-00123 on the tablet and the
+        // customer signed a form carrying it, so asking them to invent a
+        // second number at the counter only creates two ways to refer to one
+        // car. A number typed in is still honoured, for a desk form that
+        // already exists.
+        const jobCodeInput = String(b.JobCode || '').trim();
         const promised = String(b.PromisedDate || '').trim();
         const bayId = parseInt(b.BayID);
 
@@ -988,7 +994,7 @@ exports.signEstimate = async (req, res) => {
         if (!pre) throw httpError(404, 'Estimate not found.');
         assertSignable(pre, b.ContentHash);
         const isRevision = !!pre.JobCardID;
-        if (!isRevision && !jobCode) throw httpError(400, 'Enter the job number, as on the desk job card form.');
+
 
         // The total the customer sees was taxed at the rates in force when the
         // estimate was last saved. If a rate has changed since, the job card
@@ -1011,7 +1017,7 @@ exports.signEstimate = async (req, res) => {
 
         const vehicleColor = (await pool.request().input('v', sql.Int, pre.VehicleID)
             .query('SELECT VehicleColor FROM WorkshopVehicles WHERE VehicleID = @v')).recordset[0]?.VehicleColor;
-        const bodyArgs = { jobCode, promised, signerName, vehicleColor, user: req.user, bayName: bay.BayName };
+        const bodyArgs = { promised, signerName, vehicleColor, user: req.user, bayName: bay.BayName };
         const overlong = await findOverlongFields(pool, isRevision
             ? { LabourItems: labourItemsFor(pre, bay.BayName) }
             : jobCardBodyFor(pre, bodyArgs));
@@ -1043,7 +1049,14 @@ exports.signEstimate = async (req, res) => {
                 jobCardId = est.JobCardID;
                 jobCardNo = jc.JobCardNo;
             } else {
-                const created = await createJobCardInTx(tx, jobCardBodyFor(est, bodyArgs), req.user, pst);
+                // Owner ask 2026-10-07: the job number IS the estimate number.
+                // The visit began as EST-00123 on the tablet and the customer
+                // signed a form carrying it, so making the advisor invent a
+                // second number at the counter only gives one car two names. A
+                // number typed in is still honoured, for a desk form that
+                // already exists.
+                const created = await createJobCardInTx(
+                    tx, jobCardBodyFor(est, { ...bodyArgs, jobCode: jobCodeInput || est.EstimateNo }), req.user, pst);
                 jobCardId = created.JobCardId;
                 jobCardNo = created.JobCardNo;
             }
