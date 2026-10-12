@@ -12,6 +12,7 @@
  */
 const { sql, getPool } = require('../config/db');
 const docs = require('./salesDocumentController');
+const { voidMasterPayment, LOCKED_BOOKINGS } = require('../services/masterPaymentVoidService');
 
 // =========================================================================
 // Helpers
@@ -30,72 +31,70 @@ function addDaysISO(days) {
 // Agency-model step: dealer remits the wholesale price to Master Motors for
 // this booking. Dr BOOKING_VARIANT_RECEIVABLE / Cr Bank|Cash.
 exports.payMaster = async (req, res) => {
-    const bookingId = parseInt(req.params.id);
+    const bookingId = Number(req.params.id);
     const { Amount, Mode, BankAccountGLCAID, Reference, Notes } = req.body || {};
     const amt = Number(Amount);
+    if (!Number.isSafeInteger(bookingId) || bookingId <= 0) return res.status(400).json({ error: 'Invalid booking.' });
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: 'Amount must be > 0.' });
-    if (!['Cash', 'Bank'].includes(Mode))   return res.status(400).json({ error: 'Mode must be Cash or Bank.' });
+    if (!['Cash', 'Bank'].includes(Mode)) return res.status(400).json({ error: 'Mode must be Cash or Bank.' });
 
-    const pool = await getPool();
-
-    // A historical booking's remittance to Master was made and posted long
-    // before DealerDesk. Posting another voucher would count the same money
-    // twice (owner report 2026-09-25) — it is matched to the voucher already
-    // in the ledger instead, on the booking's Pay Master panel.
-    const hist = await pool.request().input('b', sql.Int, bookingId)
-        .query('SELECT IsHistorical, BookingNo FROM dms_SalesBookings WHERE BookingID = @b');
-    if (!hist.recordset.length) return res.status(404).json({ error: 'Booking not found.' });
-    if (hist.recordset[0].IsHistorical) {
-        return res.status(409).json({
-            error: `${hist.recordset[0].BookingNo} is a historical booking. Its payment to Master is already `
-                 + `in the ledger — link it to that voucher instead of posting a new one.`,
-            historical: true,
-        });
-    }
-
-    // Pay Master leaves a DRAFT voucher now, and the booking counts posted
-    // vouchers only -- so a booking that has been paid but not yet posted
-    // still reads as owing. Without this, pressing the button again raises a
-    // SECOND voucher for the same money (owner report 2026-10-02,
-    // BK-2026-0179). The screen withholds the button, but a stale page or a
-    // direct call would not know that.
-    const pending = await pool.request().input('b', sql.Int, bookingId).query(`
-        SELECT VoucherNo, TotalAmount
-        FROM   data_FinanceVoucherInfo
-        WHERE  SourceDocType = 'PAY_MASTER' AND SourceDocID = @b AND Status = 'Draft'
-        ORDER  BY VoucherID`);
-    if (pending.recordset.length) {
-        const list = pending.recordset.map(v => v.VoucherNo).join(', ');
-        return res.status(409).json({
-            error: `A payment to Master for this booking is already waiting to be posted (${list}). `
-                 + 'Post that voucher rather than raising another one for the same money.',
-            pendingVouchers: pending.recordset.map(v => v.VoucherNo),
-        });
-    }
-
-    const tx = new sql.Transaction(pool);
-    await tx.begin();
+    let tx;
     try {
+        const pool = await getPool();
+        tx = new sql.Transaction(pool);
+        await tx.begin();
+        const booking = await new sql.Request(tx).input('b', sql.Int, bookingId)
+            .query(`SELECT IsHistorical, BookingNo, Status FROM dms_SalesBookings WITH (UPDLOCK, HOLDLOCK)
+                    WHERE BookingID=@b`);
+        if (!booking.recordset.length) throw Object.assign(new Error('Booking not found.'), { statusCode: 404 });
+        const b = booking.recordset[0];
+        if (b.IsHistorical) {
+            throw Object.assign(new Error(`${b.BookingNo} is historical. Link its existing Master payment voucher instead of posting another payment.`), { statusCode: 409 });
+        }
+        if (LOCKED_BOOKINGS.includes(b.Status) || b.Status === 'Cancelled') {
+            throw Object.assign(new Error('This booking cannot accept another Master payment.'), { statusCode: 409 });
+        }
+        // Share the booking lock with voids and concurrent payment attempts.
+        const pending = await new sql.Request(tx).input('b', sql.Int, bookingId).query(`
+            SELECT VoucherNo FROM data_FinanceVoucherInfo WITH (UPDLOCK, HOLDLOCK)
+            WHERE SourceDocType='PAY_MASTER' AND SourceDocID=@b AND Status='Draft'`);
+        if (pending.recordset.length) {
+            const list = pending.recordset.map(v => v.VoucherNo).join(', ');
+            throw Object.assign(new Error(`A Master payment is already waiting to be posted (${list}). Post or void it before making another payment.`), { statusCode: 409 });
+        }
         const { postPayMasterVoucher } = require('../services/payMasterService');
         const { voucherId, voucherNo } = await postPayMasterVoucher({
             bookingId, amount: amt, mode: Mode,
             bankAccountGLCAID: BankAccountGLCAID ? Number(BankAccountGLCAID) : null,
             reference: Reference, notes: Notes,
         }, req.user, tx);
-
         await logAudit(tx, {
-            bookingId, entityType: 'Booking', entityId: bookingId,
-            action: 'PayMaster',
-            newValue: { amount: amt, mode: Mode, voucherNo },
-            actor: req.user, notes: Notes,
+            bookingId, entityType: 'Booking', entityId: bookingId, action: 'PayMaster',
+            newValue: { amount: amt, mode: Mode, voucherNo }, actor: req.user, notes: Notes,
         });
-
         await tx.commit();
         res.json({ message: 'Master payment recorded.', VoucherID: voucherId, VoucherNo: voucherNo });
     } catch (err) {
-        try { await tx.rollback(); } catch {}
-        console.error('payMaster:', err);
-        res.status(400).json({ error: err.message });
+        if (tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode || 400).json({ error: err.message });
+    }
+};
+
+exports.voidMasterPayment = async (req, res) => {
+    let tx;
+    try {
+        const pool = await getPool();
+        tx = new sql.Transaction(pool);
+        await tx.begin();
+        const result = await voidMasterPayment(tx, {
+            bookingId: Number(req.params.id), voucherId: Number(req.params.voucherId),
+            reason: req.body?.Reason, user: req.user,
+        });
+        await tx.commit();
+        res.status(result.requiresApproval ? 201 : 200).json(result);
+    } catch (err) {
+        if (tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode || 400).json({ error: err.message, ...(err.blockers ? { blockers: err.blockers } : {}) });
     }
 };
 

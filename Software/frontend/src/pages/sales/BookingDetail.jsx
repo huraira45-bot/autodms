@@ -103,6 +103,37 @@ export default function BookingDetail() {
     const [voidErr, setVoidErr] = useState(null);
     const canRequestVoid = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings');
 
+    const [masterVoidFor, setMasterVoidFor] = useState(null);
+    const [masterVoidReason, setMasterVoidReason] = useState('');
+    const [masterVoidBusy, setMasterVoidBusy] = useState(false);
+    const [masterVoidErr, setMasterVoidErr] = useState(null);
+    const closeMasterVoid = () => {
+        if (masterVoidBusy) return;
+        setMasterVoidFor(null); setMasterVoidReason(''); setMasterVoidErr(null);
+    };
+    const submitMasterVoid = async () => {
+        if (masterVoidBusy || !masterVoidFor) return;
+        const reason = masterVoidReason.trim();
+        if (reason.length < 5) {
+            setMasterVoidErr('Enter a reason of at least 5 characters.');
+            return;
+        }
+        setMasterVoidBusy(true); setMasterVoidErr(null);
+        try {
+            const { data: result } = await axios.post(
+                `${API}/sales/bookings/${id}/master-payments/${masterVoidFor.VoucherID}/void`,
+                { Reason: reason }
+            );
+            setMasterVoidFor(null); setMasterVoidReason('');
+            flash('ok', result.message || (result.requiresApproval
+                ? 'Void requested. The Accounts Manager approves it, then an admin completes the void.'
+                : 'Master payment voided. You can make a new payment for the remaining amount.'));
+            await load();
+        } catch (e) {
+            setMasterVoidErr(e.response?.data?.error || e.message);
+        } finally { setMasterVoidBusy(false); }
+    };
+
     const openVoidFor = (paymentId) => voidReqs.find(v => v.PaymentID === paymentId && ['Pending', 'AMApproved'].includes(v.Status));
     const closeVoid = () => { setVoidFor(null); setVoidReason(''); setVoidErr(null); };
     const submitVoid = async () => {
@@ -166,13 +197,16 @@ export default function BookingDetail() {
     // money (owner report, BK-2026-0179). While a draft is sitting there the
     // button is withheld and the screen says what is actually needed: someone
     // has to post it.
-    const masterDrafts = (data.masterPayments || []).filter(m => m.Status === 'Draft');
+    const masterDrafts = (data.masterPayments || []).filter(m => m.Status === 'Draft' && !m.ReversesVoucherID);
     const masterDraftTotal = masterDrafts.reduce((t, m) => t + Number(m.TotalAmount || 0), 0);
+
+    const canVoidMasterPayment = (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'))
+        && !['Closed', 'Delivered', 'GatePassIssued'].includes(data.Status);
 
     const canPayMaster = (data.AmountPaidToDate || 0) > 0
         && masterStillOwed > 0.01
         && masterDrafts.length === 0
-        && !['Closed', 'Cancelled'].includes(data.Status)
+        && !['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'].includes(data.Status)
         && (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'));
 
     // Admin-only, and the server refuses it anyway once anything has posted.
@@ -608,11 +642,14 @@ export default function BookingDetail() {
                             </div>
                             <table style={{ width: '100%', fontSize: '0.82rem' }}>
                                 <thead><tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                    <Th>Date</Th><Th>Mode</Th><Th align="right">Amount</Th><Th>Voucher</Th>
+                                    <Th>Date</Th><Th>Mode</Th><Th align="right">Amount</Th><Th>Voucher</Th><Th>Void</Th>
                                 </tr></thead>
                                 <tbody>
                                     {data.masterPayments.map(m => {
                                         const isCash = m.VoucherType === 'CPV';
+                                        const openVoid = ['PENDING', 'AM_APPROVED'].includes(m.VoidRequestStatus);
+                                        const canVoidRow = canVoidMasterPayment && !m.ReversesVoucherID
+                                            && ['Draft', 'Posted'].includes(m.Status);
                                         return (
                                             <tr key={m.VoucherID} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                 <Td style={{ fontSize: '0.75rem' }}>{new Date(m.VoucherDate).toLocaleString()}</Td>
@@ -629,12 +666,68 @@ export default function BookingDetail() {
                                                         <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#92400e' }}>{m.Status}</span>
                                                     )}
                                                 </Td>
+                                                <Td align="right">
+                                                    {openVoid ? (
+                                                        <span title="The Accounts Manager approves the request, then an admin completes it from Unfinalize Requests."
+                                                              style={{ fontSize: '0.7rem', fontWeight: 700,
+                                                                       color: m.VoidRequestStatus === 'PENDING' ? '#92400e' : '#1e40af' }}>
+                                                            {m.VoidRequestStatus === 'PENDING' ? 'Void: awaiting AM' : 'Void: awaiting admin'}
+                                                        </span>
+                                                    ) : canVoidRow ? (
+                                                        <button type="button"
+                                                                onClick={() => { setMasterVoidFor(m); setMasterVoidReason(''); setMasterVoidErr(null); }}
+                                                                title={m.Status === 'Posted'
+                                                                    ? 'Request approval to reverse this Master Motors payment'
+                                                                    : 'Void this draft Master Motors payment so a new payment can be made'}
+                                                                style={{ background: 'none', border: '1px solid #fecaca', color: '#b91c1c',
+                                                                         borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem',
+                                                                         fontWeight: 700, cursor: 'pointer' }}>
+                                                            {m.Status === 'Posted' ? 'Request Void' : 'Void'}
+                                                        </button>
+                                                    ) : null}
+                                                </Td>
                                             </tr>
                                         );
                                     })}
                                 </tbody>
                             </table>
                         </div>
+                    )}
+
+                    {masterVoidFor && (
+                        <Shell title={`${masterVoidFor.Status === 'Posted' ? 'Request void' : 'Void'} Master payment ${masterVoidFor.VoucherNo}`} onClose={closeMasterVoid}>
+                            {masterVoidErr && <Err>{masterVoidErr}</Err>}
+                            <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6,
+                                          marginBottom: 12, fontSize: '0.82rem', color: '#9a3412' }}>
+                                {masterVoidFor.Status === 'Posted' ? (
+                                    <>
+                                        This payment of PKR {fmtN(masterVoidFor.TotalAmount)} is posted.
+                                        The <strong>Accounts Manager</strong> must approve the void, then an <strong>admin</strong>
+                                        {' '}completes it from <strong>Unfinalize Requests</strong>.
+                                        The payment stays counted until its voucher is reversed.
+                                        Once completed, <strong>Make Payment to Master Motors</strong> becomes available for the remaining amount.
+                                    </>
+                                ) : (
+                                    <>
+                                        This removes draft voucher <strong>{masterVoidFor.VoucherNo}</strong> for PKR {fmtN(masterVoidFor.TotalAmount)}.
+                                        You can then use <strong>Make Payment to Master Motors</strong> to create a replacement payment.
+                                    </>
+                                )}
+                            </div>
+                            <Field label="Why should this Master payment be voided? *">
+                                <textarea rows={3} value={masterVoidReason}
+                                          onChange={e => { setMasterVoidReason(e.target.value); setMasterVoidErr(null); }}
+                                          style={{ ...inputStyle, resize: 'vertical' }} disabled={masterVoidBusy}
+                                          placeholder="e.g. wrong bank account or entered twice" />
+                            </Field>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                <button className="btn-sm" onClick={closeMasterVoid} disabled={masterVoidBusy}>Cancel</button>
+                                <button className="btn" disabled={masterVoidBusy || masterVoidReason.trim().length < 5}
+                                        onClick={submitMasterVoid} style={{ background: '#b91c1c' }}>
+                                    {masterVoidBusy ? 'Submitting...' : masterVoidFor.Status === 'Posted' ? 'Send for approval' : 'Void Master Payment'}
+                                </button>
+                            </div>
+                        </Shell>
                     )}
 
                     {voidFor && (

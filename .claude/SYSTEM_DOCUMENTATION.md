@@ -1481,3 +1481,11 @@ When the build session starts:
 11. Build the 26 reports (prioritize: Trial Balance, GL Detail, Customer/Supplier Statement, Daily Cash Book, GST/PST Summary first).
 12. Add finalize/unfinalize to manual vouchers (extend entity-map).
 13. Add unfinalize cascade-block rule for documents with downstream references.
+
+## Master Motors payment void — 2026-10-12
+
+Master payment rows now support draft void and posted void requests. Draft void deletes only the scoped PAY_MASTER voucher transactionally with a required audit snapshot/reason. Posted requests use the existing VOUCHER AM/admin unfinalize process; the booked payment is counted until its reversal completes. Row status exposes pending approval, and Pay Master becomes available again for the remaining amount after completion/reload.
+
+Master reversals retain BookingID. The Master balance includes reversed originals plus posted mirrors, with PAY_MASTER source fallback for older missing booking tags. Pay Master/void use a booking lock; conditional Draft posting prevents concurrent void/post races; reversal execution rechecks delivery/status.
+
+See docs/MASTER_PAYMENT_VOID.md for API, permissions and deployment commands. No migration or new dependency is required. Verified with 27 focused Jest tests, synthetic read-only SQL balance checks, and a successful frontend production build. Browser verification was unavailable because of tool setup failure.

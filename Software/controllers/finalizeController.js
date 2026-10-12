@@ -173,12 +173,15 @@ exports.finalize = async (req, res) => {
         try {
             if (em.isVoucher) {
                 // Flip Draft → Posted. The balanced-entry trigger fires on this UPDATE.
-                await new sql.Request(transaction)
+                const posted = await new sql.Request(transaction)
                     .input('id', sql.Int, entityId)
                     .input('by', sql.Int, req.user.userId)
                     .query(`UPDATE ${em.table}
                             SET Status='Posted', Posted=1, PostedBy=@by, PostedAt=GETDATE()
-                            WHERE ${em.pk}=@id`);
+                            WHERE ${em.pk}=@id AND Status='Draft'`);
+                if (posted.rowsAffected[0] !== 1) {
+                    throw Object.assign(new Error('Voucher was voided or posted by another user. Refresh and try again.'), { statusCode: 409 });
+                }
                 await transaction.commit();
 
                 const postHook = POST_COMMIT_HOOKS.VOUCHER;
@@ -217,7 +220,7 @@ exports.finalize = async (req, res) => {
         }
     } catch (err) {
         console.error('finalize error:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.statusCode || 500).json({ error: err.message });
     }
 };
 

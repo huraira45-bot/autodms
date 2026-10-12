@@ -141,6 +141,7 @@ router.post('/bookings/:id/allocate',                requireAny('sales_agm', 'sa
 router.post('/bookings/:id/swap-vehicle',            requireAny('sales_admin_settings', 'admin_unfinalize'), lc.swapAllocatedVehicle);
 router.post('/bookings/:id/unallocate',              requireAny('sales_agm', 'sales_gm'), lc.unallocateVehicle);
 router.post('/bookings/:id/pay-master',              requireAny('sales_master_settlement', 'sales_admin_settings'), lc.payMaster);
+router.post('/bookings/:id/master-payments/:voucherId/void', requireAny('sales_master_settlement', 'sales_admin_settings'), lc.voidMasterPayment);
 router.post('/bookings/:id/post-master-invoice',     requireAny('sales_master_settlement'), lc.postMasterInvoice);
 router.get( '/bookings/:id/delivery-readiness',      requireAny(...SALES_READERS), lc.deliveryReadiness);
 router.post('/bookings/:id/enable-partial-delivery', requireAny('sales_gm'), lc.enablePartialDelivery);

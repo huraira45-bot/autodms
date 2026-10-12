@@ -30,12 +30,27 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
         throw new Error(`Cannot reverse voucher ${orig.VoucherNo} — current status is ${orig.Status}.`);
     }
 
+
+    if (orig.SourceDocType === 'PAY_MASTER') {
+        const booking = await new sql.Request(transaction)
+            .input('bid', sql.Int, orig.SourceDocID)
+            .query(`SELECT Status FROM dms_SalesBookings WITH (UPDLOCK, HOLDLOCK)
+                    WHERE BookingID=@bid`);
+        if (!booking.recordset.length || ['Closed', 'Delivered', 'GatePassIssued'].includes(booking.recordset[0].Status)) {
+            throw new Error('The booking reached delivery after this void was requested. Correct the Master payment through Accounting.');
+        }
+        const current = await new sql.Request(transaction).input('id', sql.Int, originalVoucherId)
+            .query('SELECT Status FROM data_FinanceVoucherInfo WITH (UPDLOCK, HOLDLOCK) WHERE VoucherID=@id');
+        if (current.recordset[0]?.Status !== 'Posted') {
+            throw new Error('This Master payment has already been reversed or is no longer posted.');
+        }
+    }
     // 2. Load original detail lines. Critical: carry AllocatedToVoucherID
     // through so settlement-aware reports (Receive Payment outstanding,
     // POS Settlement pending) net the mirror against the original.
     const linesRes = await new sql.Request(transaction)
         .input('id', sql.Int, originalVoucherId)
-        .query(`SELECT GLCAID, Narration, Debit, Credit, PartyID, JobCardID, AllocatedToVoucherID
+        .query(`SELECT GLCAID, Narration, Debit, Credit, PartyID, JobCardID, BookingID, AllocatedToVoucherID
                 FROM data_FinanceVoucherDetail WHERE VoucherID=@id`);
 
     // 3. Load original subsidiary ledger rows
@@ -89,10 +104,11 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
             .input('cr',   sql.Decimal(18,2),    l.Debit  || 0)
             .input('pid',  sql.Int,              l.PartyID  || null)
             .input('jcid', sql.Int,              l.JobCardID || null)
+            .input('bid',  sql.Int,              l.BookingID || null)
             .input('alloc',sql.Int,              l.AllocatedToVoucherID || null)
             .query(`INSERT INTO data_FinanceVoucherDetail
-                        (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID, AllocatedToVoucherID)
-                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid, @alloc)`);
+                        (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID, BookingID, AllocatedToVoucherID)
+                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid, @bid, @alloc)`);
     }
 
     // 7. Insert mirror subsidiary ledger rows (Debit ↔ Credit swapped)

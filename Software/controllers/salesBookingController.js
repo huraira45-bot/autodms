@@ -148,6 +148,7 @@ exports.getBooking = async (req, res) => {
         const masterPayments = await pool.request().input('id', sql.Int, id).query(`
             SELECT v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Status,
                    v.Remarks, v.CreatedByName, vt.Title AS VoucherType,
+                   voidReq.RequestID AS VoidRequestID, voidReq.Status AS VoidRequestStatus,
                    -- So the screen can tell a draft and a reversal apart from
                    -- money that actually went. Without it the panel counted
                    -- every row as paid, which double-counted a reversal and,
@@ -157,6 +158,12 @@ exports.getBooking = async (req, res) => {
                         THEN 1 ELSE 0 END AS CountsAsPaid
             FROM   data_FinanceVoucherInfo v
             LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
+            OUTER APPLY (
+                SELECT TOP 1 RequestID, Status FROM dms_UnfinalizeRequests
+                WHERE EntityType='VOUCHER' AND EntityID=v.VoucherID
+                  AND Status IN ('PENDING','AM_APPROVED')
+                ORDER BY RequestID DESC
+            ) voidReq
             WHERE  v.SourceDocType = 'PAY_MASTER' AND v.SourceDocID = @id
             ORDER  BY v.VoucherDate DESC, v.VoucherID DESC`);
 
@@ -168,9 +175,12 @@ exports.getBooking = async (req, res) => {
             FROM data_FinanceVoucherDetail d
             INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
             INNER JOIN dms_SystemAccounts      sa ON sa.GLCAID    = d.GLCAID
-            WHERE v.Status='Posted'
+            LEFT JOIN data_FinanceVoucherInfo original ON original.VoucherID=v.ReversesVoucherID
+            WHERE v.Status IN ('Posted','Reversed')
               AND sa.RoleKey='BOOKING_VARIANT_RECEIVABLE'
-              AND d.BookingID=@id`);
+              AND (d.BookingID=@id
+                   OR (v.SourceDocType='PAY_MASTER' AND v.SourceDocID=@id)
+                   OR (original.SourceDocType='PAY_MASTER' AND original.SourceDocID=@id))`);
 
         // AmountPaidToDate is a running total kept on the booking, added to
         // when a payment is taken. It is NOT derived from the ledger -- so
