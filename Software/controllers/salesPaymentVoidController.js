@@ -112,7 +112,7 @@ async function applyVoid(tx, payment, user, reason) {
         .query(`UPDATE dms_SalesPayments
                 SET Status='Reversed', ReversedAt=GETDATE(),
                     ReversedByEmployeeID=@emp, ReversalReason=@reason
-                    ${clearVoucherLink ? ', VoucherID=NULL, VoucherNo=NULL' : ''}
+                    ${clearVoucherLink ? ', VoucherID=NULL, VoucherNo=NULL, LinkedVoucherGLCAID=NULL' : ''}
                 WHERE PaymentID=@pid`);
 
     // The booking, if this payment is what advanced it.

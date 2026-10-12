@@ -17,6 +17,7 @@
 const { sql, getPool } = require('../config/db');
 const incentive = require('./salesIncentiveController');
 const { logAudit } = require('../services/salesAuditService');
+const { historicalMasterPaidSql } = require('../services/historicalMasterAllocationService');
 
 // ============================================================================
 // Helpers
@@ -171,7 +172,8 @@ exports.getBooking = async (req, res) => {
         // BOOKING_VARIANT_RECEIVABLE Dr legs tagged with the booking. Used by
         // the UI to show remaining-to-pay-master and toggle the Pay Master button.
         const masterPaidR = await pool.request().input('id', sql.Int, id).query(`
-            SELECT ISNULL(SUM(d.Debit - d.Credit), 0) AS AmountPaidToMaster
+            SELECT ISNULL(SUM(d.Debit - d.Credit), 0)
+                 + ${historicalMasterPaidSql('@id',"(SELECT GLCAID FROM dms_SystemAccounts WHERE RoleKey='BOOKING_VARIANT_RECEIVABLE')")} AS AmountPaidToMaster
             FROM data_FinanceVoucherDetail d
             INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
             INNER JOIN dms_SystemAccounts      sa ON sa.GLCAID    = d.GLCAID
@@ -999,6 +1001,21 @@ exports.changeBookingParty = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
+            const current = await new sql.Request(tx).input('id',sql.Int,bookingId)
+                .query('SELECT PartyID FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@id');
+            if (current.recordset[0]?.PartyID !== booking.PartyID) {
+                throw Object.assign(new Error('The booking customer changed. Refresh before trying again.'),{statusCode:409});
+            }
+            const links = await new sql.Request(tx).input('id',sql.Int,bookingId)
+                .query(`SELECT TOP 1 PaymentID AS LinkID FROM dms_SalesPayments
+                    WHERE BookingID=@id AND IsLinkedVoucher=1 AND Status='Posted' AND VoucherID IS NOT NULL
+                    UNION ALL
+                    SELECT TOP 1 a.AllocationID FROM dms_HistoricalMasterAllocations a
+                    JOIN data_FinanceVoucherInfo v ON v.VoucherID=a.VoucherID
+                    WHERE a.BookingID=@id AND v.Status='Posted'`);
+            if (links.recordset.length) {
+                throw Object.assign(new Error('Unlink this booking’s historical customer and Master vouchers before changing the customer.'),{statusCode:409});
+            }
             await new sql.Request(tx)
                 .input('id', sql.Int, bookingId)
                 .input('p',  sql.Int, partyId)
@@ -1025,6 +1042,6 @@ exports.changeBookingParty = async (req, res) => {
         });
     } catch (err) {
         console.error('changeBookingParty:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.statusCode || 500).json({ error: err.message });
     }
 };

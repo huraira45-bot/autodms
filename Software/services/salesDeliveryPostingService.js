@@ -23,6 +23,7 @@ const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const N = require('./salesNarration');
+const { historicalMasterPaidSql } = require('./historicalMasterAllocationService');
 
 async function resolveAccounts() {
     const need = ['BOOKING_ADVANCE', 'BOOKING_VARIANT_RECEIVABLE',
@@ -63,11 +64,12 @@ async function loadMasterPaid(bookingId, bvrGL, transaction) {
         .input('gl', sql.Int, bvrGL)
         .input('bid', sql.Int, bookingId)
         .query(`SELECT
-                  ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0) AS Dr,
+                  ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0)
+                    + ${historicalMasterPaidSql('@bid','@gl')} AS Dr,
                   ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Cr
                 FROM data_FinanceVoucherDetail d
                 INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                WHERE v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=@bid`);
+                WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=@bid`);
     const { Dr, Cr } = r.recordset[0] || { Dr: 0, Cr: 0 };
     return Number(Dr) - Number(Cr);
 }

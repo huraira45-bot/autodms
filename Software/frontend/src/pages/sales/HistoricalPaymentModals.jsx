@@ -102,10 +102,11 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
     const [picked, setPicked] = useState(null);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+    const canLinkVoucher = v => Number(v.AvailableAmount || 0) > 0 && Math.round(Number(v.AvailableAmount || 0) * 100) >= Math.round(total * 100);
 
     const find = async (all = false) => {
-        setErr(null); setBusy(true);
-        if (!all) { setPicked(null); setOthers(null); }
+        setErr(null); setBusy(true); setPicked(null);
+        setVouchers(null); setOthers(null);
         try {
             const { data } = await axios.get(
                 `${API}/sales/historical/bookings/${booking.BookingID}/linkable-vouchers`,
@@ -117,6 +118,7 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
     };
 
     const link = async () => {
+        if (!picked || !canLinkVoucher(picked)) return;
         setBusy(true); setErr(null);
         try {
             await axios.post(`${API}/sales/historical/payments/${payment.PaymentID}/link`, { VoucherID: picked.VoucherID });
@@ -124,77 +126,88 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
         } catch (e) { setErr(e.response?.data?.error || e.message); setBusy(false); }
     };
 
-    const row = (v, selectable) => (
-        <div key={v.VoucherID} onClick={() => selectable && setPicked(v)}
-             style={{ padding: 10, borderBottom: '1px solid #f1f5f9', cursor: selectable ? 'pointer' : 'default',
-                      background: picked?.VoucherID === v.VoucherID ? '#eff6ff' : 'white', opacity: selectable ? 1 : 0.75 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <strong>{v.VoucherNo}</strong>
-                <span>{fmtN(v.TotalAmount)}</span>
+    const row = v => {
+        const selectable = canLinkVoucher(v);
+        return (
+            <div key={v.VoucherID} onClick={() => selectable && setPicked(v)}
+                 role={selectable ? 'button' : undefined} tabIndex={selectable ? 0 : undefined}
+                 onKeyDown={e => {
+                     if (selectable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setPicked(v); }
+                 }}
+                 style={{ padding: 10, borderBottom: '1px solid #f1f5f9', cursor: selectable ? 'pointer' : 'default',
+                          background: picked?.VoucherID === v.VoucherID ? '#eff6ff' : 'white', opacity: selectable ? 1 : 0.75 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: '0.85rem' }}>
+                    <strong>{v.VoucherNo}</strong>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Voucher total: PKR {fmtN(v.TotalAmount)}</span>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 3 }}>
+                    {v.VoucherType} &middot; {new Date(v.VoucherDate).toLocaleDateString()}
+                    {v.Remarks ? ` | ${String(v.Remarks).slice(0, 80)}` : ''}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginTop: 8, fontSize: '0.75rem' }}>
+                    <div><span style={{ color: '#64748b' }}>Account amount</span><div>PKR {fmtN(v.CustomerAmount)}</div></div>
+                    <div><span style={{ color: '#64748b' }}>Already linked</span><div>PKR {fmtN(v.LinkedAmount)}</div></div>
+                    <div><span style={{ color: '#64748b' }}>Available</span><div style={{ fontWeight: 600, color: selectable ? '#166534' : '#92400e' }}>PKR {fmtN(v.AvailableAmount)}</div></div>
+                </div>
+                {!selectable && <div style={{ marginTop: 6, fontSize: '0.72rem', color: '#92400e' }}>Insufficient available amount for this payment.</div>}
             </div>
-            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                {v.VoucherType} · {new Date(v.VoucherDate).toLocaleDateString()}
-                {v.Remarks ? ` · ${String(v.Remarks).slice(0, 80)}` : ''}
-            </div>
-        </div>
-    );
+        );
+    };
 
     return (
-        <Shell title={`Link payment #${payment.PaymentID} to a voucher in the ledger`} onClose={onClose}>
+        <Shell title={`Link payment #${payment.PaymentID} to a voucher in the ledger`} onClose={onClose} width={640}>
             {err && <Err>{err}</Err>}
 
             <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4, marginBottom: 12, fontSize: '0.82rem', color: '#0c4a6e' }}>
                 Payment of <strong>PKR {fmtN(total)}</strong> on {new Date(payment.ReceivedAt).toLocaleDateString()}.
-                Pick the voucher already posted on <strong>{booking.PartyName}</strong>'s account for the same amount.
-                Nothing is posted — the voucher stays exactly as it is.
+                {' '}Pick a posted voucher with at least this amount available on <strong>{booking.PartyName}</strong>'s account.
+                {' '}A shared opening voucher can cover other customers and bookings; each link uses only this payment amount.
             </div>
 
             <Field label="Narrow by voucher number or narration (optional)">
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. BRV-0912" style={inputStyle} />
             </Field>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
-                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Vouchers for exactly PKR {fmtN(total)}</span>
-                <button className="btn-sm" onClick={() => find(false)} disabled={busy}>
-                    {busy ? 'Searching…' : 'Find vouchers'}
-                </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, margin: '10px 0' }}>
+                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Account balance available: at least PKR {fmtN(total)}</span>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button className="btn-sm" onClick={() => find(true)} disabled={busy}>Show account</button>
+                    <button className="btn-sm" onClick={() => find(false)} disabled={busy}>
+                        {busy ? 'Searching...' : 'Find vouchers'}
+                    </button>
+                </div>
             </div>
 
             {vouchers && (
-                <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
                     {vouchers.length === 0 ? (
                         <div style={{ padding: 14, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
                             <AlertTriangle size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
-                            No unlinked voucher on this account for exactly PKR {fmtN(total)}.
-                            <div style={{ marginTop: 8 }}>
-                                <button className="btn-sm" onClick={() => find(true)} disabled={busy}>
-                                    Show what is on this account
-                                </button>
-                            </div>
+                            No posted voucher has PKR {fmtN(total)} available on this account. Use Show account to review its vouchers.
                         </div>
-                    ) : vouchers.map(v => row(v, true))}
+                    ) : vouchers.map(row)}
                 </div>
             )}
 
             {others && (
                 <div style={{ marginTop: 10 }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>
-                        Unlinked vouchers on {booking.PartyName}'s account ({others.length}) — for reference; only one
-                        of the same amount can be linked.
+                        Posted vouchers on {booking.PartyName}'s account ({others.length}). Select one with enough available amount;
+                        fully allocated vouchers are shown for reference.
                     </div>
-                    <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px dashed #cbd5e1', borderRadius: 6 }}>
+                    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px dashed #cbd5e1', borderRadius: 6 }}>
                         {others.length === 0
                             ? <div style={{ padding: 14, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
-                                  Nothing unlinked on this account at all. Post the entry in Accounting first.
+                                  No posted vouchers on this account. Post the opening entry in Accounting first.
                               </div>
-                            : others.map(v => row(v, Math.abs(Number(v.TotalAmount) - total) < 0.01))}
+                            : others.map(row)}
                     </div>
                 </div>
             )}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button className="btn-sm" onClick={onClose}>Cancel</button>
-                <button className="btn" onClick={link} disabled={busy || !picked}>
+                <button className="btn" onClick={link} disabled={busy || !picked || !canLinkVoucher(picked)}>
                     <Link2 size={13} /> {picked ? `Link to ${picked.VoucherNo}` : 'Pick a voucher'}
                 </button>
             </div>
@@ -211,7 +224,8 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
  * booking to that voucher instead. Nothing is posted.
  */
 export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved }) {
-    const owed = Math.round(Number(stillOwed || 0) * 100) / 100;
+    const agreedRemaining = booking.NegotiatedPrice == null ? Number(stillOwed || 0) : Number(booking.NegotiatedPrice) - Number(booking.AmountPaidToMaster || 0);
+    const owed = Math.round(Math.max(0, agreedRemaining) * 100) / 100;
     const [amount, setAmount] = useState(owed > 0 ? String(owed) : '');
     const [search, setSearch] = useState('');
     const [vouchers, setVouchers] = useState(null);   // null until searched
@@ -220,6 +234,9 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
     const [picked, setPicked] = useState(null);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+    const requestedCents = Math.round(Number(amount) * 100);
+    const amountIsValid = Number.isFinite(Number(amount)) && Number.isSafeInteger(requestedCents) && requestedCents > 0 && Number(amount) === requestedCents / 100;
+    const canAllocate = v => amountIsValid && Math.round(Number(v.UnclaimedToMaster || 0) * 100) >= requestedCents;
 
     const loadLinked = async () => {
         try {
@@ -230,8 +247,8 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
     useEffect(() => { loadLinked(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
     const find = async (all = false) => {
-        setErr(null); setBusy(true);
-        if (!all) { setPicked(null); setOthers(null); }
+        setErr(null); setBusy(true); setPicked(null);
+        setVouchers(null); setOthers(null);
         try {
             const { data } = await axios.get(
                 `${API}/sales/historical/bookings/${booking.BookingID}/linkable-master-vouchers`,
@@ -243,10 +260,12 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
     };
 
     const link = async () => {
+        if (!picked || !canAllocate(picked)) return;
         setBusy(true); setErr(null);
         try {
             const { data } = await axios.post(
-                `${API}/sales/historical/bookings/${booking.BookingID}/link-master`, { VoucherID: picked.VoucherID });
+                `${API}/sales/historical/bookings/${booking.BookingID}/link-master`,
+                { VoucherID: picked.VoucherID, Amount: requestedCents / 100 });
             onSaved(data?.message || `Linked to ${picked.VoucherNo}.`);
         } catch (e) { setErr(e.response?.data?.error || e.message); setBusy(false); }
     };
@@ -262,43 +281,58 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
         setBusy(false);
     };
 
-    const row = (v, selectable) => (
-        <div key={v.VoucherID} onClick={() => selectable && setPicked(v)}
-             style={{ padding: 10, borderBottom: '1px solid #f1f5f9', cursor: selectable ? 'pointer' : 'default',
-                      background: picked?.VoucherID === v.VoucherID ? '#eff6ff' : 'white', opacity: selectable ? 1 : 0.75 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <strong>{v.VoucherNo}</strong>
-                <span>{fmtN(v.UnclaimedToMaster)} to Master</span>
+    const row = v => {
+        const selectable = canAllocate(v);
+        return (
+            <div key={v.VoucherID} onClick={() => selectable && setPicked(v)}
+                 role={selectable ? 'button' : undefined} tabIndex={selectable ? 0 : undefined}
+                 onKeyDown={e => {
+                     if (selectable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setPicked(v); }
+                 }}
+                 style={{ padding: 10, borderBottom: '1px solid #f1f5f9', cursor: selectable ? 'pointer' : 'default',
+                          background: picked?.VoucherID === v.VoucherID ? '#eff6ff' : 'white', opacity: selectable ? 1 : 0.75 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: '0.85rem' }}>
+                    <strong>{v.VoucherNo}</strong>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Voucher total: PKR {fmtN(v.TotalAmount)}</span>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 3 }}>
+                    {v.VoucherType} &middot; {new Date(v.VoucherDate).toLocaleDateString()}
+                    {v.Remarks ? ` | ${String(v.Remarks).slice(0, 70)}` : ''}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginTop: 8, fontSize: '0.75rem' }}>
+                    <div><span style={{ color: '#64748b' }}>Master account amount</span><div>PKR {fmtN(v.MasterAmount)}</div></div>
+                    <div><span style={{ color: '#64748b' }}>Already linked</span><div>PKR {fmtN(v.LinkedAmount)}</div></div>
+                    <div><span style={{ color: '#64748b' }}>Available</span><div style={{ fontWeight: 600, color: selectable ? '#166534' : '#92400e' }}>PKR {fmtN(v.UnclaimedToMaster)}</div></div>
+                </div>
+                {!selectable && <div style={{ marginTop: 6, fontSize: '0.72rem', color: '#92400e' }}>
+                    {amountIsValid ? 'Insufficient available amount for this booking.' : 'Enter this booking\'s portion to select a voucher.'}
+                </div>}
             </div>
-            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                {v.VoucherType} · {new Date(v.VoucherDate).toLocaleDateString()} · voucher total {fmtN(v.TotalAmount)}
-                {v.Remarks ? ` · ${String(v.Remarks).slice(0, 70)}` : ''}
-            </div>
-        </div>
-    );
+        );
+    };
 
     return (
-        <Shell title={`${booking.BookingNo} — match the payment already made to Master`} onClose={onClose} width={560}>
+        <Shell title={`${booking.BookingNo} - match the payment already made to Master`} onClose={onClose} width={640}>
             {err && <Err>{err}</Err>}
 
             <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4,
                           marginBottom: 12, fontSize: '0.82rem', color: '#0c4a6e' }}>
-                This is an old deal, so the money was sent to Master and posted long ago. Pick the voucher that
-                already carries it and it will count against this booking. <strong>Nothing is posted</strong> —
-                the voucher stays exactly as it is.
+                Enter the portion of the historical Master payment that belongs to this booking, then pick its posted voucher.
+                {' '}A shared opening voucher can cover several bookings; only the amount entered here is allocated to this one.
+                {' '}Linking or unlinking here affects only this booking's portion.
                 {owed > 0 && <> Still to account for: <strong>PKR {fmtN(owed)}</strong>.</>}
             </div>
 
             {linked.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>Already matched</div>
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>Already matched to this booking</div>
                     {linked.map(v => (
                         <div key={v.VoucherID} style={{ display: 'flex', justifyContent: 'space-between',
                                 alignItems: 'center', padding: '6px 10px', background: '#f8fafc',
                                 border: '1px solid #e2e8f0', borderRadius: 4, marginBottom: 4, fontSize: '0.82rem' }}>
                             <span>
                                 <strong>{v.VoucherNo}</strong>
-                                <span style={{ color: '#64748b' }}> · {new Date(v.VoucherDate).toLocaleDateString()}</span>
+                                <span style={{ color: '#64748b' }}> &middot; {new Date(v.VoucherDate).toLocaleDateString()}</span>
                             </span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                 <span>PKR {fmtN(v.Amount)}</span>
@@ -310,60 +344,61 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
             )}
 
             <div style={{ display: 'flex', gap: 10 }}>
-                <Field label="Amount on the voucher" flex>
-                    <input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal"
-                           placeholder="e.g. 2000000" style={inputStyle} />
+                <Field label="This booking's portion (PKR)" flex>
+                    <input type="number" min="0.01" step="0.01" value={amount}
+                           onChange={e => { setAmount(e.target.value); setPicked(null); }} inputMode="decimal"
+                           placeholder="e.g. 2000000" style={inputStyle} disabled={busy} />
+                    {amount && !amountIsValid && <div style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: 4 }}>Enter a positive amount with up to two decimal places.</div>}
                 </Field>
                 <Field label="Voucher no. or narration (optional)" flex>
                     <input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. BPV-0421" style={inputStyle} />
                 </Field>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, margin: '10px 0' }}>
                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                    Vouchers with exactly PKR {fmtN(Number(amount) || 0)} sitting on the Master receivable
+                    Master balance available: at least PKR {fmtN(Number(amount) || 0)}
                 </span>
-                <button className="btn-sm" onClick={() => find(false)} disabled={busy || !(Number(amount) > 0)}>
-                    {busy ? 'Searching…' : 'Find vouchers'}
-                </button>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button className="btn-sm" onClick={() => find(true)} disabled={busy}>Show account</button>
+                    <button className="btn-sm" onClick={() => find(false)} disabled={busy || !amountIsValid}>
+                        {busy ? 'Searching...' : 'Find vouchers'}
+                    </button>
+                </div>
             </div>
 
             {vouchers && (
-                <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
                     {vouchers.length === 0 ? (
                         <div style={{ padding: 14, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
                             <AlertTriangle size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
-                            No unclaimed voucher for exactly PKR {fmtN(Number(amount) || 0)}.
-                            <div style={{ marginTop: 8 }}>
-                                <button className="btn-sm" onClick={() => find(true)} disabled={busy}>
-                                    Show everything still unclaimed
-                                </button>
-                            </div>
+                            No posted voucher has PKR {fmtN(Number(amount) || 0)} available on the Master account.
+                            {' '}Use Show account to review its vouchers.
                         </div>
-                    ) : vouchers.map(v => row(v, true))}
+                    ) : vouchers.map(row)}
                 </div>
             )}
 
             {others && (
                 <div style={{ marginTop: 10 }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>
-                        Every voucher with money on the Master receivable that no booking has claimed ({others.length}).
-                        One remittance often covers several vehicles, so the amount here may be more than this one.
+                        Posted vouchers on the Master account ({others.length}). Select one with enough available amount
+                        for this booking's portion.
                     </div>
-                    <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px dashed #cbd5e1', borderRadius: 6 }}>
+                    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px dashed #cbd5e1', borderRadius: 6 }}>
                         {others.length === 0
                             ? <div style={{ padding: 14, textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
-                                  Nothing unclaimed on the Master receivable. Post the remittance in Accounting first.
+                                  No posted vouchers on the Master account. Post the historical entry in Accounting first.
                               </div>
-                            : others.map(v => row(v, true))}
+                            : others.map(row)}
                     </div>
                 </div>
             )}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button className="btn-sm" onClick={onClose}>Close</button>
-                <button className="btn" onClick={link} disabled={busy || !picked}>
-                    <Link2 size={13} /> {picked ? `Link to ${picked.VoucherNo}` : 'Pick a voucher'}
+                <button className="btn" onClick={link} disabled={busy || !picked || !canAllocate(picked)}>
+                    <Link2 size={13} /> {picked ? `Link PKR ${fmtN(Number(amount))} to ${picked.VoucherNo}` : 'Pick a voucher'}
                 </button>
             </div>
         </Shell>

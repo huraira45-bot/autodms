@@ -13,9 +13,8 @@
  *
  * Decisions taken with the owner:
  *   - a payment may only be linked to a posted voucher that touches that
- *     customer's own account, and whose amount equals the payment;
- *   - one voucher backs exactly one payment (enforced by
- *     UX_SalesPayments_LinkedVoucher as well as by the check here);
+ *     customer's own account, with enough unallocated account amount;
+ *   - a shared voucher can back several accounts/bookings, capped per account;
  *   - the state of the booking is chosen at entry — these are old deals, they
  *     should not walk the approval flow again;
  *   - they appear in reports but raise no staff incentive: nobody is paid
@@ -28,6 +27,10 @@
  */
 const { sql, getPool } = require('../config/db');
 const { logBookingTransition } = require('./salesBookingController');
+const { assertVoucherLinkable,CUSTOMER_AMOUNT_SQL,LINKED_AMOUNT_SQL,NONLINKED_PAYMENT_SQL,LOCK_VOUCHER_SQL } = require('../services/historicalVoucherAllocationService');
+const { MASTER_AMOUNT_SQL,MASTER_LINKED_SQL,linkMasterVoucher,GENERATED_SALES_SOURCES } = require('../services/historicalMasterAllocationService');
+
+const GENERATED_SALES_SQL = GENERATED_SALES_SOURCES.map(source => "'" + source + "'").join(',');
 
 // The states an old deal can sensibly be recorded in. The in-flight approval
 // states (PendingApproval, PendingCancelApproval, CancellationApproved, Draft)
@@ -53,11 +56,11 @@ async function bookingNoForYear(tx, year) {
 }
 
 /** The booking plus the customer's ledger account. */
-async function loadBooking(pool, bookingId) {
+async function loadBooking(pool, bookingId, lock=false) {
     const r = await pool.request().input('id', sql.Int, bookingId)
         .query(`SELECT b.BookingID, b.BookingNo, b.Status, b.IsHistorical, b.PartyID,
-                       pt.PartyName, pt.PartyGLID
-                FROM   dms_SalesBookings b
+                       pt.PartyName, pt.PartyGLID, b.NegotiatedPrice
+                FROM   dms_SalesBookings b ${lock?'WITH (UPDLOCK,HOLDLOCK)':''}
                 LEFT   JOIN gen_PartiesInfo pt ON pt.PartyID = b.PartyID
                 WHERE  b.BookingID=@id`);
     if (!r.recordset.length) fail('Booking not found.', 404);
@@ -74,34 +77,6 @@ function assertHasLedgerAccount(booking) {
     if (!booking.PartyGLID) {
         fail(`${booking.PartyName || 'This customer'} has no account in the chart of accounts, so there is nothing to match against. Map the customer's account under Credit Parties first.`);
     }
-}
-
-/** Shared rule: may this voucher back a payment of this total? Returns it. */
-async function assertVoucherLinkable(pool, booking, voucherId, total) {
-    const vr = await pool.request()
-        .input('vid', sql.Int, voucherId)
-        .input('gl', sql.Int, booking.PartyGLID)
-        .query(`SELECT v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Status,
-                       (SELECT COUNT(*) FROM data_FinanceVoucherDetail d
-                         WHERE d.VoucherID = v.VoucherID AND d.GLCAID = @gl) AS TouchesCustomer,
-                       (SELECT TOP 1 p.PaymentID FROM dms_SalesPayments p WHERE p.VoucherID = v.VoucherID) AS UsedByPaymentID
-                FROM   data_FinanceVoucherInfo v WHERE v.VoucherID=@vid`);
-    if (!vr.recordset.length) fail('That voucher does not exist.', 404);
-    const v = vr.recordset[0];
-
-    if (v.Status !== 'Posted') {
-        fail(`${v.VoucherNo} is ${v.Status}, not Posted. Only a voucher already posted in the ledger can be linked.`);
-    }
-    if (!v.TouchesCustomer) {
-        fail(`${v.VoucherNo} does not touch ${booking.PartyName || 'the customer'}'s account, so it cannot be this customer's payment.`);
-    }
-    if (v.UsedByPaymentID) {
-        fail(`${v.VoucherNo} is already linked to payment #${v.UsedByPaymentID}. One voucher can only back one payment.`);
-    }
-    if (Math.abs(Number(v.TotalAmount) - total) > 0.01) {
-        fail(`${v.VoucherNo} is for PKR ${money(v.TotalAmount)}, but this payment comes to PKR ${money(total)}. They have to match.`);
-    }
-    return v;
 }
 
 /** GET /api/sales/historical/states — what the entry form may offer. */
@@ -269,81 +244,55 @@ exports.setBookingDate = async (req, res) => {
  * out and link later from the payments list.
  */
 exports.recordPayment = async (req, res) => {
+    let tx;
     try {
-        const bookingId = parseInt(req.params.id);
-        const b = req.body || {};
-        const amount = Number(b.Amount);
-        const premium = Math.max(0, Number(b.PremiumPortion) || 0);
-        const mode = b.PaymentMode;
-
-        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
-        if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be greater than 0.' });
-        if (premium > amount) return res.status(400).json({ error: 'Premium cannot be more than the amount.' });
-        if (!PATH_FOR_MODE[mode]) {
-            return res.status(400).json({ error: `Payment mode must be one of: ${Object.keys(PATH_FOR_MODE).join(', ')}` });
+        const bookingId=Number(req.params.id), b=req.body||{};
+        const rawAmount=Number(b.Amount),rawPremium=Number(b.PremiumPortion||0),mode=b.PaymentMode;
+        if (!Number.isSafeInteger(bookingId)||bookingId<=0) fail('Invalid booking id.',400);
+        const amountCents=Math.round(rawAmount*100),premiumCents=Math.round(rawPremium*100);
+        if (!Number.isFinite(rawAmount)||!Number.isFinite(rawPremium)
+            ||!Number.isSafeInteger(amountCents)||!Number.isSafeInteger(premiumCents)
+            ||amountCents<=0||premiumCents<0) fail('Enter a positive payment amount and a nonnegative premium.',400);
+        if (Math.abs(rawAmount*100-amountCents)>0.000001||Math.abs(rawPremium*100-premiumCents)>0.000001) {
+            fail('Payment and premium amounts must have at most two decimal places.',400);
         }
-
-        const pool = await getPool();
-        const booking = await loadBooking(pool, bookingId);
-        assertHistorical(booking);
-
-        const total = Math.round((amount + premium) * 100) / 100;
-        let voucher = null;
+        if (premiumCents>amountCents) fail('Premium cannot be more than the amount.',400);
+        if (!Number.isSafeInteger(amountCents+premiumCents)) fail('Payment amount is too large.',400);
+        if (!PATH_FOR_MODE[mode]) fail(`Payment mode must be one of: ${Object.keys(PATH_FOR_MODE).join(', ')}`,400);
+        const amount=amountCents/100,premium=premiumCents/100,total=(amountCents+premiumCents)/100;
+        const pool=await getPool();
+        tx=new sql.Transaction(pool); await tx.begin();
+        const booking=await loadBooking(tx,bookingId,true); assertHistorical(booking);
+        let voucher=null;
         if (b.VoucherID) {
             assertHasLedgerAccount(booking);
-            voucher = await assertVoucherLinkable(pool, booking, parseInt(b.VoucherID), total);
+            voucher=await assertVoucherLinkable(tx,booking,Number(b.VoucherID),total);
         }
-
-        const receivedAt = b.ReceivedAt ? new Date(b.ReceivedAt) : (voucher ? new Date(voucher.VoucherDate) : new Date());
-
-        const tx = new sql.Transaction(pool);
-        await tx.begin();
-        try {
-            const ins = await new sql.Request(tx)
-                .input('bid', sql.Int, bookingId)
-                .input('path', sql.NVarChar(20), PATH_FOR_MODE[mode])
-                .input('mode', sql.NVarChar(30), mode)
-                .input('amt', sql.Decimal(18, 2), amount)
-                .input('prem', sql.Decimal(18, 2), premium)
-                .input('at', sql.DateTime, receivedAt)
-                .input('vid', sql.Int, voucher ? voucher.VoucherID : null)
-                .input('vno', sql.NVarChar(50), voucher ? voucher.VoucherNo : null)
-                .input('linked', sql.Bit, voucher ? 1 : 0)
-                .input('notes', sql.NVarChar(sql.MAX), b.Notes
-                    || (voucher ? `Linked to ${voucher.VoucherNo}, already posted in the ledger.`
-                               : 'Historical payment — ledger voucher not linked yet.'))
-                .input('emp', sql.Int, req.user?.employeeId || null)
-                .input('empN', sql.NVarChar(100), req.user?.userName || null)
-                // OUTPUT needs an INTO table here: dms_SalesPayments carries the
-                // paid-total trigger, and SQL Server refuses a bare OUTPUT on a
-                // table with triggers (same shape as recordPayment).
-                .query(`DECLARE @ins TABLE (PaymentID INT);
-                        INSERT INTO dms_SalesPayments
-                            (BookingID, PaymentPath, PaymentMode, Amount, PremiumPortion,
-                             ReceivedAt, VoucherID, VoucherNo, IsLinkedVoucher, Notes,
-                             ReceivedByEmployeeID, ReceivedByName, CreatedByEmployeeID)
-                        OUTPUT INSERTED.PaymentID INTO @ins
-                        VALUES (@bid, @path, @mode, @amt, @prem,
-                                @at, @vid, @vno, @linked, @notes,
-                                @emp, @empN, @emp);
-                        SELECT PaymentID FROM @ins;`);
-            const paymentId = ins.recordset[0].PaymentID;
-
-            await logBookingTransition(tx, bookingId, booking.Status, booking.Status, req.user,
-                `Historical payment #${paymentId} of PKR ${money(total)} recorded`
-                + (voucher ? ` and linked to ${voucher.VoucherNo}, already posted in the ledger.`
-                           : '. No ledger voucher linked yet.'));
-
-            await tx.commit();
-            res.status(201).json({
-                message: voucher ? `Payment recorded and linked to ${voucher.VoucherNo}.` : 'Payment recorded. Link its ledger voucher whenever you have it.',
-                PaymentID: paymentId,
-                VoucherNo: voucher ? voucher.VoucherNo : null,
-            });
-        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
-    } catch (err) {
-        console.error('historical recordPayment:', err);
-        res.status(err.statusCode || 400).json({ error: err.message });
+        const receivedAt=b.ReceivedAt?new Date(b.ReceivedAt):(voucher?new Date(voucher.VoucherDate):new Date());
+        if (isNaN(receivedAt.getTime())) fail('Date received is not a real date.',400);
+        const ins=await new sql.Request(tx)
+            .input('bid',sql.Int,bookingId).input('path',sql.NVarChar(20),PATH_FOR_MODE[mode])
+            .input('mode',sql.NVarChar(30),mode).input('amt',sql.Decimal(18,2),amount)
+            .input('prem',sql.Decimal(18,2),premium).input('at',sql.DateTime,receivedAt)
+            .input('vid',sql.Int,voucher?.VoucherID||null).input('vno',sql.NVarChar(50),voucher?.VoucherNo||null)
+            .input('linked',sql.Bit,voucher?1:0).input('gl',sql.Int,voucher?booking.PartyGLID:null)
+            .input('notes',sql.NVarChar(sql.MAX),b.Notes||(voucher?`Linked to ${voucher.VoucherNo}, already posted.`:'Historical payment — ledger voucher not linked yet.'))
+            .input('emp',sql.Int,req.user?.employeeId||null).input('empN',sql.NVarChar(100),req.user?.userName||null)
+            .query(`DECLARE @ins TABLE (PaymentID INT);
+                INSERT INTO dms_SalesPayments
+                    (BookingID,PaymentPath,PaymentMode,Amount,PremiumPortion,ReceivedAt,VoucherID,VoucherNo,
+                     IsLinkedVoucher,LinkedVoucherGLCAID,Notes,ReceivedByEmployeeID,ReceivedByName,CreatedByEmployeeID)
+                OUTPUT INSERTED.PaymentID INTO @ins
+                VALUES (@bid,@path,@mode,@amt,@prem,@at,@vid,@vno,@linked,@gl,@notes,@emp,@empN,@emp);
+                SELECT PaymentID FROM @ins;`);
+        const paymentId=ins.recordset[0].PaymentID;
+        await logBookingTransition(tx,bookingId,booking.Status,booking.Status,req.user,
+            `Historical payment #${paymentId} of PKR ${money(total)} recorded${voucher?` and allocated to ${voucher.VoucherNo} on account ${booking.PartyGLID}`:'. No ledger voucher linked yet.'}`);
+        await tx.commit();
+        res.status(201).json({message:voucher?`Payment recorded and linked to ${voucher.VoucherNo}.`:'Payment recorded. Link its ledger voucher whenever you have it.',PaymentID:paymentId,VoucherNo:voucher?.VoucherNo||null});
+    } catch(err) {
+        if(tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode||400).json({error:err.message});
     }
 };
 
@@ -351,56 +300,39 @@ exports.recordPayment = async (req, res) => {
  * POST /api/sales/historical/payments/:paymentId/link   { VoucherID }
  * Step two: tie a payment already on record to its voucher in the ledger.
  */
-exports.linkPayment = async (req, res) => {
+exports.linkPayment = async (req,res) => {
+    let tx;
     try {
-        const paymentId = parseInt(req.params.paymentId);
-        const voucherId = parseInt(req.body?.VoucherID);
-        if (!Number.isInteger(paymentId) || !Number.isInteger(voucherId)) {
-            return res.status(400).json({ error: 'Pick a payment and a voucher.' });
-        }
-
-        const pool = await getPool();
-        const pr = await pool.request().input('pid', sql.Int, paymentId)
-            .query(`SELECT PaymentID, BookingID, Amount, PremiumPortion, Status, VoucherID, VoucherNo, IsLinkedVoucher
-                    FROM dms_SalesPayments WHERE PaymentID=@pid`);
-        if (!pr.recordset.length) return res.status(404).json({ error: 'That payment does not exist.' });
-        const p = pr.recordset[0];
-
-        // Whether this is a historical booking at all comes first: it is the
-        // most useful thing to say when someone tries this on a normal one.
-        const booking = await loadBooking(pool, p.BookingID);
-        assertHistorical(booking);
-        assertHasLedgerAccount(booking);
-
-        if (p.Status === 'Reversed') return res.status(409).json({ error: 'That payment has been voided.' });
-        if (p.VoucherID) {
-            return res.status(409).json({ error: `That payment is already linked to ${p.VoucherNo || 'a voucher'}. Unlink it first if it is wrong.` });
-        }
-
-        const total = Math.round((Number(p.Amount) + Number(p.PremiumPortion || 0)) * 100) / 100;
-        const voucher = await assertVoucherLinkable(pool, booking, voucherId, total);
-
-        const tx = new sql.Transaction(pool);
-        await tx.begin();
-        try {
-            await new sql.Request(tx)
-                .input('pid', sql.Int, paymentId)
-                .input('vid', sql.Int, voucher.VoucherID)
-                .input('vno', sql.NVarChar(50), voucher.VoucherNo)
-                .query(`UPDATE dms_SalesPayments
-                        SET VoucherID=@vid, VoucherNo=@vno, IsLinkedVoucher=1
-                        WHERE PaymentID=@pid`);
-            await logBookingTransition(tx, booking.BookingID, booking.Status, booking.Status, req.user,
-                `Payment #${paymentId} of PKR ${money(total)} linked to ${voucher.VoucherNo}, already posted in the ledger. Nothing was posted to the GL.`);
-            await tx.commit();
-            res.json({ message: `Payment linked to ${voucher.VoucherNo}.`, PaymentID: paymentId, VoucherNo: voucher.VoucherNo });
-        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
-    } catch (err) {
-        console.error('historical linkPayment:', err);
-        if (/UX_SalesPayments_LinkedVoucher/i.test(err.message || '')) {
-            return res.status(409).json({ error: 'That voucher was linked to another payment a moment ago. Pick a different one.' });
-        }
-        res.status(err.statusCode || 400).json({ error: err.message });
+        const paymentId=Number(req.params.paymentId), voucherId=Number(req.body?.VoucherID);
+        if(!Number.isSafeInteger(paymentId)||paymentId<=0||!Number.isSafeInteger(voucherId)||voucherId<=0) fail('Pick a payment and a voucher.',400);
+        const pool=await getPool();
+        const initial=await pool.request().input('pid',sql.Int,paymentId).query('SELECT BookingID FROM dms_SalesPayments WHERE PaymentID=@pid');
+        if(!initial.recordset.length) fail('That payment does not exist.',404);
+        tx=new sql.Transaction(pool); await tx.begin();
+        const booking=await loadBooking(tx,initial.recordset[0].BookingID,true);
+        assertHistorical(booking); assertHasLedgerAccount(booking);
+        // All links acquire the voucher before a payment row; capacity scans must
+        // not wait on a different payment whose transaction waits on this voucher.
+        await new sql.Request(tx).input('vid',sql.Int,voucherId).query(LOCK_VOUCHER_SQL);
+        const locked=await new sql.Request(tx).input('pid',sql.Int,paymentId).input('bid',sql.Int,booking.BookingID)
+            .query(`SELECT PaymentID,Amount,PremiumPortion,Status,VoucherID,VoucherNo
+                FROM dms_SalesPayments WITH (UPDLOCK,HOLDLOCK) WHERE PaymentID=@pid AND BookingID=@bid`);
+        const p=locked.recordset[0];
+        if(!p) fail('That payment is no longer on this booking.',409);
+        if(p.Status!=='Posted') fail('That payment has been voided.');
+        if(p.VoucherID) fail(`That payment is already linked to ${p.VoucherNo||'a voucher'}. Unlink it first if it is wrong.`);
+        const total=Math.round((Number(p.Amount)+Number(p.PremiumPortion||0))*100)/100;
+        const voucher=await assertVoucherLinkable(tx,booking,voucherId,total);
+        await new sql.Request(tx).input('pid',sql.Int,paymentId).input('vid',sql.Int,voucherId)
+            .input('vno',sql.NVarChar(50),voucher.VoucherNo).input('gl',sql.Int,booking.PartyGLID)
+            .query('UPDATE dms_SalesPayments SET VoucherID=@vid,VoucherNo=@vno,IsLinkedVoucher=1,LinkedVoucherGLCAID=@gl WHERE PaymentID=@pid');
+        await logBookingTransition(tx,booking.BookingID,booking.Status,booking.Status,req.user,
+            `Payment #${paymentId}, PKR ${money(total)}, allocated to ${voucher.VoucherNo} on account ${booking.PartyGLID}. Nothing posted to the GL.`);
+        await tx.commit();
+        res.json({message:`Payment linked to ${voucher.VoucherNo}.`,PaymentID:paymentId,VoucherNo:voucher.VoucherNo});
+    } catch(err) {
+        if(tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode||400).json({error:err.message});
     }
 };
 
@@ -409,39 +341,29 @@ exports.linkPayment = async (req, res) => {
  * Detaches a wrongly linked voucher. The voucher itself is left alone — it was
  * in the ledger before any of this, and we never posted it.
  */
-exports.unlinkPayment = async (req, res) => {
+exports.unlinkPayment = async (req,res) => {
+    let tx;
     try {
-        const paymentId = parseInt(req.params.paymentId);
-        if (!Number.isInteger(paymentId)) return res.status(400).json({ error: 'Invalid payment id.' });
-
-        const pool = await getPool();
-        const pr = await pool.request().input('pid', sql.Int, paymentId)
-            .query(`SELECT PaymentID, BookingID, VoucherID, VoucherNo, IsLinkedVoucher, Status
-                    FROM dms_SalesPayments WHERE PaymentID=@pid`);
-        if (!pr.recordset.length) return res.status(404).json({ error: 'That payment does not exist.' });
-        const p = pr.recordset[0];
-        if (!p.IsLinkedVoucher || !p.VoucherID) {
-            return res.status(409).json({ error: 'That payment has no linked voucher to remove.' });
-        }
-
-        const booking = await loadBooking(pool, p.BookingID);
-        assertHistorical(booking);
-
-        const tx = new sql.Transaction(pool);
-        await tx.begin();
-        try {
-            await new sql.Request(tx).input('pid', sql.Int, paymentId)
-                .query(`UPDATE dms_SalesPayments
-                        SET VoucherID=NULL, VoucherNo=NULL, IsLinkedVoucher=0
-                        WHERE PaymentID=@pid`);
-            await logBookingTransition(tx, booking.BookingID, booking.Status, booking.Status, req.user,
-                `Payment #${paymentId} unlinked from ${p.VoucherNo || 'its voucher'}. The voucher stays exactly as it is in the ledger.`);
-            await tx.commit();
-            res.json({ message: `Unlinked from ${p.VoucherNo || 'the voucher'}. It is untouched in the ledger.`, PaymentID: paymentId });
-        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
-    } catch (err) {
-        console.error('historical unlinkPayment:', err);
-        res.status(err.statusCode || 400).json({ error: err.message });
+        const paymentId=Number(req.params.paymentId);
+        if(!Number.isSafeInteger(paymentId)||paymentId<=0) fail('Invalid payment id.',400);
+        const pool=await getPool();
+        const initial=await pool.request().input('pid',sql.Int,paymentId).query('SELECT BookingID FROM dms_SalesPayments WHERE PaymentID=@pid');
+        if(!initial.recordset.length) fail('That payment does not exist.',404);
+        tx=new sql.Transaction(pool); await tx.begin();
+        const booking=await loadBooking(tx,initial.recordset[0].BookingID,true); assertHistorical(booking);
+        const found=await new sql.Request(tx).input('pid',sql.Int,paymentId)
+            .query('SELECT VoucherID,VoucherNo,IsLinkedVoucher FROM dms_SalesPayments WITH (UPDLOCK,HOLDLOCK) WHERE PaymentID=@pid');
+        const p=found.recordset[0];
+        if(!p?.IsLinkedVoucher||!p.VoucherID) fail('That payment has no linked voucher to remove.');
+        await new sql.Request(tx).input('pid',sql.Int,paymentId)
+            .query('UPDATE dms_SalesPayments SET VoucherID=NULL,VoucherNo=NULL,IsLinkedVoucher=0,LinkedVoucherGLCAID=NULL WHERE PaymentID=@pid');
+        await logBookingTransition(tx,booking.BookingID,booking.Status,booking.Status,req.user,
+            `Payment #${paymentId} unlinked from ${p.VoucherNo||'its voucher'}. Only this payment’s allocation was released; the ledger stays unchanged.`);
+        await tx.commit();
+        res.json({message:`Unlinked from ${p.VoucherNo||'the voucher'}.`,PaymentID:paymentId});
+    } catch(err) {
+        if(tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode||400).json({error:err.message});
     }
 };
 
@@ -490,53 +412,33 @@ exports.pendingLinks = async (req, res) => {
 /**
  * GET /api/sales/historical/bookings/:id/linkable-vouchers?amount=&search=&all=
  *
- * Posted vouchers on this customer's own account that no payment has taken yet.
- * With an amount, only exact matches — that is the rule for linking. With
- * all=1, everything available on the account, so you can see what is there when
- * nothing matches the amount you expected.
+ * Original posted manual/opening vouchers with a net amount on this customer's
+ * account. A payment reserves only its own amount plus premium on that account.
+ * Find filters by sufficient remaining capacity; all=1 includes exhausted rows
+ * for reference. Linking rechecks the capacity under the voucher header lock.
  */
-exports.linkableVouchers = async (req, res) => {
+exports.linkableVouchers = async (req,res) => {
     try {
-        const bookingId = parseInt(req.params.id);
-        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
-        const wantsAll = req.query.all === '1' || req.query.all === 'true';
-        const amount = Number(req.query.amount);
-        if (!wantsAll && !(amount > 0)) return res.status(400).json({ error: 'Enter the amount first — vouchers are matched to it.' });
-
-        const pool = await getPool();
-        const booking = await loadBooking(pool, bookingId);
-        assertHasLedgerAccount(booking);
-
-        const rq = pool.request().input('gl', sql.Int, booking.PartyGLID);
-        let amountClause = '';
-        if (!wantsAll) {
-            rq.input('amt', sql.Decimal(18, 2), amount);
-            amountClause = ' AND v.TotalAmount = @amt';
-        }
-        let searchClause = '';
-        if (req.query.search) {
-            rq.input('s', sql.NVarChar(80), `%${String(req.query.search).trim()}%`);
-            searchClause = ' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)';
-        }
-        const r = await rq.query(`
-            SELECT TOP 50 v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Remarks,
-                   vt.Title AS VoucherType,
-                   (SELECT SUM(d2.Debit - d2.Credit) FROM data_FinanceVoucherDetail d2
-                     WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gl) AS CustomerNet
-            FROM   data_FinanceVoucherInfo v
-            LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
-            WHERE  v.Status = 'Posted'
-              AND  EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d
-                            WHERE d.VoucherID = v.VoucherID AND d.GLCAID = @gl)
-              AND  NOT EXISTS (SELECT 1 FROM dms_SalesPayments p WHERE p.VoucherID = v.VoucherID)
-              ${amountClause} ${searchClause}
-            ORDER  BY v.VoucherDate DESC, v.VoucherID DESC`);
-
-        res.json({ CustomerName: booking.PartyName, CustomerGLCAID: booking.PartyGLID, vouchers: r.recordset });
-    } catch (err) {
-        console.error('linkableVouchers:', err);
-        res.status(err.statusCode || 500).json({ error: err.message });
-    }
+        const bookingId=Number(req.params.id), wantsAll=['1','true'].includes(req.query.all), amount=Number(req.query.amount);
+        if(!Number.isSafeInteger(bookingId)||bookingId<=0) fail('Invalid booking id.',400);
+        if(!wantsAll&&(!Number.isFinite(amount)||amount<=0)) fail('Enter the payment amount first.',400);
+        const pool=await getPool(), booking=await loadBooking(pool,bookingId);
+        assertHistorical(booking); assertHasLedgerAccount(booking);
+        const rq=pool.request().input('gl',sql.Int,booking.PartyGLID);
+        let amountClause='',searchClause='';
+        if(!wantsAll) { rq.input('amt',sql.Decimal(18,2),amount); amountClause=' AND cap.CustomerAmount-cap.LinkedAmount>=@amt'; }
+        if(req.query.search) { rq.input('s',sql.NVarChar(200),`%${String(req.query.search).trim()}%`); searchClause=' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)'; }
+        const r=await rq.query(`SELECT TOP 50 v.VoucherID,v.VoucherNo,v.VoucherDate,v.TotalAmount,v.Remarks,vt.Title AS VoucherType,
+                cap.CustomerAmount,cap.LinkedAmount,
+                CASE WHEN cap.CustomerAmount>cap.LinkedAmount THEN cap.CustomerAmount-cap.LinkedAmount ELSE 0 END AS AvailableAmount
+            FROM data_FinanceVoucherInfo v LEFT JOIN GLVoucherType vt ON vt.Voucherid=v.VoucherTypeID
+            CROSS APPLY (SELECT ${CUSTOMER_AMOUNT_SQL} AS CustomerAmount,${LINKED_AMOUNT_SQL} AS LinkedAmount) cap
+            WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+              AND ISNULL(v.SourceDocType,'') NOT IN (${GENERATED_SALES_SQL}) AND ${NONLINKED_PAYMENT_SQL} IS NULL
+              AND cap.CustomerAmount>0 ${amountClause} ${searchClause}
+            ORDER BY v.VoucherDate DESC,v.VoucherID DESC`);
+        res.json({CustomerName:booking.PartyName,CustomerGLCAID:booking.PartyGLID,vouchers:r.recordset});
+    } catch(err) { res.status(err.statusCode||500).json({error:err.message}); }
 };
 
 // ---------------------------------------------------------------------------
@@ -553,9 +455,10 @@ exports.linkableVouchers = async (req, res) => {
 // predates DealerDesk and carries no BookingID, which is exactly why the
 // booking looks unpaid and somebody reaches for Pay Master.
 //
-// So linking here means tagging that existing debit with this booking. No new
-// voucher and no new table, and AmountPaidToMaster, the remaining-to-pay
-// figure and the delivery posting all pick it up on their own.
+// New links allocate a selected portion in dms_HistoricalMasterAllocations;
+// opening ledger amounts and tags remain intact. Booking, lifecycle, delivery
+// and reconciliation totals add active allocations to their tagged GL balance.
+// Legacy tag-based links remain visible and can be unlinked independently.
 
 /** The system account Master remittances are debited to. */
 async function masterReceivableGL(pool) {
@@ -574,197 +477,107 @@ async function masterReceivableGL(pool) {
  * Posted vouchers carrying a Master-receivable debit that no booking has
  * claimed yet.
  */
-exports.linkableMasterVouchers = async (req, res) => {
+exports.linkableMasterVouchers = async (req,res) => {
     try {
-        const bookingId = parseInt(req.params.id);
-        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
-        const wantsAll = req.query.all === '1' || req.query.all === 'true';
-        const amount = Number(req.query.amount);
-        if (!wantsAll && !(amount > 0)) {
-            return res.status(400).json({ error: 'Enter the amount first — vouchers are matched to it.' });
-        }
-
-        const pool = await getPool();
-        const booking = await loadBooking(pool, bookingId);
-        assertHistorical(booking);
-        const masterGL = await masterReceivableGL(pool);
-
-        const rq = pool.request().input('gl', sql.Int, masterGL);
-        let amountClause = '';
-        if (!wantsAll) {
-            rq.input('amt', sql.Decimal(18, 2), amount);
-            // Matched on the Master leg rather than the voucher total: one
-            // remittance often covers several vehicles on a single voucher.
-            amountClause = ` AND EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d5
-                                          WHERE d5.VoucherID = v.VoucherID AND d5.GLCAID = @gl
-                                            AND d5.BookingID IS NULL AND d5.Debit = @amt)`;
-        }
-        let searchClause = '';
-        if (req.query.search) {
-            rq.input('s', sql.NVarChar(80), `%${String(req.query.search).trim()}%`);
-            searchClause = ' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)';
-        }
-
-        const r = await rq.query(`
-            SELECT TOP 50 v.VoucherID, v.VoucherNo, v.VoucherDate, v.TotalAmount, v.Remarks,
-                   vt.Title AS VoucherType,
-                   (SELECT SUM(d2.Debit) FROM data_FinanceVoucherDetail d2
-                     WHERE d2.VoucherID = v.VoucherID AND d2.GLCAID = @gl AND d2.BookingID IS NULL)
-                     AS UnclaimedToMaster
-            FROM   data_FinanceVoucherInfo v
-            LEFT   JOIN GLVoucherType vt ON vt.Voucherid = v.VoucherTypeID
-            WHERE  v.Status = 'Posted' AND v.ReversesVoucherID IS NULL
-              AND  EXISTS (SELECT 1 FROM data_FinanceVoucherDetail d
-                            WHERE d.VoucherID = v.VoucherID AND d.GLCAID = @gl
-                              AND d.Debit > 0 AND d.BookingID IS NULL)
-              ${amountClause} ${searchClause}
-            ORDER  BY v.VoucherDate DESC, v.VoucherID DESC`);
-
-        res.json({ bookingNo: booking.BookingNo, vouchers: r.recordset });
-    } catch (err) {
-        console.error('linkableMasterVouchers:', err);
-        res.status(err.statusCode || 500).json({ error: err.message });
-    }
+        const bookingId=Number(req.params.id), wantsAll=['1','true'].includes(req.query.all), amount=Number(req.query.amount);
+        if(!Number.isSafeInteger(bookingId)||bookingId<=0) fail('Invalid booking id.',400);
+        if(!wantsAll&&(!Number.isFinite(amount)||amount<=0)) fail('Enter this booking’s allocation amount.',400);
+        const pool=await getPool(), booking=await loadBooking(pool,bookingId); assertHistorical(booking);
+        const gl=await masterReceivableGL(pool);
+        const rq=pool.request().input('gl',sql.Int,gl);
+        let amountClause='',searchClause='';
+        if(!wantsAll) { rq.input('amt',sql.Decimal(18,2),amount); amountClause=' AND cap.MasterAmount-cap.LinkedAmount>=@amt'; }
+        if(req.query.search) { rq.input('s',sql.NVarChar(200),`%${String(req.query.search).trim()}%`); searchClause=' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)'; }
+        const r=await rq.query(`SELECT TOP 50 v.VoucherID,v.VoucherNo,v.VoucherDate,v.TotalAmount,v.Remarks,vt.Title AS VoucherType,
+                cap.MasterAmount,cap.LinkedAmount,
+                CASE WHEN cap.MasterAmount>cap.LinkedAmount THEN cap.MasterAmount-cap.LinkedAmount ELSE 0 END AS UnclaimedToMaster
+            FROM data_FinanceVoucherInfo v LEFT JOIN GLVoucherType vt ON vt.Voucherid=v.VoucherTypeID
+            CROSS APPLY (SELECT ${MASTER_AMOUNT_SQL} AS MasterAmount,${MASTER_LINKED_SQL} AS LinkedAmount) cap
+            WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
+              AND ISNULL(v.SourceDocType,'') NOT IN (${GENERATED_SALES_SQL})
+              AND cap.MasterAmount>0 ${amountClause} ${searchClause}
+            ORDER BY v.VoucherDate DESC,v.VoucherID DESC`);
+        res.json({bookingNo:booking.BookingNo,vouchers:r.recordset});
+    } catch(err) { res.status(err.statusCode||500).json({error:err.message}); }
 };
 
 /**
- * POST /api/sales/historical/bookings/:id/link-master   { VoucherID }
+ * POST /api/sales/historical/bookings/:id/link-master   { VoucherID, Amount }
  *
- * Claims the unclaimed Master-receivable debits on that voucher for this
- * booking. Nothing is posted.
+ * Reserves only Amount from the remaining Master-receivable net debit budget.
+ * Multiple bookings can share the original voucher. Nothing is posted.
  */
-exports.linkMasterPayment = async (req, res) => {
+exports.linkMasterPayment = async (req,res) => {
+    let tx;
     try {
-        const bookingId = parseInt(req.params.id);
-        const voucherId = parseInt(req.body?.VoucherID);
-        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
-        if (!Number.isInteger(voucherId)) return res.status(400).json({ error: 'Pick the voucher to link.' });
-
-        const pool = await getPool();
-        const booking = await loadBooking(pool, bookingId);
-        assertHistorical(booking);
-        const masterGL = await masterReceivableGL(pool);
-
-        const v = (await pool.request().input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL)
-            .query(`SELECT vi.VoucherNo, vi.VoucherDate, vi.Status, vi.ReversesVoucherID,
-                           (SELECT ISNULL(SUM(d.Debit), 0) FROM data_FinanceVoucherDetail d
-                             WHERE d.VoucherID = vi.VoucherID AND d.GLCAID = @gl AND d.BookingID IS NULL)
-                             AS Unclaimed
-                    FROM   data_FinanceVoucherInfo vi WHERE vi.VoucherID = @v`)).recordset[0];
-        if (!v) fail('That voucher does not exist.', 404);
-        if (v.Status !== 'Posted') {
-            fail(`${v.VoucherNo} is ${v.Status}, not posted — only a posted voucher can back an old remittance.`);
-        }
-        if (v.ReversesVoucherID) {
-            fail(`${v.VoucherNo} reverses another voucher; it is not a payment to Master.`);
-        }
-        if (!(Number(v.Unclaimed) > 0)) {
-            fail(`${v.VoucherNo} has nothing left on the Master receivable that another booking has not already claimed.`);
-        }
-
-        // Claiming more than the vehicle is worth would break the delivery
-        // posting, which refuses to settle until master-paid equals the price.
-        const priced = (await pool.request().input('b', sql.Int, bookingId)
-            .query(`SELECT NegotiatedPrice FROM dms_SalesBookings WHERE BookingID = @b`)).recordset[0];
-        const already = (await pool.request().input('b', sql.Int, bookingId).input('gl', sql.Int, masterGL)
-            .query(`SELECT ISNULL(SUM(d.Debit - d.Credit), 0) AS Paid
-                    FROM   data_FinanceVoucherDetail d
-                    JOIN   data_FinanceVoucherInfo vi ON vi.VoucherID = d.VoucherID
-                    WHERE  vi.Status = 'Posted' AND d.GLCAID = @gl AND d.BookingID = @b`)).recordset[0];
-        const after = Number(already.Paid) + Number(v.Unclaimed);
-        if (after - Number(priced?.NegotiatedPrice || 0) > 0.01) {
-            fail(`Linking ${v.VoucherNo} would put PKR ${money(after)} against a vehicle priced at `
-               + `PKR ${money(priced?.NegotiatedPrice || 0)}. Pick the voucher that matches this booking.`);
-        }
-
-        const tx = new sql.Transaction(pool);
-        await tx.begin();
-        try {
-            const tagged = await new sql.Request(tx)
-                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
-                .query(`UPDATE data_FinanceVoucherDetail
-                        SET BookingID = @b
-                        WHERE VoucherID = @v AND GLCAID = @gl AND Debit > 0 AND BookingID IS NULL`);
-
-            // The subsidiary row is what party statements read.
-            await new sql.Request(tx)
-                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
-                .query(`UPDATE dms_PartyLedger
-                        SET BookingID = @b
-                        WHERE VoucherID = @v AND GLCAID = @gl AND BookingID IS NULL`);
-
-            await logBookingTransition(tx, bookingId, booking.Status, booking.Status, req.user,
-                `Payment to Master matched to ${v.VoucherNo} of `
-                + `${new Date(v.VoucherDate).toISOString().slice(0, 10)}, PKR ${money(v.Unclaimed)}. `
-                + `The money was remitted and posted before DealerDesk; nothing new was posted.`);
-            await tx.commit();
-
-            res.json({
-                message: `Linked to ${v.VoucherNo}. PKR ${money(v.Unclaimed)} now counts as paid to Master.`,
-                VoucherNo: v.VoucherNo,
-                Amount: Number(v.Unclaimed),
-                LinesTagged: tagged.rowsAffected[0],
-            });
-        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
-    } catch (err) {
-        console.error('linkMasterPayment:', err);
-        res.status(err.statusCode || 400).json({ error: err.message });
+        const bookingId=Number(req.params.id),voucherId=Number(req.body?.VoucherID),amount=Number(req.body?.Amount);
+        if(!Number.isSafeInteger(bookingId)||bookingId<=0) fail('Invalid booking id.',400);
+        const pool=await getPool(); tx=new sql.Transaction(pool); await tx.begin();
+        const booking=await loadBooking(tx,bookingId,true); assertHistorical(booking);
+        const gl=await masterReceivableGL(tx);
+        const linked=await linkMasterVoucher(tx,booking,voucherId,amount,gl,req.user);
+        await logBookingTransition(tx,bookingId,booking.Status,booking.Status,req.user,
+            `PKR ${money(linked.Amount)} allocated from Master voucher ${linked.VoucherNo}. Other bookings’ allocations and ledger amounts are unchanged.`);
+        await tx.commit();
+        res.json({message:`Linked PKR ${money(linked.Amount)} from ${linked.VoucherNo} to this booking.`,VoucherNo:linked.VoucherNo,Amount:linked.Amount});
+    } catch(err) {
+        if(tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode||400).json({error:err.message});
     }
 };
 
 /** POST /api/sales/historical/bookings/:id/unlink-master   { VoucherID } */
-exports.unlinkMasterPayment = async (req, res) => {
+exports.unlinkMasterPayment = async (req,res) => {
+    let tx;
     try {
-        const bookingId = parseInt(req.params.id);
-        const voucherId = parseInt(req.body?.VoucherID);
-        if (!Number.isInteger(bookingId) || !Number.isInteger(voucherId)) {
-            return res.status(400).json({ error: 'Invalid booking or voucher id.' });
-        }
-        const pool = await getPool();
-        const booking = await loadBooking(pool, bookingId);
-        assertHistorical(booking);
-        const masterGL = await masterReceivableGL(pool);
-
-        const tx = new sql.Transaction(pool);
-        await tx.begin();
-        try {
-            const r = await new sql.Request(tx)
-                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
-                .query(`UPDATE data_FinanceVoucherDetail SET BookingID = NULL
-                        WHERE VoucherID = @v AND GLCAID = @gl AND BookingID = @b`);
-            if (!r.rowsAffected[0]) fail('That voucher is not linked to this booking.', 404);
-            await new sql.Request(tx)
-                .input('v', sql.Int, voucherId).input('gl', sql.Int, masterGL).input('b', sql.Int, bookingId)
-                .query(`UPDATE dms_PartyLedger SET BookingID = NULL
-                        WHERE VoucherID = @v AND GLCAID = @gl AND BookingID = @b`);
-            await logBookingTransition(tx, bookingId, booking.Status, booking.Status, req.user,
-                'Payment to Master unlinked from its voucher. Nothing was posted or reversed.');
-            await tx.commit();
-            res.json({ message: 'Unlinked.' });
-        } catch (err) { try { await tx.rollback(); } catch {} throw err; }
-    } catch (err) {
-        console.error('unlinkMasterPayment:', err);
-        res.status(err.statusCode || 400).json({ error: err.message });
+        const bookingId=Number(req.params.id),voucherId=Number(req.body?.VoucherID);
+        if(!Number.isSafeInteger(bookingId)||bookingId<=0||!Number.isSafeInteger(voucherId)||voucherId<=0) fail('Invalid booking or voucher.',400);
+        const pool=await getPool(); tx=new sql.Transaction(pool); await tx.begin();
+        const booking=await loadBooking(tx,bookingId,true); assertHistorical(booking);
+        const gl=await masterReceivableGL(tx);
+        const header=await new sql.Request(tx).input('v',sql.Int,voucherId)
+            .query('SELECT SourceDocType FROM data_FinanceVoucherInfo WITH (UPDLOCK,HOLDLOCK) WHERE VoucherID=@v');
+        if(!header.recordset.length) fail('Voucher not found.',404);
+        if(GENERATED_SALES_SOURCES.includes(header.recordset[0].SourceDocType)) fail('Use the payment void process for an automatically created sales voucher.');
+        const removed=await new sql.Request(tx).input('v',sql.Int,voucherId).input('gl',sql.Int,gl).input('b',sql.Int,bookingId)
+            .query('DELETE FROM dms_HistoricalMasterAllocations WHERE VoucherID=@v AND GLCAID=@gl AND BookingID=@b');
+        // Preserve support for links made by the old tag-based implementation.
+        const legacyAmount=await new sql.Request(tx).input('v',sql.Int,voucherId).input('gl',sql.Int,gl).input('b',sql.Int,bookingId)
+            .query('SELECT ISNULL(SUM(Debit-Credit),0) AS Amount FROM data_FinanceVoucherDetail WHERE VoucherID=@v AND GLCAID=@gl AND BookingID=@b');
+        const legacy=Number(legacyAmount.recordset[0]?.Amount)>0
+            ? await new sql.Request(tx).input('v',sql.Int,voucherId).input('gl',sql.Int,gl).input('b',sql.Int,bookingId)
+                .query('UPDATE data_FinanceVoucherDetail SET BookingID=NULL WHERE VoucherID=@v AND GLCAID=@gl AND BookingID=@b')
+            : { rowsAffected:[0] };
+        if(!removed.rowsAffected[0]&&!legacy.rowsAffected[0]) fail('That voucher is not linked to this booking.',404);
+        if(legacy.rowsAffected[0]) await new sql.Request(tx).input('v',sql.Int,voucherId).input('gl',sql.Int,gl).input('b',sql.Int,bookingId)
+            .query('UPDATE dms_PartyLedger SET BookingID=NULL WHERE VoucherID=@v AND GLCAID=@gl AND BookingID=@b');
+        await logBookingTransition(tx,bookingId,booking.Status,booking.Status,req.user,
+            'This booking’s Master allocation was unlinked. Other bookings and ledger amounts stay unchanged.');
+        await tx.commit(); res.json({message:'This booking’s allocation was unlinked.'});
+    } catch(err) {
+        if(tx) { try { await tx.rollback(); } catch {} }
+        res.status(err.statusCode||400).json({error:err.message});
     }
 };
 
 /** GET /api/sales/historical/bookings/:id/linked-master — what is matched so far. */
-exports.linkedMasterPayments = async (req, res) => {
+exports.linkedMasterPayments = async (req,res) => {
     try {
-        const bookingId = parseInt(req.params.id);
-        if (!Number.isInteger(bookingId)) return res.status(400).json({ error: 'Invalid booking id.' });
-        const pool = await getPool();
-        const masterGL = await masterReceivableGL(pool);
-        const r = await pool.request().input('b', sql.Int, bookingId).input('gl', sql.Int, masterGL)
-            .query(`SELECT vi.VoucherID, vi.VoucherNo, vi.VoucherDate, SUM(d.Debit - d.Credit) AS Amount
-                    FROM   data_FinanceVoucherDetail d
-                    JOIN   data_FinanceVoucherInfo vi ON vi.VoucherID = d.VoucherID
-                    WHERE  d.BookingID = @b AND d.GLCAID = @gl AND vi.Status = 'Posted'
-                    GROUP  BY vi.VoucherID, vi.VoucherNo, vi.VoucherDate
-                    ORDER  BY vi.VoucherDate DESC`);
+        const bookingId=Number(req.params.id);
+        if(!Number.isSafeInteger(bookingId)||bookingId<=0) fail('Invalid booking id.',400);
+        const pool=await getPool(),gl=await masterReceivableGL(pool);
+        const r=await pool.request().input('b',sql.Int,bookingId).input('gl',sql.Int,gl)
+            .query(`SELECT VoucherID,VoucherNo,VoucherDate,SUM(Amount) AS Amount FROM (
+                SELECT v.VoucherID,v.VoucherNo,v.VoucherDate,SUM(d.Debit-d.Credit) AS Amount
+                FROM data_FinanceVoucherDetail d JOIN data_FinanceVoucherInfo v ON v.VoucherID=d.VoucherID
+                WHERE d.BookingID=@b AND d.GLCAID=@gl AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+                  AND ISNULL(v.SourceDocType,'') NOT IN (${GENERATED_SALES_SQL})
+                GROUP BY v.VoucherID,v.VoucherNo,v.VoucherDate HAVING SUM(d.Debit-d.Credit)>0
+                UNION ALL
+                SELECT v.VoucherID,v.VoucherNo,v.VoucherDate,a.Amount
+                FROM dms_HistoricalMasterAllocations a JOIN data_FinanceVoucherInfo v ON v.VoucherID=a.VoucherID
+                WHERE a.BookingID=@b AND a.GLCAID=@gl AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
+            ) links GROUP BY VoucherID,VoucherNo,VoucherDate ORDER BY VoucherDate DESC`);
         res.json(r.recordset);
-    } catch (err) {
-        console.error('linkedMasterPayments:', err);
-        res.status(500).json({ error: err.message });
-    }
+    } catch(err) { res.status(err.statusCode||500).json({error:err.message}); }
 };

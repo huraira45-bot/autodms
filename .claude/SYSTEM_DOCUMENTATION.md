@@ -1489,3 +1489,13 @@ Master payment rows now support draft void and posted void requests. Draft void 
 Master reversals retain BookingID. The Master balance includes reversed originals plus posted mirrors, with PAY_MASTER source fallback for older missing booking tags. Pay Master/void use a booking lock; conditional Draft posting prevents concurrent void/post races; reversal execution rechecks delivery/status.
 
 See docs/MASTER_PAYMENT_VOID.md for API, permissions and deployment commands. No migration or new dependency is required. Verified with 27 focused Jest tests, synthetic read-only SQL balance checks, and a successful frontend production build. Browser verification was unavailable because of tool setup failure.
+
+## Shared historical opening vouchers - 2026-10-12
+
+Implemented both customer and Master Motors sharing of a posted opening/manual voucher. Customer links reserve payment plus premium against their saved GL account; Master links reserve a typed portion in dms_HistoricalMasterAllocations. Pickers show account and remaining amounts. Unlink/void releases only the applicable portion, and generated sales vouchers/settlement credits are protected.
+
+Master totals in booking detail, lifecycle, delivery and reconciliation include active allocations. Voucher locks serialize capacity checks; existing-payment linking acquires the voucher before locking the payment. Changing a customer requires unlinking active historical allocations first.
+
+Migration 152 was applied and rerun successfully on local development DB, with no ledger/payment amount changes. Runner now supports --only for targeted deployment. Verified 111 focused tests, synthetic read-only SQL (including actual consumer queries), and production frontend build. Browser interaction was unavailable in this environment. Feature deployment guide: docs/SHARED_HISTORICAL_VOUCHERS.md. Live deployment is pending the user's manual Git pull, targeted migration, build and PM2 restart.
+
+Pre-existing docs/GPT_CHANGELOG.md edits and unrelated untracked files remain preserved and outside the feature commit.

@@ -7,6 +7,7 @@
  */
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
+const { historicalMasterPaidSql } = require('../services/historicalMasterAllocationService');
 
 function parseRange(req) {
     const today = new Date();
@@ -365,10 +366,11 @@ exports.bookingAccountReconciliation = async (req, res) => {
             SELECT b.BookingID, b.BookingNo, b.Status, veh.ChasisNo, p.PartyName,
                    ISNULL((SELECT SUM(d.Debit) FROM data_FinanceVoucherDetail d
                            JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                           WHERE v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0) AS PaidToMaster,
+                           WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0)
+                     + ${historicalMasterPaidSql('b.BookingID','@gl')} AS PaidToMaster,
                    ISNULL((SELECT SUM(d.Credit) FROM data_FinanceVoucherDetail d
                            JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                           WHERE v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0) AS SettledAtDelivery
+                           WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0) AS SettledAtDelivery
             FROM dms_SalesBookings b
             LEFT JOIN dms_Vehicle     veh ON veh.VehicleID = b.AllocatedVehicleID
             LEFT JOIN gen_PartiesInfo p   ON p.PartyID     = b.PartyID
@@ -392,7 +394,7 @@ exports.bookingAccountReconciliation = async (req, res) => {
             SELECT ISNULL(SUM(d.Debit),0) - ISNULL(SUM(d.Credit),0) AS Balance
             FROM data_FinanceVoucherDetail d
             JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-            WHERE v.Status='Posted' AND d.GLCAID=@gl`);
+            WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl`);
         const glBalance = +Number(glTotal.recordset[0].Balance).toFixed(2);
         const difference = +(glBalance - sumOfBookings).toFixed(2);
 

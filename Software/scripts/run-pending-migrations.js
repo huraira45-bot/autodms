@@ -7,12 +7,13 @@
  * Migrations are applied once per DB; tracking table is auto-created.
  *
  *   node Software/scripts/run-pending-migrations.js
+ *   node Software/scripts/run-pending-migrations.js --only 152_shared_historical_voucher_allocations.sql
  *
  * The deploy.bat calls this on every deploy. Safe to invoke manually too.
  */
 const fs   = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { sql, getPool } = require('../config/db');
 
@@ -47,11 +48,11 @@ function applyOne(file) {
     const full = path.join(MIGRATIONS_DIR, file);
     // -E Windows-auth, -I QUOTED_IDENTIFIER ON (required for some triggers/views),
     // -b exit non-zero on error so we abort the run, -r1 stderr inline.
-    const cmd = `sqlcmd -S "${DB_SERVER}" -d "${DB_NAME}" -E -I -b -r1 -i "${full}"`;
+    const args = ['-S', DB_SERVER, '-d', DB_NAME, '-E', '-I', '-b', '-r1', '-i', full];
     console.log(`  > ${file}`);
     const t0 = Date.now();
     try {
-        execSync(cmd, { stdio: 'inherit' });
+        execFileSync('sqlcmd', args, { stdio: 'inherit' });
         return Date.now() - t0;
     } catch (err) {
         throw new Error(`Migration failed: ${file}`);
@@ -61,11 +62,18 @@ function applyOne(file) {
 async function main() {
     const markAll = process.argv.includes('--mark-all-applied');
     const dryRun  = process.argv.includes('--dry-run');
+    const onlyIndex = process.argv.indexOf('--only');
+    const only = onlyIndex < 0 ? null : process.argv[onlyIndex + 1];
+    const all = listMigrationFiles();
+    if (onlyIndex >= 0 && !all.includes(only)) {
+        throw new Error('--only requires an exact migration filename from Software/migrations.');
+    }
+    if (only && markAll) throw new Error('--only cannot be combined with --mark-all-applied.');
     const pool = await getPool();
     await ensureTrackingTable(pool);
     const applied = await loadApplied(pool);
-    const all = listMigrationFiles();
-    const pending = all.filter(f => !applied.has(f));
+    const selected = only ? [only] : all;
+    const pending = selected.filter(f => !applied.has(f));
 
     console.log(`Migrations: ${all.length} total · ${applied.size} applied · ${pending.length} pending`);
 

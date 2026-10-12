@@ -13,6 +13,7 @@
 const { sql, getPool } = require('../config/db');
 const docs = require('./salesDocumentController');
 const { voidMasterPayment, LOCKED_BOOKINGS } = require('../services/masterPaymentVoidService');
+const { historicalMasterPaidSql } = require('../services/historicalMasterAllocationService');
 
 // =========================================================================
 // Helpers
@@ -578,10 +579,11 @@ async function masterRemittancePosition(pool, bookingId) {
             .input('gl',  sql.Int, bvrGL)
             .input('bid', sql.Int, bookingId)
             .query(`SELECT ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0)
-                         - ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Net
+                         - ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0)
+                         + ${historicalMasterPaidSql('@bid','@gl')} AS Net
                     FROM   data_FinanceVoucherDetail d
                     JOIN   data_FinanceVoucherInfo   v ON v.VoucherID = d.VoucherID
-                    WHERE  v.Status='Posted' AND d.GLCAID=@gl AND d.BookingID=@bid`);
+                    WHERE  v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=@bid`);
         remitted = Number(q.recordset[0]?.Net) || 0;
     } catch (e) {
         // BVR unmapped — GL posting is disabled anyway; don't block on it.
