@@ -13,7 +13,7 @@
 const { sql, getPool } = require('../config/db');
 const docs = require('./salesDocumentController');
 const { voidMasterPayment, LOCKED_BOOKINGS } = require('../services/masterPaymentVoidService');
-const { historicalMasterPaidSql } = require('../services/historicalMasterAllocationService');
+const { loadMasterPosition } = require('../services/masterPaymentPositionService');
 
 // =========================================================================
 // Helpers
@@ -548,9 +548,9 @@ exports.postMasterInvoice = async (req, res) => {
  * discount given to the customer comes out of our own premium, never out of
  * what Master is owed.
  *
- * `remitted` is the net Dr on BOOKING_VARIANT_RECEIVABLE tagged to the
- * booking — the same figure salesDeliveryPostingService settles against, so
- * the gate and the posting can never disagree.
+ * `remitted` includes current and legacy Master account balances, explicit
+ * historical allocations and linked historical direct pay orders. Delivery
+ * settles those same accounts, so readiness and posting agree.
  */
 async function masterRemittancePosition(pool, bookingId) {
     const r = await pool.request().input('id', sql.Int, bookingId).query(`
@@ -569,29 +569,15 @@ async function masterRemittancePosition(pool, bookingId) {
         ? Number(row.WholesalePrice)
         : Number(row.NegotiatedPrice || 0);
 
-    let remitted = 0;
-    try {
-        // Local resolveRole takes (executor, roleKey) and returns null when the
-        // role is unmapped — it does not throw.
-        const bvrGL = await resolveRole(pool, 'BOOKING_VARIANT_RECEIVABLE');
-        if (!bvrGL) throw new Error('BOOKING_VARIANT_RECEIVABLE unmapped');
-        const q = await pool.request()
-            .input('gl',  sql.Int, bvrGL)
-            .input('bid', sql.Int, bookingId)
-            .query(`SELECT ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0)
-                         - ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0)
-                         + ${historicalMasterPaidSql('@bid','@gl')} AS Net
-                    FROM   data_FinanceVoucherDetail d
-                    JOIN   data_FinanceVoucherInfo   v ON v.VoucherID = d.VoucherID
-                    WHERE  v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=@bid`);
-        remitted = Number(q.recordset[0]?.Net) || 0;
-    } catch (e) {
-        // BVR unmapped — GL posting is disabled anyway; don't block on it.
+    const bvrGL = await resolveRole(pool, 'BOOKING_VARIANT_RECEIVABLE');
+    if (!bvrGL) {
         return { definedRate, remitted: 0, shortfall: 0, enforceable: false,
                  ChasisNo: row.ChasisNo, EngineNo: row.EngineNo,
                  VariantCode: row.VariantCode, VariantName: row.VariantName };
     }
-
+    // A database error must propagate; it must not waive the Master gate.
+    const position = await loadMasterPosition(pool, bookingId, bvrGL);
+    const remitted = Math.round(position.reduce((sum, account) => sum + account.Net, 0) * 100) / 100;
     const shortfall = Math.round((definedRate - remitted) * 100) / 100;
     return {
         definedRate, remitted,

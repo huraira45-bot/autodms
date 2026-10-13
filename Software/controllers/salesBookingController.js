@@ -17,7 +17,7 @@
 const { sql, getPool } = require('../config/db');
 const incentive = require('./salesIncentiveController');
 const { logAudit } = require('../services/salesAuditService');
-const { historicalMasterPaidSql } = require('../services/historicalMasterAllocationService');
+const { masterNetSql } = require('../services/masterPaymentPositionService');
 
 // ============================================================================
 // Helpers
@@ -168,22 +168,11 @@ exports.getBooking = async (req, res) => {
             WHERE  v.SourceDocType = 'PAY_MASTER' AND v.SourceDocID = @id
             ORDER  BY v.VoucherDate DESC, v.VoucherID DESC`);
 
-        // Cumulative amount forwarded to Master against this booking — sum of
-        // BOOKING_VARIANT_RECEIVABLE Dr legs tagged with the booking. Used by
+        // Cumulative Master balance, including posted historical direct pay orders
+        // on their original legacy booking account and explicit allocations. Used by
         // the UI to show remaining-to-pay-master and toggle the Pay Master button.
-        const masterPaidR = await pool.request().input('id', sql.Int, id).query(`
-            SELECT ISNULL(SUM(d.Debit - d.Credit), 0)
-                 + ${historicalMasterPaidSql('@id',"(SELECT GLCAID FROM dms_SystemAccounts WHERE RoleKey='BOOKING_VARIANT_RECEIVABLE')")} AS AmountPaidToMaster
-            FROM data_FinanceVoucherDetail d
-            INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-            INNER JOIN dms_SystemAccounts      sa ON sa.GLCAID    = d.GLCAID
-            LEFT JOIN data_FinanceVoucherInfo original ON original.VoucherID=v.ReversesVoucherID
-            WHERE v.Status IN ('Posted','Reversed')
-              AND sa.RoleKey='BOOKING_VARIANT_RECEIVABLE'
-              AND (d.BookingID=@id
-                   OR (v.SourceDocType='PAY_MASTER' AND v.SourceDocID=@id)
-                   OR (original.SourceDocType='PAY_MASTER' AND original.SourceDocID=@id))`);
-
+        const masterPaidR = await pool.request().input('id', sql.Int, id).query(`SELECT
+            ${masterNetSql('@id',"(SELECT GLCAID FROM dms_SystemAccounts WHERE RoleKey='BOOKING_VARIANT_RECEIVABLE')")} AS AmountPaidToMaster`);
         // AmountPaidToDate is a running total kept on the booking, added to
         // when a payment is taken. It is NOT derived from the ledger -- so
         // unfinalizing a payment's voucher takes the money out of the books and

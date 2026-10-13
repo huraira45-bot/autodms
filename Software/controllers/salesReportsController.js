@@ -7,7 +7,7 @@
  */
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
-const { historicalMasterPaidSql } = require('../services/historicalMasterAllocationService');
+const { masterPositionSql, masterAccountSql } = require('../services/masterPaymentPositionService');
 
 function parseRange(req) {
     const today = new Date();
@@ -364,16 +364,13 @@ exports.bookingAccountReconciliation = async (req, res) => {
         // carrying a balance here (or not, if Master hasn't been paid yet).
         const rows = await pool.request().input('gl', sql.Int, bvrGL).query(`
             SELECT b.BookingID, b.BookingNo, b.Status, veh.ChasisNo, p.PartyName,
-                   ISNULL((SELECT SUM(d.Debit) FROM data_FinanceVoucherDetail d
-                           JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                           WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0)
-                     + ${historicalMasterPaidSql('b.BookingID','@gl')} AS PaidToMaster,
-                   ISNULL((SELECT SUM(d.Credit) FROM data_FinanceVoucherDetail d
-                           JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                           WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=b.BookingID), 0) AS SettledAtDelivery
+                   position.PaidToMaster,position.SettledAtDelivery
             FROM dms_SalesBookings b
             LEFT JOIN dms_Vehicle     veh ON veh.VehicleID = b.AllocatedVehicleID
             LEFT JOIN gen_PartiesInfo p   ON p.PartyID     = b.PartyID
+            CROSS APPLY (SELECT ISNULL(SUM(mp.Dr),0) AS PaidToMaster,
+                                ISNULL(SUM(mp.Cr),0) AS SettledAtDelivery
+                         FROM (${masterPositionSql('b.BookingID','@gl')}) mp) position
             WHERE b.Status NOT IN ('Closed', 'Cancelled', 'CancellationApproved')
             ORDER BY b.BookingID DESC`);
 
@@ -394,7 +391,7 @@ exports.bookingAccountReconciliation = async (req, res) => {
             SELECT ISNULL(SUM(d.Debit),0) - ISNULL(SUM(d.Credit),0) AS Balance
             FROM data_FinanceVoucherDetail d
             JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-            WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl`);
+            WHERE v.Status IN ('Posted','Reversed') AND ${masterAccountSql('d','@gl')}`);
         const glBalance = +Number(glTotal.recordset[0].Balance).toFixed(2);
         const difference = +(glBalance - sumOfBookings).toFixed(2);
 

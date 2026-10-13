@@ -1,4 +1,4 @@
-﻿jest.mock('../config/db', () => ({
+jest.mock('../config/db', () => ({
     sql: {
         Int: 'Int', Decimal: () => 'Decimal', NVarChar: size => `NVarChar(${size})`,
         Request: class {
@@ -107,8 +107,10 @@ it('paid SQL counts active original historical allocations alongside booking-tag
     const paid = tx.calls[3];
     expect(paid.values).toEqual({ bid: 7, gl: 101 });
     expect(paid.query).toContain("v.Status IN ('Posted','Reversed')");
-    expect(paid.query).toContain('d.GLCAID=@gl AND d.BookingID=@bid');
-    expect(paid.query).toContain(historicalMasterPaidSql('@bid', '@gl'));
+    expect(paid.query).toContain('d.GLCAID=@gl');
+    expect(paid.query).toContain('d.BookingID=@bid');
+    expect(paid.query).toContain("p.PaymentMode='PayOrder'");
+    expect(paid.query).toContain("a.BookingID=@bid AND hv.Status='Posted'");
     const expression = historicalMasterPaidSql('b.BookingID', 'cfg.GLCAID');
     expect(expression).toContain('hm.BookingID=b.BookingID AND hm.GLCAID=cfg.GLCAID');
     expect(expression).toContain("hv.Status='Posted' AND hv.ReversesVoucherID IS NULL");
@@ -185,4 +187,10 @@ it('waits for the Master header lock before reading capacity or writing an alloc
     await expect(pending).resolves.toMatchObject({ Amount: 100, UnclaimedToMaster: 900 });
     expect(tx.query.mock.calls[1][0]).toBe(MASTER_CAPACITY_SQL);
     expect(writes(tx)).toHaveLength(1);
+});
+
+it('does not allocate a second Master link over an automatically recognized direct pay order',async()=>{
+    const tx=transaction([[{...voucher,MasterAmount:2000,DirectPayOrderAmount:1000}]]);
+    await expect(linkMasterVoucher(tx,booking,20,100,101,user)).rejects.toThrow('direct-to-Master');
+    expect(writes(tx)).toHaveLength(0);
 });

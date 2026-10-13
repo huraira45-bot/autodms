@@ -1,4 +1,5 @@
 const { sql } = require('../config/db');
+const { historicalPayOrderSql, masterNetSql } = require('./masterPaymentPositionService');
 const fail = (message, statusCode=409) => { throw Object.assign(new Error(message), { statusCode }); };
 const cents = value => {
     const number=Number(value), result=Math.round(number*100);
@@ -11,12 +12,16 @@ const GENERATED_SALES_SOURCES = ['PAY_MASTER','MASTER_INVOICE','SALES_PAYMENT','
 const MASTER_AMOUNT_SQL = `(SELECT ISNULL(SUM(ISNULL(d.Debit,0)-ISNULL(d.Credit,0)),0)
     FROM data_FinanceVoucherDetail d
     WHERE d.VoucherID=v.VoucherID AND d.GLCAID=@gl AND d.BookingID IS NULL)`;
-const MASTER_LINKED_SQL = `(SELECT ISNULL(SUM(a.Amount),0)
-    FROM dms_HistoricalMasterAllocations a WHERE a.VoucherID=v.VoucherID AND a.GLCAID=@gl)`;
+const MASTER_LINKED_SQL = `((SELECT ISNULL(SUM(a.Amount),0)
+    FROM dms_HistoricalMasterAllocations a WHERE a.VoucherID=v.VoucherID AND a.GLCAID=@gl)
+    + (SELECT ISNULL(SUM(po.Amount),0) FROM (${historicalPayOrderSql('@gl')}) po
+        WHERE po.VoucherID=v.VoucherID AND po.GLCAID=@gl))`;
 
 const MASTER_HEADER_LOCK_SQL = `SELECT VoucherID,VoucherNo,VoucherDate,Status,ReversesVoucherID,SourceDocType
     FROM data_FinanceVoucherInfo WITH (UPDLOCK,HOLDLOCK) WHERE VoucherID=@vid`;
-const MASTER_CAPACITY_SQL = `SELECT ${MASTER_AMOUNT_SQL} AS MasterAmount, ${MASTER_LINKED_SQL} AS LinkedAmount
+const MASTER_CAPACITY_SQL = `SELECT ${MASTER_AMOUNT_SQL} AS MasterAmount, ${MASTER_LINKED_SQL} AS LinkedAmount,
+    (SELECT ISNULL(SUM(po.Amount),0) FROM (${historicalPayOrderSql('@gl')}) po
+        WHERE po.VoucherID=v.VoucherID AND po.BookingID=@bid) AS DirectPayOrderAmount
     FROM data_FinanceVoucherInfo v WHERE v.VoucherID=@vid`;
 // Expressions are supplied by source code only, never by a request.
 function historicalMasterPaidSql(bookingExpression, accountExpression) {
@@ -38,18 +43,17 @@ async function linkMasterVoucher(tx, booking, voucherId, amount, masterGL, user)
     if (!header) fail('That voucher does not exist.',404);
     if (header.Status!=='Posted' || header.ReversesVoucherID) fail('Select an original posted Master voucher.');
     if (GENERATED_SALES_SOURCES.includes(header.SourceDocType)) fail('Automatically created payments already belong to their booking and cannot be allocated again.');
-    const capacity=await new sql.Request(tx).input('vid',sql.Int,voucherId).input('gl',sql.Int,masterGL)
+    const capacity=await new sql.Request(tx).input('vid',sql.Int,voucherId).input('gl',sql.Int,masterGL).input('bid',sql.Int,booking.BookingID)
         .query(MASTER_CAPACITY_SQL);
     const voucher={...header,...capacity.recordset[0]};
+    if (Number(voucher.DirectPayOrderAmount)>0) fail('This voucher is already counted as this booking\'s direct-to-Master pay order. No separate Master link is required.');
     const available=Math.max(0,cents(voucher.MasterAmount)-cents(voucher.LinkedAmount));
     if (requested>available) fail(`${voucher.VoucherNo} has only PKR ${(available/100).toLocaleString('en-PK')} available to allocate to Master.`);
     const duplicate=await new sql.Request(tx).input('b',sql.Int,booking.BookingID).input('v',sql.Int,voucherId).input('gl',sql.Int,masterGL)
         .query('SELECT AllocationID FROM dms_HistoricalMasterAllocations WHERE BookingID=@b AND VoucherID=@v AND GLCAID=@gl');
     if (duplicate.recordset.length) fail('This booking already has an allocation from that voucher. Unlink it before changing its amount.');
     const prior=await new sql.Request(tx).input('bid',sql.Int,booking.BookingID).input('gl',sql.Int,masterGL)
-        .query(`SELECT ISNULL(SUM(d.Debit-d.Credit),0)+${historicalMasterPaidSql('@bid','@gl')} AS Paid
-            FROM data_FinanceVoucherDetail d JOIN data_FinanceVoucherInfo v ON v.VoucherID=d.VoucherID
-            WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=@bid`);
+        .query(`SELECT ${masterNetSql('@bid','@gl')} AS Paid`);
     if (cents(prior.recordset[0]?.Paid||0)+requested>cents(booking.NegotiatedPrice||0)) {
         fail('The total linked to Master would exceed this historical bookingâ€™s agreed vehicle price.');
     }

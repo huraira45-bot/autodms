@@ -49,3 +49,7 @@ Refresh the browser with Ctrl+F5 after deployment.
 111 focused Jest tests passed across the shared customer/Master allocation, historical controller, and existing Master payment void suites. The production frontend build passed with its existing bundle-size warning.
 
 The targeted migration was applied to the local development database and rerun successfully. Read-only synthetic SQL verified separate customer budgets, premium and void capacity, exhausted Master capacity, inactive sources, and the actual booking/lifecycle/delivery balance queries. No real historical voucher was linked or voided during verification. Live deployment remains a manual user step.
+
+### Historical direct pay orders - 2026-10-13
+
+Linked Posted historical PayOrder vouchers now count automatically toward Master through their verified legacy booking account. Booking/readiness/delivery/reconciliation use masterPaymentPositionService; delivery clears the original account(s). Manual allocation capacity reserves recognized pay-order amounts and protects against duplicate links. See HISTORICAL_PAYORDER_MASTER.md.

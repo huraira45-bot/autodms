@@ -4,7 +4,7 @@
  *
  *   A. Settle the customer's vehicle account against Master fulfilment
  *        Dr Customer A/c             (= masterPaid)
- *        Cr BOOKING_VARIANT_RECEIVABLE (masterPaid)
+ *        Cr original Master booking account(s) (masterPaid)
  *
  *   B. Recognize premium (kept strictly separate from the vehicle account)
  *        Dr PREMIUM_DEFERRED          (premium)
@@ -23,7 +23,7 @@ const { sql } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const N = require('./salesNarration');
-const { historicalMasterPaidSql } = require('./historicalMasterAllocationService');
+const { loadMasterPosition } = require('./masterPaymentPositionService');
 
 async function resolveAccounts() {
     const need = ['BOOKING_ADVANCE', 'BOOKING_VARIANT_RECEIVABLE',
@@ -50,28 +50,11 @@ async function loadBooking(bookingId, transaction) {
         .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.NegotiatedPrice,
                        b.AmountPaidToDate, b.PremiumAmount,
                        v.WholesalePrice
-                FROM dms_SalesBookings b
+                FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
                 LEFT JOIN dms_VehicleVariant v ON b.VehicleVariantID = v.VariantID
                 WHERE b.BookingID=@id`);
     if (!r.recordset.length) throw new Error(`Booking ${bookingId} not found.`);
     return r.recordset[0];
-}
-
-// What did we actually pay Master against this booking? Sum of Dr legs on
-// BOOKING_VARIANT_RECEIVABLE in posted vouchers tagged to this BookingID.
-async function loadMasterPaid(bookingId, bvrGL, transaction) {
-    const r = await new sql.Request(transaction)
-        .input('gl', sql.Int, bvrGL)
-        .input('bid', sql.Int, bookingId)
-        .query(`SELECT
-                  ISNULL(SUM(CASE WHEN d.Debit  > 0 THEN d.Debit  ELSE 0 END), 0)
-                    + ${historicalMasterPaidSql('@bid','@gl')} AS Dr,
-                  ISNULL(SUM(CASE WHEN d.Credit > 0 THEN d.Credit ELSE 0 END), 0) AS Cr
-                FROM data_FinanceVoucherDetail d
-                INNER JOIN data_FinanceVoucherInfo v ON v.VoucherID = d.VoucherID
-                WHERE v.Status IN ('Posted','Reversed') AND d.GLCAID=@gl AND d.BookingID=@bid`);
-    const { Dr, Cr } = r.recordset[0] || { Dr: 0, Cr: 0 };
-    return Number(Dr) - Number(Cr);
 }
 
 /**
@@ -87,8 +70,12 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     const premium    = Number(b.PremiumAmount || 0);
     if (negotiated <= 0) throw new Error(`Booking ${b.BookingNo} has no NegotiatedPrice.`);
 
-    // What we actually paid Master against this booking (sum of BVR Dr legs).
-    const masterPaid = await loadMasterPaid(bookingId, acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, transaction);
+    // Settle the same current/legacy accounts that establish gate-pass readiness.
+    const masterPosition = await loadMasterPosition(transaction, bookingId, acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, true);
+    const masterPaid = masterPosition.reduce((sum, account) => sum + account.Net, 0);
+    if (masterPosition.some(account => account.Net < -0.01)) {
+        throw new Error('A Master booking account is already over-settled. Reconcile its balance before delivery.');
+    }
 
     // Backstop for the gate in issueGatePass (owner decision 2026-09-11).
     // This voucher settles the customer against what reached Master, so if
@@ -119,7 +106,11 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     const vehicle = N.vehicleText(ctx);
     const forVeh = N.forVehicleAndBooking(ctx);
     const customerTitle = await N.accountTitle(transaction, customerLeaf.GLCAID);
-    const bvrTitle = await N.accountTitle(transaction, acc.BOOKING_VARIANT_RECEIVABLE.GLCAID);
+    const masterTitles = new Map();
+    for (const account of masterPosition.filter(account => account.Net > 0)) {
+        masterTitles.set(account.GLCAID, await N.accountTitle(transaction, account.GLCAID));
+    }
+    const bvrTitle = [...masterTitles.values()].join(' / ');
     const premDefTitle = await N.accountTitle(transaction, acc.PREMIUM_DEFERRED.GLCAID);
     const premIncTitle = await N.accountTitle(transaction, acc.PREMIUM_INCOME.GLCAID);
 
@@ -163,20 +154,21 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
                     VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @bid)`);
     };
 
-    // A. Vehicle settlement — Customer A/c against BVR (no premium here)
+    // A. Vehicle settlement against each original Master account (no premium).
     if (masterPaid > 0) {
         await insertLine(customerLeaf.GLCAID, masterPaid, 0, N.line([
             `${customer} charged on delivery of ${vehicle || 'the booked vehicle'},`,
             b.BookingNo ? `booking ${b.BookingNo}.` : '',
             customerLeaf.isPartyLeaf ? '' : '(posted to Booking Advance — no party account mapped)',
         ], bvrTitle));
-        await insertLine(acc.BOOKING_VARIANT_RECEIVABLE.GLCAID, 0, masterPaid, N.line([
-            `Master Motors delivered ${vehicle || 'the booked vehicle'} to ${customer},`,
-            b.BookingNo ? `booking ${b.BookingNo}` : '',
-            '— receivable from Master Motors cleared.',
-        ], customerTitle));
+        for (const account of masterPosition.filter(account => account.Net > 0)) {
+            await insertLine(account.GLCAID, 0, account.Net, N.line([
+                `Master Motors delivered ${vehicle || 'the booked vehicle'} to ${customer},`,
+                b.BookingNo ? `booking ${b.BookingNo}` : '',
+                '- Master booking account settled on delivery',
+            ], customerTitle));
+        }
     }
-
     // B. Premium recognition — strictly separate, never on the customer A/c
     if (premium > 0) {
         await insertLine(acc.PREMIUM_DEFERRED.GLCAID, premium, 0, N.line([

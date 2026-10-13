@@ -1499,3 +1499,11 @@ Master totals in booking detail, lifecycle, delivery and reconciliation include 
 Migration 152 was applied and rerun successfully on local development DB, with no ledger/payment amount changes. Runner now supports --only for targeted deployment. Verified 111 focused tests, synthetic read-only SQL (including actual consumer queries), and production frontend build. Browser interaction was unavailable in this environment. Feature deployment guide: docs/SHARED_HISTORICAL_VOUCHERS.md. Live deployment is pending the user's manual Git pull, targeted migration, build and PM2 restart.
 
 Pre-existing docs/GPT_CHANGELOG.md edits and unrelated untracked files remain preserved and outside the feature commit.
+
+## 2026-10-13 - Historical direct-to-Master pay-order recognition
+
+Implemented shared Master account position logic for linked Posted historical PayOrder vouchers, including the verified legacy FIS booking asset accounts. Recognition checks customer credit, source status, premium exclusion, source account ambiguity and aggregate capacity, and preserves explicit allocation/tag precedence. Booking detail, gate-pass readiness, delivery posting, reconciliation and manual Master-link capacity use the same recognized amounts. Delivery credits the original legacy/current account(s), avoiding a central-account credit against an Oshan debit.
+
+Read-only in-memory evaluation of the revised live-data controller for BK-2026-0030 returns ready=true, remitted PKR 8,617,980, shortfall 0; no live records or application files were changed. Verified 121 focused Jest tests and 23 synthetic read-only SQL scenarios plus capacity/source-account checks. No new migration/frontend change/dependency is needed. Deployment remains manual as the user previously requested. Guide: docs/HISTORICAL_PAYORDER_MASTER.md.
+
+Pre-existing changelog and unrelated untracked files are preserved.
