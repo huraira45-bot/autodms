@@ -173,7 +173,7 @@ export default function BookingDetail() {
         (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
         (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
-    const canAllocate = ['PendingPayment', 'MasterInvoicePending'].includes(data.Status) &&
+    const canAllocate = ['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status) &&
         !data.AllocatedVehicleID && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
     // Pay Master: shown whenever there's vehicle-money pending forward to Master.
     // Premium is additive on top of the set price and stays with the dealer,

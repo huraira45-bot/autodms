@@ -1507,3 +1507,7 @@ Implemented shared Master account position logic for linked Posted historical Pa
 Read-only in-memory evaluation of the revised live-data controller for BK-2026-0030 returns ready=true, remitted PKR 8,617,980, shortfall 0; no live records or application files were changed. Verified 121 focused Jest tests and 23 synthetic read-only SQL scenarios plus capacity/source-account checks. No new migration/frontend change/dependency is needed. Deployment remains manual as the user previously requested. Guide: docs/HISTORICAL_PAYORDER_MASTER.md.
 
 Pre-existing changelog and unrelated untracked files are preserved.
+
+## BookingConfirmed allocation visibility - 2026-10-13
+
+BookingDetail canAllocate now includes BookingConfirmed, matching the allocation API/readiness allowlist. This permits historical bookings entered in BookingConfirmed to reach the ordinary vehicle selection and document/payment checks. The existing sales_agm/sales_gm/sales_admin_settings permission condition is preserved. Pay Master remains hidden once the recognized Master balance covers the variant rate (including historical direct pay orders).
