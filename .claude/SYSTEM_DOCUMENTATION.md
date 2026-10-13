@@ -1511,3 +1511,13 @@ Pre-existing changelog and unrelated untracked files are preserved.
 ## BookingConfirmed allocation visibility - 2026-10-13
 
 BookingDetail canAllocate now includes BookingConfirmed, matching the allocation API/readiness allowlist. This permits historical bookings entered in BookingConfirmed to reach the ordinary vehicle selection and document/payment checks. The existing sales_agm/sales_gm/sales_admin_settings permission condition is preserved. Pay Master remains hidden once the recognized Master balance covers the variant rate (including historical direct pay orders).
+
+## 2026-10-13 - Credit invoice Word/Excel exports and party NTN
+
+Added Invoice exports beside Print on finalized job cards. Credit invoice preview offers Print, native Word (.docx), and native Excel (.xlsx); ordinary print continues auto-printing. Export data reuses the rendered invoice line items/totals, authoritative invoice-data Recipient/NTN and configured business profile. Word embeds supported optional PNG/JPEG logos. Excel keeps identifiers as text and amounts/quantities numeric. The printed credit invoice also shows Party NTN.
+
+Added CreditPartyNTN to jobCardRegister API and Party NTN to its existing Excel/CSV export. No accounting or database data is changed; no new dependency/migration is needed.
+
+Verified production build and independent Office ZIP CRC/XML/content/logo checks, xlsx-reader round-trip data, leading-zero NTN/item codes, negative depreciation, empty fields, literal formula-like text and existing report column alignment. Desktop Word/browser interaction was not performed. Guide: docs/CREDIT_INVOICE_EXPORTS.md. Live installation remains the user's manual Git pull, frontend build and PM2 restart.
+
+Pre-existing changelog/untracked files remain outside the feature commit.

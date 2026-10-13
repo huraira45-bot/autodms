@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Lock, Unlock, UserCircle, Loader2, Search, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
+import { Lock, Unlock, UserCircle, Loader2, Search, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Printer, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import KYCBanner from '../components/KYCBanner';
 import CampaignBox from '../components/CampaignBox';
@@ -903,6 +903,15 @@ export default function JobCardForm() {
                 window.open(`/workshop/jobs/${id}/${target}`, '_blank');
             }}>
             <Printer size={12} /> Print
+          </button>
+        )}
+
+        {isEdit && (
+          <button style={{...S.toolBtn,color:'#0f766e',borderColor:'#0f766e',opacity:isFinalized?1:0.4,cursor:isFinalized?'pointer':'not-allowed'}}
+            disabled={!isFinalized}
+            title={isFinalized?'Download the Credit Invoice as Word or Excel':'Finalize the Job Card before exporting'}
+            onClick={()=>window.open(`/workshop/jobs/${id}/credit-invoice?preview=1`,'_blank')}>
+            <FileText size={12} /> Invoice exports
           </button>
         )}
         {canFinalize && (

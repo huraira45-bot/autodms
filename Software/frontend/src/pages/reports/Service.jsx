@@ -60,7 +60,7 @@ export function JobCardRegister() {
         filename: `job-card-register-${params.from || 'from'}_to_${params.to || 'to'}.csv`,
         headers: [
             'Card #', 'Finalized Date', 'Finalized By', 'Customer', 'Customer Code',
-            'Credit Party', 'Vehicle Reg', 'Vehicle Type / Model', 'Year / Variant',
+            'Credit Party', 'Party NTN', 'Vehicle Reg', 'Vehicle Type / Model', 'Year / Variant',
             'Chassis', 'Advisor', 'Job Type', 'Payment Type',
             'Status', 'Labour', 'Sublet', 'PST', 'Parts', 'GST', 'Total',
         ],
@@ -71,6 +71,7 @@ export function JobCardRegister() {
             r.CustomerName || '',
             r.CustomerCode || '',
             r.CreditPartyName || '',
+            r.CreditPartyNTN || '',
             r.VehicleRegNo || '',
             r.VehicleModel || '',
             r.VehicleYear || '',

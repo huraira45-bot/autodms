@@ -109,6 +109,7 @@ exports.jobCardRegister = async (req, res) => {
                    j.FinalizedByName  AS FinalizedByName,
                    c.endUserName AS CustomerName, c.PhoneNo, c.CustomerCode,
                    p.PartyName AS CreditPartyName,
+                   p.NTNNO AS CreditPartyNTN,
                    t.Title AS JobType,
                    ISNULL((SELECT SUM(ISNULL(d.Price,0) * ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0))
                            FROM Addata_JobCardInfoDetail d WHERE d.JobCardId = j.JobCardId), 0) AS LabourGross,
@@ -145,6 +146,7 @@ exports.jobCardRegister = async (req, res) => {
                 CustomerName: x.CustomerName || '',
                 CustomerCode: x.CustomerCode || '',
                 CreditPartyName: x.CreditPartyName || '',
+                CreditPartyNTN: x.CreditPartyNTN || '',
                 PhoneNo:      x.PhoneNo || '',
                 VehicleRegNo: x.VehicleRegNo || '',
                 ChasisNo:     x.ChasisNo || '',

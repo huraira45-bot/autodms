@@ -4,12 +4,15 @@
  * (see docs at credit invoice.pdf). Data comes from:
  *   - /api/workshop/job-cards/:id/print-data (customer, vehicle, labour, parts, sublet, totals)
  *   - /api/workshop/job-cards/:id/insurance  (surveyor / claim / depreciation lines)
+ *   - /api/workshop/job-cards/:id/invoice-data (resolved billing party and NTN)
  *   - /api/settings/business-profile        (letterhead + logo)
  */
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../components/PrintBusinessHeader';
+import { getBusinessProfile } from '../utils/businessProfile';
+import { buildCreditInvoiceWord, buildCreditInvoiceExcel, downloadInvoiceFile } from '../utils/creditInvoiceOffice';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const d   = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-') : '';
@@ -19,6 +22,10 @@ export default function CreditInvoicePrint() {
     const [jc, setJc] = useState(null);
     const [ins, setIns] = useState(null);
     const [err, setErr] = useState(null);
+    const [recipient, setRecipient] = useState(null);
+    const [businessProfile, setBusinessProfile] = useState(null);
+    const [exportBusy, setExportBusy] = useState(null);
+    const [exportError, setExportError] = useState(null);
 
     useEffect(() => {
         // Blank the tab title before printing so browsers (Chrome, Edge)
@@ -29,15 +36,21 @@ export default function CreditInvoicePrint() {
         // print dialog to hide those.
         const oldTitle = document.title;
         document.title = ' ';
-        // Business profile is fetched by PrintBusinessHeader itself.
+        // Share the cached business profile with the header and Office exports.
         Promise.all([
             axios.get(`/api/workshop/job-cards/${id}/print-data`),
             axios.get(`/api/workshop/job-cards/${id}/insurance`).catch(() => ({ data: null })),
+            axios.get(`/api/workshop/job-cards/${id}/invoice-data`),
+            getBusinessProfile(),
         ])
-        .then(([jcRes, insRes]) => {
+        .then(([jcRes, insRes, invoiceRes, profile]) => {
             setJc(jcRes.data);
             setIns(insRes.data);
-            setTimeout(() => window.print(), 500);
+            setRecipient(invoiceRes.data.Recipient || null);
+            setBusinessProfile(profile);
+            if (new URLSearchParams(window.location.search).get('preview') !== '1') {
+                setTimeout(() => window.print(), 500);
+            }
         })
         .catch(e => setErr(e.response?.data?.error || e.message));
         return () => { document.title = oldTitle; };
@@ -92,10 +105,84 @@ export default function CreditInvoicePrint() {
     // Party name — for credit sales, prefer the linked party's name; falls
     // back to CustomerName for walk-in workshops that shouldn't really have
     // a credit invoice but the operator triggered it anyway.
-    const partyName = jc.PartyName || jc.CustomerName || '';
+    const partyName = (recipient?.source !== 'CUSTOMER' && recipient?.name) || jc.PartyName || jc.CustomerName || '';
+
+    const exportInvoice = async (format) => {
+        setExportBusy(format); setExportError(null);
+        try {
+            const invoice = {
+                business: businessProfile || {},
+                metadata: [
+                    ['Customer Name', jc.CustomerName || jc.endUserName || '', 'Claim No', ins?.header?.InsClaimNo || ''],
+                    ['Address', jc.Address || jc.CustomerAddress || '', 'Date', d(jc.FinalizedAt || jc.JobCardDate || jc.CreatedAt)],
+                    ['Mobile', jc.CustomerPhone || jc.PhoneNo || '', 'Invoice #', jc.JobCardNo || jc.jobCode || ''],
+                    ['Party / Insurance', partyName || ins?.header?.CompanyName || '', 'Surveyor Company', ins?.header?.CompanyName || ''],
+                    ['Party NTN', recipient?.ntn || '', 'Surveyor Name', ins?.header?.SurveyorName || ''],
+                ],
+                vehicleHeaders: ['Vehicle','Registration #','Engine #','KM','Chassis #','Color'],
+                vehicle: [jc.VersionCode || '', jc.VehicleRegNo || '', jc.EngineNo || '',
+                    {value:jc.Odometer || jc.KiloMeter || jc.KM || '',format:'quantity'}, jc.ChasisNo || jc.ChassisNo || '', jc.VehicleColor || ''],
+                sections: [
+                    {title:'Jobs',headers:['Job Description','Total Amount'],wordWidths:[8000,2400],
+                        rows:labourItems.map(l=>[l.Remarks || l.WorkDescription || l.Description || '',
+                            (Number(l.Price)||0)-(Number(l.DiscAmt)||0)])},
+                    {title:'Sublet',headers:['Description','Qty','Total Amount'],wordWidths:[7000,1000,2400],
+                        rows:subletItems.map(s=>[s.Remarks || s.Description || '',{value:1,format:'quantity'},Number(s.PayableAmount)||0])},
+                    {title:'Spares',headers:['Item Number','Description','Qty','Rate','Amount with GST','Dep %','Dep Amount'],
+                        wordWidths:[1200,3100,700,1400,1600,800,1600],
+                        rows:[...partsRows.map(p=>[String(p.ItemNumber || ''),p.ItemName || '',
+                            {value:Number(p.Qty)||0,format:'quantity'},Number(p.Rate)||0,
+                            (Number(p.TotalAmount)||0)+(Number(p.TaxAmount)||0),
+                            {value:Number(p.DepreciationPct)||0,format:'quantity'},Number(p.DepAmount)||0]),
+                            ...(partsRows.length?[['','Spares Total','','',partsNet+gst,'',dep]]:[])]},
+                ],
+                totals: [
+                    ['Labour + Sublet without PST', labourNet + sublet],
+                    ['16% PST',pst], ['Parts Without GST',partsNet], ['18% GST',gst],
+                    [dep>0?'Less: Depreciation':'Depreciation',-dep],
+                    ...(dep>0&&depBalance>0.01?[['Depreciation Received',depPaid],['Depreciation Balance',depBalance]]:[]),
+                    ['Total Payable by Party',totalPayable],
+                ],
+                signatures:['Manager Service/Bodypaint','Accounts Manager'],
+            };
+            let logo=null;
+            if(format==='word' && businessProfile?.LogoPath) {
+                try {
+                    const response=await axios.get('/uploads/'+businessProfile.LogoPath,{responseType:'arraybuffer'});
+                    const bytes=new Uint8Array(response.data);
+                    if(bytes[0]===0x89 && bytes[1]===0x50 && bytes[2]===0x4E && bytes[3]===0x47) {
+                        const dimensions=bytes.length>=24?new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength):null;
+                        logo={bytes,extension:'png',contentType:'image/png',width:dimensions?.getUint32(16),height:dimensions?.getUint32(20)};
+                    } else if(bytes[0]===0xFF && bytes[1]===0xD8 && bytes[2]===0xFF) {
+                        logo={bytes,extension:'jpg',contentType:'image/jpeg'};
+                    }
+                } catch { /* Company text remains available when the optional logo cannot load. */ }
+            }
+            const number=String(jc.JobCardNo || jc.jobCode || id).replace(/[\\/:*?"<>|]/g,'_');
+            const word=format==='word';
+            const bytes=word?buildCreditInvoiceWord(invoice,logo):buildCreditInvoiceExcel(invoice);
+            downloadInvoiceFile(bytes, `Credit-Invoice-${number}.${word?'docx':'xlsx'}`,
+                word?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        } catch(e) { setExportError(e.message || 'Could not export this invoice.'); }
+        finally { setExportBusy(null); }
+    };
+
 
     return (
         <div className="ci">
+
+            <div className="no-print" style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:16}}>
+                <button className="btn" type="button" onClick={()=>window.print()} disabled={!!exportBusy}>Print Invoice</button>
+                <button className="btn" type="button" onClick={()=>exportInvoice('word')} disabled={!!exportBusy}>
+                    {exportBusy==='word'?'Exporting...':'Export Word'}
+                </button>
+                <button className="btn" type="button" onClick={()=>exportInvoice('excel')} disabled={!!exportBusy}>
+                    {exportBusy==='excel'?'Exporting...':'Export Excel'}
+                </button>
+                {exportError && <span role="alert" style={{color:'#b91c1c'}}>{exportError}</span>}
+            </div>
+
             {/* Shared business header (owner ask 2026-07-04) — same letterhead
                 across every printed document. The invoice-style layout below
                 (customer block, item table, totals, signatures) is preserved. */}
@@ -154,6 +241,12 @@ export default function CreditInvoicePrint() {
                             "Surveyor Name" so the two don't collide. */}
                         <td className="lbl">Surveyor Company</td>
                         <td className="val">{ins?.header?.CompanyName || '—'}</td>
+                    </tr>
+                    <tr>
+                        <td className="lbl">Party NTN</td>
+                        <td className="val">{recipient?.ntn || '-'}</td>
+                        <td className="lbl">&nbsp;</td>
+                        <td className="val">&nbsp;</td>
                     </tr>
                     <tr>
                         <td className="lbl">Surveyor Name</td>
