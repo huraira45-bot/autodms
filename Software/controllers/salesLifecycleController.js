@@ -14,6 +14,7 @@ const { sql, getPool } = require('../config/db');
 const docs = require('./salesDocumentController');
 const { voidMasterPayment, LOCKED_BOOKINGS } = require('../services/masterPaymentVoidService');
 const { loadMasterPosition } = require('../services/masterPaymentPositionService');
+const { effectiveMasterPaid } = require('../services/historicalMasterApprovalService');
 
 // =========================================================================
 // Helpers
@@ -561,7 +562,7 @@ exports.postMasterInvoice = async (req, res) => {
  */
 async function masterRemittancePosition(pool, bookingId) {
     const r = await pool.request().input('id', sql.Int, bookingId).query(`
-        SELECT b.BookingID, b.NegotiatedPrice, v.WholesalePrice, v.VariantCode, v.VariantName,
+        SELECT b.BookingID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice, v.WholesalePrice, v.VariantCode, v.VariantName,
                veh.ChasisNo, veh.EngineNo
         FROM   dms_SalesBookings b
         LEFT   JOIN dms_VehicleVariant v   ON v.VariantID = b.VehicleVariantID
@@ -578,16 +579,21 @@ async function masterRemittancePosition(pool, bookingId) {
 
     const bvrGL = await resolveRole(pool, 'BOOKING_VARIANT_RECEIVABLE');
     if (!bvrGL) {
-        return { definedRate, remitted: 0, shortfall: 0, enforceable: false,
+        const approvedAmount=row.IsHistorical?Number(row.HistoricalMasterApprovedAmount||0):0;
+        return { definedRate, remitted: approvedAmount, ledgerRemitted: 0, approvedAmount,
+                 shortfall: approvedAmount>0?Math.max(0,definedRate-approvedAmount):0,
+                 enforceable: approvedAmount>0&&definedRate>0,
                  ChasisNo: row.ChasisNo, EngineNo: row.EngineNo,
                  VariantCode: row.VariantCode, VariantName: row.VariantName };
     }
     // A database error must propagate; it must not waive the Master gate.
     const position = await loadMasterPosition(pool, bookingId, bvrGL);
-    const remitted = Math.round(position.reduce((sum, account) => sum + account.Net, 0) * 100) / 100;
+    const ledgerRemitted = Math.round(position.reduce((sum, account) => sum + account.Net, 0) * 100) / 100;
+    const remitted = effectiveMasterPaid(row,ledgerRemitted);
     const shortfall = Math.round((definedRate - remitted) * 100) / 100;
     return {
-        definedRate, remitted,
+        definedRate, remitted, ledgerRemitted,
+        approvedAmount: row.IsHistorical ? Number(row.HistoricalMasterApprovedAmount||0) : 0,
         shortfall: shortfall > 0.01 ? shortfall : 0,
         enforceable: definedRate > 0,
         ChasisNo: row.ChasisNo, EngineNo: row.EngineNo,
@@ -792,6 +798,13 @@ exports.issueGatePass = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
+            // Approval changes serialize with delivery; recheck under the booking lock.
+            await new sql.Request(tx).input('bid',sql.Int,id)
+                .query('SELECT BookingID FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@bid');
+            const lockedMaster = await masterRemittancePosition(tx,id);
+            if (lockedMaster?.enforceable && lockedMaster.shortfall>0)
+                throw new Error('Master payment approval or remittance changed. Refresh before issuing the gate pass.');
+            const historicalApprovedRelease = lockedMaster?.approvedAmount>0 && lockedMaster.ledgerRemitted<lockedMaster.definedRate-0.01;
             // GL post FIRST — revenue recognition + COGS + premium (if any).
             // The service joins to dms_VehicleVariant to pull WholesalePrice
             // for the COGS leg. Voucher is created as Draft, not auto-posted
@@ -855,7 +868,7 @@ exports.issueGatePass = async (req, res) => {
                             WHERE VehicleID=@vid AND Status='AtDealer'`);
 
                 await logTransition(tx, id, b.Status, 'Closed', req.user,
-                    `Gate pass issued. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`} GL posting SKIPPED — unmapped roles: ${missing.join(', ')}.`);
+                    `Gate pass issued. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`} ${historicalApprovedRelease ? 'Historical Master payment approved without voucher matching; ledger entries unchanged.' : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}.`}`);
 
                 await createRecoveryPlanIfNeeded(tx, id, b, fullyPaid, req.user);
             }
@@ -910,7 +923,9 @@ exports.issueGatePass = async (req, res) => {
 
             await tx.commit();
             res.json({
-                message: responseMessage || 'Gate pass issued — booking closed',
+                message: responseMessage || (historicalApprovedRelease
+                    ? 'Gate pass issued — historical Master payment approved; voucher matching optional.'
+                    : 'Gate pass issued — booking closed'),
                 BookingID: id,
                 GatePassID: gpIns.recordset[0].GatePassID,
                 GatePassNo: gatePassNo,

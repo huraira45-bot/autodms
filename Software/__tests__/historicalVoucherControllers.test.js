@@ -60,6 +60,7 @@ beforeEach(() => {
     mockQueryHandler = async (query, values) => {
         if (query === LOCK_VOUCHER_SQL || query === LINKABLE_VOUCHER_SQL) return result([mockState.voucher]);
         if (/FROM\s+dms_SystemAccounts/i.test(query)) return result([{ GLCAID: 205 }]);
+        if (/SELECT coa.GLCAID FROM dms_VehicleVariant/i.test(query)) return result([{ GLCAID: 205 }]);
         if (/SELECT BookingID FROM dms_SalesPayments/i.test(query)) return result([{ BookingID: mockState.payment.BookingID }]);
         if (/FROM\s+dms_SalesBookings b/i.test(query)) return result([mockState.booking]);
         if (/FROM\s+dms_SalesPayments WITH/i.test(query)) return result([mockState.payment]);
@@ -70,7 +71,7 @@ beforeEach(() => {
         if (/UPDATE dms_SalesPayments/i.test(query)) {
             mockState.payment = { ...mockState.payment, VoucherID: values.vid ?? null,
                 VoucherNo: values.vno ?? null, LinkedVoucherGLCAID: values.gl ?? null,
-                IsLinkedVoucher: !/IsLinkedVoucher=0/.test(query) };
+                IsLinkedVoucher: !/IsLinkedVoucher=0/.test(query), HistoricalMasterGLCAID: values.masterGL ?? mockState.payment.HistoricalMasterGLCAID };
             return result([], 1);
         }
         if (/FROM data_FinanceVoucherInfo WITH/i.test(query)) return result([mockState.voucher]);
@@ -146,7 +147,7 @@ it('links an existing customer payment and stores the account used for the share
     await controller.linkPayment({ params: { paymentId: '31' }, body: { VoucherID: 20 }, user }, res);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ PaymentID: 31, VoucherNo: 'JV-OPENING-20' }));
     expect(mockState.payment).toMatchObject({ VoucherID: 20, VoucherNo: 'JV-OPENING-20', LinkedVoucherGLCAID: 101 });
-    expect(changes()[0].values).toEqual({ pid: 31, vid: 20, vno: 'JV-OPENING-20', gl: 101 });
+    expect(changes()[0].values).toEqual({ pid: 31, vid: 20, vno: 'JV-OPENING-20', gl: 101, masterGL: null });
     expect(mockTransactions[0].commit).toHaveBeenCalledTimes(1);
     expect(changes()).toHaveLength(1);
 });
@@ -260,4 +261,26 @@ it('locks the shared voucher before locking the existing payment row', async () 
     expect(headerIndex).toBeGreaterThanOrEqual(0);
     expect(paymentIndex).toBeGreaterThan(headerIndex);
     expect(capacityIndex).toBeGreaterThan(paymentIndex);
+});
+
+it('snapshots the vehicle Master account when recording a historical direct pay order', async () => {
+    const res=response();
+    await controller.recordPayment({params:{id:'10'},body:{Amount:300,PaymentMode:'PayOrder',VoucherID:20},user},res);
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(mockState.insertedPayment).toMatchObject({masterGL:205,mode:'PayOrder',gl:101});
+    expect(mockQueries.find(entry=>/SELECT coa.GLCAID FROM dms_VehicleVariant/.test(entry.query)).values).toEqual({bid:10});
+});
+it('snapshots the Master account when linking a previously recorded pay order', async () => {
+    mockState.payment.PaymentMode='PayOrder';mockState.payment.PremiumPortion=0;
+    const res=response();
+    await controller.linkPayment({params:{paymentId:'31'},body:{VoucherID:20},user},res);
+    expect(mockState.payment.HistoricalMasterGLCAID).toBe(205);
+    expect(mockTransactions[0].commit).toHaveBeenCalledTimes(1);
+});
+it('does not assign a Master opening snapshot to a premium-bearing pay order', async () => {
+    const res=response();
+    await controller.recordPayment({params:{id:'10'},body:{Amount:300,PremiumPortion:20,PaymentMode:'PayOrder'},user},res);
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(mockState.insertedPayment.masterGL).toBeNull();
+    expect(mockQueries.some(entry=>/SELECT coa.GLCAID FROM dms_VehicleVariant/.test(entry.query))).toBe(false);
 });

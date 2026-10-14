@@ -31,6 +31,7 @@ const { assertVoucherLinkable,CUSTOMER_AMOUNT_SQL,LINKED_AMOUNT_SQL,NONLINKED_PA
 const { MASTER_AMOUNT_SQL,MASTER_LINKED_SQL,linkMasterVoucher,GENERATED_SALES_SOURCES } = require('../services/historicalMasterAllocationService');
 
 const { applyVoucherFilters } = require('../services/historicalVoucherSearchService');
+const { historicalMasterAccount } = require('../services/historicalMasterAccountService');
 
 const GENERATED_SALES_SQL = GENERATED_SALES_SOURCES.map(source => "'" + source + "'").join(',');
 
@@ -270,6 +271,7 @@ exports.recordPayment = async (req, res) => {
             assertHasLedgerAccount(booking);
             voucher=await assertVoucherLinkable(tx,booking,Number(b.VoucherID),total);
         }
+        const masterGL=mode==='PayOrder'&&premium===0 ? await historicalMasterAccount(tx,bookingId) : null;
         const receivedAt=b.ReceivedAt?new Date(b.ReceivedAt):(voucher?new Date(voucher.VoucherDate):new Date());
         if (isNaN(receivedAt.getTime())) fail('Date received is not a real date.',400);
         const ins=await new sql.Request(tx)
@@ -278,14 +280,15 @@ exports.recordPayment = async (req, res) => {
             .input('prem',sql.Decimal(18,2),premium).input('at',sql.DateTime,receivedAt)
             .input('vid',sql.Int,voucher?.VoucherID||null).input('vno',sql.NVarChar(50),voucher?.VoucherNo||null)
             .input('linked',sql.Bit,voucher?1:0).input('gl',sql.Int,voucher?booking.PartyGLID:null)
+            .input('masterGL',sql.Int,masterGL)
             .input('notes',sql.NVarChar(sql.MAX),b.Notes||(voucher?`Linked to ${voucher.VoucherNo}, already posted.`:'Historical payment — ledger voucher not linked yet.'))
             .input('emp',sql.Int,req.user?.employeeId||null).input('empN',sql.NVarChar(100),req.user?.userName||null)
             .query(`DECLARE @ins TABLE (PaymentID INT);
                 INSERT INTO dms_SalesPayments
                     (BookingID,PaymentPath,PaymentMode,Amount,PremiumPortion,ReceivedAt,VoucherID,VoucherNo,
-                     IsLinkedVoucher,LinkedVoucherGLCAID,Notes,ReceivedByEmployeeID,ReceivedByName,CreatedByEmployeeID)
+                     IsLinkedVoucher,LinkedVoucherGLCAID,HistoricalMasterGLCAID,Notes,ReceivedByEmployeeID,ReceivedByName,CreatedByEmployeeID)
                 OUTPUT INSERTED.PaymentID INTO @ins
-                VALUES (@bid,@path,@mode,@amt,@prem,@at,@vid,@vno,@linked,@gl,@notes,@emp,@empN,@emp);
+                VALUES (@bid,@path,@mode,@amt,@prem,@at,@vid,@vno,@linked,@gl,@masterGL,@notes,@emp,@empN,@emp);
                 SELECT PaymentID FROM @ins;`);
         const paymentId=ins.recordset[0].PaymentID;
         await logBookingTransition(tx,bookingId,booking.Status,booking.Status,req.user,
@@ -317,7 +320,7 @@ exports.linkPayment = async (req,res) => {
         // not wait on a different payment whose transaction waits on this voucher.
         await new sql.Request(tx).input('vid',sql.Int,voucherId).query(LOCK_VOUCHER_SQL);
         const locked=await new sql.Request(tx).input('pid',sql.Int,paymentId).input('bid',sql.Int,booking.BookingID)
-            .query(`SELECT PaymentID,Amount,PremiumPortion,Status,VoucherID,VoucherNo
+            .query(`SELECT PaymentID,Amount,PremiumPortion,PaymentMode,Status,VoucherID,VoucherNo
                 FROM dms_SalesPayments WITH (UPDLOCK,HOLDLOCK) WHERE PaymentID=@pid AND BookingID=@bid`);
         const p=locked.recordset[0];
         if(!p) fail('That payment is no longer on this booking.',409);
@@ -325,9 +328,10 @@ exports.linkPayment = async (req,res) => {
         if(p.VoucherID) fail(`That payment is already linked to ${p.VoucherNo||'a voucher'}. Unlink it first if it is wrong.`);
         const total=Math.round((Number(p.Amount)+Number(p.PremiumPortion||0))*100)/100;
         const voucher=await assertVoucherLinkable(tx,booking,voucherId,total);
+        const masterGL=p.PaymentMode==='PayOrder'&&!Number(p.PremiumPortion||0) ? await historicalMasterAccount(tx,booking.BookingID) : null;
         await new sql.Request(tx).input('pid',sql.Int,paymentId).input('vid',sql.Int,voucherId)
-            .input('vno',sql.NVarChar(50),voucher.VoucherNo).input('gl',sql.Int,booking.PartyGLID)
-            .query('UPDATE dms_SalesPayments SET VoucherID=@vid,VoucherNo=@vno,IsLinkedVoucher=1,LinkedVoucherGLCAID=@gl WHERE PaymentID=@pid');
+            .input('vno',sql.NVarChar(50),voucher.VoucherNo).input('gl',sql.Int,booking.PartyGLID).input('masterGL',sql.Int,masterGL)
+            .query('UPDATE dms_SalesPayments SET VoucherID=@vid,VoucherNo=@vno,IsLinkedVoucher=1,LinkedVoucherGLCAID=@gl,HistoricalMasterGLCAID=@masterGL WHERE PaymentID=@pid');
         await logBookingTransition(tx,booking.BookingID,booking.Status,booking.Status,req.user,
             `Payment #${paymentId}, PKR ${money(total)}, allocated to ${voucher.VoucherNo} on account ${booking.PartyGLID}. Nothing posted to the GL.`);
         await tx.commit();

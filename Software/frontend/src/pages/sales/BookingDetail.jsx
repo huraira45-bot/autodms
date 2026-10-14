@@ -23,6 +23,7 @@ import { printGatePass } from '../../utils/gatePassPrint';
 import BookingDocumentDrop from './BookingDocumentDrop';
 import { HistoricalPaymentModal, LinkMasterVoucherModal } from './HistoricalPaymentModals';
 import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences';
+import { HistoricalMasterApprovalModal } from './HistoricalMasterApproval';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -60,6 +61,7 @@ export default function BookingDetail() {
     // separate steps (owner ask 2026-09-18).
     const [showHistPayment, setShowHistPayment] = useState(false);
     const [showVoucherReferences, setShowVoucherReferences] = useState(false);
+    const [showMasterApproval, setShowMasterApproval] = useState(false);
     const [showCancel, setShowCancel] = useState(false);
     // Imported historical bookings can arrive without a date — the owner's
     // August sheet had none — so it is filled in here afterwards.
@@ -209,11 +211,15 @@ export default function BookingDetail() {
     const canVoidMasterPayment = (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'))
         && !['Closed', 'Delivered', 'GatePassIssued'].includes(data.Status);
 
+    const canApproveHistoricalMaster = data.IsHistorical
+        && (hasModule('sales_admin_settings') || hasModule('sales_gm'))
+        && !['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'].includes(data.Status);
     const canPayMaster = (data.AmountPaidToDate || 0) > 0
-        && masterStillOwed > 0.01
+        && (data.IsHistorical || masterStillOwed > 0.01)
         && masterDrafts.length === 0
         && !['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'].includes(data.Status)
-        && (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'));
+        && (data.IsHistorical ? (hasModule('sales_gm') || hasModule('sales_admin_settings'))
+            : (hasModule('sales_master_settlement') || hasModule('sales_admin_settings')));
 
     // Admin-only, and the server refuses it anyway once anything has posted.
     const canChangeCustomer = hasModule('sales_admin_settings') || hasModule('admin_unfinalize');
@@ -372,10 +378,12 @@ export default function BookingDetail() {
 
             {/* Workflow actions row */}
             {(canAllocate || canPayMaster || canPostMasterInvoice || canIssueGatePass
-              || masterDrafts.length > 0 || canManageReferences) && (
+              || masterDrafts.length > 0 || canManageReferences || canApproveHistoricalMaster) && (
                 <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Next steps:</div>
                     {canManageReferences && <button className="btn-sm" onClick={() => setShowVoucherReferences(true)}><Link2 size={14} /> Voucher references</button>}
+                    {canApproveHistoricalMaster && <button className="btn-sm" onClick={() => setShowMasterApproval(true)}>Approve Master payment</button>}
+                    {data.IsHistorical && Number(data.HistoricalMasterApprovedAmount)>0 && <span style={{ fontSize: '0.8rem', color: '#166534' }}>Master payment approved: PKR {fmtN(data.HistoricalMasterApprovedAmount)} · voucher matching optional</span>}
                     {canAllocate && (
                         <button onClick={() => setShowAllocate(true)}
                             style={{ padding: '8px 14px', background: '#1e40af', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -862,6 +870,8 @@ export default function BookingDetail() {
             )}
 
             {showVoucherReferences && data.IsHistorical && <HistoricalVoucherReferencesModal booking={data} onClose={() => setShowVoucherReferences(false)} />}
+            {showMasterApproval && <HistoricalMasterApprovalModal booking={data} onClose={() => setShowMasterApproval(false)}
+                onSaved={message => { setShowMasterApproval(false); flash('ok',message); load(); }} />}
             {showPayMaster && data.IsHistorical && (
                 <LinkMasterVoucherModal booking={data} stillOwed={masterStillOwed}
                     onClose={() => setShowPayMaster(false)}

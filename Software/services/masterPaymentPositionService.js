@@ -8,21 +8,37 @@ function masterAccountSql(alias, coreGL) {
         (SELECT GLCAID FROM GLChartOFAccount WHERE GLCode IN (${legacyCodesSql})))`;
 }
 function historicalPayOrderSql(coreGL = '@gl') {
-    return `SELECT candidate.PaymentID,candidate.BookingID,candidate.VoucherID,candidate.GLCAID,candidate.Amount
+    return `SELECT candidate.PaymentID,candidate.BookingID,candidate.VoucherID,candidate.GLCAID,candidate.Amount,
+        candidate.PaymentVoucherID
     FROM (
-        SELECT p.PaymentID,p.BookingID,p.VoucherID,master.GLCAID,p.Amount,
+        SELECT p.PaymentID,p.BookingID,master.VoucherID,master.GLCAID,p.Amount,p.VoucherID AS PaymentVoucherID,
             master.MasterAmount-ISNULL((SELECT SUM(a.Amount) FROM dms_HistoricalMasterAllocations a
-                WHERE a.VoucherID=p.VoucherID AND a.GLCAID=master.GLCAID),0) AS Available,
-            SUM(p.Amount) OVER (PARTITION BY p.VoucherID,master.GLCAID) AS Requested
+                WHERE a.VoucherID=master.VoucherID AND a.GLCAID=master.GLCAID),0) AS Available,
+            SUM(p.Amount) OVER (PARTITION BY master.VoucherID,master.GLCAID) AS Requested
         FROM dms_SalesPayments p
         JOIN data_FinanceVoucherInfo v ON v.VoucherID=p.VoucherID
         CROSS APPLY (
-            SELECT MIN(d.GLCAID) AS GLCAID,COUNT(DISTINCT d.GLCAID) AS AccountCount,
-                   ISNULL(SUM(ISNULL(d.Debit,0)-ISNULL(d.Credit,0)),0) AS MasterAmount
+            SELECT source.VoucherID,d.GLCAID,SUM(ISNULL(d.Debit,0)-ISNULL(d.Credit,0)) AS MasterAmount,
+                COUNT(*) OVER () AS AccountCount
             FROM data_FinanceVoucherDetail d
-            WHERE d.VoucherID=p.VoucherID AND d.BookingID IS NULL AND ${masterAccountSql('d',coreGL)}
+            JOIN data_FinanceVoucherInfo source ON source.VoucherID=d.VoucherID
+            WHERE d.BookingID IS NULL AND ${masterAccountSql('d',coreGL)}
+              AND source.Status='Posted' AND source.ReversesVoucherID IS NULL
+              AND ISNULL(source.SourceDocType,'') NOT IN (${generatedSourcesSql})
+              AND (
+                -- Ordinary direct pay order: its own unambiguous Master entry.
+                (source.VoucherID=v.VoucherID AND
+                    (v.VoucherNo NOT LIKE 'JV-OB-%' OR p.HistoricalMasterGLCAID IS NULL
+                        OR d.GLCAID=p.HistoricalMasterGLCAID))
+                OR
+                -- Customer and Master opening balances can be in separate vouchers.
+                (v.VoucherNo LIKE 'JV-OB-%' AND source.VoucherNo LIKE 'JV-OB-%'
+                    AND source.VoucherDate<=v.VoucherDate AND d.GLCAID=p.HistoricalMasterGLCAID
+                    AND NOT EXISTS (SELECT 1 FROM data_FinanceVoucherDetail ownMaster
+                        WHERE ownMaster.VoucherID=v.VoucherID AND ${masterAccountSql('ownMaster',coreGL)}))
+              )
+            GROUP BY source.VoucherID,d.GLCAID
         ) master
-        -- IsLinkedVoucher is set only by the historical payment workflow.
         WHERE p.IsLinkedVoucher=1 AND p.Status='Posted' AND p.PaymentMode='PayOrder'
           AND p.Amount>0 AND ISNULL(p.PremiumPortion,0)=0 AND p.LinkedVoucherGLCAID IS NOT NULL
           AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
@@ -32,12 +48,13 @@ function historicalPayOrderSql(coreGL = '@gl') {
                FROM data_FinanceVoucherDetail c
                WHERE c.VoucherID=p.VoucherID AND c.GLCAID=p.LinkedVoucherGLCAID)>=p.Amount
           AND NOT EXISTS (SELECT 1 FROM dms_HistoricalMasterAllocations a
-              WHERE a.VoucherID=p.VoucherID AND a.BookingID=p.BookingID)
+              WHERE a.VoucherID IN (p.VoucherID,master.VoucherID) AND a.BookingID=p.BookingID)
           AND NOT EXISTS (SELECT 1 FROM data_FinanceVoucherDetail tagged
-              WHERE tagged.VoucherID=p.VoucherID AND tagged.BookingID=p.BookingID
+              WHERE tagged.VoucherID IN (p.VoucherID,master.VoucherID) AND tagged.BookingID=p.BookingID
                 AND ${masterAccountSql('tagged',coreGL)})
     ) candidate WHERE candidate.Requested<=candidate.Available`;
 }
+
 function masterPositionSql(booking, coreGL) {
     return `SELECT movement.GLCAID,SUM(movement.Debit) AS Dr,SUM(movement.Credit) AS Cr,
         SUM(movement.Debit-movement.Credit) AS Net
@@ -65,8 +82,13 @@ async function loadMasterPosition(executor, bookingId, coreGL, lockSources = fal
         await new sql.Request(executor).input('bid',sql.Int,bookingId).query(`
             SELECT v.VoucherID FROM data_FinanceVoucherInfo v WITH (UPDLOCK,HOLDLOCK)
             WHERE EXISTS (SELECT 1 FROM dms_SalesPayments p
-                WHERE p.BookingID=@bid AND p.VoucherID=v.VoucherID
-                  AND p.IsLinkedVoucher=1 AND p.PaymentMode='PayOrder' AND p.Status='Posted')`);
+                JOIN data_FinanceVoucherInfo customerVoucher ON customerVoucher.VoucherID=p.VoucherID
+                WHERE p.BookingID=@bid AND p.IsLinkedVoucher=1 AND p.PaymentMode='PayOrder' AND p.Status='Posted'
+                  AND (p.VoucherID=v.VoucherID OR (
+                    customerVoucher.VoucherNo LIKE 'JV-OB-%' AND v.VoucherNo LIKE 'JV-OB-%'
+                    AND v.VoucherDate<=customerVoucher.VoucherDate
+                    AND EXISTS (SELECT 1 FROM data_FinanceVoucherDetail openingAccount
+                        WHERE openingAccount.VoucherID=v.VoucherID AND openingAccount.GLCAID=p.HistoricalMasterGLCAID))))`);
     }
     const r=await new sql.Request(executor).input('bid',sql.Int,bookingId).input('gl',sql.Int,coreGL)
         .query(masterPositionSql('@bid','@gl'));

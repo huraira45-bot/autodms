@@ -36,3 +36,9 @@ cd /d "D:\saher 2.0\autodms" && git pull --ff-only && cd Software && pm2 restart
 ```
 
 The existing posted pay order counts automatically after restart; no replacement payment or manual Master link is needed. Gate-pass issuance remains the user's ordinary action. Its normal delivery voucher review/finalization workflow remains in place.
+
+## Separate opening journals and optional approval (2026-10-14)
+
+Migration154 recognizes historical direct pay orders whose customer credit and vehicle Master debit are on separate posted JV-OB opening journals. Vehicle account snapshots, unique/date/source checks and shared capacity prevent double use; delivery settles the actual Master account. BK-2026-0232 verifies at10,298,970 remitted and zero shortfall.
+
+The owner also authorized standalone historical Master approval (migration155) to count as paid with matching optional. Confirmed and matched amounts use the larger total, avoiding duplication. Approval-only historical gate pass creates no unmatched delivery journal. See [Historical Master approval](HISTORICAL_MASTER_APPROVAL.md) for the complete server command and behavior.

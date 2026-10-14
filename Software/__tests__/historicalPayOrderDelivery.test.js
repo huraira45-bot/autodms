@@ -17,7 +17,7 @@ const {loadMasterPosition}=require('../services/masterPaymentPositionService');
 const {postDeliveryVoucher}=require('../services/salesDeliveryPostingService');
 function transaction(price=1000,premium=0){
     const tx={calls:[],query:jest.fn(async(query)=>{
-        if(query.includes('SELECT b.BookingID'))return {recordset:[{BookingID:7,BookingNo:'BK-TEST',PartyID:10,NegotiatedPrice:price,WholesalePrice:price,PremiumAmount:premium}]};
+        if(query.includes('SELECT b.BookingID'))return {recordset:[{BookingID:7,BookingNo:'BK-TEST',PartyID:10,NegotiatedPrice:price,WholesalePrice:price,PremiumAmount:premium,...tx.bookingOverrides}]};
         if(query.includes('SELECT PartyGLID'))return {recordset:[{PartyGLID:301}]};
         if(query.includes('SELECT Voucherid FROM GLVoucherType'))return {recordset:[{Voucherid:1}]};
         if(query.includes('INSERT INTO data_FinanceVoucherInfo'))return {recordset:[{VoucherID:77}]};
@@ -60,4 +60,29 @@ it('refuses an over-settled account rather than writing an unbalanced journal',a
     loadMasterPosition.mockResolvedValue([{GLCAID:101,Dr:1500,Cr:0,Net:1500},{GLCAID:201,Dr:0,Cr:500,Net:-500}]);
     const tx=transaction();await expect(postDeliveryVoucher(7,{},tx)).rejects.toThrow('over-settled');
     expect(details(tx)).toEqual([]);
+});
+
+it('does not invent a delivery journal for historical approval without a matched Master balance',async()=>{
+ loadMasterPosition.mockResolvedValue([]);const tx=transaction();
+ tx.bookingOverrides={IsHistorical:true,HistoricalMasterApprovedAmount:1000};
+ await expect(postDeliveryVoucher(7,{},tx)).resolves.toBeNull();
+ expect(details(tx)).toHaveLength(0);
+ expect(tx.calls.some(call=>/INSERT|UPDATE/.test(call.query))).toBe(false);
+});
+it('does not waive normal-booking remittance through historical approval fields',async()=>{
+ loadMasterPosition.mockResolvedValue([]);const tx=transaction();
+ tx.bookingOverrides={IsHistorical:false,HistoricalMasterApprovedAmount:1000};
+ await expect(postDeliveryVoucher(7,{},tx)).rejects.toThrow('has not been remitted');
+});
+it('still blocks partial historical approval below the defined rate',async()=>{
+ loadMasterPosition.mockResolvedValue([]);const tx=transaction();
+ tx.bookingOverrides={IsHistorical:true,HistoricalMasterApprovedAmount:900};
+ await expect(postDeliveryVoucher(7,{},tx)).rejects.toThrow('has not been remitted');
+});
+it('keeps normal balanced settlement when an approved historical payment is matched',async()=>{
+ loadMasterPosition.mockResolvedValue([{GLCAID:101,Dr:1000,Cr:0,Net:1000}]);const tx=transaction();
+ tx.bookingOverrides={IsHistorical:true,HistoricalMasterApprovedAmount:1000};
+ await expect(postDeliveryVoucher(7,{},tx)).resolves.toBe(77);
+ expect(details(tx).reduce((sum,line)=>sum+line.dr-line.cr,0)).toBe(0);
+ expect(details(tx).filter(line=>line.gl===101)).toEqual([expect.objectContaining({cr:1000})]);
 });

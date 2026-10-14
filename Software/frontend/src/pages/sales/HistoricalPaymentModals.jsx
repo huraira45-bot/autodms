@@ -14,6 +14,7 @@ import { Link2, AlertTriangle } from 'lucide-react';
 import { inputStyle, Field, Err, Shell } from './VehicleModelsAdmin';
 
 import { VoucherSearchFields, HistoricalVoucherReferencePanel } from './HistoricalVoucherReferences';
+import { HistoricalMasterApprovalPanel } from './HistoricalMasterApproval';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -237,7 +238,8 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
 export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved }) {
     const agreedRemaining = booking.NegotiatedPrice == null ? Number(stillOwed || 0) : Number(booking.NegotiatedPrice) - Number(booking.AmountPaidToMaster || 0);
     const owed = Math.round(Math.max(0, agreedRemaining) * 100) / 100;
-    const [amount, setAmount] = useState(owed > 0 ? String(owed) : '');
+    const [amount, setAmount] = useState(owed > 0 ? String(owed) : booking.HistoricalMasterApprovedAmount ? String(booking.HistoricalMasterApprovedAmount) : '');
+    const [approvalOnly, setApprovalOnly] = useState(false);
     const [search, setSearch] = useState('');
     const [voucherType, setVoucherType] = useState('');
     const [referenceOnly, setReferenceOnly] = useState(false);
@@ -327,11 +329,13 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
     return (
         <Shell title={`${booking.BookingNo} - match the payment already made to Master`} onClose={onClose} width={640}>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <button className="btn-sm" disabled={busy} aria-pressed={!referenceOnly} onClick={() => setReferenceOnly(false)}>Master payment link</button>
-                <button className="btn-sm" disabled={busy} aria-pressed={referenceOnly} onClick={() => setReferenceOnly(true)}>Any voucher as reference</button>
+                <button className="btn-sm" disabled={busy} aria-pressed={approvalOnly} onClick={() => { setApprovalOnly(true); setReferenceOnly(false); }}>Approve without voucher</button>
+                <button className="btn-sm" disabled={busy} aria-pressed={!referenceOnly && !approvalOnly} onClick={() => { setReferenceOnly(false); setApprovalOnly(false); }}>Master payment link</button>
+                <button className="btn-sm" disabled={busy} aria-pressed={referenceOnly} onClick={() => { setReferenceOnly(true); setApprovalOnly(false); }}>Any voucher as reference</button>
             </div>
+            {approvalOnly && <HistoricalMasterApprovalPanel booking={booking} onSaved={onSaved} />}
             {referenceOnly && <HistoricalVoucherReferencePanel booking={booking} kind="MASTER" />}
-            <div hidden={referenceOnly}>
+            <div hidden={referenceOnly || approvalOnly}>
             {err && <Err>{err}</Err>}
 
             <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4,

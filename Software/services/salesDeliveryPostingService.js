@@ -47,7 +47,7 @@ async function resolveCustomerGL(partyId, fallbackGL, transaction) {
 async function loadBooking(bookingId, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, bookingId)
-        .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.NegotiatedPrice,
+        .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice,
                        b.AmountPaidToDate, b.PremiumAmount,
                        v.WholesalePrice
                 FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
@@ -84,6 +84,11 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     // Refuse rather than post a settlement that cannot reconcile. The caller
     // is inside a transaction, so this rolls the delivery back whole.
     const definedRate = Number(b.WholesalePrice) > 0 ? Number(b.WholesalePrice) : negotiated;
+    // Explicit historical confirmation is a business record, not a GL debit.
+    // When it covers the missing remittance, issue the historical gate pass
+    // without inventing an unmatched delivery journal. Optional matching stays intact.
+    if (b.IsHistorical && Number(b.HistoricalMasterApprovedAmount||0)>=definedRate-0.01
+        && definedRate-masterPaid>0.01) return null;
     if (definedRate - masterPaid > 0.01) {
         throw new Error(
             `Cannot settle delivery for ${b.BookingNo}: PKR ${(definedRate - masterPaid).toLocaleString('en-PK')} `

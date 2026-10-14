@@ -18,6 +18,7 @@ const { sql, getPool } = require('../config/db');
 const incentive = require('./salesIncentiveController');
 const { logAudit } = require('../services/salesAuditService');
 const { masterNetSql } = require('../services/masterPaymentPositionService');
+const { effectiveMasterPaidSql } = require('../services/historicalMasterApprovalService');
 
 // ============================================================================
 // Helpers
@@ -172,7 +173,7 @@ exports.getBooking = async (req, res) => {
         // on their original legacy booking account and explicit allocations. Used by
         // the UI to show remaining-to-pay-master and toggle the Pay Master button.
         const masterPaidR = await pool.request().input('id', sql.Int, id).query(`SELECT
-            ${masterNetSql('@id',"(SELECT GLCAID FROM dms_SystemAccounts WHERE RoleKey='BOOKING_VARIANT_RECEIVABLE')")} AS AmountPaidToMaster`);
+            ${effectiveMasterPaidSql('@id',masterNetSql('@id',"(SELECT GLCAID FROM dms_SystemAccounts WHERE RoleKey='BOOKING_VARIANT_RECEIVABLE')"))} AS AmountPaidToMaster`);
         // AmountPaidToDate is a running total kept on the booking, added to
         // when a payment is taken. It is NOT derived from the ledger -- so
         // unfinalizing a payment's voucher takes the money out of the books and
