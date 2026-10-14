@@ -158,13 +158,20 @@ async function resolveRolesBatch(executor, roleKeys) {
 // ALLOCATION — assign a Vehicle to a Booking (Sales Manager role)
 // =========================================================================
 
+// Historical payment entry preserves the imported state. A paid historical
+// booking may therefore still be PendingBookingPayment; the payment/document
+// gates below apply before it can be allocated, just as for confirmed bookings.
+const allocationStateAllowed = booking =>
+    ['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(booking.Status)
+    || (booking.IsHistorical && booking.Status === 'PendingBookingPayment');
+
 // GET /api/sales/bookings/:id/allocation-readiness — preflight for the UI
 exports.allocationReadiness = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const pool = await getPool();
         const bk = await pool.request().input('id', sql.Int, id).query(`
-            SELECT b.BookingID, b.Status, b.AllocatedVehicleID, b.AmountPaidToDate, b.NegotiatedPrice,
+            SELECT b.BookingID, b.Status, b.IsHistorical, b.AllocatedVehicleID, b.AmountPaidToDate, b.NegotiatedPrice,
                    v.MinimumBookingAmount, v.VariantCode, v.VariantName
             FROM dms_SalesBookings b
             LEFT JOIN dms_VehicleVariant v ON b.VehicleVariantID = v.VariantID
@@ -177,7 +184,7 @@ exports.allocationReadiness = async (req, res) => {
         const paid = Number(b.AmountPaidToDate) || 0;
 
         if (b.AllocatedVehicleID) reasons.push('Already allocated');
-        if (!['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(b.Status)) {
+        if (!allocationStateAllowed(b)) {
             reasons.push(`Booking status is "${b.Status}" — must be BookingConfirmed / PendingPayment`);
         }
         if (minAmt > 0 && paid < minAmt) reasons.push(`Minimum booking payment of PKR ${minAmt.toLocaleString()} not yet received (paid: PKR ${paid.toLocaleString()})`);
@@ -217,7 +224,7 @@ exports.allocateVehicle = async (req, res) => {
 
         const pool = await getPool();
         const bk = await pool.request().input('id', sql.Int, bookingId).query(`
-            SELECT b.BookingID, b.Status, b.AllocatedVehicleID, b.VehicleVariantID,
+            SELECT b.BookingID, b.Status, b.IsHistorical, b.AllocatedVehicleID, b.VehicleVariantID,
                    b.AmountPaidToDate, b.NegotiatedPrice,
                    v.MinimumBookingAmount
             FROM dms_SalesBookings b
@@ -226,9 +233,9 @@ exports.allocateVehicle = async (req, res) => {
         if (!bk.recordset.length) return res.status(404).json({ error: 'Booking not found' });
         const booking = bk.recordset[0];
 
-        // Booking must not be already allocated and must be in a post-confirmation state
+        // Allow the imported historical pending state; payment/document gates still apply.
         if (booking.AllocatedVehicleID) return res.status(409).json({ error: `Booking already allocated to vehicle #${booking.AllocatedVehicleID}` });
-        if (!['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(booking.Status)) {
+        if (!allocationStateAllowed(booking)) {
             return res.status(409).json({ error: `Cannot allocate from status "${booking.Status}". Must be BookingConfirmed / PendingPayment / MasterInvoicePending.` });
         }
 

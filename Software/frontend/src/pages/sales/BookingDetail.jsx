@@ -30,6 +30,8 @@ const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
 
 const STATUS_STYLE = {
     Draft:                { bg: '#e2e8f0', col: '#475569', label: 'Draft' },
+    PendingBookingPayment: { bg: '#fef3c7', col: '#92400e', label: 'Pending Booking Payment' },
+    BookingConfirmed:     { bg: '#dbeafe', col: '#1e40af', label: 'Booking Confirmed' },
     PendingApproval:      { bg: '#fef3c7', col: '#92400e', label: 'Pending Discount Approval' },
     PendingPayment:       { bg: '#dbeafe', col: '#1e40af', label: 'Pending Payment' },
     Allocated:            { bg: '#fed7aa', col: '#9a3412', label: 'Allocated' },
@@ -153,7 +155,7 @@ export default function BookingDetail() {
     if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><Loader2 className="animate-spin" /></div>;
     if (!data) return <div style={{ padding: 40, color: '#dc2626' }}>Booking not found</div>;
 
-    const sty = STATUS_STYLE[data.Status] || STATUS_STYLE.Draft;
+    const sty = STATUS_STYLE[data.Status] || { bg: '#e2e8f0', col: '#475569', label: data.Status || 'Unknown' };
     // NegotiatedPrice = vehicle set price (paid to Master).
     // PremiumAmount   = dealer's additive markup (kept).
     // Customer total  = NegotiatedPrice + PremiumAmount.
@@ -176,8 +178,9 @@ export default function BookingDetail() {
         (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
         (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
-    const canAllocate = ['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status) &&
-        !data.AllocatedVehicleID && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
+    const canAllocate = (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)
+        || (data.IsHistorical && data.Status === 'PendingBookingPayment' && Number(data.AmountPaidToDate) > 0))
+        && !data.AllocatedVehicleID && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
     // Pay Master: shown whenever there's vehicle-money pending forward to Master.
     // Premium is additive on top of the set price and stays with the dealer,
     // so wholesale due = NegotiatedPrice (the set price itself).
