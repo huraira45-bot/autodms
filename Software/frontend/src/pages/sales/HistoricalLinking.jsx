@@ -13,6 +13,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Link2, Loader2, RefreshCw, ExternalLink, History } from 'lucide-react';
 import { ErpControlPanel } from '../../components/erp';
 import { LinkVoucherModal } from './HistoricalPaymentModals';
+import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences';
+import { useAuth } from '../../context/AuthContext';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -33,6 +35,9 @@ export default function HistoricalLinking() {
     const [tab, setTab] = useState('unlinked');
     const [msg, setMsg] = useState(null);
     const [linkFor, setLinkFor] = useState(null);
+    const [referenceFor, setReferenceFor] = useState(null);
+    const { hasModule } = useAuth();
+    const canManageReferences = hasModule('sales_admin_settings') || hasModule('sales_gm');
 
     const flash = (kind, text) => { setMsg({ kind, text }); setTimeout(() => setMsg(null), 4000); };
 
@@ -142,6 +147,7 @@ export default function HistoricalLinking() {
                                                 : <span style={{ color: '#b45309', fontWeight: 600 }}>Not linked</span>}
                                         </td>
                                         <td style={td}>
+                                            {canManageReferences && <button className="btn-sm" onClick={() => setReferenceFor(r)}>Voucher references</button>}
                                             {r.VoucherID
                                                 ? <button className="btn-sm" onClick={() => unlink(r)}
                                                           title="Remove the link — the voucher stays exactly as it is in the ledger">Unlink</button>
@@ -165,6 +171,7 @@ export default function HistoricalLinking() {
                 </div>
             </div>
 
+            {referenceFor && <HistoricalVoucherReferencesModal booking={referenceFor} onClose={() => setReferenceFor(null)} />}
             {linkFor && (
                 <LinkVoucherModal
                     booking={{ BookingID: linkFor.BookingID, PartyName: linkFor.PartyName }}

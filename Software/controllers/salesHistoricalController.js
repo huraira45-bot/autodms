@@ -30,6 +30,8 @@ const { logBookingTransition } = require('./salesBookingController');
 const { assertVoucherLinkable,CUSTOMER_AMOUNT_SQL,LINKED_AMOUNT_SQL,NONLINKED_PAYMENT_SQL,LOCK_VOUCHER_SQL } = require('../services/historicalVoucherAllocationService');
 const { MASTER_AMOUNT_SQL,MASTER_LINKED_SQL,linkMasterVoucher,GENERATED_SALES_SOURCES } = require('../services/historicalMasterAllocationService');
 
+const { applyVoucherFilters } = require('../services/historicalVoucherSearchService');
+
 const GENERATED_SALES_SQL = GENERATED_SALES_SOURCES.map(source => "'" + source + "'").join(',');
 
 // The states an old deal can sensibly be recorded in. The in-flight approval
@@ -427,7 +429,7 @@ exports.linkableVouchers = async (req,res) => {
         const rq=pool.request().input('gl',sql.Int,booking.PartyGLID);
         let amountClause='',searchClause='';
         if(!wantsAll) { rq.input('amt',sql.Decimal(18,2),amount); amountClause=' AND cap.CustomerAmount-cap.LinkedAmount>=@amt'; }
-        if(req.query.search) { rq.input('s',sql.NVarChar(200),`%${String(req.query.search).trim()}%`); searchClause=' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)'; }
+        searchClause = applyVoucherFilters(rq, req.query);
         const r=await rq.query(`SELECT TOP 50 v.VoucherID,v.VoucherNo,v.VoucherDate,v.TotalAmount,v.Remarks,vt.Title AS VoucherType,
                 cap.CustomerAmount,cap.LinkedAmount,
                 CASE WHEN cap.CustomerAmount>cap.LinkedAmount THEN cap.CustomerAmount-cap.LinkedAmount ELSE 0 END AS AvailableAmount
@@ -487,7 +489,7 @@ exports.linkableMasterVouchers = async (req,res) => {
         const rq=pool.request().input('gl',sql.Int,gl);
         let amountClause='',searchClause='';
         if(!wantsAll) { rq.input('amt',sql.Decimal(18,2),amount); amountClause=' AND cap.MasterAmount-cap.LinkedAmount>=@amt'; }
-        if(req.query.search) { rq.input('s',sql.NVarChar(200),`%${String(req.query.search).trim()}%`); searchClause=' AND (v.VoucherNo LIKE @s OR v.Remarks LIKE @s)'; }
+        searchClause = applyVoucherFilters(rq, req.query);
         const r=await rq.query(`SELECT TOP 50 v.VoucherID,v.VoucherNo,v.VoucherDate,v.TotalAmount,v.Remarks,vt.Title AS VoucherType,
                 cap.MasterAmount,cap.LinkedAmount,
                 CASE WHEN cap.MasterAmount>cap.LinkedAmount THEN cap.MasterAmount-cap.LinkedAmount ELSE 0 END AS UnclaimedToMaster

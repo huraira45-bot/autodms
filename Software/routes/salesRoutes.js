@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const pv = require('../controllers/salesPaymentVoidController');
 const hist = require('../controllers/salesHistoricalController');
+const histRef = require('../controllers/salesHistoricalReferenceController');
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
 const lc  = require('../controllers/salesLifecycleController');
@@ -102,6 +103,11 @@ router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_
 // Historical bookings — deals done before DealerDesk, whose vouchers are
 // already posted in the ledger. Back-dated data entry that ties the two
 // together, so it sits with the people who own the sales data.
+router.get('/historical/voucher-types', requireAny('sales_admin_settings', 'sales_gm'), histRef.types);
+router.get('/historical/bookings/:id/voucher-search', requireAny('sales_admin_settings', 'sales_gm'), histRef.search);
+router.get('/historical/bookings/:id/voucher-references', requireAny('sales_admin_settings', 'sales_gm'), histRef.list);
+router.post('/historical/bookings/:id/voucher-references', requireAny('sales_admin_settings', 'sales_gm'), histRef.add);
+router.delete('/historical/bookings/:id/voucher-references/:referenceId', requireAny('sales_admin_settings', 'sales_gm'), histRef.remove);
 router.get( '/historical/states',                         requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.states);
 router.post('/historical/bookings',                       requireAny('sales_admin_settings', 'sales_gm'), hist.createBooking);
 router.get( '/historical/pending-links',                  requireAny('sales_admin_settings', 'sales_gm', 'sales_agm'), hist.pendingLinks);

@@ -22,6 +22,7 @@ import SearchableSelect from '../../components/SearchableSelect';
 import { printGatePass } from '../../utils/gatePassPrint';
 import BookingDocumentDrop from './BookingDocumentDrop';
 import { HistoricalPaymentModal, LinkMasterVoucherModal } from './HistoricalPaymentModals';
+import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -56,6 +57,7 @@ export default function BookingDetail() {
     // each one is linked to a voucher already in the ledger afterwards — two
     // separate steps (owner ask 2026-09-18).
     const [showHistPayment, setShowHistPayment] = useState(false);
+    const [showVoucherReferences, setShowVoucherReferences] = useState(false);
     const [showCancel, setShowCancel] = useState(false);
     // Imported historical bookings can arrive without a date — the owner's
     // August sheet had none — so it is filled in here afterwards.
@@ -169,6 +171,7 @@ export default function BookingDetail() {
     const notInGL = data.PaymentsNotInGL || [];
     const paidMismatch = Math.abs(paidInGL - Number(data.AmountPaidToDate || 0)) > 0.01;
     const canPay = ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
+    const canManageReferences = data.IsHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canSetBookingDate = data.IsHistorical &&
         (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
@@ -366,9 +369,10 @@ export default function BookingDetail() {
 
             {/* Workflow actions row */}
             {(canAllocate || canPayMaster || canPostMasterInvoice || canIssueGatePass
-              || masterDrafts.length > 0) && (
+              || masterDrafts.length > 0 || canManageReferences) && (
                 <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Next steps:</div>
+                    {canManageReferences && <button className="btn-sm" onClick={() => setShowVoucherReferences(true)}><Link2 size={14} /> Voucher references</button>}
                     {canAllocate && (
                         <button onClick={() => setShowAllocate(true)}
                             style={{ padding: '8px 14px', background: '#1e40af', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -854,6 +858,7 @@ export default function BookingDetail() {
                 />
             )}
 
+            {showVoucherReferences && data.IsHistorical && <HistoricalVoucherReferencesModal booking={data} onClose={() => setShowVoucherReferences(false)} />}
             {showPayMaster && data.IsHistorical && (
                 <LinkMasterVoucherModal booking={data} stillOwed={masterStillOwed}
                     onClose={() => setShowPayMaster(false)}

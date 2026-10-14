@@ -1521,3 +1521,7 @@ Added CreditPartyNTN to jobCardRegister API and Party NTN to its existing Excel/
 Verified production build and independent Office ZIP CRC/XML/content/logo checks, xlsx-reader round-trip data, leading-zero NTN/item codes, negative depreciation, empty fields, literal formula-like text and existing report column alignment. Desktop Word/browser interaction was not performed. Guide: docs/CREDIT_INVOICE_EXPORTS.md. Live installation remains the user's manual Git pull, frontend build and PM2 restart.
 
 Pre-existing changelog/untracked files remain outside the feature commit.
+
+## 2026-10-14 - Historical voucher references
+
+Historical bookings can search any voucher by number and dynamic voucher type, and attach unrelated vouchers as supporting references. References are stored in dms_HistoricalVoucherReferences (migration153), with booking/customer-payment/Master scope, current source status, audited add/remove and existing sales GM/admin permissions. They never count toward payment, Master or gate-pass totals. Financial linking retains account/capacity/status checks and now supports type filtering. Booking detail and Historical Payment Links expose Voucher references, including closed/fully paid bookings. Guide: docs/HISTORICAL_VOUCHER_REFERENCES.md. Verified 144 tests, production build, synthetic read-only SQL queries and local targeted migration application/rerun; manual server deployment pending.

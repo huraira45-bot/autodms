@@ -13,6 +13,8 @@ import axios from 'axios';
 import { Link2, AlertTriangle } from 'lucide-react';
 import { inputStyle, Field, Err, Shell } from './VehicleModelsAdmin';
 
+import { VoucherSearchFields, HistoricalVoucherReferencePanel } from './HistoricalVoucherReferences';
+
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
 const MODES = ['BankTransfer', 'Cash', 'Cheque', 'POS', 'PayOrder'];
@@ -97,6 +99,8 @@ export function HistoricalPaymentModal({ booking, onClose, onSaved }) {
 export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
     const total = Math.round((Number(payment.Amount) + Number(payment.PremiumPortion || 0)) * 100) / 100;
     const [search, setSearch] = useState('');
+    const [voucherType, setVoucherType] = useState('');
+    const [referenceOnly, setReferenceOnly] = useState(false);
     const [vouchers, setVouchers] = useState(null);     // null until searched
     const [others, setOthers] = useState(null);         // everything on the account
     const [picked, setPicked] = useState(null);
@@ -110,7 +114,7 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
         try {
             const { data } = await axios.get(
                 `${API}/sales/historical/bookings/${booking.BookingID}/linkable-vouchers`,
-                { params: all ? { all: 1 } : { amount: total, search: search || undefined } });
+                { params: { ...(all ? { all: 1 } : { amount: total }), search: search || undefined, voucherType: voucherType || undefined } });
             if (all) setOthers(data.vouchers || []);
             else setVouchers(data.vouchers || []);
         } catch (e) { setErr(e.response?.data?.error || e.message); if (!all) setVouchers([]); }
@@ -156,6 +160,12 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
 
     return (
         <Shell title={`Link payment #${payment.PaymentID} to a voucher in the ledger`} onClose={onClose} width={640}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button className="btn-sm" disabled={busy} aria-pressed={!referenceOnly} onClick={() => setReferenceOnly(false)}>Payment link</button>
+                <button className="btn-sm" disabled={busy} aria-pressed={referenceOnly} onClick={() => setReferenceOnly(true)}>Any voucher as reference</button>
+            </div>
+            {referenceOnly && <HistoricalVoucherReferencePanel booking={booking} kind="CUSTOMER" paymentId={payment.PaymentID} />}
+            <div hidden={referenceOnly}>
             {err && <Err>{err}</Err>}
 
             <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4, marginBottom: 12, fontSize: '0.82rem', color: '#0c4a6e' }}>
@@ -164,9 +174,9 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
                 {' '}A shared opening voucher can cover other customers and bookings; each link uses only this payment amount.
             </div>
 
-            <Field label="Narrow by voucher number or narration (optional)">
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. BRV-0912" style={inputStyle} />
-            </Field>
+            <VoucherSearchFields search={search} voucherType={voucherType} disabled={busy}
+                onSearch={value => { setSearch(value); setPicked(null); setVouchers(null); setOthers(null); }}
+                onType={value => { setVoucherType(value); setPicked(null); setVouchers(null); setOthers(null); }} />
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, margin: '10px 0' }}>
                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Account balance available: at least PKR {fmtN(total)}</span>
@@ -211,6 +221,7 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
                     <Link2 size={13} /> {picked ? `Link to ${picked.VoucherNo}` : 'Pick a voucher'}
                 </button>
             </div>
+            </div>
         </Shell>
     );
 }
@@ -228,6 +239,8 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
     const owed = Math.round(Math.max(0, agreedRemaining) * 100) / 100;
     const [amount, setAmount] = useState(owed > 0 ? String(owed) : '');
     const [search, setSearch] = useState('');
+    const [voucherType, setVoucherType] = useState('');
+    const [referenceOnly, setReferenceOnly] = useState(false);
     const [vouchers, setVouchers] = useState(null);   // null until searched
     const [others, setOthers] = useState(null);
     const [linked, setLinked] = useState([]);
@@ -252,7 +265,7 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
         try {
             const { data } = await axios.get(
                 `${API}/sales/historical/bookings/${booking.BookingID}/linkable-master-vouchers`,
-                { params: all ? { all: 1 } : { amount: Number(amount), search: search || undefined } });
+                { params: { ...(all ? { all: 1 } : { amount: Number(amount) }), search: search || undefined, voucherType: voucherType || undefined } });
             if (all) setOthers(data.vouchers || []);
             else setVouchers(data.vouchers || []);
         } catch (e) { setErr(e.response?.data?.error || e.message); if (!all) setVouchers([]); }
@@ -313,6 +326,12 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
 
     return (
         <Shell title={`${booking.BookingNo} - match the payment already made to Master`} onClose={onClose} width={640}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button className="btn-sm" disabled={busy} aria-pressed={!referenceOnly} onClick={() => setReferenceOnly(false)}>Master payment link</button>
+                <button className="btn-sm" disabled={busy} aria-pressed={referenceOnly} onClick={() => setReferenceOnly(true)}>Any voucher as reference</button>
+            </div>
+            {referenceOnly && <HistoricalVoucherReferencePanel booking={booking} kind="MASTER" />}
+            <div hidden={referenceOnly}>
             {err && <Err>{err}</Err>}
 
             <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4,
@@ -350,10 +369,10 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
                            placeholder="e.g. 2000000" style={inputStyle} disabled={busy} />
                     {amount && !amountIsValid && <div style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: 4 }}>Enter a positive amount with up to two decimal places.</div>}
                 </Field>
-                <Field label="Voucher no. or narration (optional)" flex>
-                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="e.g. BPV-0421" style={inputStyle} />
-                </Field>
             </div>
+            <VoucherSearchFields search={search} voucherType={voucherType} disabled={busy}
+                onSearch={value => { setSearch(value); setPicked(null); setVouchers(null); setOthers(null); }}
+                onType={value => { setVoucherType(value); setPicked(null); setVouchers(null); setOthers(null); }} />
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, margin: '10px 0' }}>
                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
@@ -400,6 +419,7 @@ export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved })
                 <button className="btn" onClick={link} disabled={busy || !picked || !canAllocate(picked)}>
                     <Link2 size={13} /> {picked ? `Link PKR ${fmtN(Number(amount))} to ${picked.VoucherNo}` : 'Pick a voucher'}
                 </button>
+            </div>
             </div>
         </Shell>
     );
