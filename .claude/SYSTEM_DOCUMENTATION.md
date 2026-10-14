@@ -1533,3 +1533,7 @@ Historical PendingBookingPayment may proceed through allocation under the ordina
 ## 2026-10-14 - Historical Master approval without required matching
 
 Owner explicitly authorized approval to count as paid and satisfy the Master gate-pass check without matching. Migration155 stores confirmed total/actor/time/notes; GM/admin approval/removal is audited and serialized. Paid total uses MAX(approved,matched), not their sum. Optional matching remains. Approval-only historical delivery creates no unmatched journal; matched delivery retains normal Draft/finalize flow. Migration154 also supports separate/shared opening pay orders via vehicle account snapshots and posted/date/unique/shared-capacity validation, fixing BK-2026-0232.196 tests/build and synthetic SQL checks pass; no live data changed. Guide docs/HISTORICAL_MASTER_APPROVAL.md. Manual update requires migrations154/155.
+
+## 2026-10-14 - Gate-pass source-lock performance
+
+Booking265 gate-pass timeout was traced to a costly correlated voucher-lock SELECT (CXPACKET, no blocking session). MASTER_SOURCE_IDS_SQL now uses booking-filtered UNION discovery, followed by ascending primary-key header locks and unchanged capacity reads. Read-only live pre-write trace completed454ms; no pass/voucher/sequence was created.199 regression tests and synthetic SQL source/balance checks pass. No migration/frontend change. Guide docs/GATE_PASS_TIMEOUT_FIX.md; manual backend pull/restart required.

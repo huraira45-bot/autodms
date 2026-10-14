@@ -2,7 +2,7 @@
 require('dotenv').config({path:require('path').join(__dirname,'..','.env')});
 const assert=require('assert/strict');
 const {sql,getPool}=require('../config/db');
-const {masterPositionSql,historicalPayOrderSql}=require('../services/masterPaymentPositionService');
+const {masterPositionSql,historicalPayOrderSql,MASTER_SOURCE_IDS_SQL}=require('../services/masterPaymentPositionService');
 const {MASTER_CAPACITY_SQL}=require('../services/historicalMasterAllocationService');
 const {legacyMasterCodeSql}=require('../services/historicalMasterAccountService');
 const tables=[
@@ -143,6 +143,13 @@ add('delivery settles the separate opening on its actual Master account',d=>{
   const rows=(await pool.request().input('gl',sql.Int,201).query(ctes(fixture())+historicalPayOrderSql('@gl'))).recordset;
   assert.equal(rows[0].GLCAID,101);assert.equal(Number(rows[0].Amount),1000);
   const split=fixture();splitOpening(split);
+  const splitIds=(await pool.request().input('bid',sql.Int,7).query(ctes(split)+MASTER_SOURCE_IDS_SQL)).recordset;
+  assert.deepEqual(splitIds.map(row=>row.VoucherID).sort((a,b)=>a-b),[20,88]);
+  const directIds=(await pool.request().input('bid',sql.Int,7).query(ctes(fixture())+MASTER_SOURCE_IDS_SQL)).recordset;
+  assert.deepEqual(directIds.map(row=>row.VoucherID),[20]);
+  split.dms_SalesPayments[0][7]='Cash';
+  assert.equal((await pool.request().input('bid',sql.Int,7).query(ctes(split)+MASTER_SOURCE_IDS_SQL)).recordset.length,0);
+  split.dms_SalesPayments[0][7]='PayOrder';
   const openingRows=(await pool.request().input('gl',sql.Int,201).query(ctes(split)+historicalPayOrderSql('@gl'))).recordset;
   assert.equal(openingRows[0].VoucherID,88);assert.equal(openingRows[0].PaymentVoucherID,20);assert.equal(openingRows[0].GLCAID,101);
   for(const [name,expected] of [

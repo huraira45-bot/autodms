@@ -77,21 +77,33 @@ function masterPositionSql(booking, coreGL) {
 function masterNetSql(booking, coreGL) {
     return `(SELECT ISNULL(SUM(position.Net),0) FROM (${masterPositionSql(booking,coreGL)}) position)`;
 }
+const MASTER_SOURCE_IDS_SQL = `SELECT p.VoucherID FROM dms_SalesPayments p
+    WHERE p.BookingID=@bid AND p.IsLinkedVoucher=1 AND p.PaymentMode='PayOrder' AND p.Status='Posted'
+      AND p.VoucherID IS NOT NULL
+    UNION
+    SELECT opening.VoucherID FROM dms_SalesPayments p
+    JOIN data_FinanceVoucherInfo customerVoucher ON customerVoucher.VoucherID=p.VoucherID
+    JOIN data_FinanceVoucherInfo opening ON opening.VoucherNo LIKE 'JV-OB-%'
+        AND opening.VoucherDate<=customerVoucher.VoucherDate
+    JOIN data_FinanceVoucherDetail openingAccount ON openingAccount.VoucherID=opening.VoucherID
+        AND openingAccount.GLCAID=p.HistoricalMasterGLCAID
+    WHERE p.BookingID=@bid AND p.IsLinkedVoucher=1 AND p.PaymentMode='PayOrder' AND p.Status='Posted'
+      AND customerVoucher.VoucherNo LIKE 'JV-OB-%' AND p.HistoricalMasterGLCAID IS NOT NULL`;
+const MASTER_SOURCE_LOCK_SQL = 'SELECT VoucherID FROM data_FinanceVoucherInfo WITH (UPDLOCK,HOLDLOCK) WHERE VoucherID=@vid';
 async function loadMasterPosition(executor, bookingId, coreGL, lockSources = false) {
     if (lockSources) {
-        await new sql.Request(executor).input('bid',sql.Int,bookingId).query(`
-            SELECT v.VoucherID FROM data_FinanceVoucherInfo v WITH (UPDLOCK,HOLDLOCK)
-            WHERE EXISTS (SELECT 1 FROM dms_SalesPayments p
-                JOIN data_FinanceVoucherInfo customerVoucher ON customerVoucher.VoucherID=p.VoucherID
-                WHERE p.BookingID=@bid AND p.IsLinkedVoucher=1 AND p.PaymentMode='PayOrder' AND p.Status='Posted'
-                  AND (p.VoucherID=v.VoucherID OR (
-                    customerVoucher.VoucherNo LIKE 'JV-OB-%' AND v.VoucherNo LIKE 'JV-OB-%'
-                    AND v.VoucherDate<=customerVoucher.VoucherDate
-                    AND EXISTS (SELECT 1 FROM data_FinanceVoucherDetail openingAccount
-                        WHERE openingAccount.VoucherID=v.VoucherID AND openingAccount.GLCAID=p.HistoricalMasterGLCAID))))`);
+        const sources=await new sql.Request(executor).input('bid',sql.Int,bookingId).query(MASTER_SOURCE_IDS_SQL);
+        const ids=[...new Set(sources.recordset.map(row=>Number(row.VoucherID)))]
+            .filter(id=>Number.isSafeInteger(id)&&id>0).sort((a,b)=>a-b);
+        // Resolve the narrow source set before locking. A correlated OR under
+        // HOLDLOCK produced a costly parallel plan across the voucher table.
+        // Lock existing sources in a consistent order, then read capacities.
+        for (const voucherId of ids) {
+            await new sql.Request(executor).input('vid',sql.Int,voucherId).query(MASTER_SOURCE_LOCK_SQL);
+        }
     }
     const r=await new sql.Request(executor).input('bid',sql.Int,bookingId).input('gl',sql.Int,coreGL)
         .query(masterPositionSql('@bid','@gl'));
     return r.recordset.map(row=>({GLCAID:row.GLCAID,Dr:Number(row.Dr)||0,Cr:Number(row.Cr)||0,Net:Number(row.Net)||0}));
 }
-module.exports={LEGACY_MASTER_CODES,masterAccountSql,historicalPayOrderSql,masterPositionSql,masterNetSql,loadMasterPosition};
+module.exports={LEGACY_MASTER_CODES,masterAccountSql,historicalPayOrderSql,masterPositionSql,masterNetSql,loadMasterPosition,MASTER_SOURCE_IDS_SQL,MASTER_SOURCE_LOCK_SQL};
