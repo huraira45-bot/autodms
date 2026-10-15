@@ -41,7 +41,7 @@ async function loadSupplierGL(partyId, transaction) {
     return { name: p.PartyName, GLCAID: p.PartyGLID };
 }
 
-async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
+async function postPaintGRNVoucher(paintGRNID, userInfo, transaction, { postingNote = '' } = {}) {
     const hdrRes = await new sql.Request(transaction)
         .input('id', sql.Int, paintGRNID)
         .query(`SELECT PaintGRNID, GRNNo, GRNDate, PartyID, SupplierBillNo,
@@ -88,7 +88,7 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction) {
         .input('vd',      sql.DateTime,          new Date())
         .input('vno',     sql.NVarChar(50),      voucherNo)
         .input('vtId',    sql.Int,               voucherTypeId)
-        .input('remarks', sql.NVarChar(sql.MAX), narration)
+        .input('remarks', sql.NVarChar(sql.MAX), postingNote ? `${narration}\n${postingNote}` : narration)
         .input('total',   sql.Decimal(18,2),     totalDr)
         .input('src',     sql.NVarChar(20),      'PAINT_GRN')
         .input('srcId',   sql.Int,               paintGRNID)

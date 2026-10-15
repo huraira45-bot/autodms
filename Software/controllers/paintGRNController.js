@@ -16,6 +16,7 @@
  */
 const { sql, getPool } = require('../config/db');
 const { postPaintGRNVoucher } = require('../services/paintGRNPostingService');
+const { postPaintGRNToParty } = require('../services/paintGRNPartyService');
 const { postReversalVoucher } = require('../services/voucherReversalService');
 const { _resolveBaseQty: resolveBaseQty } = require('./paintLabController');
 
@@ -467,6 +468,24 @@ exports.unfinalize = async (req, res) => {
     } catch (err) {
         try { await tx.rollback(); } catch (_) {}
         res.status(400).json({ error: err.message });
+    }
+};
+
+// Financial correction for an existing stock receipt; no finalize/unfinalize call.
+exports.postToParty = async (req, res) => {
+    let tx;
+    try {
+        const pool = await getPool();
+        tx = new sql.Transaction(pool);
+        await tx.begin();
+        const result = await postPaintGRNToParty(tx, {
+            grnId: Number(req.params.id), partyId: Number(req.body?.PartyID), user: req.user,
+        });
+        await tx.commit();
+        res.json(result);
+    } catch (err) {
+        if (tx) { try { await tx.rollback(); } catch (_) {} }
+        res.status(err.statusCode || 400).json({ error: err.message });
     }
 };
 

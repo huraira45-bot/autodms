@@ -19,6 +19,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useFeedback } from '../../context/FeedbackContext';
 import SearchableSelect from '../../components/SearchableSelect';
+import PaintGRNPartyPosting from './PaintGRNPartyPosting';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -32,7 +33,7 @@ const blankLine = (defaultUomId, defaultGstRate) => ({
 });
 
 export default function PaintGRN() {
-    const { hasModule } = useAuth();
+    const { hasModule, hasPermission } = useAuth();
     const { notify, confirm } = useFeedback();
     const canUnfinalize = hasModule('admin_unfinalize');
     const canEdit = hasModule('paint_lab_grn');
@@ -51,6 +52,8 @@ export default function PaintGRN() {
     const [form, setForm]     = useState(null);
     const [dirty, setDirty]   = useState(false);
     const [saving, setSaving] = useState(false);
+    const [showPartyPosting, setShowPartyPosting] = useState(false);
+    const canPostToParty = hasPermission('paint_lab_grn', 'edit');
 
     const reloadList = async () => {
         const params = {};
@@ -87,6 +90,7 @@ export default function PaintGRN() {
     useEffect(() => { reloadList().catch(() => {}); /* eslint-disable-next-line */ }, [search, statusFilter]);
 
     const openNew = () => {
+        setShowPartyPosting(false);
         setId(null);
         setForm({
             GRNDate: today(),
@@ -103,6 +107,7 @@ export default function PaintGRN() {
             const r = await axios.get(`/api/paint/grn/${rowId}`);
             const data = r.data;
             setId(data.PaintGRNID);
+            setShowPartyPosting(false);
             setForm({
                 GRNNo: data.GRNNo,
                 GRNDate: (data.GRNDate || '').slice(0, 10),
@@ -113,6 +118,8 @@ export default function PaintGRN() {
                 Status: data.Status,
                 PaymentMode: data.PaymentMode || 'CREDIT',
                 VoucherNo: data.VoucherNo,
+                VoucherID: data.VoucherID,
+                GrandTotal: data.GrandTotal,
                 Lines: (data.Lines || []).map(l => ({
                     PaintItemID: l.PaintItemID,
                     PaintUOMID:  l.PaintUOMID || '',
@@ -309,7 +316,7 @@ export default function PaintGRN() {
             {/* Sticky action bar — always reachable */}
             <div className="paint-actionbar">
                 {form && (
-                    <button className="paint-icon-btn" onClick={closeForm} title="Back to list"><ChevronLeft size={13} /></button>
+                    <button className="paint-icon-btn" onClick={closeForm} disabled={saving} title="Back to list"><ChevronLeft size={13} /></button>
                 )}
                 <div className="title">
                     {form
@@ -331,11 +338,16 @@ export default function PaintGRN() {
                     {form?.Status === 'Posted' && canUnfinalize && (
                         <button className="btn btn-secondary" onClick={unfinalize} disabled={saving}><RefreshCcw size={13} /> Unfinalize</button>
                     )}
+                    {form?.Status === 'Posted' && form.PaymentMode === 'CASH' && !form.VoucherID && canPostToParty && (
+                        <button className="btn btn-primary" disabled={saving} onClick={() => setShowPartyPosting(true)}>
+                            Post to party
+                        </button>
+                    )}
                     {form && id && <button className="btn" onClick={printGRN}><Printer size={13} /> Print</button>}
                     {form?.Status === 'Draft' && id && canEdit && (
                         <button className="btn btn-danger" onClick={remove} disabled={saving}><Trash2 size={13} /> Delete</button>
                     )}
-                    {form && <button className="btn" onClick={closeForm}><X size={13} /> Close</button>}
+                    {form && <button className="btn" disabled={saving} onClick={closeForm}><X size={13} /> Close</button>}
                 </div>
             </div>
 
@@ -450,6 +462,16 @@ export default function PaintGRN() {
                             Cash GRN — stock updates on finalize, but no GL voucher is posted at all (no Cash Book
                             hit, no supplier payable). Supplier is optional — no GL account needed even if picked.
                         </div>
+                    )}
+
+                    {showPartyPosting && form.Status === 'Posted' && form.PaymentMode === 'CASH' && canPostToParty && (
+                        <PaintGRNPartyPosting key={id} grnId={id} grnNo={form.GRNNo} amount={form.GrandTotal}
+                            parties={partyOpts} initialPartyId={form.PartyID} onBusy={setSaving}
+                            onClose={() => setShowPartyPosting(false)} onSaved={async data => {
+                                notify({ type: 'success', title: 'Posted to party', message: data.message });
+                                await openId(id);
+                                await reloadList();
+                            }} />
                     )}
 
                     {parties.length === 0 && (

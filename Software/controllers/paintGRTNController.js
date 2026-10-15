@@ -159,7 +159,7 @@ async function writeDraft({ pool, paintGRTNID, body, user }) {
     try {
         // Verify source GRN is Posted + belongs to supplier + warehouse matches.
         const src = await new sql.Request(tx).input('sg', sql.Int, SourcePaintGRNID)
-            .query('SELECT * FROM paint_GRN WHERE PaintGRNID=@sg');
+            .query('SELECT * FROM paint_GRN WITH (UPDLOCK, HOLDLOCK) WHERE PaintGRNID=@sg');
         if (!src.recordset.length) throw new Error('Source Paint GRN not found.');
         const s = src.recordset[0];
         if (s.Status !== 'Posted')      throw new Error(`Source GRN ${s.GRNNo} is ${s.Status}. Only Posted GRNs can be returned against.`);

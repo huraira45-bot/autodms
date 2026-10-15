@@ -17,6 +17,7 @@ router.put(   '/:id',             requirePerm('paint_lab_grn', 'edit'),   c.upda
 router.delete('/:id',             requirePerm('paint_lab_grn', 'delete'), c.remove);
 
 router.post(  '/:id/finalize',    requirePerm('paint_lab_grn', 'edit'),   c.finalize);
+router.post(  '/:id/post-to-party', requirePerm('paint_lab_grn', 'edit'), c.postToParty);
 router.post(  '/:id/unfinalize',  requirePerm('admin_unfinalize','view'), c.unfinalize);
 
 module.exports = router;
