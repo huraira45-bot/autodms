@@ -1,9 +1,9 @@
 /**
  * Sales — Bookings list.
- * Filters by status, search, "assigned to me" (executive view).
+ * Filters by booking date, status, search, "assigned to me" (executive view).
  * Click a row → /sales/bookings/:id for the detail view.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { ClipboardList, Plus, RefreshCw, Loader2 } from 'lucide-react';
@@ -14,6 +14,9 @@ import { DataCard, EmptyState, FilterBar, PageHeader, SearchField, StatusPill } 
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
+const fmtDate = (value) => value
+    ? new Date(String(value).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
 
 const STATUS_STYLE = {
     Draft:                { bg: '#e2e8f0', col: '#475569' },
@@ -53,22 +56,40 @@ export default function BookingsList() {
     const [statusFilter, setStatusFilter] = useState('');
     const [assignedToMe, setAssignedToMe] = useState(false);
     const [search, setSearch] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
     const [msg, setMsg] = useState(null);
+    const requestId = useRef(0);
 
     const flash = (kind, text) => { setMsg({ kind, text }); setTimeout(() => setMsg(null), 4000); };
 
     const load = useCallback(async () => {
+        const currentRequest = ++requestId.current;
+        if (dateFrom && dateTo && dateFrom > dateTo) {
+            setRows([]);
+            setLoading(false);
+            flash('err', 'From date must be on or before To date.');
+            return;
+        }
+        setMsg(null);
         setLoading(true);
         try {
             const params = {};
             if (statusFilter) params.status = statusFilter;
             if (assignedToMe) params.assignedToMe = 1;
             if (search) params.search = search;
+            if (dateFrom) params.dateFrom = dateFrom;
+            if (dateTo) params.dateTo = dateTo;
             const r = await axios.get(`${API}/sales/bookings`, { params });
-            setRows(r.data);
-        } catch (e) { flash('err', e.response?.data?.error || e.message); }
-        setLoading(false);
-    }, [statusFilter, assignedToMe, search]);
+            if (currentRequest === requestId.current) setRows(r.data);
+        } catch (e) {
+            if (currentRequest === requestId.current) {
+                setRows([]);
+                flash('err', e.response?.data?.error || e.message);
+            }
+        }
+        if (currentRequest === requestId.current) setLoading(false);
+    }, [statusFilter, assignedToMe, search, dateFrom, dateTo]);
     useEffect(() => { load(); }, [load]);
 
     return (
@@ -99,6 +120,22 @@ export default function BookingsList() {
                     placeholder="Booking #, customer, corporate PO..."
                     width={320}
                 />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
+                    Booking from
+                    <input type="date" aria-label="Booking from date" value={dateFrom}
+                        max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} />
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
+                    To
+                    <input type="date" aria-label="Booking to date" value={dateTo}
+                        min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} />
+                </label>
+                {(dateFrom || dateTo) && (
+                    <button type="button" className="erp-btn erp-btn-sm"
+                        onClick={() => { setDateFrom(''); setDateTo(''); }}>
+                        Clear dates
+                    </button>
+                )}
                 <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                     style={{ minWidth: 190 }}>
                     <option value="">All statuses</option>
@@ -114,14 +151,14 @@ export default function BookingsList() {
                     <EmptyState
                         icon={ClipboardList}
                         title={loading ? 'Loading bookings' : 'No bookings found'}
-                        message={loading ? 'Fetching the latest booking list.' : 'Try a different status, search term, or assignment filter.'}
+                        message={loading ? 'Fetching the latest booking list.' : 'Try a different booking date, status, search term, or assignment filter.'}
                     />
                 ) : (
                     <div className="table-wrapper">
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                         <thead>
                             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                                <Th>#</Th><Th>Customer</Th><Th>Vehicle</Th>
+                                <Th>#</Th><Th>Booking Date</Th><Th>Customer</Th><Th>Vehicle</Th>
                                 <Th align="right">Standard</Th><Th align="right">Negotiated</Th>
                                 <Th align="right">Disc</Th><Th align="right">Paid</Th>
                                 <Th>Status</Th><Th>Allocated</Th><Th>Executive</Th>
@@ -144,6 +181,7 @@ export default function BookingsList() {
                                                 </span>
                                             )}
                                         </Td>
+                                        <Td style={{ whiteSpace: 'nowrap' }}>{fmtDate(b.BookingDate || b.CreatedAt)}</Td>
                                         <Td>
                                             <div style={{ fontWeight: 500 }}>{b.PartyName}</div>
                                             <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{b.PartyType} {b.CorporatePONumber ? `· PO ${b.CorporatePONumber}` : ''}</div>

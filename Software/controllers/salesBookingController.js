@@ -55,12 +55,35 @@ exports.logBookingTransition = logTransition;
 // BOOKINGS
 // ============================================================================
 
-// GET /api/sales/bookings?status=&executiveId=&search=&corpPO=
+// GET /api/sales/bookings?status=&executiveId=&search=&corpPO=&dateFrom=&dateTo=
 exports.listBookings = async (req, res) => {
     try {
+        const { dateFrom, dateTo } = req.query;
+        for (const [name, value] of [['dateFrom', dateFrom], ['dateTo', dateTo]]) {
+            if (value === undefined || value === '') continue;
+            const parsed = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+                ? new Date(value + 'T00:00:00.000Z') : new Date(NaN);
+            if (!Number.isFinite(parsed.getTime()) || value.startsWith('0000') ||
+                parsed.toISOString().slice(0, 10) !== value) {
+                return res.status(400).json({ error: name + ' must be a valid date (YYYY-MM-DD).' });
+            }
+        }
+        if (dateFrom && dateTo && dateFrom > dateTo) {
+            return res.status(400).json({ error: 'From date must be on or before To date.' });
+        }
         const pool = await getPool();
         const r = pool.request();
         const conds = [];
+        // Use the actual booking day, including historical entries; both bounds are inclusive.
+        const bookingDay = 'CAST(COALESCE(b.BookingDate, b.CreatedAt) AS DATE)';
+        if (dateFrom) {
+            r.input('dateFrom', sql.Date, new Date(dateFrom + 'T00:00:00.000Z'));
+            conds.push(bookingDay + ' >= @dateFrom');
+        }
+        if (dateTo) {
+            r.input('dateTo', sql.Date, new Date(dateTo + 'T00:00:00.000Z'));
+            conds.push(bookingDay + ' <= @dateTo');
+        }
         if (req.query.status)       { r.input('s', sql.NVarChar(30), req.query.status); conds.push('b.Status=@s'); }
         if (req.query.executiveId)  { r.input('exe', sql.Int, parseInt(req.query.executiveId)); conds.push('b.CreatedBy_SalesExecutiveID=@exe'); }
         if (req.query.partyId)      { r.input('pid', sql.Int, parseInt(req.query.partyId)); conds.push('b.PartyID=@pid'); }
@@ -77,6 +100,7 @@ exports.listBookings = async (req, res) => {
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
         const result = await r.query(`
             SELECT b.BookingID, b.BookingNo, b.Status,
+                   COALESCE(b.BookingDate, b.CreatedAt) AS BookingDate,
                    b.PartyID, p.PartyName, p.PartyType, p.PhoneOne,
                    b.VehicleModelID, m.ModelCode, m.ModelName,
                    b.VehicleVariantID, v.VariantCode, v.VariantName,
