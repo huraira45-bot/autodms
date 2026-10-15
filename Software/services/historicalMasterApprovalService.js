@@ -17,7 +17,7 @@ const CLOSED=['Closed','Delivered','GatePassIssued','Cancelled'];
 async function load(tx,id) {
     const r=await new sql.Request(tx).input('bid',sql.Int,id).query(`
         SELECT b.BookingID,b.BookingNo,b.Status,b.IsHistorical,b.HistoricalMasterApprovedAmount,
-            b.NegotiatedPrice,b.MasterPriceBeforeDiscount,v.WholesalePrice
+            b.NegotiatedPrice,b.MasterPriceBeforeDiscount,b.MasterAgreedAmount,v.WholesalePrice
         FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
         LEFT JOIN dms_VehicleVariant v ON v.VariantID=b.VehicleVariantID WHERE b.BookingID=@bid`);
     const booking=r.recordset[0];

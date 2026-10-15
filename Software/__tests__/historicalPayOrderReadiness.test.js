@@ -24,6 +24,13 @@ it('allows a fully paid booking when its historical direct pay order covers Mast
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ready:true,blockingReasons:[],
         masterRemittance:expect.objectContaining({remitted:1000,shortfall:0,enforceable:true})}));
 });
+it('BK-2026-0006 is ready when Master explicitly accepted the discounted commercial price',async()=>{
+    Object.assign(mockBooking,{NegotiatedPrice:3380000,AmountPaidToDate:3380000,WholesalePrice:3430700,MasterAgreedAmount:3380000});
+    loadMasterPosition.mockResolvedValue([{GLCAID:101,Net:3380000}]);const res=response();
+    await lc.deliveryReadiness({params:{id:'6'}},res);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ready:true,blockingReasons:[],
+        masterRemittance:expect.objectContaining({definedRate:3380000,remitted:3380000,shortfall:0})}));
+});
 it('still blocks a genuine Master shortfall',async()=>{
     loadMasterPosition.mockResolvedValue([{GLCAID:101,Net:900}]);const res=response();
     await lc.deliveryReadiness({params:{id:'30'}},res);

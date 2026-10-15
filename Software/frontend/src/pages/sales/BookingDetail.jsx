@@ -25,6 +25,8 @@ import { HistoricalPaymentModal, LinkMasterVoucherModal } from './HistoricalPaym
 import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences';
 import { HistoricalMasterApprovalModal } from './HistoricalMasterApproval';
 import BookingDiscountModal from './BookingDiscountModal';
+import MasterAgreedAmountModal from './MasterAgreedAmountModal';
+import { masterAmountDue } from '../../utils/salesMasterAmount';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -64,6 +66,7 @@ export default function BookingDetail() {
     const [showVoucherReferences, setShowVoucherReferences] = useState(false);
     const [showMasterApproval, setShowMasterApproval] = useState(false);
     const [showDiscount, setShowDiscount] = useState(false);
+    const [showMasterAgreement, setShowMasterAgreement] = useState(false);
     const [showCancel, setShowCancel] = useState(false);
     // Imported historical bookings can arrive without a date — the owner's
     // August sheet had none — so it is filled in here afterwards.
@@ -195,9 +198,7 @@ export default function BookingDetail() {
     // Master's price; a discount given to the customer comes out of our own
     // premium, never out of Master's amount. Falls back to the negotiated price
     // only when the variant carries no rate.
-    const definedRate    = Number(data.WholesalePrice) > 0
-        ? Number(data.WholesalePrice)
-        : Number(data.MasterPriceBeforeDiscount || data.NegotiatedPrice || 0);
+    const definedRate = masterAmountDue(data);
     const wholesaleDue   = Math.max(0, definedRate);
     const masterPaidSoFar = Number(data.AmountPaidToMaster || 0);
     const masterStillOwed = Math.round((wholesaleDue - masterPaidSoFar) * 100) / 100;
@@ -284,6 +285,9 @@ export default function BookingDetail() {
                                 Give discount
                             </button>
                         )}
+                        {canDiscount && <button type="button" className="erp-btn erp-btn-sm" onClick={() => setShowMasterAgreement(true)}>
+                            Master agreed amount
+                        </button>}
                         {canCancel && (
                             <button type="button" className="erp-btn erp-btn-sm erp-btn-danger" onClick={() => setShowCancel(true)}>
                                 <Ban size={14} /> Cancel
@@ -377,7 +381,7 @@ export default function BookingDetail() {
                               : `${paidPct.toFixed(1)}% of set price`} />
                     <Stat label={vehicleRemaining < 0 ? 'Vehicle Overpaid' : 'Vehicle Remaining'} value={fmtN(Math.abs(vehicleRemaining))} color={vehicleRemaining > 0 ? '#b45309' : '#94a3b8'} />
                     <Stat label="Paid to Master" value={fmtN(data.AmountPaidToMaster)} color="#0e7490"
-                          sub={`of ${fmtN(data.NegotiatedPrice || 0)} set price`} />
+                          sub={`of ${fmtN(definedRate)} ${data.MasterAgreedAmount ? 'agreed Master amount' : 'due to Master'}`} />
                 </div>
 
                 {/* Progress bar */}
@@ -882,6 +886,8 @@ export default function BookingDetail() {
             {showVoucherReferences && data.IsHistorical && <HistoricalVoucherReferencesModal booking={data} onClose={() => setShowVoucherReferences(false)} />}
             {showDiscount && <BookingDiscountModal booking={data} onClose={() => setShowDiscount(false)}
                 onSaved={message => { setShowDiscount(false); flash('ok', message); load(); }} />}
+            {showMasterAgreement && <MasterAgreedAmountModal booking={data} onClose={() => setShowMasterAgreement(false)}
+                onSaved={message => { setShowMasterAgreement(false); flash('ok', message); load(); }} />}
             {showMasterApproval && <HistoricalMasterApprovalModal booking={data} onClose={() => setShowMasterApproval(false)}
                 onSaved={message => { setShowMasterApproval(false); flash('ok',message); load(); }} />}
             {showPayMaster && data.IsHistorical && (
@@ -1079,8 +1085,7 @@ function AllocateModal({ booking, onClose, onSaved }) {
 
 function PayMasterModal({ booking, onClose, onSaved }) {
     // Wholesale due = full NegotiatedPrice (premium is additive, stays with us).
-    const masterDue = Number(booking.WholesalePrice) > 0 ? Number(booking.WholesalePrice)
-        : Number(booking.MasterPriceBeforeDiscount || booking.NegotiatedPrice || 0);
+    const masterDue = masterAmountDue(booking);
     const remaining = Math.max(0, masterDue - (booking.AmountPaidToMaster || 0));
     const [amount, setAmount] = useState(String(remaining || ''));
     const [mode, setMode]     = useState('Bank');

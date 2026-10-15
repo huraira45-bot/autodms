@@ -1,5 +1,7 @@
 # Discounts after a booking price is locked
 
+For a discount also accepted by Master Motors, use the separate **Master agreed amount** action after applying the customer discount. It records a booking-specific settlement without another customer discount or ledger posting. See [the Master agreement guide](BOOKING_MASTER_AGREEMENT.md).
+
 Open Sales > Bookings > booking > **Give discount**. Enter the **additional discount** in PKR and a reason. The preview shows the new vehicle price, customer total including premium, and total discount from the original standard price.
 
 The action uses the existing **Sales Pricing Admin** (`sales_admin_pricing`) permission. It can be assigned through Admin > Permissions. Pricing-only users can also open the booking list and details. No live account permissions were changed by the agent.

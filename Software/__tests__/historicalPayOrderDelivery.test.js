@@ -38,6 +38,12 @@ it('settles the legacy Oshan debit on the same account without creating another 
     expect(header.values).toMatchObject({src:'SALES_DELIVERY',tot:1000,srcId:7});
     expect(header.query).toContain("'Draft'");
 });
+it('settles the actual pay order after an explicit Master commercial-price agreement',async()=>{
+    loadMasterPosition.mockResolvedValue([{GLCAID:101,Dr:3380000,Cr:0,Net:3380000}]);
+    const tx=transaction(3380000);tx.bookingOverrides={WholesalePrice:3430700,MasterAgreedAmount:3380000};
+    await expect(postDeliveryVoucher(7,{},tx)).resolves.toBe(77);
+    expect(details(tx)).toEqual([expect.objectContaining({gl:301,dr:3380000,cr:0}),expect.objectContaining({gl:101,dr:0,cr:3380000})]);
+});
 it('balances mixed legacy/current Master settlements and premium separately',async()=>{
     loadMasterPosition.mockResolvedValue([{GLCAID:101,Dr:1000,Cr:0,Net:1000},{GLCAID:201,Dr:500,Cr:0,Net:500}]);
     const tx=transaction(1500,50);

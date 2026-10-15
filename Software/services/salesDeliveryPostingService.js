@@ -49,7 +49,7 @@ async function loadBooking(bookingId, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, bookingId)
         .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice,
-                       b.AmountPaidToDate, b.PremiumAmount, b.MasterPriceBeforeDiscount,
+                       b.AmountPaidToDate, b.PremiumAmount, b.MasterPriceBeforeDiscount, b.MasterAgreedAmount,
                        v.WholesalePrice
                 FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
                 LEFT JOIN dms_VehicleVariant v ON b.VehicleVariantID = v.VariantID

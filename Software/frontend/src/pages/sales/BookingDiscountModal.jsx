@@ -40,6 +40,7 @@ export default function BookingDiscountModal({ booking, onClose, onSaved }) {
             Customer total including premium: <strong>PKR {fmt(next + Number(booking.PremiumAmount || 0))}</strong><br />
             Total discount from standard: <strong>PKR {fmt(Number(booking.StandardPrice) - next)}</strong>
         </div>}
+        <p style={{ fontSize: '0.8rem', color: '#64748b' }}>If Master also accepts a reduced settlement, record it using “Master agreed amount” on the booking.</p>
         <Actions onCancel={onClose} onConfirm={save} busy={busy} disabled={!valid} confirmLabel="Apply discount" />
     </Shell>;
 }

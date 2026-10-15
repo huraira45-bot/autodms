@@ -4,6 +4,7 @@ const assert = require('assert/strict');
 const { sql, getPool } = require('../config/db');
 const { applyBookingDiscount } = require('../services/salesBookingDiscountService');
 const { masterAmountDue } = require('../services/salesMasterAmount');
+const { setMasterAgreedAmount } = require('../services/salesMasterAgreementService');
 (async () => {
     if (!['.', 'localhost', '127.0.0.1', require('os').hostname().toLowerCase()].includes((process.env.DB_SERVER || '').split('\\')[0].toLowerCase())) {
         throw new Error('Run against the local development database only.');
@@ -42,12 +43,21 @@ const { masterAmountDue } = require('../services/salesMasterAmount');
         await applyBookingDiscount(tx, { ...input, amount: '99.75', expectedPrice: 899.75 });
         booking = await load();
         assert.equal(booking.NegotiatedPrice, 800); assert.equal(booking.MasterPriceBeforeDiscount, 1000);
+        // Explicit agreement for a commercial-vehicle concession, without a second customer discount.
+        const variant = (await request().input('id', sql.Int, fixture.recordsets[1][0].VariantID)
+            .query('SELECT WholesalePrice FROM dms_VehicleVariant WHERE VariantID=@id')).recordset[0];
+        const priorMaster = masterAmountDue({ ...booking, WholesalePrice: variant.WholesalePrice });
+        const accepted = Math.min(800, priorMaster);
+        await setMasterAgreedAmount(tx, { bookingId: id, amount: accepted, expectedAmount: priorMaster, reason: 'Master confirmed discounted full settlement', user });
+        booking = await load();
+        assert.equal(booking.NegotiatedPrice, 800); assert.equal(booking.MasterAgreedAmount, accepted);
+        assert.equal(masterAmountDue({ ...booking, WholesalePrice: variant.WholesalePrice }), accepted);
         assert.equal(await snapshot(), before, 'No voucher, GL detail, party ledger or payment row may change.');
         const audit = await request().input('id', sql.Int, id).query(`
             SELECT COUNT(*) AS Count FROM dms_SalesAuditLog WHERE BookingID=@id AND Action='ApplyBookingDiscount';
             SELECT COUNT(*) AS Count FROM dms_BookingStateTransitions WHERE BookingID=@id`);
-        assert.equal(audit.recordsets[0][0].Count, 2); assert.equal(audit.recordsets[1][0].Count, 2);
-        console.log('PASS: actual SQL discounts, totals, audit, stale retry, fixed Master fallback and identical GL/party/payment rows.');
+        assert.equal(audit.recordsets[0][0].Count, 2); assert.equal(audit.recordsets[1][0].Count, 3);
+        console.log('PASS: SQL discounts and explicit Master agreement, unchanged customer price on agreement, audit, stale retry and identical GL/party/payment rows.');
     } finally { await tx.rollback(); }
     const remaining = await pool.request().input('no', sql.NVarChar(20), marker)
         .query('SELECT COUNT(*) AS Count FROM dms_SalesBookings WHERE BookingNo=@no');

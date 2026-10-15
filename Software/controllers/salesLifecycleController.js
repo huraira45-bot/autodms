@@ -563,7 +563,7 @@ exports.postMasterInvoice = async (req, res) => {
  */
 async function masterRemittancePosition(pool, bookingId) {
     const r = await pool.request().input('id', sql.Int, bookingId).query(`
-        SELECT b.BookingID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, v.WholesalePrice, v.VariantCode, v.VariantName,
+        SELECT b.BookingID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, b.MasterAgreedAmount, v.WholesalePrice, v.VariantCode, v.VariantName,
                veh.ChasisNo, veh.EngineNo
         FROM   dms_SalesBookings b
         LEFT   JOIN dms_VehicleVariant v   ON v.VariantID = b.VehicleVariantID

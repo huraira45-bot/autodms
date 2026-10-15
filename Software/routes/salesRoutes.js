@@ -76,6 +76,7 @@ router.get(   '/bookings',                 requireAny(...SALES_READERS),       b
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
 router.post('/bookings/:id/discount', requireAny('sales_admin_pricing'), bookingDiscount.apply);
+router.post('/bookings/:id/master-agreed-amount', requireAny('sales_admin_pricing'), bookingDiscount.setMasterAmount);
 // Moving a booking to the right customer. Admin-only, refused once anything
 // has posted against it, and the reason goes on the audit trail (owner ask
 // 2026-10-02).
