@@ -1,4 +1,5 @@
 const { sql } = require('../config/db');
+const { masterAmountDue } = require('./salesMasterAmount');
 function approvedMasterSql(booking) {
     return `(SELECT CASE WHEN confirmed.IsHistorical=1 THEN ISNULL(confirmed.HistoricalMasterApprovedAmount,0) ELSE 0 END
         FROM dms_SalesBookings confirmed WHERE confirmed.BookingID=${booking})`;
@@ -16,7 +17,7 @@ const CLOSED=['Closed','Delivered','GatePassIssued','Cancelled'];
 async function load(tx,id) {
     const r=await new sql.Request(tx).input('bid',sql.Int,id).query(`
         SELECT b.BookingID,b.BookingNo,b.Status,b.IsHistorical,b.HistoricalMasterApprovedAmount,
-            b.NegotiatedPrice,v.WholesalePrice
+            b.NegotiatedPrice,b.MasterPriceBeforeDiscount,v.WholesalePrice
         FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
         LEFT JOIN dms_VehicleVariant v ON v.VariantID=b.VehicleVariantID WHERE b.BookingID=@bid`);
     const booking=r.recordset[0];
@@ -31,7 +32,7 @@ async function approveHistoricalMaster(tx,id,amount,notes,user) {
     if(!Number.isFinite(Number(amount))||!Number.isSafeInteger(cents)||cents<=0||Math.abs(Number(amount)*100-cents)>0.000001)
         fail('Enter a positive amount with up to two decimal places.',400);
     const booking=await load(tx,id);
-    const target=Number(booking.WholesalePrice)>0?Number(booking.WholesalePrice):Number(booking.NegotiatedPrice);
+    const target=masterAmountDue(booking);
     if(cents>Math.round(target*100))fail('The approved total cannot exceed the vehicle amount due to Master.',400);
     if(String(notes||'').length>1000)fail('Notes must be no more than 1000 characters.',400);
     await new sql.Request(tx).input('bid',sql.Int,id).input('amt',sql.Decimal(18,2),cents/100)

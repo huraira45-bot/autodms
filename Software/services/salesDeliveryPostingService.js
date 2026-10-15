@@ -24,6 +24,7 @@ const { resolveRole } = require('../controllers/systemAccountsController');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const N = require('./salesNarration');
 const { loadMasterPosition } = require('./masterPaymentPositionService');
+const { masterAmountDue } = require('./salesMasterAmount');
 
 async function resolveAccounts() {
     const need = ['BOOKING_ADVANCE', 'BOOKING_VARIANT_RECEIVABLE',
@@ -48,7 +49,7 @@ async function loadBooking(bookingId, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, bookingId)
         .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice,
-                       b.AmountPaidToDate, b.PremiumAmount,
+                       b.AmountPaidToDate, b.PremiumAmount, b.MasterPriceBeforeDiscount,
                        v.WholesalePrice
                 FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
                 LEFT JOIN dms_VehicleVariant v ON b.VehicleVariantID = v.VariantID
@@ -83,7 +84,7 @@ async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     // customer's account — which is exactly what happened on BK-2026-0002.
     // Refuse rather than post a settlement that cannot reconcile. The caller
     // is inside a transaction, so this rolls the delivery back whole.
-    const definedRate = Number(b.WholesalePrice) > 0 ? Number(b.WholesalePrice) : negotiated;
+    const definedRate = masterAmountDue(b);
     // Explicit historical confirmation is a business record, not a GL debit.
     // When it covers the missing remittance, issue the historical gate pass
     // without inventing an unmatched delivery journal. Optional matching stays intact.

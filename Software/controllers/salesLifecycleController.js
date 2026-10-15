@@ -15,6 +15,7 @@ const docs = require('./salesDocumentController');
 const { voidMasterPayment, LOCKED_BOOKINGS } = require('../services/masterPaymentVoidService');
 const { loadMasterPosition } = require('../services/masterPaymentPositionService');
 const { effectiveMasterPaid } = require('../services/historicalMasterApprovalService');
+const { masterAmountDue } = require('../services/salesMasterAmount');
 
 // =========================================================================
 // Helpers
@@ -562,7 +563,7 @@ exports.postMasterInvoice = async (req, res) => {
  */
 async function masterRemittancePosition(pool, bookingId) {
     const r = await pool.request().input('id', sql.Int, bookingId).query(`
-        SELECT b.BookingID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice, v.WholesalePrice, v.VariantCode, v.VariantName,
+        SELECT b.BookingID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, v.WholesalePrice, v.VariantCode, v.VariantName,
                veh.ChasisNo, veh.EngineNo
         FROM   dms_SalesBookings b
         LEFT   JOIN dms_VehicleVariant v   ON v.VariantID = b.VehicleVariantID
@@ -573,9 +574,7 @@ async function masterRemittancePosition(pool, bookingId) {
 
     // Fall back to the negotiated price only if the variant carries no rate —
     // better than silently reconciling to zero and waving everything through.
-    const definedRate = Number(row.WholesalePrice) > 0
-        ? Number(row.WholesalePrice)
-        : Number(row.NegotiatedPrice || 0);
+    const definedRate = masterAmountDue(row);
 
     const bvrGL = await resolveRole(pool, 'BOOKING_VARIANT_RECEIVABLE');
     if (!bvrGL) {
@@ -799,8 +798,12 @@ exports.issueGatePass = async (req, res) => {
         await tx.begin();
         try {
             // Approval changes serialize with delivery; recheck under the booking lock.
-            await new sql.Request(tx).input('bid',sql.Int,id)
-                .query('SELECT BookingID FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@bid');
+            const lockedBooking = await new sql.Request(tx).input('bid',sql.Int,id)
+                .query('SELECT BookingID,Status,NegotiatedPrice FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@bid');
+            const currentBooking = lockedBooking.recordset[0];
+            if (!currentBooking || currentBooking.Status !== b.Status || Number(currentBooking.NegotiatedPrice) !== Number(b.NegotiatedPrice)) {
+                throw new Error('The booking price or status changed. Refresh before issuing the gate pass.');
+            }
             const lockedMaster = await masterRemittancePosition(tx,id);
             if (lockedMaster?.enforceable && lockedMaster.shortfall>0)
                 throw new Error('Master payment approval or remittance changed. Refresh before issuing the gate pass.');

@@ -1,4 +1,5 @@
 const { sql } = require('../config/db');
+const { masterAmountDue } = require('./salesMasterAmount');
 const { historicalPayOrderSql, masterNetSql } = require('./masterPaymentPositionService');
 const fail = (message, statusCode=409) => { throw Object.assign(new Error(message), { statusCode }); };
 const cents = value => {
@@ -54,7 +55,8 @@ async function linkMasterVoucher(tx, booking, voucherId, amount, masterGL, user)
     if (duplicate.recordset.length) fail('This booking already has an allocation from that voucher. Unlink it before changing its amount.');
     const prior=await new sql.Request(tx).input('bid',sql.Int,booking.BookingID).input('gl',sql.Int,masterGL)
         .query(`SELECT ${masterNetSql('@bid','@gl')} AS Paid`);
-    if (cents(prior.recordset[0]?.Paid||0)+requested>cents(booking.NegotiatedPrice||0)) {
+    const masterLimit = booking.MasterPriceBeforeDiscount ? masterAmountDue(booking) : Number(booking.NegotiatedPrice || 0);
+    if (cents(prior.recordset[0]?.Paid||0)+requested>cents(masterLimit)) {
         fail('The total linked to Master would exceed this historical bookingâ€™s agreed vehicle price.');
     }
     await new sql.Request(tx).input('b',sql.Int,booking.BookingID).input('v',sql.Int,voucherId)

@@ -62,9 +62,10 @@ async function bookingNoForYear(tx, year) {
 async function loadBooking(pool, bookingId, lock=false) {
     const r = await pool.request().input('id', sql.Int, bookingId)
         .query(`SELECT b.BookingID, b.BookingNo, b.Status, b.IsHistorical, b.PartyID,
-                       pt.PartyName, pt.PartyGLID, b.NegotiatedPrice
+                       pt.PartyName, pt.PartyGLID, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, v.WholesalePrice
                 FROM   dms_SalesBookings b ${lock?'WITH (UPDLOCK,HOLDLOCK)':''}
                 LEFT   JOIN gen_PartiesInfo pt ON pt.PartyID = b.PartyID
+                LEFT   JOIN dms_VehicleVariant v ON v.VariantID=b.VehicleVariantID
                 WHERE  b.BookingID=@id`);
     if (!r.recordset.length) fail('Booking not found.', 404);
     return r.recordset[0];

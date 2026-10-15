@@ -24,6 +24,7 @@ import BookingDocumentDrop from './BookingDocumentDrop';
 import { HistoricalPaymentModal, LinkMasterVoucherModal } from './HistoricalPaymentModals';
 import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences';
 import { HistoricalMasterApprovalModal } from './HistoricalMasterApproval';
+import BookingDiscountModal from './BookingDiscountModal';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
 const API = '/api';
@@ -62,6 +63,7 @@ export default function BookingDetail() {
     const [showHistPayment, setShowHistPayment] = useState(false);
     const [showVoucherReferences, setShowVoucherReferences] = useState(false);
     const [showMasterApproval, setShowMasterApproval] = useState(false);
+    const [showDiscount, setShowDiscount] = useState(false);
     const [showCancel, setShowCancel] = useState(false);
     // Imported historical bookings can arrive without a date — the owner's
     // August sheet had none — so it is filled in here afterwards.
@@ -175,6 +177,8 @@ export default function BookingDetail() {
     const notInGL = data.PaymentsNotInGL || [];
     const paidMismatch = Math.abs(paidInGL - Number(data.AmountPaidToDate || 0)) > 0.01;
     const canPay = ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
+    const canDiscount = hasModule('sales_admin_pricing') && !data.DeliveryVoucherID && !data.DeliveredAt && !data.GatePassIssuedAt
+        && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
     const canManageReferences = data.IsHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canSetBookingDate = data.IsHistorical &&
         (hasModule('sales_admin_settings') || hasModule('sales_gm'));
@@ -193,7 +197,7 @@ export default function BookingDetail() {
     // only when the variant carries no rate.
     const definedRate    = Number(data.WholesalePrice) > 0
         ? Number(data.WholesalePrice)
-        : Number(data.NegotiatedPrice || 0);
+        : Number(data.MasterPriceBeforeDiscount || data.NegotiatedPrice || 0);
     const wholesaleDue   = Math.max(0, definedRate);
     const masterPaidSoFar = Number(data.AmountPaidToMaster || 0);
     const masterStillOwed = Math.round((wholesaleDue - masterPaidSoFar) * 100) / 100;
@@ -273,6 +277,11 @@ export default function BookingDetail() {
                                     className={`erp-btn erp-btn-sm${data.BookingDate ? '' : ' erp-btn-primary'}`}
                                     onClick={() => setShowBookingDate(true)}>
                                 <CalendarDays size={14} /> {data.BookingDate ? 'Booking date' : 'Set booking date'}
+                            </button>
+                        )}
+                        {canDiscount && (
+                            <button type="button" className="erp-btn erp-btn-sm" onClick={() => setShowDiscount(true)}>
+                                Give discount
                             </button>
                         )}
                         {canCancel && (
@@ -358,6 +367,7 @@ export default function BookingDetail() {
                 {/* Money row */}
                 <div style={{ marginTop: 16, padding: 14, background: '#f8fafc', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
                     <Stat label="Set Price (Vehicle)" value={fmtN(data.NegotiatedPrice)} color="#1e40af" />
+                    {Number(data.DiscountAmount) > 0 && <Stat label="Discount given" value={fmtN(data.DiscountAmount)} color="#b91c1c" />}
                     {data.PremiumAmount > 0 && <Stat label="Premium (on top)" value={fmtN(data.PremiumAmount)} color="#7c3aed" sub="+ additive" />}
                     <Stat label="Customer Total" value={fmtN((data.NegotiatedPrice || 0) + (data.PremiumAmount || 0))} color="#0f172a" sub="vehicle + premium" />
                     <Stat label="Vehicle Paid" value={fmtN(data.AmountPaidToDate)}
@@ -365,7 +375,7 @@ export default function BookingDetail() {
                           sub={paidMismatch
                               ? `only ${fmtN(paidInGL)} is in the books`
                               : `${paidPct.toFixed(1)}% of set price`} />
-                    <Stat label="Vehicle Remaining" value={fmtN(vehicleRemaining)} color={vehicleRemaining > 0 ? '#b45309' : '#94a3b8'} />
+                    <Stat label={vehicleRemaining < 0 ? 'Vehicle Overpaid' : 'Vehicle Remaining'} value={fmtN(Math.abs(vehicleRemaining))} color={vehicleRemaining > 0 ? '#b45309' : '#94a3b8'} />
                     <Stat label="Paid to Master" value={fmtN(data.AmountPaidToMaster)} color="#0e7490"
                           sub={`of ${fmtN(data.NegotiatedPrice || 0)} set price`} />
                 </div>
@@ -870,6 +880,8 @@ export default function BookingDetail() {
             )}
 
             {showVoucherReferences && data.IsHistorical && <HistoricalVoucherReferencesModal booking={data} onClose={() => setShowVoucherReferences(false)} />}
+            {showDiscount && <BookingDiscountModal booking={data} onClose={() => setShowDiscount(false)}
+                onSaved={message => { setShowDiscount(false); flash('ok', message); load(); }} />}
             {showMasterApproval && <HistoricalMasterApprovalModal booking={data} onClose={() => setShowMasterApproval(false)}
                 onSaved={message => { setShowMasterApproval(false); flash('ok',message); load(); }} />}
             {showPayMaster && data.IsHistorical && (
@@ -1067,7 +1079,9 @@ function AllocateModal({ booking, onClose, onSaved }) {
 
 function PayMasterModal({ booking, onClose, onSaved }) {
     // Wholesale due = full NegotiatedPrice (premium is additive, stays with us).
-    const remaining = Math.max(0, (booking.NegotiatedPrice || 0) - (booking.AmountPaidToMaster || 0));
+    const masterDue = Number(booking.WholesalePrice) > 0 ? Number(booking.WholesalePrice)
+        : Number(booking.MasterPriceBeforeDiscount || booking.NegotiatedPrice || 0);
+    const remaining = Math.max(0, masterDue - (booking.AmountPaidToMaster || 0));
     const [amount, setAmount] = useState(String(remaining || ''));
     const [mode, setMode]     = useState('Bank');
     const [bankId, setBankId] = useState('');

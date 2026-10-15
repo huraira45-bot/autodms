@@ -236,7 +236,10 @@ export function LinkVoucherModal({ booking, payment, onClose, onSaved }) {
  * booking to that voucher instead. Nothing is posted.
  */
 export function LinkMasterVoucherModal({ booking, stillOwed, onClose, onSaved }) {
-    const agreedRemaining = booking.NegotiatedPrice == null ? Number(stillOwed || 0) : Number(booking.NegotiatedPrice) - Number(booking.AmountPaidToMaster || 0);
+    const masterDue = booking.MasterPriceBeforeDiscount
+        ? (Number(booking.WholesalePrice) > 0 ? Number(booking.WholesalePrice) : Number(booking.MasterPriceBeforeDiscount))
+        : Number(booking.NegotiatedPrice);
+    const agreedRemaining = booking.NegotiatedPrice == null ? Number(stillOwed || 0) : masterDue - Number(booking.AmountPaidToMaster || 0);
     const owed = Math.round(Math.max(0, agreedRemaining) * 100) / 100;
     const [amount, setAmount] = useState(owed > 0 ? String(owed) : booking.HistoricalMasterApprovedAmount ? String(booking.HistoricalMasterApprovedAmount) : '');
     const [approvalOnly, setApprovalOnly] = useState(false);

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { inputStyle, Field, Err, Shell } from './VehicleModelsAdmin';
 
 export function HistoricalMasterApprovalPanel({ booking, onSaved }) {
-    const target=Number(booking.WholesalePrice)>0?Number(booking.WholesalePrice):Number(booking.NegotiatedPrice||0);
+    const target=Number(booking.WholesalePrice)>0?Number(booking.WholesalePrice):Number(booking.MasterPriceBeforeDiscount||booking.NegotiatedPrice||0);
     const [amount,setAmount]=useState(String(booking.HistoricalMasterApprovedAmount||target));
     const [notes,setNotes]=useState(booking.HistoricalMasterApprovalNotes||'');
     const [busy,setBusy]=useState(false);

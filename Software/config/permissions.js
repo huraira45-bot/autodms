@@ -106,7 +106,7 @@ const SECTIONS = [
             { key: 'sales_executive',         label: 'Sales Executive (booking + payments)', kind: 'workflow' },
             { key: 'sales_agm',               label: 'Sales AGM (team view + assign)',        kind: 'workflow' },
             { key: 'sales_gm',                label: 'Sales GM (full team + targets)',       kind: 'workflow' },
-            { key: 'sales_admin_pricing',     label: 'Pricing Admin (approve discounts)',    kind: 'workflow' },
+            { key: 'sales_admin_pricing',     label: 'Pricing Admin (approve + apply booking discounts)', kind: 'workflow' },
             { key: 'sales_admin_settings',    label: 'Catalog & Policy Admin',               kind: 'workflow' },
             { key: 'sales_master_settlement', label: 'Master Invoice Posting',               kind: 'workflow' },
             { key: 'sales_recovery',          label: 'Recovery Officer',                     kind: 'workflow' },

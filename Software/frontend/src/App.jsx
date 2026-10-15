@@ -751,7 +751,7 @@ function LegacySidebar() {
                         <Truck size={20} /> Vehicle Inventory
                     </NavLink>
                 )}
-                {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
+                {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports') || hasModule('sales_admin_pricing')) && (
                     <NavLink to="/sales/bookings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ClipboardList size={20} /> Bookings
                     </NavLink>

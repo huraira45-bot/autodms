@@ -12,6 +12,7 @@ const histRef = require('../controllers/salesHistoricalReferenceController');
 const histMasterApproval = require('../controllers/salesHistoricalMasterApprovalController');
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
+const bookingDiscount = require('../controllers/salesBookingDiscountController');
 const lc  = require('../controllers/salesLifecycleController');
 const inc = require('../controllers/salesIncentiveController');
 const mi  = require('../controllers/masterIncentiveController');
@@ -36,7 +37,7 @@ const withUploadErrors = (mw) => (req, res, next) => mw(req, res, (err) => {
 });
 
 // Read permissions: anyone in the sales chain or settings/reports
-const SALES_READERS = ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings', 'sales_master_settlement', 'sales_reports'];
+const SALES_READERS = ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing', 'sales_admin_settings', 'sales_master_settlement', 'sales_reports'];
 
 // =========================================================================
 // Vehicle Catalog — Models / Variants / Vehicles
@@ -74,6 +75,7 @@ router.delete('/vehicles/:id',     requireAny('sales_admin_settings'), cat.delet
 router.get(   '/bookings',                 requireAny(...SALES_READERS),       bk.listBookings);
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
+router.post('/bookings/:id/discount', requireAny('sales_admin_pricing'), bookingDiscount.apply);
 // Moving a booking to the right customer. Admin-only, refused once anything
 // has posted against it, and the reason goes on the audit trail (owner ask
 // 2026-10-02).

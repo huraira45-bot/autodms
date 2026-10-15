@@ -34,7 +34,7 @@ const MODULES = [
     { key: 'sales_executive',       label: 'Sales Executive (booking, payments, docs)', section: 'NEW VEHICLE SALES' },
     { key: 'sales_agm',             label: 'Sales AGM (team view + assign inquiries)',   section: 'NEW VEHICLE SALES' },
     { key: 'sales_gm',              label: 'Sales GM (full team + targets + policies)',  section: 'NEW VEHICLE SALES' },
-    { key: 'sales_admin_pricing',   label: 'Sales — Pricing Admin (approve discounts)',  section: 'NEW VEHICLE SALES' },
+    { key: 'sales_admin_pricing',   label: 'Sales — Pricing Admin (approve + apply booking discounts)', section: 'NEW VEHICLE SALES' },
     { key: 'sales_admin_settings',  label: 'Sales — Catalog & Policy Admin',             section: 'NEW VEHICLE SALES' },
     { key: 'sales_master_settlement', label: 'Sales — Master Invoice Posting',           section: 'NEW VEHICLE SALES' },
     { key: 'sales_recovery',        label: 'Sales — Recovery Officer',                   section: 'NEW VEHICLE SALES' },
