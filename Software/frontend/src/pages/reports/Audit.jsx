@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import VoucherEditHistory from '../../components/VoucherEditHistory';
 import { useNavigate } from 'react-router-dom';
 import { History, ShieldCheck } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
@@ -13,6 +14,7 @@ const TYPE_TO_ROUTE = {
 
 // ---- Voucher Audit Trail ----
 export function VoucherAudit() {
+    const [showEdits, setShowEdits] = useState(false);
     const navigate = useNavigate();
     const openVoucher = (v) => {
         const route = TYPE_TO_ROUTE[v.VoucherType] || '/vouchers/jv';
@@ -24,7 +26,12 @@ export function VoucherAudit() {
         return <span style={{ background: bg, color: col, padding: '2px 8px', borderRadius: 99, fontSize: '0.7rem', fontWeight: 600 }}>{s}</span>;
     };
     return (
-        <ReportShell
+        <>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button type="button" className="erp-btn" onClick={() => setShowEdits(false)} aria-pressed={!showEdits}>Voucher lifecycle</button>
+            <button type="button" className="erp-btn" onClick={() => setShowEdits(true)} aria-pressed={showEdits}>Edit history</button>
+        </div>
+        {showEdits ? <VoucherEditHistory /> : <ReportShell
             title="Voucher Audit Trail"
             subtitle="All vouchers in a period (Posted, Reversed, Draft)."
             icon={History}
@@ -92,7 +99,8 @@ export function VoucherAudit() {
                     </div>
                 </>
             )}
-        </ReportShell>
+        </ReportShell>}
+        </>
     );
 }
 

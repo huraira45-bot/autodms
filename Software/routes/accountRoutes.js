@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const accountController = require('../controllers/accountController');
+const { getVoucherEditHistory } = require('../controllers/voucherEditHistoryController');
 const { requirePerm, requireAnyAccess } = require('../middleware/permissions');
 
 // Chart of Accounts (finance_coa). The COA picker is used by MANY pages
@@ -40,6 +41,8 @@ router.post(  '/vouchers',          requirePerm('finance_vouchers', 'insert'), a
 router.get(   '/vouchers/drafts',   requirePerm('finance_vouchers', 'view'),   accountController.getDraftVouchers);
 router.get(   '/vouchers/search',   requirePerm('finance_vouchers', 'view'),   accountController.searchVouchers);
 router.get(   '/vouchers/needs-department', requirePerm('finance_vouchers', 'view'), accountController.getVouchersNeedingDepartment);
+router.get(   '/vouchers/edit-history', requireAnyAccess('finance_vouchers:view', 'report:voucher_audit'), getVoucherEditHistory);
+router.get(   '/vouchers/:id/edit-history', requirePerm('finance_vouchers', 'view'), getVoucherEditHistory);
 router.get(   '/vouchers/:id',      requirePerm('finance_vouchers', 'view'),   accountController.getVoucher);
 router.put(   '/vouchers/:id',      requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucher);
 router.patch( '/vouchers/:id/date', requirePerm('finance_vouchers', 'edit'),   accountController.updateVoucherDate);

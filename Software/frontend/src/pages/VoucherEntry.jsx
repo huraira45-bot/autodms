@@ -5,6 +5,7 @@ import { Plus, Trash2, Save, FileText, Calculator, Lock, Unlock, RefreshCw, Load
 import { useAuth, useCan } from '../context/AuthContext';
 import { useFeedback } from '../context/FeedbackContext';
 import SearchableSelect from '../components/SearchableSelect';
+import VoucherEditHistory from '../components/VoucherEditHistory';
 import { fmtDTLong } from '../utils/datetime';
 import {
     ErpControlPanel, ErpStatusBar, ErpSmartButton, ErpStatusPill, ErpEmptyState,
@@ -84,6 +85,9 @@ export default function VoucherEntry({ forceTypeCode, title }) {
 
     const [mode, setMode] = useState(initialId ? 'view' : 'new'); // 'new' | 'view'
     const [active, setActive] = useState(null); // loaded voucher when mode === 'view'
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [historyVersion, setHistoryVersion] = useState(0);
+    const [editReason, setEditReason] = useState('');
 
     // Policy: vouchers are always posted with today's date — no backdate, no future date.
     // (Enforced server-side too in accountController.checkVoucherDateIsToday.)
@@ -142,6 +146,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         try {
             const r = await axios.get(`${API_BASE}/accounts/vouchers/${id}`);
             setActive(r.data);
+            setHistoryVersion(n => n + 1);
             setMode('view');
         } catch (err) {
             setMsg({ kind: 'err', text: err.response?.data?.error || err.message });
@@ -256,11 +261,15 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             });
             return;
         }
+        if (editingId && (editReason.trim().length < 3 || editReason.trim().length > 500)) {
+            notify({ type: 'warning', title: 'Edit reason required', message: 'Enter a reason of 3 to 500 characters for the voucher history.' });
+            return;
+        }
         setBusy(true); setMsg(null);
         try {
             let resultId, resultNo;
             if (editingId) {
-                await axios.put(`${API_BASE}/accounts/vouchers/${editingId}`, { ...header, Items: items });
+                await axios.put(`${API_BASE}/accounts/vouchers/${editingId}`, { ...header, Items: items, Reason: editReason.trim() });
                 resultId = editingId;
                 setEditingId(null);
                 setMsg({ kind: 'ok', text: `Draft updated.` });
@@ -344,6 +353,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
             DepartmentID: l.DepartmentID || '',
             IsExpense: l.IsExpense === true || l.IsExpense === 1 ? true : (l.IsExpense === false || l.IsExpense === 0 ? false : null),
         })));
+        setEditReason('');
         setEditingId(active.VoucherID);
         setMode('new');
         setMsg(null);
@@ -563,6 +573,9 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                             <button type="button" className="erp-btn erp-btn-sm" onClick={() => window.open(`/vouchers/${active.VoucherID}/print`, '_blank')}>
                                 <Printer size={14} /> Print
                             </button>
+                            <button type="button" className="erp-btn erp-btn-sm" onClick={() => setHistoryOpen(v => !v)}>
+                                Edit history
+                            </button>
                             {canInsert && (
                                 <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={startNew}>
                                     <Plus size={14} /> New
@@ -571,6 +584,8 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         </>
                     }
                 />
+
+                {historyOpen && <VoucherEditHistory key={`${active.VoucherID}-${historyVersion}`} voucherId={active.VoucherID} />}
 
                 {/* Odoo-style status-bar (Draft → Posted → Reversed) */}
                 <div style={{ background: 'var(--erp-surface)', border: '1px solid var(--erp-border)', borderRadius: 'var(--erp-radius)', overflow: 'hidden' }}>
@@ -647,12 +662,10 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                                        min={minStr} max={maxStr}
                                        onChange={e => setDateEditVal(e.target.value)}
                                        style={{ padding: '2px 6px', fontSize: 12 }} />
-                                {canSetAnyDate && (
                                     <input type="text" value={dateEditReason}
                                            onChange={e => setDateEditReason(e.target.value)}
-                                           placeholder="Why? (goes on the record)"
+                                           maxLength={500} placeholder="Reason (saved in history)"
                                            style={{ padding: '2px 6px', fontSize: 12, minWidth: 200 }} />
-                                )}
                                 <button type="button" className="erp-btn erp-btn-sm erp-btn-primary" onClick={submitDateChange} disabled={busy || !dateEditVal}>
                                     {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save
                                 </button>
@@ -886,7 +899,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         {(editingId ? canEdit : canInsert) && (
                             <button type="button" className="erp-btn erp-btn-primary" onClick={handleSave} disabled={busy}>
                                 {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                                {editingId ? 'Update Draft' : 'Save as Draft'}
+                                {editingId ? 'Save Changes' : 'Save as Draft'}
                             </button>
                         )}
                     </>
@@ -911,6 +924,12 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                     {msg.text}
                 </div>
             )}
+
+            {editingId && <label className="card" style={{ display: 'block', fontSize: 13 }}>
+                Reason for edit (required — saved in voucher history)
+                <textarea value={editReason} onChange={e => setEditReason(e.target.value)} maxLength={500} rows={2}
+                    placeholder="Explain what is being corrected and why" style={{ display: 'block', width: '100%', padding: 8, marginTop: 6 }} />
+            </label>}
 
             {/* Drafts panel */}
             {drafts.length > 0 && (

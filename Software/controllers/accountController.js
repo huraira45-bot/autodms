@@ -1,5 +1,6 @@
 const { sql, getPool } = require('../config/db');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
+const { withVoucherEditHistory, requireUnchangedHeader } = require('../services/voucherEditHistoryService');
 
 /**
  * Policy: vouchers can only be posted with today's date — no back-date, no
@@ -60,12 +61,9 @@ function userCanSetAnyVoucherDate(req) {
         && req.user.permissions.includes('finance_voucher_date_any');
 }
 
-// Every voucher date change goes on the record — override or not. Never
-// allowed to fail the change itself; a lost audit row is worth less than a
-// half-applied correction.
-async function recordVoucherDateChange(pool, req, { row, newDate, reason, override }) {
-    try {
-        await pool.request()
+// Keep the legacy date log and the full edit trail in the same transaction.
+async function recordVoucherDateChange(transaction, req, { row, newDate, reason, override }) {
+        await new sql.Request(transaction)
             .input('vid', sql.Int, row.VoucherID)
             .input('vno', sql.NVarChar(50), row.VoucherNo || null)
             .input('vt',  sql.NVarChar(30), row.VoucherType || null)
@@ -80,9 +78,6 @@ async function recordVoucherDateChange(pool, req, { row, newDate, reason, overri
                         (VoucherID, VoucherNo, VoucherType, VoucherStatus, OldDate, NewDate,
                          Reason, UsedAdminOverride, ChangedBy, ChangedByName)
                     VALUES (@vid, @vno, @vt, @st, @od, @nd, @rs, @ov, @by, @bn)`);
-    } catch (err) {
-        console.error('recordVoucherDateChange (change still applied):', err.message);
-    }
 }
 
 exports.addAccount = async (req, res) => {
@@ -568,15 +563,18 @@ exports.updateVoucherDate = async (req, res) => {
             }
         }
 
-        await pool.request()
+        await withVoucherEditHistory(pool, req, id, 'DATE_CHANGE', async (transaction, before) => {
+            requireUnchangedHeader(before, row);
+            await new sql.Request(transaction)
             .input('id', sql.Int, id)
             .input('dt', sql.DateTime, d)
             .query(`UPDATE data_FinanceVoucherInfo SET VoucherDate = @dt WHERE VoucherID = @id`);
-        await recordVoucherDateChange(pool, req, { row, newDate: d, reason: Reason, override });
+            await recordVoucherDateChange(transaction, req, { row, newDate: d, reason: Reason, override });
+        });
         res.json({ message: 'Voucher date updated', VoucherID: id, UsedAdminOverride: override });
     } catch (err) {
         console.error('updateVoucherDate:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 };
 
@@ -617,15 +615,21 @@ exports.updateVoucherLineDepartment = async (req, res) => {
             if (!dept.recordset.length) return res.status(400).json({ error: 'Unknown department.' });
         }
 
-        await pool.request()
+        await withVoucherEditHistory(pool, req, id, 'LINE_DEPARTMENT_CHANGE', async transaction => {
+            const result = await new sql.Request(transaction)
             .input('id', sql.Int, lineId)
+            .input('vid', sql.Int, id)
             .input('dep', sql.Int, finalDeptId)
             .input('exp', sql.Bit, isExpense === null ? null : (isExpense ? 1 : 0))
-            .query(`UPDATE data_FinanceVoucherDetail SET DepartmentID = @dep, IsExpense = @exp WHERE VoucherDetailID = @id`);
+            .query(`UPDATE data_FinanceVoucherDetail SET DepartmentID = @dep, IsExpense = @exp
+                    OUTPUT INSERTED.VoucherDetailID
+                    WHERE VoucherDetailID = @id AND VoucherID=@vid`);
+            if (!result.recordset?.length) throw Object.assign(new Error('Voucher line changed. Refresh and try again.'), { status: 409 });
+        });
         res.json({ message: 'Line updated', VoucherDetailID: lineId, DepartmentID: finalDeptId, IsExpense: isExpense });
     } catch (err) {
         console.error('updateVoucherLineDepartment:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 };
 
@@ -649,16 +653,17 @@ exports.bulkSetVoucherExpenseFlag = async (req, res) => {
             .query(`SELECT VoucherID FROM data_FinanceVoucherInfo WHERE VoucherID = @id`);
         if (!head.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
 
-        const result = await pool.request()
+        const result = await withVoucherEditHistory(pool, req, id, 'EXPENSE_FLAG_CHANGE', async transaction => new sql.Request(transaction)
             .input('id', sql.Int, id)
             .input('exp', sql.Bit, isExpenseRaw === false ? 0 : null)
             .query(`UPDATE data_FinanceVoucherDetail
                     SET DepartmentID = NULL, IsExpense = @exp
-                    WHERE VoucherID = @id AND Debit > 0`);
-        res.json({ message: 'Voucher lines updated', VoucherID: id, LinesAffected: result.rowsAffected[0] });
+                    OUTPUT INSERTED.VoucherDetailID
+                    WHERE VoucherID = @id AND Debit > 0`));
+        res.json({ message: 'Voucher lines updated', VoucherID: id, LinesAffected: result.recordset.length });
     } catch (err) {
         console.error('bulkSetVoucherExpenseFlag:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 };
 
@@ -742,6 +747,8 @@ exports.updateVoucher = async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { VoucherDate, VoucherTypeID, Remarks, Items, IsCharitable } = req.body;
+        if (typeof req.body.Reason !== 'string' || req.body.Reason.trim().length < 3 || req.body.Reason.trim().length > 500)
+            return res.status(400).json({ error: 'Enter an edit reason of 3 to 500 characters.' });
         if (!Array.isArray(Items) || Items.length === 0)
             return res.status(400).json({ error: 'Voucher must have at least one line.' });
         const badIdx = Items.findIndex(it => !it.GLCAID);
@@ -803,9 +810,8 @@ exports.updateVoucher = async (req, res) => {
             if (dateErr) return res.status(400).json({ error: dateErr });
         }
 
-        const transaction = new sql.Transaction(pool);
-        await transaction.begin();
-        try {
+        await withVoucherEditHistory(pool, req, id, 'VOUCHER_EDIT', async (transaction, before) => {
+            requireUnchangedHeader(before, row);
             await new sql.Request(transaction).input('id', sql.Int, id)
                 .query(`DELETE FROM data_FinanceVoucherDetail WHERE VoucherID=@id`);
 
@@ -840,21 +846,18 @@ exports.updateVoucher = async (req, res) => {
                                 (VoucherID, GLCAID, Narration, Debit, Credit, DepartmentID, IsExpense)
                             VALUES (@VID, @GL, @Nar, @Dr, @Cr, @Dep, @Exp)`);
             }
-            await transaction.commit();
-
             // Charity side ledger reconciliation on edit (owner ask 2026-07-18).
             // Only applies to CRV/BRV; other types skip. On every update we
             // drop any prior manual-source row for this voucher and re-insert
             // one if the box is still Yes. Receive-payment rows are locked to
-            // their original CRV and never touched here. Runs OUTSIDE the tx.
+            // their original CRV and never touched here. Part of the audited tx.
             if (isCharityScoped) {
-                try {
-                    await pool.request()
+                    await new sql.Request(transaction)
                         .input('vid', sql.Int, id)
                         .query(`DELETE FROM dms_CharityTracking
                                 WHERE VoucherID = @vid AND SourceType = 'MANUAL_VOUCHER_1PCT'`);
                     if (IsCharitable === true && totalAmount > 0) {
-                        await pool.request()
+                        await new sql.Request(transaction)
                             .input('vid', sql.Int,           id)
                             .input('src', sql.NVarChar(40),  'MANUAL_VOUCHER_1PCT')
                             .input('va',  sql.Decimal(18,2), +totalAmount.toFixed(2))
@@ -866,19 +869,18 @@ exports.updateVoucher = async (req, res) => {
                                         CreatedBy, CreatedByName)
                                     VALUES (@vid, @src, @va, @ca, @by, @byN)`);
                     }
-                } catch (e) {
-                    console.warn('[charity] voucher-update tracking failed for voucher', id, e.message);
-                }
             }
-
-            res.json({ message: 'Voucher updated', VoucherID: id });
-        } catch (err) {
-            await transaction.rollback();
-            throw err;
-        }
+            if (new Date(before.Header.VoucherDate).getTime() !== new Date(VoucherDate).getTime()) {
+                await recordVoucherDateChange(transaction, req, {
+                    row: { ...before.Header, VoucherType: before.Header.VoucherTypeCode },
+                    newDate: new Date(VoucherDate), reason: req.body.Reason, override: false,
+                });
+            }
+        });
+        res.json({ message: 'Voucher updated', VoucherID: id });
     } catch (err) {
         console.error('updateVoucher:', err);
-        res.status(400).json({ error: err.message });
+        res.status(err.status || 400).json({ error: err.message });
     }
 };
 
