@@ -47,6 +47,7 @@ export default function NewBooking() {
     const [negotiatedPrice, setNegotiatedPrice] = useState('');
     const [negotiationReason, setNegotiationReason] = useState('');
     const [corpPO, setCorpPO] = useState('');
+    const [promisedMonth, setPromisedMonth] = useState('');
 
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
@@ -134,6 +135,7 @@ export default function NewBooking() {
                 PartyID: pickedParty.PartyID,
                 VehicleVariantID: Number(variantId),
                 NegotiatedPrice: Number(negotiatedPrice),
+                PromisedDeliveryMonth: promisedMonth || null,
             };
             if (corpPO) body.CorporatePONumber = corpPO;
             if (needsApproval) body.NegotiationReason = negotiationReason.trim();
@@ -333,6 +335,9 @@ export default function NewBooking() {
 
                 <Field label="Corporate PO Number (optional)">
                     <input value={corpPO} onChange={e => setCorpPO(e.target.value)} placeholder="If part of a corporate purchase order" style={inputStyle} />
+                </Field>
+                <Field label="Promised delivery month (optional)">
+                    <input type="month" value={promisedMonth} onChange={e => setPromisedMonth(e.target.value)} style={inputStyle} />
                 </Field>
             </div>
 

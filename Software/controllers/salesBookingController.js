@@ -19,6 +19,7 @@ const incentive = require('./salesIncentiveController');
 const { logAudit } = require('../services/salesAuditService');
 const { masterNetSql } = require('../services/masterPaymentPositionService');
 const { effectiveMasterPaidSql } = require('../services/historicalMasterApprovalService');
+const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 
 // ============================================================================
 // Helpers
@@ -105,7 +106,7 @@ exports.listBookings = async (req, res) => {
                    b.VehicleModelID, m.ModelCode, m.ModelName,
                    b.VehicleVariantID, v.VariantCode, v.VariantName,
                    b.AllocatedVehicleID, veh.ChasisNo AS AllocatedChasisNo,
-                   b.StandardPrice, b.NegotiatedPrice, b.DiscountAmount, b.DiscountPct,
+                   b.StandardPrice, b.NegotiatedPrice, b.DiscountAmount, b.DiscountPct, b.PromisedDeliveryMonth,
                    b.AmountPaidToDate, b.PremiumAmount,
                    b.CorporatePONumber, b.AllowPartialDelivery,
                    b.CreatedBy_SalesExecutiveID, e.EmployeeName AS SalesExecutiveName,
@@ -240,6 +241,9 @@ exports.getBooking = async (req, res) => {
 exports.createBooking = async (req, res) => {
     try {
         const b = req.body || {};
+        let promisedMonth;
+        try { promisedMonth = parseDeliveryMonth(b.PromisedDeliveryMonth); }
+        catch (err) { return res.status(400).json({ error: err.message }); }
         const errors = [];
         if (!b.PartyID) errors.push('PartyID is required');
         if (!b.VehicleVariantID) errors.push('VehicleVariantID is required');
@@ -285,13 +289,14 @@ exports.createBooking = async (req, res) => {
                 .input('exeN', sql.NVarChar(100), req.user?.userName || null)
                 .input('po', sql.NVarChar(100), b.CorporatePONumber || null)
                 .input('iq', sql.Int, b.SourceInquiryID || null)
+                .input('promise', sql.Date, promisedMonth)
                 .query(`INSERT INTO dms_SalesBookings
                             (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName,
-                             CorporatePONumber, SourceInquiryID)
+                             CorporatePONumber, SourceInquiryID, PromisedDeliveryMonth)
                         OUTPUT INSERTED.BookingID
-                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po, @iq)`);
+                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po, @iq, @promise)`);
             const bookingId = r.recordset[0].BookingID;
 
             // If this booking originated from a CRO inquiry, flip the inquiry to Converted

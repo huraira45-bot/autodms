@@ -158,7 +158,7 @@ export default function BookingsList() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                         <thead>
                             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                                <Th>#</Th><Th>Booking Date</Th><Th>Customer</Th><Th>Vehicle</Th>
+                                <Th>#</Th><Th>Booking Date</Th><Th>Promised month</Th><Th>Customer</Th><Th>Vehicle</Th>
                                 <Th align="right">Standard</Th><Th align="right">Negotiated</Th>
                                 <Th align="right">Disc</Th><Th align="right">Paid</Th>
                                 <Th>Status</Th><Th>Allocated</Th><Th>Executive</Th>
@@ -182,6 +182,7 @@ export default function BookingsList() {
                                             )}
                                         </Td>
                                         <Td style={{ whiteSpace: 'nowrap' }}>{fmtDate(b.BookingDate || b.CreatedAt)}</Td>
+                                        <Td style={{ whiteSpace: 'nowrap' }}>{b.PromisedDeliveryMonth ? new Date(b.PromisedDeliveryMonth).toLocaleDateString('en-PK', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : 'Not set'}</Td>
                                         <Td>
                                             <div style={{ fontWeight: 500 }}>{b.PartyName}</div>
                                             <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{b.PartyType} {b.CorporatePONumber ? `· PO ${b.CorporatePONumber}` : ''}</div>

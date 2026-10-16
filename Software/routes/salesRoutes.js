@@ -13,6 +13,7 @@ const histMasterApproval = require('../controllers/salesHistoricalMasterApproval
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
 const bookingDiscount = require('../controllers/salesBookingDiscountController');
+const deliveryMonth = require('../controllers/bookingDeliveryMonthController');
 const lc  = require('../controllers/salesLifecycleController');
 const inc = require('../controllers/salesIncentiveController');
 const mi  = require('../controllers/masterIncentiveController');
@@ -75,6 +76,7 @@ router.delete('/vehicles/:id',     requireAny('sales_admin_settings'), cat.delet
 router.get(   '/bookings',                 requireAny(...SALES_READERS),       bk.listBookings);
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
+router.patch('/bookings/:id/delivery-month', requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'), deliveryMonth.update);
 router.post('/bookings/:id/discount', requireAny('sales_admin_pricing'), bookingDiscount.apply);
 router.post('/bookings/:id/master-agreed-amount', requireAny('sales_admin_pricing'), bookingDiscount.setMasterAmount);
 // Moving a booking to the right customer. Admin-only, refused once anything

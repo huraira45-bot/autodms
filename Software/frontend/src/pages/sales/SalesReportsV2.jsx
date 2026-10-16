@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Loader2, BarChart3, Clock, TrendingUp, Scale } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
 import { ErpControlPanel } from '../../components/erp';
+import CustomerVehicleBalances from '../reports/CustomerVehicleBalances';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
@@ -22,6 +23,7 @@ export default function SalesReportsV2() {
     const [busy, setBusy] = useState(false);
 
     const load = useCallback(async () => {
+        if (tab === 'customerBalances') { setBusy(false); return; }
         setBusy(true);
         try {
             if (tab === 'pipeline') {
@@ -55,6 +57,7 @@ export default function SalesReportsV2() {
                     ['miAging','Master Invoice Aging', Clock],
                     ['incAging','Incentive Receivable Aging', TrendingUp],
                     ['bvrRecon','Booking Account Reconciliation', Scale],
+                    ['customerBalances','Customer Balance Payments', Scale],
                 ].map(([key,label,Icon]) => (
                     <button key={key} onClick={() => setTab(key)}
                         style={{ padding: '8px 14px', background: tab===key?'#1e40af':'#f1f5f9', color: tab===key?'white':'#475569', border:'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -62,6 +65,8 @@ export default function SalesReportsV2() {
                     </button>
                 ))}
             </div>
+
+            {tab === 'customerBalances' && <CustomerVehicleBalances />}
 
             {tab === 'pipeline' && (
                 <>

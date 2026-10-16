@@ -26,6 +26,8 @@ import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences'
 import { HistoricalMasterApprovalModal } from './HistoricalMasterApproval';
 import BookingDiscountModal from './BookingDiscountModal';
 import MasterAgreedAmountModal from './MasterAgreedAmountModal';
+import BookingDeliveryMonthModal from './BookingDeliveryMonthModal';
+import { formatDeliveryMonth } from '../../utils/deliveryMonth';
 import { masterAmountDue } from '../../utils/salesMasterAmount';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
 
@@ -71,6 +73,7 @@ export default function BookingDetail() {
     // Imported historical bookings can arrive without a date — the owner's
     // August sheet had none — so it is filled in here afterwards.
     const [showBookingDate, setShowBookingDate] = useState(false);
+    const [showDeliveryMonth, setShowDeliveryMonth] = useState(false);
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
     const [showChangeCustomer, setShowChangeCustomer] = useState(false);
@@ -285,6 +288,11 @@ export default function BookingDetail() {
                                 Give discount
                             </button>
                         )}
+                        {['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'].some(role => hasModule(role)) && (
+                            <button type="button" className="erp-btn erp-btn-sm" onClick={() => setShowDeliveryMonth(true)}>
+                                <CalendarDays size={14} /> Promised month
+                            </button>
+                        )}
                         {canDiscount && <button type="button" className="erp-btn erp-btn-sm" onClick={() => setShowMasterAgreement(true)}>
                             Master agreed amount
                         </button>}
@@ -340,6 +348,7 @@ export default function BookingDetail() {
                         <div style={{ fontWeight: 600 }}>{data.BrandName} · {data.ModelCode}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.VariantCode} {data.VariantName}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Wholesale PKR {fmtN(data.WholesalePrice)}</div>
+                        <div style={{ fontSize: '0.8rem', marginTop: 6 }}>Promised delivery: <strong>{formatDeliveryMonth(data.PromisedDeliveryMonth)}</strong></div>
                         {data.AllocatedChasisNo && (
                             <div style={{ marginTop: 6, padding: 6, background: '#dcfce7', borderRadius: 4, fontSize: '0.78rem' }}>
                                 Chassis: <strong style={{ fontFamily: 'monospace' }}>{data.AllocatedChasisNo}</strong>
@@ -857,6 +866,9 @@ export default function BookingDetail() {
                     onClose={() => setShowBookingDate(false)}
                     onSaved={() => { setShowBookingDate(false); flash('ok', 'Booking date saved'); load(); }} />
             )}
+            {showDeliveryMonth && <BookingDeliveryMonthModal booking={data}
+                onClose={() => setShowDeliveryMonth(false)}
+                onSaved={() => { setShowDeliveryMonth(false); flash('ok', 'Promised delivery month saved'); load(); }} />}
             {showCancel && (
                 <CancelModal booking={data}
                     onClose={() => setShowCancel(false)}

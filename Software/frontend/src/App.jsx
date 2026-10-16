@@ -196,6 +196,7 @@ import { ReceivablesSubLedger } from './pages/reports/ReceivablesSubLedger';
 import TabletApp from './pages/tablet/TabletApp';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, JcPartsCostMargin, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
+import CustomerVehicleBalances from './pages/reports/CustomerVehicleBalances';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
 import WorkspaceTopBar      from './components/WorkspaceTopBar';
@@ -820,6 +821,11 @@ function LegacySidebar() {
                         <FileBarChart size={20} /> Booking Register
                     </NavLink>
                 )}
+                {(canReport('booking_register') || hasModule('sales_reports')) && (
+                    <NavLink to="/reports/sales/customer-balances" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Customer Balance Payments
+                    </NavLink>
+                )}
                 {canReport('vehicle_inventory') && (
                     <NavLink to="/reports/sales/vehicle-inventory" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Vehicle Inventory Report
@@ -1131,6 +1137,7 @@ function AppShell() {
 
                     {/* Sales (vehicle) reports */}
                     <Route path="/reports/sales/booking-register"        element={<ProtectedRoute><BookingRegister /></ProtectedRoute>} />
+                    <Route path="/reports/sales/customer-balances" element={<ProtectedRoute><CustomerVehicleBalances /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory"       element={<ProtectedRoute><VehicleInventory /></ProtectedRoute>} />
                     <Route path="/reports/sales/executive-performance"   element={<ProtectedRoute><ExecutivePerformance /></ProtectedRoute>} />
                     <Route path="/reports/sales/customer-advances-aging" element={<ProtectedRoute><CustomerAdvancesAging /></ProtectedRoute>} />

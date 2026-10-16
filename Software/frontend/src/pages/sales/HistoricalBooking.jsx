@@ -50,6 +50,7 @@ export default function HistoricalBooking() {
     const [partyLoading, setPartyLoading] = useState(false);
 
     const [bookingDate, setBookingDate] = useState('');
+    const [promisedMonth, setPromisedMonth] = useState('');
     const [priceAtTime, setPriceAtTime] = useState('');
     const [negotiatedPrice, setNegotiatedPrice] = useState('');
     const [status, setStatus] = useState('Closed');
@@ -115,6 +116,7 @@ export default function HistoricalBooking() {
                 PartyID: pickedParty.PartyID,
                 VehicleVariantID: Number(variantId),
                 BookingDate: bookingDate,
+                PromisedDeliveryMonth: promisedMonth || null,
                 NegotiatedPrice: agreed,
                 PriceAtTime: dayPrice || undefined,
                 Status: status,
@@ -211,6 +213,8 @@ export default function HistoricalBooking() {
                         <input type="date" value={bookingDate} max={today()}
                                onChange={e => setBookingDate(e.target.value)} style={inputStyle} />
                         <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>The day the deal actually happened.</div>
+                        <label style={{ display: 'block', marginTop: 10, fontSize: '0.8rem', fontWeight: 600 }}>Promised delivery month (optional)</label>
+                        <input type="month" value={promisedMonth} onChange={e => setPromisedMonth(e.target.value)} style={inputStyle} />
                     </div>
                     <div>
                         <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Price of the day</label>

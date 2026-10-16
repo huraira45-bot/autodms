@@ -26,6 +26,7 @@
  * a voucher is attached.
  */
 const { sql, getPool } = require('../config/db');
+const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 const { logBookingTransition } = require('./salesBookingController');
 const { assertVoucherLinkable,CUSTOMER_AMOUNT_SQL,LINKED_AMOUNT_SQL,NONLINKED_PAYMENT_SQL,LOCK_VOUCHER_SQL } = require('../services/historicalVoucherAllocationService');
 const { MASTER_AMOUNT_SQL,MASTER_LINKED_SQL,linkMasterVoucher,GENERATED_SALES_SOURCES } = require('../services/historicalMasterAllocationService');
@@ -94,6 +95,9 @@ exports.states = async (_req, res) => res.json(ALLOWED_STATES);
 exports.createBooking = async (req, res) => {
     try {
         const b = req.body || {};
+        let promisedMonth;
+        try { promisedMonth = parseDeliveryMonth(b.PromisedDeliveryMonth); }
+        catch (err) { return res.status(400).json({ error: err.message }); }
         const errors = [];
         if (!b.PartyID) errors.push('Customer is required');
         if (!b.VehicleVariantID) errors.push('Variant is required');
@@ -145,6 +149,7 @@ exports.createBooking = async (req, res) => {
                 .input('exeN', sql.NVarChar(100), req.user?.userName || null)
                 .input('po', sql.NVarChar(100), b.CorporatePONumber || null)
                 .input('bd', sql.DateTime, bookingDate)
+                .input('promise', sql.Date, promisedMonth)
                 // Closed / gate-passed / cancelled old deals carry their date,
                 // so the booking does not look like it closed today.
                 .input('closed', sql.DateTime, status === 'Closed' ? bookingDate : null)
@@ -155,11 +160,11 @@ exports.createBooking = async (req, res) => {
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName, CorporatePONumber,
                              IsHistorical, BookingDate, HistoricalEnteredAt,
-                             CreatedAt, ClosedAt, GatePassIssuedAt, DeliveredAt, CancelledAt)
+                             CreatedAt, ClosedAt, GatePassIssuedAt, DeliveredAt, CancelledAt, PromisedDeliveryMonth)
                         OUTPUT INSERTED.BookingID
                         VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po,
                                 1, @bd, GETDATE(),
-                                @bd, @closed, @gp, @gp, @canc)`);
+                                @bd, @closed, @gp, @gp, @canc, @promise)`);
             const bookingId = r.recordset[0].BookingID;
 
             await logBookingTransition(tx, bookingId, 'Historical', status, req.user,
