@@ -282,11 +282,13 @@ async function accrueForBooking(tx, bookingId) {
         .input('base', sql.Decimal(18,2), booking.NegotiatedPrice)
         .input('p', sql.Int, policy.PolicyID)
         .input('snap', sql.NVarChar(sql.MAX), JSON.stringify(policy))
-        .query(`INSERT INTO dms_SalesIncentiveAccruals
+        .query(`DECLARE @newAccrual TABLE (AccrualID INT);
+                INSERT INTO dms_SalesIncentiveAccruals
                     (BookingID, EarnerType, EarnerEmployeeID, IncentiveCategory,
                      AmountAccrued, IncentiveBaseAmount, SalesPolicyID, PolicySnapshotJSON, Status, AccruedAt)
-                OUTPUT INSERTED.AccrualID
-                VALUES (@b, 'Employee', @e, @cat, @amt, @base, @p, @snap, 'Accrued', GETDATE())`);
+                OUTPUT INSERTED.AccrualID INTO @newAccrual
+                VALUES (@b, 'Employee', @e, @cat, @amt, @base, @p, @snap, 'Accrued', GETDATE());
+                SELECT AccrualID FROM @newAccrual`);
     const accrualId = ar.recordset[0].AccrualID;
 
     // GL post — gated. If the staff-incentive roles aren't mapped, skip silently.

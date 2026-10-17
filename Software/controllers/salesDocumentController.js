@@ -85,13 +85,14 @@ exports.remove = async (req, res) => {
         const pool = await getPool();
         const r = await pool.request()
             .input('id', sql.Int, id)
+            .input('bid', sql.Int, Number(req.params.id))
             .input('emp', sql.Int, req.user?.employeeId || null)
             .input('empN', sql.NVarChar(100), req.user?.userName || null)
             .input('r', sql.NVarChar(sql.MAX), reason)
             .query(`UPDATE dms_SalesDocuments
                     SET DeletedAt=GETDATE(), DeletedByEmployeeID=@emp, DeletedByName=@empN, DeleteReason=@r
                     OUTPUT INSERTED.DocumentID
-                    WHERE DocumentID=@id AND DeletedAt IS NULL`);
+                    WHERE DocumentID=@id AND BookingID=@bid AND DeletedAt IS NULL`);
         if (!r.recordset.length) return res.status(404).json({ error: 'Document not found or already deleted' });
         res.json({ message: 'Deleted' });
     } catch (err) { res.status(500).json({ error: err.message }); }

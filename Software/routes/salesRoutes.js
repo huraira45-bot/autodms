@@ -14,6 +14,7 @@ const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
 const bookingDiscount = require('../controllers/salesBookingDiscountController');
 const deliveryMonth = require('../controllers/bookingDeliveryMonthController');
+const masterInvoiceDocument = require('../controllers/bookingMasterInvoiceDocumentController');
 const lc  = require('../controllers/salesLifecycleController');
 const inc = require('../controllers/salesIncentiveController');
 const mi  = require('../controllers/masterIncentiveController');
@@ -158,6 +159,8 @@ router.post('/bookings/:id/unallocate',              requireAny('sales_agm', 'sa
 router.post('/bookings/:id/pay-master',              requireAny('sales_master_settlement', 'sales_admin_settings'), lc.payMaster);
 router.post('/bookings/:id/master-payments/:voucherId/void', requireAny('sales_master_settlement', 'sales_admin_settings'), lc.voidMasterPayment);
 router.post('/bookings/:id/post-master-invoice',     requireAny('sales_master_settlement'), lc.postMasterInvoice);
+router.post('/bookings/:id/master-invoice-document', requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm'),
+    withUploadErrors(uploadSalesDoc.single('file')), masterInvoiceDocument.record);
 router.get( '/bookings/:id/delivery-readiness',      requireAny(...SALES_READERS), lc.deliveryReadiness);
 router.post('/bookings/:id/enable-partial-delivery', requireAny('sales_gm'), lc.enablePartialDelivery);
 router.post('/bookings/:id/finance-cosign',          requireAny('sales_admin_settings'), lc.financeCoSignPartial);  // proxy for Finance Head — wire to real finance role when HR adds it

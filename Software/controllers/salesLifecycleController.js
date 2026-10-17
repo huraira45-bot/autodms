@@ -16,6 +16,7 @@ const { voidMasterPayment, LOCKED_BOOKINGS } = require('../services/masterPaymen
 const { loadMasterPosition } = require('../services/masterPaymentPositionService');
 const { effectiveMasterPaid } = require('../services/historicalMasterApprovalService');
 const { masterAmountDue } = require('../services/salesMasterAmount');
+const { requireUploadedMasterInvoice, MASTER_INVOICE_STATES } = require('../services/masterInvoiceAccrualGuard');
 
 // =========================================================================
 // Helpers
@@ -375,7 +376,7 @@ exports.postMasterInvoice = async (req, res) => {
         const booking = bk.recordset[0];
 
         if (!booking.AllocatedVehicleID) return res.status(409).json({ error: 'Booking must have an allocated vehicle first.' });
-        if (booking.Status !== 'Allocated' && booking.Status !== 'MasterInvoicePending') {
+        if (!MASTER_INVOICE_STATES.includes(booking.Status)) {
             return res.status(409).json({ error: `Cannot post Master invoice from "${booking.Status}".` });
         }
 
@@ -383,6 +384,7 @@ exports.postMasterInvoice = async (req, res) => {
         if (!Number.isFinite(wholesalePrice) || wholesalePrice <= 0) return res.status(400).json({ error: 'Wholesale price must be > 0.' });
 
         const invoiceDate = new Date(b.MasterInvoiceDate);
+        if (!Number.isFinite(invoiceDate.getTime())) return res.status(400).json({ error: 'Master invoice date is invalid.' });
 
         // Look up applicable campaigns (Special + Additional) for this Variant + invoice date
         const camps = await pool.request()
@@ -408,7 +410,10 @@ exports.postMasterInvoice = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
-            // Insert accrual rows (always — they're our own records)
+            const current = await requireUploadedMasterInvoice(tx, bookingId, b.MasterInvoiceNo.trim(), invoiceDate.toISOString().slice(0,10));
+            if(current.Status!==booking.Status || current.AllocatedVehicleID!==booking.AllocatedVehicleID)
+                throw Object.assign(new Error('Booking changed. Refresh before processing the Master incentive.'), {status:409});
+            // Insert Master accruals only after the saved invoice has been verified.
             const campaignIDs = camps.recordset.map(c => c.CampaignID);
             const accruals = [];
 
@@ -419,11 +424,13 @@ exports.postMasterInvoice = async (req, res) => {
                     .input('amt', sql.Decimal(18, 2), standardAmt)
                     .input('base', sql.Decimal(18, 2), booking.NegotiatedPrice)
                     .input('tt', sql.NVarChar(30), booking.StandardIncentiveTaxTreatment)
-                    .query(`INSERT INTO dms_SalesIncentiveAccruals
+                    .query(`DECLARE @newAccrual TABLE (AccrualID INT);
+                            INSERT INTO dms_SalesIncentiveAccruals
                                 (BookingID, VehicleID, EarnerType, IncentiveCategory,
                                  AmountAccrued, IncentiveBaseAmount, TaxTreatment, Status, AccruedAt)
-                            OUTPUT INSERTED.AccrualID
-                            VALUES (@bid, @vid, 'Master', 'Standard', @amt, @base, @tt, 'Accrued', GETDATE())`);
+                            OUTPUT INSERTED.AccrualID INTO @newAccrual
+                            VALUES (@bid, @vid, 'Master', 'Standard', @amt, @base, @tt, 'Accrued', GETDATE());
+                            SELECT AccrualID FROM @newAccrual`);
                 accruals.push({ id: ar.recordset[0].AccrualID, category: 'Standard', amount: standardAmt });
             }
             if (specialSum > 0) {
@@ -432,11 +439,13 @@ exports.postMasterInvoice = async (req, res) => {
                     .input('vid', sql.Int, booking.AllocatedVehicleID)
                     .input('amt', sql.Decimal(18, 2), specialSum)
                     .input('camps', sql.NVarChar(sql.MAX), JSON.stringify(camps.recordset.filter(c => c.IncentiveType === 'Special')))
-                    .query(`INSERT INTO dms_SalesIncentiveAccruals
+                    .query(`DECLARE @newAccrual TABLE (AccrualID INT);
+                            INSERT INTO dms_SalesIncentiveAccruals
                                 (BookingID, VehicleID, EarnerType, IncentiveCategory,
                                  AmountAccrued, MasterCampaignIDsJSON, Status, AccruedAt)
-                            OUTPUT INSERTED.AccrualID
-                            VALUES (@bid, @vid, 'Master', 'Special', @amt, @camps, 'Accrued', GETDATE())`);
+                            OUTPUT INSERTED.AccrualID INTO @newAccrual
+                            VALUES (@bid, @vid, 'Master', 'Special', @amt, @camps, 'Accrued', GETDATE());
+                            SELECT AccrualID FROM @newAccrual`);
                 accruals.push({ id: ar.recordset[0].AccrualID, category: 'Special', amount: specialSum });
             }
             if (additionalSum > 0) {
@@ -445,11 +454,13 @@ exports.postMasterInvoice = async (req, res) => {
                     .input('vid', sql.Int, booking.AllocatedVehicleID)
                     .input('amt', sql.Decimal(18, 2), additionalSum)
                     .input('camps', sql.NVarChar(sql.MAX), JSON.stringify(camps.recordset.filter(c => c.IncentiveType === 'Additional')))
-                    .query(`INSERT INTO dms_SalesIncentiveAccruals
+                    .query(`DECLARE @newAccrual TABLE (AccrualID INT);
+                            INSERT INTO dms_SalesIncentiveAccruals
                                 (BookingID, VehicleID, EarnerType, IncentiveCategory,
                                  AmountAccrued, MasterCampaignIDsJSON, Status, AccruedAt)
-                            OUTPUT INSERTED.AccrualID
-                            VALUES (@bid, @vid, 'Master', 'Additional', @amt, @camps, 'Accrued', GETDATE())`);
+                            OUTPUT INSERTED.AccrualID INTO @newAccrual
+                            VALUES (@bid, @vid, 'Master', 'Additional', @amt, @camps, 'Accrued', GETDATE());
+                            SELECT AccrualID FROM @newAccrual`);
                 accruals.push({ id: ar.recordset[0].AccrualID, category: 'Additional', amount: additionalSum });
             }
 
@@ -505,15 +516,18 @@ exports.postMasterInvoice = async (req, res) => {
             // nothing to post (GL not configured yet, or no standard
             // incentive on this variant), there's nothing to wait for, so
             // advance immediately as before.
-            const newStatus = masterVoucherId ? 'MasterInvoicePending' : 'MasterInvoicePosted';
+            const newStatus = ['Allocated','MasterInvoicePending'].includes(booking.Status)
+                ? (masterVoucherId ? 'MasterInvoicePending' : 'MasterInvoicePosted') : booking.Status;
             await new sql.Request(tx).input('bid', sql.Int, bookingId).input('st', sql.NVarChar(30), newStatus)
                 .query(`UPDATE dms_SalesBookings SET Status=@st, UpdatedAt=GETDATE() WHERE BookingID=@bid`);
+            await new sql.Request(tx).input('id',sql.Int,bookingId)
+                .query(`UPDATE dms_BookingMasterInvoices SET IncentiveProcessedAt=SYSUTCDATETIME() WHERE BookingID=@id`);
 
             const glIntent = masterVoucherId
-                ? `GL voucher #${masterVoucherId} created as Draft — awaiting review + Finalize before booking moves to MasterInvoicePosted.`
+                ? `GL voucher #${masterVoucherId} created as Draft — awaiting review + Finalize.${newStatus==='MasterInvoicePending' ? ' Booking awaits MasterInvoicePosted.' : ` Booking remains ${newStatus}.`}`
                 : glPostingEnabled
-                    ? `No Draft voucher needed (no standard incentive) — booking advanced directly.`
-                    : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}. Admin must map via /accounting/setup. Booking advanced directly.`;
+                    ? `No Draft voucher needed (no standard incentive). Booking status: ${newStatus}.`
+                    : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}. Admin must map via /accounting/setup. Booking status: ${newStatus}.`;
             await logTransition(tx, bookingId, booking.Status, newStatus, req.user,
                 `Master invoice ${b.MasterInvoiceNo} recorded (${invoiceDate.toISOString().slice(0,10)}). Wholesale: PKR ${wholesalePrice.toLocaleString()}. Std incentive: ${standardAmt.toLocaleString()}, Special: ${specialSum.toLocaleString()}, Additional: ${additionalSum.toLocaleString()}. ${glIntent}`);
 
@@ -536,7 +550,7 @@ exports.postMasterInvoice = async (req, res) => {
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('postMasterInvoice:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 };
 

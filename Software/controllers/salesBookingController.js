@@ -152,13 +152,25 @@ exports.getBooking = async (req, res) => {
                    v.StandardIncentiveAmount, v.StandardIncentiveTaxTreatment,
                    veh.ChasisNo AS AllocatedChasisNo, veh.EngineNo AS AllocatedEngineNo,
                    veh.Color AS AllocatedColor,
-                   e.EmployeeName AS SalesExecutiveName
+                   e.EmployeeName AS SalesExecutiveName,
+                   miDoc.InvoiceNo AS MasterInvoiceNo, miDoc.InvoiceDate AS MasterInvoiceDate,
+                   miFile.DocumentID AS MasterInvoiceDocumentID, miFile.FilePath AS MasterInvoiceFilePath,
+                   miFile.OriginalFileName AS MasterInvoiceFileName, miDoc.RecordedByName AS MasterInvoiceRecordedByName,
+                   CASE WHEN miDoc.IncentiveProcessedAt IS NOT NULL OR EXISTS (
+                       SELECT 1 FROM dms_SalesIncentiveAccruals a WHERE a.BookingID=b.BookingID AND a.EarnerType='Master' AND a.Status<>'Reversed'
+                   ) OR EXISTS (
+                       SELECT 1 FROM data_FinanceVoucherInfo mv WHERE mv.SourceDocType='MASTER_INVOICE' AND mv.SourceDocID=b.BookingID
+                           AND mv.Status IN ('Draft','Posted') AND mv.ReversesVoucherID IS NULL
+                   ) THEN 1 ELSE 0 END AS MasterIncentiveAlreadyAccrued
             FROM dms_SalesBookings b
             LEFT JOIN gen_PartiesInfo   p   ON b.PartyID = p.PartyID
             LEFT JOIN dms_VehicleModel  m   ON b.VehicleModelID = m.ModelID
             LEFT JOIN dms_VehicleVariant v  ON b.VehicleVariantID = v.VariantID
             LEFT JOIN dms_Vehicle       veh ON b.AllocatedVehicleID = veh.VehicleID
             LEFT JOIN gen_EmployeeInfo  e   ON b.CreatedBy_SalesExecutiveID = e.EmployeeID
+            LEFT JOIN dms_BookingMasterInvoices miDoc ON miDoc.BookingID=b.BookingID
+            LEFT JOIN dms_SalesDocuments miFile ON miFile.DocumentID=miDoc.DocumentID
+                AND miFile.BookingID=b.BookingID AND miFile.DocType='MasterInvoice' AND miFile.DeletedAt IS NULL
             WHERE b.BookingID=@id
         `);
         if (!bk.recordset.length) return res.status(404).json({ error: 'Booking not found' });

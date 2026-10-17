@@ -26,6 +26,7 @@ import { HistoricalVoucherReferencesModal } from './HistoricalVoucherReferences'
 import { HistoricalMasterApprovalModal } from './HistoricalMasterApproval';
 import BookingDiscountModal from './BookingDiscountModal';
 import MasterAgreedAmountModal from './MasterAgreedAmountModal';
+import MasterInvoiceUploadModal from './MasterInvoiceUploadModal';
 import BookingDeliveryMonthModal from './BookingDeliveryMonthModal';
 import { formatDeliveryMonth } from '../../utils/deliveryMonth';
 import { masterAmountDue } from '../../utils/salesMasterAmount';
@@ -79,6 +80,7 @@ export default function BookingDetail() {
     const [showChangeCustomer, setShowChangeCustomer] = useState(false);
     const [showSwapVehicle, setShowSwapVehicle] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
+    const [showMasterInvoiceUpload, setShowMasterInvoiceUpload] = useState(false);
     const [showGatePass, setShowGatePass] = useState(false);
     const [showExecutive, setShowExecutive] = useState(false);
 
@@ -239,8 +241,11 @@ export default function BookingDetail() {
         && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
 
     const canPostMasterInvoice = data.AllocatedVehicleID
-        && !['Closed', 'Cancelled'].includes(data.Status)
+        && data.MasterInvoiceDocumentID && !data.IsHistorical && !data.MasterIncentiveAlreadyAccrued
+        && ['Allocated','MasterInvoicePending','MasterInvoicePosted','ReadyForDelivery','DeliveryApproved','GatePassIssued','Delivered','Closed'].includes(data.Status)
         && hasModule('sales_master_settlement');
+    const canUploadMasterInvoice = data.Status !== 'Cancelled' && !data.MasterInvoiceDocumentID
+        && ['sales_master_settlement', 'sales_admin_settings', 'sales_gm'].some(role => hasModule(role));
 
     // Owner ask 2026-09-11: the executive is stamped from whoever created the
     // booking and was never changeable. It drives "my bookings" and the
@@ -400,7 +405,7 @@ export default function BookingDetail() {
             </div>
 
             {/* Workflow actions row */}
-            {(canAllocate || canPayMaster || canPostMasterInvoice || canIssueGatePass
+            {(canAllocate || canPayMaster || canPostMasterInvoice || canUploadMasterInvoice || canIssueGatePass
               || masterDrafts.length > 0 || canManageReferences || canApproveHistoricalMaster) && (
                 <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: '0.78rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 600 }}>Next steps:</div>
@@ -433,10 +438,13 @@ export default function BookingDetail() {
                                 : <><CreditCard size={14} /> Pay Master Motors</>}
                         </button>
                     )}
+                    {canUploadMasterInvoice && <button className="erp-btn erp-btn-primary" onClick={() => setShowMasterInvoiceUpload(true)}>
+                        <FileCheck2 size={14} /> Record Master Invoice
+                    </button>}
                     {canPostMasterInvoice && (
                         <button onClick={() => setShowMasterInvoice(true)}
                             style={{ padding: '8px 14px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                            <FileCheck2 size={14} /> Record Master Tax Invoice
+                            <FileCheck2 size={14} /> Process Master Incentive
                         </button>
                     )}
                     {canIssueGatePass && (
@@ -449,6 +457,14 @@ export default function BookingDetail() {
             )}
 
             {/* Documents panel */}
+            {data.MasterInvoiceDocumentID && <div className="card" style={{border:'1px solid #bbf7d0',background:'#f0fdf4'}}>
+                <strong>Master invoice uploaded ✓</strong>
+                {data.IsHistorical && <div style={{fontSize:12,marginTop:4}}>Historical booking — invoice record only; no Master incentive accrual.</div>}
+                <div style={{marginTop:6}}>Invoice <strong>{data.MasterInvoiceNo}</strong> · Date {String(data.MasterInvoiceDate).slice(0,10)} · {data.MasterInvoiceRecordedByName}</div>
+                <a href={`/${data.MasterInvoiceFilePath}`} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:6,color:'#1e40af',textDecoration:'underline'}}>
+                    View / download {data.MasterInvoiceFileName}
+                </a>
+            </div>}
             <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <h3 style={{ margin: 0, fontSize: '1rem' }}>
@@ -915,8 +931,11 @@ export default function BookingDetail() {
             {showMasterInvoice && (
                 <MasterInvoiceModal booking={data}
                     onClose={() => setShowMasterInvoice(false)}
-                    onSaved={(out) => { setShowMasterInvoice(false); flash('ok', `Master tax invoice recorded${out.IncentiveAccrued?.total ? ` — accrued PKR ${Number(out.IncentiveAccrued.total).toLocaleString()}` : ''}`); load(); }} />
+                    onSaved={(out) => { setShowMasterInvoice(false); flash('ok', `Master incentive processed${out.IncentiveAccrued?.total ? ` — accrued PKR ${Number(out.IncentiveAccrued.total).toLocaleString()}` : ''}`); load(); }} />
             )}
+            {showMasterInvoiceUpload && <MasterInvoiceUploadModal booking={data}
+                onClose={() => setShowMasterInvoiceUpload(false)}
+                onSaved={() => { setShowMasterInvoiceUpload(false); flash('ok','Master invoice uploaded and recorded'); load(); }} />}
             {showGatePass && (
                 <GatePassModal booking={data}
                     onClose={() => setShowGatePass(false)}
@@ -1163,8 +1182,8 @@ function PayMasterModal({ booking, onClose, onSaved }) {
 }
 
 function MasterInvoiceModal({ booking, onClose, onSaved }) {
-    const [invoiceNo, setInvoiceNo] = useState('');
-    const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+    const [invoiceNo, setInvoiceNo] = useState(booking.MasterInvoiceNo || '');
+    const [invoiceDate, setInvoiceDate] = useState(booking.MasterInvoiceDate?.slice(0,10) || new Date().toISOString().slice(0, 10));
     const [wholesale, setWholesale] = useState(booking.WholesalePrice || '');
     const [notes, setNotes] = useState('');
     const [busy, setBusy] = useState(false);
@@ -1186,10 +1205,10 @@ function MasterInvoiceModal({ booking, onClose, onSaved }) {
     };
 
     return (
-        <Shell title="Record Master Tax Invoice" onClose={onClose}>
+        <Shell title="Process Master Incentive" onClose={onClose}>
             {err && <Err>{err}</Err>}
             <p style={{ fontSize: '0.85rem', color: '#475569' }}>
-                Records Master's sales-tax invoice for compliance and triggers the Master incentive accrual (Dr Master Incentive Receivable / Cr Master Incentive Income). The invoice itself is in the <strong>customer's</strong> name — this is a memo record on our side.
+                Processes Master incentive accrual against the uploaded invoice (Dr Master Incentive Receivable / Cr Master Incentive Income). Invoice number and date must match the saved file record. Historical bookings do not accrue Master incentives.
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
                 <Field label="Master Invoice # *" flex><input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="MCI-2026-XXXX" style={inputStyle} /></Field>
