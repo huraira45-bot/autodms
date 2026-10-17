@@ -195,7 +195,7 @@ import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceT
 import { ReceivablesSubLedger } from './pages/reports/ReceivablesSubLedger';
 import TabletApp from './pages/tablet/TabletApp';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, JcPartsCostMargin, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
-import { BookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
+import { BookingRegister, CancelledBookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import CustomerVehicleBalances from './pages/reports/CustomerVehicleBalances';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
@@ -821,6 +821,11 @@ function LegacySidebar() {
                         <FileBarChart size={20} /> Booking Register
                     </NavLink>
                 )}
+                {canReport('booking_register') && (
+                    <NavLink to="/reports/sales/cancelled-booking-register" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Cancelled Booking Register
+                    </NavLink>
+                )}
                 {(canReport('booking_register') || hasModule('sales_reports')) && (
                     <NavLink to="/reports/sales/customer-balances" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <FileBarChart size={20} /> Customer Balance Payments
@@ -1137,6 +1142,7 @@ function AppShell() {
 
                     {/* Sales (vehicle) reports */}
                     <Route path="/reports/sales/booking-register"        element={<ProtectedRoute><BookingRegister /></ProtectedRoute>} />
+                    <Route path="/reports/sales/cancelled-booking-register" element={<ProtectedRoute><CancelledBookingRegister /></ProtectedRoute>} />
                     <Route path="/reports/sales/customer-balances" element={<ProtectedRoute><CustomerVehicleBalances /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory"       element={<ProtectedRoute><VehicleInventory /></ProtectedRoute>} />
                     <Route path="/reports/sales/executive-performance"   element={<ProtectedRoute><ExecutivePerformance /></ProtectedRoute>} />

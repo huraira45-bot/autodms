@@ -5,6 +5,7 @@ const { requireAccess, requireAnyAccess } = require('../middleware/permissions')
 const { report: customerBalances } = require('../controllers/customerVehicleBalanceController');
 
 router.get('/booking-register',           requireAccess('report:booking_register'),           c.bookingRegister);
+router.get('/cancelled-booking-register', requireAccess('report:booking_register'), c.cancelledBookingRegister);
 router.get('/customer-balances', requireAnyAccess('report:booking_register', 'sales_reports'), customerBalances);
 router.get('/vehicle-inventory',          requireAccess('report:vehicle_inventory'),          c.vehicleInventory);
 router.get('/executive-performance',      requireAccess('report:executive_performance'),      c.executivePerformance);

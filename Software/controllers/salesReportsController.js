@@ -1,6 +1,7 @@
 /**
  * Sales (Vehicle) reports.
- *   - Booking Register             — every booking in the period, with status + paid
+ *   - Booking Register             — non-cancelled bookings in the period
+ *   - Cancelled Booking Register   — cancelled bookings in the period
  *   - Vehicle Inventory            — vehicles in stock by status + cost
  *   - Executive Performance        — bookings/conversions per sales exec
  *   - Customer Advances Aging      — outstanding deposits bucketed by age
@@ -21,20 +22,20 @@ function parseRange(req) {
 /**
  * GET /reports/sales/booking-register
  */
-exports.bookingRegister = async (req, res) => {
+async function bookingRegister(req, res, cancelled = false) {
     try {
         const { from, to } = parseRange(req);
         const pool = await getPool();
         const rq = pool.request()
             .input('from', sql.DateTime, from)
             .input('to',   sql.DateTime, to);
-        const conds = ['b.CreatedAt BETWEEN @from AND @to'];
+        const conds = ['b.CreatedAt BETWEEN @from AND @to', cancelled ? "b.Status = 'Cancelled'" : "b.Status <> 'Cancelled'"];
         if (req.query.status) { rq.input('st', sql.NVarChar(30), req.query.status); conds.push('b.Status = @st'); }
 
         const r = await rq.query(`
             SELECT b.BookingID, b.BookingNo, b.CreatedAt AS BookedOn, b.Status,
                    b.StandardPrice, b.NegotiatedPrice, b.DiscountAmount,
-                   b.AmountPaidToDate, b.DeliveredAt, b.CancelledAt,
+                   b.AmountPaidToDate, b.DeliveredAt, b.CancelledAt, b.CancellationReason,
                    p.PartyName AS CustomerName,
                    m.ModelCode + ' ' + ISNULL(v.VariantName, '') AS Vehicle,
                    b.CreatedByName AS ExecutiveName
@@ -46,6 +47,7 @@ exports.bookingRegister = async (req, res) => {
             ORDER BY b.CreatedAt DESC`);
 
         const rows = r.recordset.map(x => ({
+            BookingID:     x.BookingID,
             BookingNo:     x.BookingNo,
             BookedOn:      x.BookedOn?.toISOString().slice(0,10),
             Status:        x.Status,
@@ -56,9 +58,10 @@ exports.bookingRegister = async (req, res) => {
             Negotiated:    +Number(x.NegotiatedPrice || 0).toFixed(2),
             Discount:      +Number(x.DiscountAmount || 0).toFixed(2),
             Paid:          +Number(x.AmountPaidToDate || 0).toFixed(2),
-            Outstanding:   +(Number(x.NegotiatedPrice || 0) - Number(x.AmountPaidToDate || 0)).toFixed(2),
+            Outstanding:   cancelled ? 0 : +(Number(x.NegotiatedPrice || 0) - Number(x.AmountPaidToDate || 0)).toFixed(2),
             DeliveredAt:   x.DeliveredAt?.toISOString().slice(0,10) || null,
             CancelledAt:   x.CancelledAt?.toISOString().slice(0,10) || null,
+            CancellationReason: x.CancellationReason || '',
         }));
 
         const totals = {
@@ -73,7 +76,9 @@ exports.bookingRegister = async (req, res) => {
 
         res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
     } catch (err) { console.error('bookingRegister:', err); res.status(500).json({ error: err.message }); }
-};
+}
+exports.bookingRegister = (req, res) => bookingRegister(req, res, false);
+exports.cancelledBookingRegister = (req, res) => bookingRegister(req, res, true);
 
 /**
  * GET /reports/sales/vehicle-inventory

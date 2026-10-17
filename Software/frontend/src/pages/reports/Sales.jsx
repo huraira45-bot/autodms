@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { ClipboardList, Truck, TrendingUp, Wallet } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls } from './ReportShell';
 
@@ -11,14 +12,27 @@ const firstOfMonthISO = () => {
 // Booking Register
 // =====================================================================
 export function BookingRegister() {
+    return <BookingRegisterView />;
+}
+export function CancelledBookingRegister() {
+    return <BookingRegisterView cancelled />;
+}
+function BookingRegisterView({ cancelled = false }) {
     return (
         <ReportShell
-            title="Booking Register"
-            subtitle="Every vehicle booking in the period — customer, vehicle, status, paid vs. outstanding."
+            title={cancelled ? 'Cancelled Booking Register' : 'Booking Register'}
+            subtitle={cancelled
+                ? 'Cancelled bookings created in the selected period, with cancellation date and reason. Recorded payments are not a refund calculation.'
+                : 'Bookings created in the selected period, excluding cancelled bookings — paid vs. outstanding.'}
             icon={ClipboardList}
-            endpoint="sales/booking-register"
+            endpoint={cancelled ? 'sales/cancelled-booking-register' : 'sales/booking-register'}
             defaultParams={{ from: firstOfMonthISO(), to: todayISO() }}
-            controls={PeriodControls}
+            controls={props => <>
+                <PeriodControls {...props} />
+                <Link className="erp-btn" to={cancelled ? '/reports/sales/booking-register' : '/reports/sales/cancelled-booking-register'}>
+                    {cancelled ? 'Booking Register' : 'Cancelled Booking Register'}
+                </Link>
+            </>}
         >
             {(data) => (
                 <>
@@ -27,7 +41,7 @@ export function BookingRegister() {
                         { label: 'Negotiated',  value: 'PKR ' + fmt(data.totals.negotiated) },
                         { label: 'Discount',    value: 'PKR ' + fmt(data.totals.discount) },
                         { label: 'Paid',        value: 'PKR ' + fmt(data.totals.paid) },
-                        { label: 'Outstanding', value: 'PKR ' + fmt(data.totals.outstanding), strong: true },
+                        ...(!cancelled ? [{ label: 'Outstanding', value: 'PKR ' + fmt(data.totals.outstanding), strong: true }] : []),
                     ]} />
                     {Object.keys(data.totals.byStatus || {}).length > 0 && (
                         <div className="card" style={{ display: 'flex', gap: 14, padding: 10, flexWrap: 'wrap' }}>
@@ -45,24 +59,26 @@ export function BookingRegister() {
                                 <tr style={trHeader}>
                                     <TH>Booking #</TH><TH>Date</TH><TH>Customer</TH><TH>Vehicle</TH>
                                     <TH>Executive</TH><TH>Status</TH>
+                                    {cancelled && <><TH>Cancelled on</TH><TH>Cancellation reason</TH></>}
                                     <TH align="right">Negotiated</TH><TH align="right">Discount</TH>
-                                    <TH align="right">Paid</TH><TH align="right">Outstanding</TH>
+                                    <TH align="right">{cancelled ? 'Paid (booking)' : 'Paid'}</TH>{!cancelled && <TH align="right">Outstanding</TH>}
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={10}>No bookings in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={cancelled ? 11 : 10}>No {cancelled ? 'cancelled ' : ''}bookings in this period.</Empty>}
                                 {data.rows.map((r, i) => (
                                     <tr key={i} style={trBody}>
-                                        <TD mono><strong>{r.BookingNo}</strong></TD>
+                                        <TD mono><Link to={`/sales/bookings/${r.BookingID}`}><strong>{r.BookingNo}</strong></Link></TD>
                                         <TD>{r.BookedOn}</TD>
                                         <TD>{r.CustomerName}</TD>
                                         <TD>{r.Vehicle}</TD>
                                         <TD>{r.ExecutiveName}</TD>
                                         <TD><StatusPill v={r.Status} /></TD>
+                                        {cancelled && <><TD>{r.CancelledAt || '—'}</TD><TD>{r.CancellationReason || '—'}</TD></>}
                                         <TD align="right" mono>{fmt(r.Negotiated)}</TD>
                                         <TD align="right" mono color={r.Discount > 0 ? '#a16207' : undefined}>{fmt(r.Discount)}</TD>
                                         <TD align="right" mono color="#15803d">{fmt(r.Paid)}</TD>
-                                        <TD align="right" mono color={r.Outstanding > 0 ? '#b91c1c' : undefined} bold>{fmt(r.Outstanding)}</TD>
+                                        {!cancelled && <TD align="right" mono color={r.Outstanding > 0 ? '#b91c1c' : undefined} bold>{fmt(r.Outstanding)}</TD>}
                                     </tr>
                                 ))}
                             </tbody>
