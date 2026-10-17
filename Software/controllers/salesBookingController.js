@@ -57,7 +57,7 @@ exports.logBookingTransition = logTransition;
 // ============================================================================
 
 // GET /api/sales/bookings?status=&executiveId=&search=&corpPO=&dateFrom=&dateTo=
-exports.listBookings = async (req, res) => {
+async function listBookings(req, res, cancelled = false) {
     try {
         const { dateFrom, dateTo } = req.query;
         for (const [name, value] of [['dateFrom', dateFrom], ['dateTo', dateTo]]) {
@@ -74,7 +74,7 @@ exports.listBookings = async (req, res) => {
         }
         const pool = await getPool();
         const r = pool.request();
-        const conds = [];
+        const conds = [cancelled ? "b.Status='Cancelled'" : "b.Status<>'Cancelled'"];
         // Use the actual booking day, including historical entries; both bounds are inclusive.
         const bookingDay = 'CAST(COALESCE(b.BookingDate, b.CreatedAt) AS DATE)';
         if (dateFrom) {
@@ -111,7 +111,7 @@ exports.listBookings = async (req, res) => {
                    b.CorporatePONumber, b.AllowPartialDelivery,
                    b.CreatedBy_SalesExecutiveID, e.EmployeeName AS SalesExecutiveName,
                    b.CreatedAt, b.CreatedByName,
-                   b.DeliveredAt, b.GatePassIssuedAt, b.ClosedAt, b.CancelledAt
+                   b.DeliveredAt, b.GatePassIssuedAt, b.ClosedAt, b.CancelledAt, b.CancellationReason
             FROM dms_SalesBookings b
             LEFT JOIN gen_PartiesInfo   p   ON b.PartyID = p.PartyID
             LEFT JOIN dms_VehicleModel  m   ON b.VehicleModelID = m.ModelID
@@ -136,7 +136,9 @@ exports.listBookings = async (req, res) => {
         `);
         res.json(result.recordset);
     } catch (err) { res.status(500).json({ error: err.message }); }
-};
+}
+exports.listBookings = (req, res) => listBookings(req, res, false);
+exports.listCancelledBookings = (req, res) => listBookings(req, res, true);
 
 // GET /api/sales/bookings/:id
 exports.getBooking = async (req, res) => {

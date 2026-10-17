@@ -74,6 +74,7 @@ router.delete('/vehicles/:id',     requireAny('sales_admin_settings'), cat.delet
 // Cancel: same as create, plus sales_admin_pricing
 // =========================================================================
 router.get(   '/bookings',                 requireAny(...SALES_READERS),       bk.listBookings);
+router.get('/bookings/cancelled', requireAny(...SALES_READERS), bk.listCancelledBookings);
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
 router.patch('/bookings/:id/delivery-month', requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'), deliveryMonth.update);

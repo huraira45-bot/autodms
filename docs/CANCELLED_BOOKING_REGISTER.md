@@ -9,6 +9,12 @@ Both reports retain the existing register period behavior: the selected dates fi
 API: `/api/reports/sales/cancelled-booking-register`.
 Page: `/reports/sales/cancelled-booking-register`.
 
+## Vehicle Sales dashboard and bookings screen
+
+The **Vehicle Sales → Bookings** working list also excludes cancelled bookings. They cannot be selected using its status filter. Open the separate **Vehicle Sales → Cancelled Bookings** dashboard tile, or the **Cancelled Bookings** button on the working list, to review them. This is a browsing screen, separate from the Cancellations approval queue.
+
+Working-list page: `/sales/cancelled-bookings`; API: `/api/sales/bookings/cancelled`. It preserves booking-date, customer/booking/PO search and own-executive filters, and adds cancellation date/reason columns. Sales users retain their existing viewing permissions; individual bookings remain available at their detail URLs. No records are deleted.
+
 No new database migration is required. Deploy with the normal Git pull, frontend build and PM2 restart. If the two preceding feature migrations (158 and 159) remain pending, apply them before restarting:
 
 ```bat

@@ -1,6 +1,7 @@
 jest.mock('../config/db', () => ({ getPool: jest.fn(), sql: { DateTime: 'datetime', NVarChar: () => 'nvarchar' } }));
 const { getPool } = require('../config/db');
 const reports = require('../controllers/salesReportsController');
+const bookings = require('../controllers/salesBookingController');
 const router = require('../routes/salesReportsRoutes');
 const response = () => ({ code: 200, status(n) { this.code=n; return this; }, json(body) { this.body=body; } });
 const row = { BookingID: 7, BookingNo: 'BK-2026-0007', BookedOn: new Date('2026-10-01T00:00Z'),
@@ -47,4 +48,19 @@ test('both registers use the existing booking-register report permission',()=>{
         expect(denied.code).toBe(403);expect(next).not.toHaveBeenCalled();
         guard({user:{groupId:2,permissions:['report:booking_register']}},response(),next);expect(next).toHaveBeenCalledTimes(1);
     }
+});
+
+test('Vehicle Bookings screen excludes cancelled records even when a cancelled status is requested',async()=>{
+    const {query,values}=fixture([]),res=response();
+    await bookings.listBookings({query:{status:'Cancelled',includeCancelled:'1'}},res);
+    expect(query.mock.calls[0][0]).toContain("b.Status<>'Cancelled'");
+    expect(values.s).toBe('Cancelled');expect(res.body).toEqual([]);
+});
+test('separate cancelled bookings list has its own fixed scope and preserves booking search/date filters',async()=>{
+    const {query,values}=fixture([{...row,Status:'Cancelled'}]),res=response();
+    await bookings.listCancelledBookings({query:{dateFrom:'2026-10-01',dateTo:'2026-10-17',search:'Farhan',assignedToMe:'1'},user:{employeeId:3}},res);
+    expect(query.mock.calls[0][0]).toContain("b.Status='Cancelled'");
+    expect(query.mock.calls[0][0]).toContain('b.CancellationReason');
+    expect(query.mock.calls[0][0]).toContain('>= @dateFrom');expect(query.mock.calls[0][0]).toContain('<= @dateTo');
+    expect(values.q).toBe('%Farhan%');expect(values.me).toBe(3);expect(res.body[0].Status).toBe('Cancelled');
 });

@@ -46,7 +46,7 @@ const STATUS_TONE = {
     Cancelled: 'red',
 };
 
-export default function BookingsList() {
+export default function BookingsList({ cancelled = false }) {
     const { hasModule } = useAuth();
     const canCreate = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm');
     const navigate = useNavigate();
@@ -75,12 +75,12 @@ export default function BookingsList() {
         setLoading(true);
         try {
             const params = {};
-            if (statusFilter) params.status = statusFilter;
+            if (!cancelled && statusFilter) params.status = statusFilter;
             if (assignedToMe) params.assignedToMe = 1;
             if (search) params.search = search;
             if (dateFrom) params.dateFrom = dateFrom;
             if (dateTo) params.dateTo = dateTo;
-            const r = await axios.get(`${API}/sales/bookings`, { params });
+            const r = await axios.get(`${API}/sales/bookings${cancelled ? '/cancelled' : ''}`, { params });
             if (currentRequest === requestId.current) setRows(r.data);
         } catch (e) {
             if (currentRequest === requestId.current) {
@@ -89,17 +89,20 @@ export default function BookingsList() {
             }
         }
         if (currentRequest === requestId.current) setLoading(false);
-    }, [statusFilter, assignedToMe, search, dateFrom, dateTo]);
+    }, [cancelled, statusFilter, assignedToMe, search, dateFrom, dateTo]);
     useEffect(() => { load(); }, [load]);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <ErpControlPanel
-                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ClipboardList size={16} /> Vehicle Bookings</span>}
-                subtitle="Track customer bookings, payments, allocation, approvals, and delivery readiness."
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ClipboardList size={16} /> {cancelled ? 'Cancelled Vehicle Bookings' : 'Vehicle Bookings'}</span>}
+                subtitle={cancelled ? 'Completed booking cancellations, with cancellation date and reason.' : 'Track customer bookings, payments, allocation, approvals, and delivery readiness. Cancelled bookings are listed separately.'}
                 actions={
                     <>
-                        {canCreate && (
+                        <button type="button" className="erp-btn" onClick={() => navigate(cancelled ? '/sales/bookings' : '/sales/cancelled-bookings')}>
+                            {cancelled ? 'Vehicle Bookings' : 'Cancelled Bookings'}
+                        </button>
+                        {canCreate && !cancelled && (
                             <button type="button" className="erp-btn erp-btn-primary" onClick={() => navigate('/sales/bookings/new')}>
                                 <Plus size={14} /> New Booking
                             </button>
@@ -136,11 +139,11 @@ export default function BookingsList() {
                         Clear dates
                     </button>
                 )}
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                {cancelled ? <StatusPill tone="red">Cancelled</StatusPill> : <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
                     style={{ minWidth: 190 }}>
                     <option value="">All statuses</option>
-                    {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                    {Object.keys(STATUS_STYLE).filter(s => s !== 'Cancelled').map(s => <option key={s} value={s}>{s}</option>)}
+                </select>}
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
                     <input type="checkbox" checked={assignedToMe} onChange={e => setAssignedToMe(e.target.checked)} /> My bookings only
                 </label>
@@ -162,6 +165,7 @@ export default function BookingsList() {
                                 <Th align="right">Standard</Th><Th align="right">Negotiated</Th>
                                 <Th align="right">Disc</Th><Th align="right">Paid</Th>
                                 <Th>Status</Th><Th>Allocated</Th><Th>Executive</Th>
+                                {cancelled && <><Th>Cancelled on</Th><Th>Cancellation reason</Th></>}
                             </tr>
                         </thead>
                         <tbody>
@@ -198,6 +202,7 @@ export default function BookingsList() {
                                         <Td><StatusPill tone={STATUS_TONE[b.Status] || 'slate'}>{b.Status}</StatusPill></Td>
                                         <Td mono style={{ color: '#475569', fontSize: '0.78rem' }}>{b.AllocatedChasisNo || '—'}</Td>
                                         <Td style={{ fontSize: '0.78rem' }}>{b.SalesExecutiveName?.trim() || '—'}</Td>
+                                        {cancelled && <><Td>{fmtDate(b.CancelledAt) || '—'}</Td><Td>{b.CancellationReason || '—'}</Td></>}
                                     </tr>
                                 );
                             })}

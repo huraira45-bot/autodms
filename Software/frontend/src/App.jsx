@@ -757,6 +757,11 @@ function LegacySidebar() {
                         <ClipboardList size={20} /> Bookings
                     </NavLink>
                 )}
+                {['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports', 'sales_admin_pricing', 'sales_admin_settings'].some(role => hasModule(role)) && (
+                    <NavLink to="/sales/cancelled-bookings" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <ClipboardList size={20} /> Cancelled Bookings
+                    </NavLink>
+                )}
                 {(hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings') || hasModule('sales_reports')) && (
                     <NavLink to="/sales/inquiries" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <Headphones size={20} /> Sales Inquiries
@@ -1334,7 +1339,10 @@ function AppShell() {
                         <ProtectedRoute><VehicleInventoryAdmin /></ProtectedRoute>
                     } />
                     <Route path="/sales/bookings" element={
-                        <ProtectedRoute><BookingsList /></ProtectedRoute>
+                        <ProtectedRoute><BookingsList key="current-bookings" /></ProtectedRoute>
+                    } />
+                    <Route path="/sales/cancelled-bookings" element={
+                        <ProtectedRoute><BookingsList key="cancelled-bookings" cancelled /></ProtectedRoute>
                     } />
                     <Route path="/sales/bookings/new" element={
                         <ProtectedRoute><NewBooking /></ProtectedRoute>
