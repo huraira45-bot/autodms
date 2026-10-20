@@ -164,7 +164,9 @@ export default function JobController() {
     j.jobCode?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const fmtDT = (val) => val ? new Date(val).toISOString().slice(0, 16) : '';
+  // SQL timestamps and datetime-local edits both carry the workshop wall clock.
+  // Parsing an edit as a Date converts it to UTC and shifts it on every change.
+  const fmtDT = (val) => val ? val.slice(0, 16) : '';
 
   const StatusIcon = selected ? (STATUS_COLORS[selected.WorkshopStatus]?.icon || Clock) : Clock;
 
