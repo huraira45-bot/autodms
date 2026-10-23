@@ -3,6 +3,10 @@ const router = express.Router();
 const c = require('../controllers/salesReportsController');
 const { requireAnyAccess } = require('../middleware/permissions');
 const { report: customerBalances } = require('../controllers/customerVehicleBalanceController');
+const bookingPayments = require('../controllers/bookingPaymentReportController');
+
+router.get('/booking-payments/options', requireAnyAccess('sales_reports', 'report:booking_register'), bookingPayments.options);
+router.get('/booking-payments', requireAnyAccess('sales_reports', 'report:booking_register'), bookingPayments.report);
 
 router.get('/booking-register',           requireAnyAccess('sales_reports', 'report:booking_register'),           c.bookingRegister);
 router.get('/cancelled-booking-register', requireAnyAccess('sales_reports', 'report:booking_register'), c.cancelledBookingRegister);

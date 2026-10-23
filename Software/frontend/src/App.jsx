@@ -197,6 +197,7 @@ import TabletApp from './pages/tablet/TabletApp';
 import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, PartsIssuedToJc, JcPartsCostMargin, PartsSoldFinalized, ItemLedger } from './pages/reports/Parts';
 import { BookingRegister, CancelledBookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import CustomerVehicleBalances from './pages/reports/CustomerVehicleBalances';
+import BookingPaymentReport from './pages/reports/BookingPaymentReport';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
 import WorkspaceTopBar      from './components/WorkspaceTopBar';
@@ -1149,6 +1150,7 @@ function AppShell() {
                     <Route path="/reports/sales/booking-register"        element={<ProtectedRoute><BookingRegister /></ProtectedRoute>} />
                     <Route path="/reports/sales/cancelled-booking-register" element={<ProtectedRoute><CancelledBookingRegister /></ProtectedRoute>} />
                     <Route path="/reports/sales/customer-balances" element={<ProtectedRoute><CustomerVehicleBalances /></ProtectedRoute>} />
+                    <Route path="/reports/sales/booking-payments" element={<ProtectedRoute><BookingPaymentReport /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory"       element={<ProtectedRoute><VehicleInventory /></ProtectedRoute>} />
                     <Route path="/reports/sales/executive-performance"   element={<ProtectedRoute><ExecutivePerformance /></ProtectedRoute>} />
                     <Route path="/reports/sales/customer-advances-aging" element={<ProtectedRoute><CustomerAdvancesAging /></ProtectedRoute>} />

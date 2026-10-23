@@ -55,7 +55,7 @@ function historicalPayOrderSql(coreGL = '@gl') {
     ) candidate WHERE candidate.Requested<=candidate.Available`;
 }
 
-function masterPositionSql(booking, coreGL) {
+function masterPositionSql(booking, coreGL, { excludeDelivery = false } = {}) {
     return `SELECT movement.GLCAID,SUM(movement.Debit) AS Dr,SUM(movement.Credit) AS Cr,
         SUM(movement.Debit-movement.Credit) AS Net
     FROM (
@@ -63,6 +63,7 @@ function masterPositionSql(booking, coreGL) {
         FROM data_FinanceVoucherDetail d JOIN data_FinanceVoucherInfo v ON v.VoucherID=d.VoucherID
         LEFT JOIN data_FinanceVoucherInfo original ON original.VoucherID=v.ReversesVoucherID
         WHERE v.Status IN ('Posted','Reversed') AND ${masterAccountSql('d',coreGL)}
+          ${excludeDelivery ? "AND ISNULL(v.SourceDocType,'')<>'SALES_DELIVERY' AND ISNULL(original.SourceDocType,'')<>'SALES_DELIVERY'" : ''}
           AND (d.BookingID=${booking} OR (v.SourceDocType='PAY_MASTER' AND v.SourceDocID=${booking})
                OR (original.SourceDocType='PAY_MASTER' AND original.SourceDocID=${booking}))
         UNION ALL

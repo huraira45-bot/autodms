@@ -4,7 +4,7 @@ Open **Dashboard → Sale Module Reports**, or select **Sale Module Reports** in
 the sidebar. The Vehicle Sales module also has a shortcut to this report hub.
 Direct route: `/module/sales-reports`.
 
-The hub gathers the ten existing vehicle-sales reports:
+The hub gathers eleven vehicle-sales reports:
 
 | Section | Report | Route |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ The hub gathers the ten existing vehicle-sales reports:
 | Bookings | Cancelled Booking Register | `/reports/sales/cancelled-booking-register` |
 | Bookings | Booking Pipeline | `/sales/reports?tab=pipeline` |
 | Payments & Reconciliation | Customer Balance Payments | `/reports/sales/customer-balances` |
+| Payments & Reconciliation | Booking Payment Status | `/reports/sales/booking-payments` |
 | Payments & Reconciliation | Customer Advances Aging | `/reports/sales/customer-advances-aging` |
 | Payments & Reconciliation | Booking Account Reconciliation | `/sales/reports?tab=bvrRecon` |
 | Inventory & Master Motors | Vehicle Inventory | `/reports/sales/vehicle-inventory` |
@@ -27,9 +28,10 @@ options are retained apart from the query corrections below.
 ## Access
 
 The existing `sales_reports` permission is now labelled **Sale Module Reports
-(read-only)** in Role Permissions. It grants all ten read-only report endpoints.
+(read-only)** in Role Permissions. It grants all eleven read-only reports.
 Individual `report:*` grants continue to allow only their corresponding reports;
-`report:booking_register` covers both registers and Customer Balance Payments.
+`report:booking_register` covers both registers, Customer Balance Payments and
+Booking Payment Status (including its filter-options endpoint).
 The hub and analytics tabs show only accessible reports. Server endpoints enforce
 the same rules independently. Admin retains access. No new permission key or
 database migration is required.
@@ -46,9 +48,11 @@ database migration is required.
 
 ## Verification
 
-- 61 focused Jest tests passed across `salesReportModule`,
-  `cancelledBookingRegister`, and `bookingDeliveryMonth`.
-- All ten controllers returned HTTP 200 with read-only local database checks.
+- Initial hub: 61 focused tests; all ten original controllers passed read-only
+  development database checks.
+- Booking Payment Status addition: 137 focused tests passed, both new endpoints
+  passed read-only development checks, and ten SQL fixture scenarios verified
+  remittances, delivery, reversals, drafts and historical payments.
 - Production frontend build passed. The existing bundle-size warning remains.
 - No live deployment or financial/stock data changes were performed.
 
