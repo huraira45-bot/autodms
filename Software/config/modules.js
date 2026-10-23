@@ -38,7 +38,7 @@ const MODULES = [
     { key: 'sales_admin_settings',  label: 'Sales — Catalog & Policy Admin',             section: 'NEW VEHICLE SALES' },
     { key: 'sales_master_settlement', label: 'Sales — Master Invoice Posting',           section: 'NEW VEHICLE SALES' },
     { key: 'sales_recovery',        label: 'Sales — Recovery Officer',                   section: 'NEW VEHICLE SALES' },
-    { key: 'sales_reports',         label: 'Sales Reports',                              section: 'NEW VEHICLE SALES' },
+    { key: 'sales_reports',         label: 'Sale Module Reports',                              section: 'NEW VEHICLE SALES' },
     { key: 'sales_hierarchy',       label: 'Sales Hierarchy & Targets (HR-side)',        section: 'ADMIN & HR' },
     { key: 'hr_employees',        label: 'Employees',              section: 'ADMIN & HR' },
     { key: 'hr_settings',         label: 'HR Config',              section: 'ADMIN & HR' },

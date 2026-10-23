@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Search, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { getModuleActions } from '../navigationConfig';
 
 const STORAGE_KEY = 'dms_recent_commands';
 
@@ -75,10 +76,6 @@ const COMMANDS = [
     { label: 'Cancellation Queue', path: '/sales/cancellations', section: 'Vehicle Sales', anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'am_approve', 'admin_unfinalize', 'sales_admin_settings'], keywords: ['cancel'] },
     { label: 'Incentive Policies', path: '/sales/incentive-policies', section: 'Vehicle Sales', anyModules: ['sales_admin_settings', 'sales_gm', 'sales_reports'], keywords: ['commission'] },
     { label: 'Incentive Disbursement', path: '/sales/incentive-disbursement', section: 'Vehicle Sales', anyModules: ['sales_admin_settings', 'sales_gm', 'sales_reports'], keywords: ['commission payment'] },
-    { label: 'Booking Register', path: '/reports/sales/booking-register', section: 'Vehicle Sales Reports', anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], keywords: ['report'] },
-    { label: 'Sales Vehicle Inventory Report', path: '/reports/sales/vehicle-inventory', section: 'Vehicle Sales Reports', anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], keywords: ['report'] },
-    { label: 'Executive Performance', path: '/reports/sales/executive-performance', section: 'Vehicle Sales Reports', anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], keywords: ['target', 'report'] },
-    { label: 'Customer Advances Aging', path: '/reports/sales/customer-advances-aging', section: 'Vehicle Sales Reports', anyModules: ['sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], keywords: ['advance', 'aging'] },
 
     { label: 'Employees', path: '/employees', section: 'Admin & HR', moduleKey: 'hr_employees', keywords: ['staff'] },
     { label: 'HR Settings', path: '/hr-settings', section: 'Admin & HR', moduleKey: 'hr_settings', keywords: ['department', 'designation'] },
@@ -116,15 +113,23 @@ function setRecentCommand(path) {
 
 export default function CommandPalette({ open, onOpen, onClose }) {
     const navigate = useNavigate();
-    const { hasModule } = useAuth();
+    const { hasModule, hasPermission } = useAuth();
     const inputRef = useRef(null);
     const [query, setQuery] = useState('');
     const [activeIndex, setActiveIndex] = useState(0);
     const [recentPaths, setRecentPaths] = useState([]);
 
     const visibleCommands = useMemo(
-        () => COMMANDS.filter(item => canUseCommand(item, hasModule)),
-        [hasModule]
+        () => {
+            const reports = getModuleActions('sales-reports', hasModule, hasPermission);
+            const reportCommands = reports.map(item => ({
+                label: item.label, path: item.path, section: 'Sale Module Reports',
+                keywords: ['sales', 'report', item.keywords || '', item.description || ''],
+            }));
+            if (reports.length) reportCommands.unshift({ label: 'Sale Module Reports', path: '/module/sales-reports', section: 'Modules', keywords: ['sales', 'reports', 'vehicle'] });
+            return [...COMMANDS.filter(item => canUseCommand(item, hasModule)), ...reportCommands];
+        },
+        [hasModule, hasPermission]
     );
 
     const commandsByPath = useMemo(() => {

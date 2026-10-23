@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Loader2, BarChart3, Clock, TrendingUp, Scale } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
+import { useAuth } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
 import CustomerVehicleBalances from '../reports/CustomerVehicleBalances';
 
@@ -10,10 +12,21 @@ const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthStartISO = () => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); };
+const REPORT_TABS = [
+    ['pipeline', 'Booking Pipeline', BarChart3, 'report:booking_pipeline'],
+    ['miAging', 'Master Invoice Aging', Clock, 'report:master_invoice_aging'],
+    ['incAging', 'Incentive Receivable Aging', TrendingUp, 'report:incentive_receivable_aging'],
+    ['bvrRecon', 'Booking Account Reconciliation', Scale, 'report:booking_account_reconciliation'],
+    ['customerBalances', 'Customer Balance Payments', Scale, 'report:booking_register'],
+];
 
 export default function SalesReportsV2() {
     const { notify } = useFeedback();
-    const [tab, setTab] = useState('pipeline');
+    const { hasModule, hasPermission } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const allowedTabs = REPORT_TABS.filter(([, , , permission]) => hasModule('sales_reports') || hasPermission(permission));
+    const tab = allowedTabs.find(([key]) => key === searchParams.get('tab'))?.[0] || allowedTabs[0]?.[0];
+    const setTab = key => setSearchParams({ tab: key });
     const [from, setFrom] = useState(monthStartISO());
     const [to, setTo]     = useState(todayISO());
     const [pipeline, setPipeline] = useState(null);
@@ -23,7 +36,7 @@ export default function SalesReportsV2() {
     const [busy, setBusy] = useState(false);
 
     const load = useCallback(async () => {
-        if (tab === 'customerBalances') { setBusy(false); return; }
+        if (!tab || tab === 'customerBalances') { setBusy(false); return; }
         setBusy(true);
         try {
             if (tab === 'pipeline') {
@@ -35,7 +48,7 @@ export default function SalesReportsV2() {
             } else if (tab === 'incAging') {
                 const r = await axios.get('/api/reports/sales/incentive-receivable-aging');
                 setIncAging(r.data);
-            } else {
+            } else if (tab === 'bvrRecon') {
                 const r = await axios.get('/api/reports/sales/booking-account-reconciliation');
                 setBvrRecon(r.data);
             }
@@ -48,17 +61,13 @@ export default function SalesReportsV2() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <ErpControlPanel
-                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><BarChart3 size={16} /> Sales Reports</span>}
-                subtitle="Booking pipeline, master invoice aging, incentive receivable aging."
+                title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><BarChart3 size={16} /> Sale Module Reports</span>}
+                subtitle="Booking pipeline, aging and account reconciliation."
+                actions={<Link className="btn" to="/module/sales-reports">All sale reports</Link>}
             />
+            {!tab && <div className="card">You do not have permission to view these reports.</div>}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-                {[
-                    ['pipeline','Booking Pipeline', BarChart3],
-                    ['miAging','Master Invoice Aging', Clock],
-                    ['incAging','Incentive Receivable Aging', TrendingUp],
-                    ['bvrRecon','Booking Account Reconciliation', Scale],
-                    ['customerBalances','Customer Balance Payments', Scale],
-                ].map(([key,label,Icon]) => (
+                {allowedTabs.map(([key,label,Icon]) => (
                     <button key={key} onClick={() => setTab(key)}
                         style={{ padding: '8px 14px', background: tab===key?'#1e40af':'#f1f5f9', color: tab===key?'white':'#475569', border:'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Icon size={14} /> {label}
@@ -121,7 +130,7 @@ export default function SalesReportsV2() {
                                     <th style={th}>Customer</th>
                                     <th style={th}>Variant</th>
                                     <th style={th}>Chassis</th>
-                                    <th style={th}>Allocated</th>
+                                    <th style={th}>Aging from</th>
                                     <th style={{...th, textAlign:'right'}}>Days</th>
                                     <th style={th}>Bucket</th>
                                 </tr></thead>
@@ -132,7 +141,7 @@ export default function SalesReportsV2() {
                                             <td style={td}>{r.PartyName || '—'}</td>
                                             <td style={td}>{r.VariantName || '—'}</td>
                                             <td style={{...td, fontFamily: 'monospace'}}>{r.AllocatedChasisNo || '—'}</td>
-                                            <td style={{...td, color: '#64748b'}}>{dt(r.AllocatedAt)}</td>
+                                            <td style={{...td, color: '#64748b'}}>{dt(r.AllocatedAt)}{r.AllocationDateEstimated ? ' *' : ''}</td>
                                             <td style={{...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.DaysSinceAlloc > 30 ? '#b91c1c' : '#1e40af'}}>{r.DaysSinceAlloc}</td>
                                             <td style={td}>{r.Bucket}</td>
                                         </tr>
@@ -140,6 +149,7 @@ export default function SalesReportsV2() {
                                     {miAging.rows.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>Nothing waiting for Master invoice.</td></tr>}
                                 </tbody>
                             </table>
+                            <p className="hint">* Booking date used where an allocation history date is unavailable.</p>
                         </div>
                     </>
                 )

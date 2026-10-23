@@ -807,13 +807,13 @@ function LegacySidebar() {
                         <FileClock size={20} /> Draft Vouchers
                     </NavLink>
                 )}
-                {anyReport(
+                {(hasModule('sales_reports') || anyReport(
                     'booking_register','vehicle_inventory','executive_performance',
                     'customer_advances_aging','booking_pipeline','master_invoice_aging',
-                    'incentive_receivable_aging',
-                ) && (
-                    <NavLink to="/sales/reports" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
-                        <FileBarChart size={20} /> Sales Reports
+                    'incentive_receivable_aging','booking_account_reconciliation',
+                )) && (
+                    <NavLink to="/module/sales-reports" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Sale Module Reports
                     </NavLink>
                 )}
                 {hasModule('cro_reports') && (

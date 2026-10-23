@@ -246,7 +246,7 @@ exports.bookingPipeline = async (req, res) => {
             .query(`
                 SELECT
                     (SELECT COUNT(*) FROM dms_CRO_Inquiries
-                       WHERE CreatedAt BETWEEN @from AND @to)                                            AS Inquiries,
+                       WHERE OpenedAt BETWEEN @from AND @to)                                             AS Inquiries,
                     (SELECT COUNT(*) FROM dms_SalesBookings
                        WHERE CreatedAt BETWEEN @from AND @to AND Status <> 'Cancelled')                  AS Bookings,
                     (SELECT COUNT(*) FROM dms_SalesBookings
@@ -255,8 +255,8 @@ exports.bookingPipeline = async (req, res) => {
                        WHERE CreatedAt BETWEEN @from AND @to AND Status IN ('MasterInvoicePosted','ReadyForDelivery','Closed','Delivered','GatePassIssued')) AS MasterInvoiced,
                     (SELECT COUNT(*) FROM dms_SalesBookings
                        WHERE GatePassIssuedAt BETWEEN @from AND @to)                                     AS Delivered,
-                    (SELECT COUNT(*) FROM dms_SalesBookingCancellations
-                       WHERE RequestedAt BETWEEN @from AND @to AND Status='Executed')                    AS Cancelled
+                    (SELECT COUNT(*) FROM dms_SalesBookings
+                       WHERE CancelledAt BETWEEN @from AND @to AND Status='Cancelled')                   AS Cancelled
             `);
         const k = r.recordset[0];
         const stages = [
@@ -290,14 +290,23 @@ exports.masterInvoiceAging = async (req, res) => {
         const pool = await getPool();
         const r = await pool.request().query(`
             SELECT b.BookingID, b.BookingNo, p.PartyName, v.VariantName,
-                   b.AllocatedChasisNo, b.AllocatedAt,
-                   DATEDIFF(day, b.AllocatedAt, GETDATE()) AS DaysSinceAlloc,
+                   veh.ChasisNo AS AllocatedChasisNo,
+                   dates.AllocatedAt,
+                   CAST(CASE WHEN allocation.At IS NULL THEN 1 ELSE 0 END AS BIT) AS AllocationDateEstimated,
+                   DATEDIFF(day, dates.AllocatedAt, GETDATE()) AS DaysSinceAlloc,
                    b.NegotiatedPrice
             FROM dms_SalesBookings b
             LEFT JOIN gen_PartiesInfo p   ON p.PartyID   = b.PartyID
-            LEFT JOIN dms_VehicleVariant v ON v.VariantID = b.VariantID
-            WHERE b.Status = 'Allocated' AND b.AllocatedAt IS NOT NULL
-            ORDER BY b.AllocatedAt ASC`);
+            LEFT JOIN dms_VehicleVariant v ON v.VariantID = b.VehicleVariantID
+            LEFT JOIN dms_Vehicle veh ON veh.VehicleID = b.AllocatedVehicleID
+            OUTER APPLY (
+                SELECT TOP (1) t.At FROM dms_BookingStateTransitions t
+                WHERE t.BookingID=b.BookingID AND t.ToState='Allocated' AND t.FromState<>'Allocated'
+                ORDER BY t.At DESC, t.TransitionID DESC
+            ) allocation
+            CROSS APPLY (SELECT COALESCE(allocation.At,b.BookingDate,b.CreatedAt) AS AllocatedAt) dates
+            WHERE b.Status = 'Allocated'
+            ORDER BY dates.AllocatedAt ASC`);
         const rows = r.recordset.map(x => ({
             ...x,
             Bucket: x.DaysSinceAlloc <= 7 ? '0-7 days'

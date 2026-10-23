@@ -111,7 +111,7 @@ const SECTIONS = [
             { key: 'sales_master_settlement', label: 'Master Invoice Posting',               kind: 'workflow' },
             { key: 'sales_recovery',          label: 'Recovery Officer',                     kind: 'workflow' },
             { key: 'sales_hierarchy',         label: 'Hierarchy & Targets (HR-side)',        kind: 'workflow' },
-            { key: 'sales_reports',           label: 'Sales Reports (read-only)',            kind: 'workflow' },
+            { key: 'sales_reports',           label: 'Sale Module Reports (read-only)',            kind: 'workflow' },
         ],
     },
     {

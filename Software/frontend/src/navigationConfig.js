@@ -36,6 +36,7 @@ export const MODULE_GROUPS = [
     { id: 'finance',    label: 'Finance',          icon: Wallet,          path: '/module/finance',   description: 'Vouchers, payments, cheques, setup' },
     { id: 'crm',        label: 'CRM / CRO',        icon: HeartHandshake,  path: '/module/crm',       description: 'Follow-ups, complaints, surveys, KYC' },
     { id: 'sales',      label: 'Vehicle Sales',    icon: Car,             path: '/module/sales',     description: 'Bookings, inventory, incentives' },
+    { id: 'sales-reports', label: 'Sale Module Reports', icon: FileBarChart, path: '/module/sales-reports', description: 'Vehicle bookings, customer balances, inventory, performance and reconciliation reports' },
     { id: 'hr',         label: 'HR',               icon: Users,           path: '/module/hr',        description: 'Employees, departments' },
     { id: 'admin',      label: 'Admin',            icon: ShieldCheck,     path: '/module/admin',     description: 'Users, permissions' },
     { id: 'reports',    label: 'Reports',          icon: FileBarChart,    path: '/module/reports',   description: 'Financial + operational reports' },
@@ -146,7 +147,7 @@ export const NAV_ITEMS = [
     { id: 's-recov',     moduleGroup: 'sales', label: 'Sales Recovery',        path: '/sales/recovery',          icon: TrendingUp,   anyPermissions: ['sales_recovery', 'sales_admin_settings', 'sales_gm', 'sales_agm', 'sales_reports'], description: 'Payment recovery queue.', keywords: 'recovery' },
     { id: 's-draft-vou', moduleGroup: 'sales', label: 'Draft Vouchers',        path: '/sales/draft-vouchers',    icon: FileClock,    anyPermissions: ['sales_master_settlement', 'sales_admin_settings', 'sales_gm'], description: 'Booking vouchers awaiting review + Finalize.', keywords: 'draft finalize voucher gl' },
     { id: 's-targets',   moduleGroup: 'sales', label: 'Hierarchy & Targets',   path: '/sales/hierarchy-targets', icon: TrendingUp,   anyPermissions: ['sales_hierarchy', 'sales_admin_settings', 'sales_gm', 'sales_reports'], description: 'Sales-staff structure + monthly targets.', keywords: 'target' },
-    { id: 's-reports',   moduleGroup: 'sales', label: 'Sales Reports',         path: '/sales/reports',           icon: LineChart,    moduleKey: 'sales_reports',       description: 'Booking, inventory, executive-performance.', keywords: 'reports' },
+    { id: 's-reports', moduleGroup: 'sales', label: 'Sale Module Reports', path: '/module/sales-reports', icon: LineChart, anyPermissions: ['sales_reports', 'report:booking_register', 'report:vehicle_inventory', 'report:executive_performance', 'report:customer_advances_aging', 'report:booking_pipeline', 'report:master_invoice_aging', 'report:incentive_receivable_aging', 'report:booking_account_reconciliation'], description: 'All vehicle-sales reports in one place.', keywords: 'reports balance cancelled aging pipeline' },
     { id: 's-cro-rep',   moduleGroup: 'sales', label: 'CRO Reports',           path: '/cro/reports',             icon: LineChart,    moduleKey: 'cro_reports',         description: 'Customer-relations reports.', keywords: 'cro' },
 
     // ── HR ───────────────────────────────────────────────────
@@ -231,12 +232,16 @@ export const NAV_ITEMS = [
     { id: 'r-p-margin',  moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'JC Parts Cost & Margin', path: '/reports/parts/jc-cost-margin', icon: ListChecks, permission: 'report:jc_parts_cost_margin', description: 'Part cost job-card-wise per business unit — each item with its purchase price, sale price and margin.' },
     { id: 'r-p-led',     moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Item Ledger',         path: '/reports/parts/item-ledger',   icon: ListChecks,   permission: 'report:item_ledger' },
     { id: 'r-ss-tax',    moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Store Sale Tax Invoice Tracker', path: '/reports/parts/tax-invoice-tracker', icon: ListChecks, permission: 'report:store_sale_tax_invoice_tracker' },
-    { id: 'r-s-book',    moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Booking Register',    path: '/reports/sales/booking-register',    icon: ListChecks, permission: 'report:booking_register' },
-    { id: 'r-s-cancel', moduleGroup: 'reports', section: 'Vehicle Sales', label: 'Cancelled Booking Register', path: '/reports/sales/cancelled-booking-register', icon: ListChecks, permission: 'report:booking_register', description: 'Cancelled vehicle bookings with cancellation date and reason.', keywords: 'cancel cancellation' },
-    { id: 'r-s-bal', moduleGroup: 'reports', section: 'Vehicle Sales', label: 'Customer Balance Payments', path: '/reports/sales/customer-balances', icon: ListChecks, anyPermissions: ['report:booking_register', 'sales_reports'], description: 'Vehicle payments still due from customers.', keywords: 'outstanding promised delivery month unpaid car' },
-    { id: 'r-s-inv',     moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Vehicle Inventory',   path: '/reports/sales/vehicle-inventory',   icon: ListChecks, permission: 'report:vehicle_inventory' },
-    { id: 'r-s-exec',    moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Executive Performance',path: '/reports/sales/executive-performance',icon: ListChecks,permission: 'report:executive_performance' },
-    { id: 'r-s-adv',     moduleGroup: 'reports', section: 'Vehicle Sales',         label: 'Customer Advances Aging', path: '/reports/sales/customer-advances-aging', icon: ListChecks, permission: 'report:customer_advances_aging' },
+    { id: 'r-s-book', moduleGroup: 'sales-reports', section: 'Bookings', label: 'Booking Register', path: '/reports/sales/booking-register', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:booking_register', description: 'Active bookings, vehicle prices, payments and status.' },
+    { id: 'r-s-cancel', moduleGroup: 'sales-reports', section: 'Bookings', label: 'Cancelled Booking Register', path: '/reports/sales/cancelled-booking-register', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:booking_register', description: 'Cancelled bookings with cancellation date and reason.', keywords: 'cancel cancellation' },
+    { id: 'r-s-pipeline', moduleGroup: 'sales-reports', section: 'Bookings', label: 'Booking Pipeline', path: '/sales/reports?tab=pipeline', icon: LineChart, moduleKey: 'sales_reports', permission: 'report:booking_pipeline', description: 'Inquiries, bookings, allocation, invoicing and delivery.' },
+    { id: 'r-s-bal', moduleGroup: 'sales-reports', section: 'Payments & Reconciliation', label: 'Customer Balance Payments', path: '/reports/sales/customer-balances', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:booking_register', description: 'Vehicle payments still due from customers, with promised delivery month.', keywords: 'outstanding unpaid car' },
+    { id: 'r-s-adv', moduleGroup: 'sales-reports', section: 'Payments & Reconciliation', label: 'Customer Advances Aging', path: '/reports/sales/customer-advances-aging', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:customer_advances_aging', description: 'Customer advances grouped by booking age.' },
+    { id: 'r-s-recon', moduleGroup: 'sales-reports', section: 'Payments & Reconciliation', label: 'Booking Account Reconciliation', path: '/sales/reports?tab=bvrRecon', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:booking_account_reconciliation', description: 'Compare booking payments with their ledger entries.' },
+    { id: 'r-s-inv', moduleGroup: 'sales-reports', section: 'Inventory & Master Motors', label: 'Vehicle Inventory', path: '/reports/sales/vehicle-inventory', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:vehicle_inventory', description: 'Vehicle stock, chassis, cost and inventory status.' },
+    { id: 'r-s-mi-aging', moduleGroup: 'sales-reports', section: 'Inventory & Master Motors', label: 'Master Invoice Aging', path: '/sales/reports?tab=miAging', icon: FileClock, moduleKey: 'sales_reports', permission: 'report:master_invoice_aging', description: 'Allocated bookings waiting for Master invoicing.' },
+    { id: 'r-s-inc-aging', moduleGroup: 'sales-reports', section: 'Inventory & Master Motors', label: 'Incentive Receivable Aging', path: '/sales/reports?tab=incAging', icon: Award, moduleKey: 'sales_reports', permission: 'report:incentive_receivable_aging', description: 'Outstanding Master incentives by age.' },
+    { id: 'r-s-exec', moduleGroup: 'sales-reports', section: 'Performance', label: 'Executive Performance', path: '/reports/sales/executive-performance', icon: ListChecks, moduleKey: 'sales_reports', permission: 'report:executive_performance', description: 'Bookings, payments and deliveries by sales executive.' },
 
     // ── Workflow ─────────────────────────────────────────────
     { id: 'wf-unfin',    moduleGroup: 'workflow', label: 'Unfinalize Requests', path: '/unfinalize-requests', icon: Workflow, moduleKey: 'am_approve', description: 'Approve reversal requests.', keywords: 'reverse approve', priority: 8, isQueue: true },
@@ -316,7 +321,7 @@ export function getQueueActions(hasModule, hasPermission) {
 /** Report items the user can access (My Reports section). */
 export function getVisibleReports(hasModule, hasPermission) {
     return getVisibleNavItems(hasModule, hasPermission)
-        .filter(it => it.moduleGroup === 'reports');
+        .filter(it => it.moduleGroup === 'reports' || it.moduleGroup === 'sales-reports');
 }
 
 /** All content the dashboard needs, computed in one pass for a given auth. */
