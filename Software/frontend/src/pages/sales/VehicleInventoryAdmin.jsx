@@ -8,7 +8,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Truck, Plus, RefreshCw, Loader2, Search, Pencil, Trash2 } from 'lucide-react';
+import { Truck, Plus, RefreshCw, Loader2, Search, Pencil, Trash2, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
 import { useFeedback } from '../../context/FeedbackContext';
@@ -28,7 +28,7 @@ const STATUS_STYLES = {
     Returned:  { bg: '#fee2e2', col: '#b91c1c' },
 };
 
-const STATUSES = ['AtMaster', 'InTransit', 'AtDealer', 'Allocated', 'Delivered', 'Returned', 'Sold'];
+const STATUSES = ['AtMaster', 'InTransit', 'AtDealer', 'Allocated', 'Delivered', 'Returned'];
 
 export default function VehicleInventoryAdmin() {
     const { hasModule } = useAuth();
@@ -85,7 +85,7 @@ export default function VehicleInventoryAdmin() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ErpControlPanel
                 title="Vehicle Inventory"
-                subtitle="Per-chassis records. Booked vehicles go on the balance sheet; Open-Allocation are memo-only until sold."
+                subtitle="Stock by chassis and variant. Issued gate passes mark vehicles Delivered and lock their records."
                 actions={
                     <>
                         {canCreate && (
@@ -141,6 +141,7 @@ export default function VehicleInventoryAdmin() {
                         <tbody>
                             {rows.map(v => {
                                 const st = STATUS_STYLES[v.Status] || STATUS_STYLES.AtMaster;
+                                const locked = v.IsDeliveryLocked || ['Delivered','Sold'].includes(v.Status) || !!v.SoldDeliveredAt;
                                 return (
                                     <tr key={v.VehicleID} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                         <Td mono color="#475569">{v.ChasisNo}</Td>
@@ -148,13 +149,14 @@ export default function VehicleInventoryAdmin() {
                                         <Td><strong>{v.VariantCode}</strong><div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{v.VariantName}</div></Td>
                                         <Td>{v.Color || '—'}</Td>
                                         <Td><Pill bg={v.AllocationType === 'OpenAllocation' ? '#fef3c7' : '#dbeafe'} col={v.AllocationType === 'OpenAllocation' ? '#92400e' : '#1e40af'}>{v.AllocationType === 'OpenAllocation' ? 'OPEN' : 'BOOKED'}</Pill></Td>
-                                        <Td><Pill bg={st.bg} col={st.col}>{v.Status}</Pill></Td>
+                                        <Td><Pill bg={st.bg} col={st.col}>{locked ? 'Delivered' : v.Status}</Pill></Td>
                                         <Td mono color="#1e40af">{v.CurrentBookingNo || '—'}</Td>
                                         <Td style={{ fontSize: '0.78rem' }}>{v.Location || '—'}</Td>
                                         <Td>
                                             <div style={{ display: 'flex', gap: 4 }}>
-                                                {canUpdate && <button className="btn-icon" onClick={() => setEditItem(v)} title="Edit"><Pencil size={14} /></button>}
-                                                {canDelete && <button className="btn-icon" onClick={() => remove(v)} title="Delete" style={{ color: '#b91c1c' }}><Trash2 size={14} /></button>}
+                                                {locked && <span title="Delivered vehicles cannot be edited or deleted" style={{ display: 'inline-flex', gap: 4, color: '#64748b' }}><Lock size={14} /> Locked</span>}
+                                                {canUpdate && !locked && <button className="btn-icon" onClick={() => setEditItem(v)} title="Edit"><Pencil size={14} /></button>}
+                                                {canDelete && !locked && <button className="btn-icon" onClick={() => remove(v)} title="Delete" style={{ color: '#b91c1c' }}><Trash2 size={14} /></button>}
                                             </div>
                                         </Td>
                                     </tr>
@@ -235,7 +237,7 @@ function VehicleEditor({ item, variants, onClose, onSaved }) {
                 </Field>
                 <Field label="Status *" flex>
                     <select value={status} onChange={e => setStatus(e.target.value)} style={inputStyle}>
-                        {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                        {STATUSES.filter(s => s !== 'Delivered').map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                 </Field>
             </div>

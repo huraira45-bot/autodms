@@ -94,13 +94,8 @@ async function handleSalesPaymentPosted(voucherId, paymentId, user) {
     }
 }
 
-// Owner ask 2026-08-07 (explicit, strict choice for Gate Pass specifically):
-// the vehicle does not release and the booking does not close until the
-// delivery voucher is finalized — unlike Master Invoice / Payment, there is
-// no "release now, GL catches up" fallback here even though this delays a
-// physical vehicle handover. Mirrors the recovery-plan + vehicle/booking
-// updates that issueGatePass used to do immediately (see
-// createRecoveryPlanIfNeeded / the else-branch in salesLifecycleController.js).
+// Finalization closes the accounting workflow. The vehicle was delivered and
+// locked when its gate pass was issued; preserve that date and stock movement.
 async function handleSalesDeliveryPosted(voucherId, bookingId, user) {
     const pool = await getPool();
     const bk = await pool.request().input('id', sql.Int, bookingId)
@@ -115,7 +110,7 @@ async function handleSalesDeliveryPosted(voucherId, bookingId, user) {
     await pool.request().input('id', sql.Int, bookingId)
         .query(`UPDATE dms_SalesBookings
                 SET Status='Closed',
-                    GatePassIssuedAt=GETDATE(),
+                    GatePassIssuedAt=COALESCE(GatePassIssuedAt,GETDATE()),
                     DeliveredAt=COALESCE(DeliveredAt, GETDATE()),
                     ClosedAt=GETDATE(),
                     UpdatedAt=GETDATE()
@@ -123,7 +118,7 @@ async function handleSalesDeliveryPosted(voucherId, bookingId, user) {
 
     if (b.AllocatedVehicleID) {
         await pool.request().input('vid', sql.Int, b.AllocatedVehicleID)
-            .query(`UPDATE dms_Vehicle SET Status='Sold', SoldDeliveredAt=GETDATE(), UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
+            .query(`UPDATE dms_Vehicle SET Status='Delivered', SoldDeliveredAt=COALESCE(SoldDeliveredAt,GETDATE()), UpdatedAt=GETDATE() WHERE VehicleID=@vid AND Status NOT IN ('Delivered','Sold') AND SoldDeliveredAt IS NULL`);
         await pool.request().input('vid', sql.Int, b.AllocatedVehicleID).input('bid', sql.Int, bookingId)
             .query(`UPDATE dms_OpenAllocationLedger
                     SET Status='Sold', SoldAt=GETDATE(), SoldToBookingID=@bid
@@ -131,7 +126,7 @@ async function handleSalesDeliveryPosted(voucherId, bookingId, user) {
     }
 
     await logTransition(pool, bookingId, 'GatePassIssued', 'Closed', user,
-        `Delivery voucher #${voucherId} finalized — vehicle released. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`}`);
+        `Delivery voucher #${voucherId} finalized — booking closed; gate-pass delivery retained. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`}`);
 
     if (!fullyPaid) {
         const remainder = Number(b.NegotiatedPrice) - Number(b.AmountPaidToDate);

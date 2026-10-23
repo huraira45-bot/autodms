@@ -234,10 +234,10 @@ export default function BookingDetail() {
     // Admin-only, and the server refuses it anyway once anything has posted.
     const canChangeCustomer = hasModule('sales_admin_settings') || hasModule('admin_unfinalize');
 
-    // Correcting the allocated vehicle at any stage, gate pass included
-    // (owner ask 2026-10-02). The ordinary allocate/unallocate pair cannot do
-    // it once a booking has moved past Allocated.
+    // The issued gate pass permanently locks the delivered chassis.
     const canSwapVehicle = !!data.AllocatedVehicleID
+        && !data.VehicleDeliveryLocked && !data.GatePassIssuedAt
+        && !['GatePassIssued','Delivered','Closed'].includes(data.Status)
         && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
 
     const canPostMasterInvoice = data.AllocatedVehicleID
@@ -1918,6 +1918,7 @@ function ChangeCustomerModal({ booking, onClose, onDone }) {
  * rewrite them, and someone has to correct those by hand.
  */
 function SwapVehicleModal({ booking, onClose, onDone }) {
+    const locked = booking.VehicleDeliveryLocked || booking.GatePassIssuedAt || ['GatePassIssued','Delivered','Closed'].includes(booking.Status);
     const [vehicles, setVehicles] = useState([]);
     const [vehicleId, setVehicleId] = useState('');
     const [reason, setReason] = useState('');
@@ -1961,12 +1962,10 @@ function SwapVehicleModal({ booking, onClose, onDone }) {
                         vehicle goes back on the yard and the booking keeps its stage.
                     </div>
 
-                    {['GatePassIssued', 'Delivered', 'Closed'].includes(booking.Status) && (
+                    {locked && (
                         <div style={{ marginBottom: 12, padding: '9px 11px', borderRadius: 6, fontSize: '0.8rem',
                                       background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e' }}>
-                            This booking is <strong>{booking.Status}</strong> — the vehicle has already left on
-                            paperwork that names its chassis. Those documents will not change; you will be told
-                            which ones to correct.
+                            This vehicle has been delivered and is locked. Its chassis cannot be changed.
                         </div>
                     )}
 
@@ -1977,7 +1976,7 @@ function SwapVehicleModal({ booking, onClose, onDone }) {
                         placeholder="Search by chassis…"
                         title="Pick the vehicle"
                         options={vehicles
-                            .filter(v => v.VehicleID !== booking.AllocatedVehicleID)
+                            .filter(v => v.VehicleID !== booking.AllocatedVehicleID && !v.IsDeliveryLocked && !['Delivered','Sold'].includes(v.Status))
                             .map(v => ({ id: v.VehicleID, label: v.ChasisNo,
                                          sub: v.EngineNo || v.Status || undefined }))} />
 
@@ -2000,7 +1999,7 @@ function SwapVehicleModal({ booking, onClose, onDone }) {
                         <button onClick={onClose} style={{ padding: '8px 14px', background: '#fff',
                                 border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
                         <button className="btn" onClick={save}
-                                disabled={busy || !vehicleId || reason.trim().length < 5}
+                                disabled={locked || busy || !vehicleId || reason.trim().length < 5}
                                 style={{ padding: '8px 16px' }}>
                             {busy ? 'Changing…' : 'Change vehicle'}
                         </button>

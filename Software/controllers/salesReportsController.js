@@ -116,7 +116,7 @@ exports.vehicleInventory = async (req, res) => {
             DaysInStock:     x.ReceivedAt ? Math.floor((Date.now() - new Date(x.ReceivedAt).getTime()) / 86400000) : null,
         }));
 
-        const inStock = rows.filter(r => r.Status !== 'Delivered' && r.Status !== 'Sold');
+        const inStock = rows.filter(r => !['Delivered','Sold','Returned'].includes(r.Status));
         const totals = {
             total:         rows.length,
             inStock:       inStock.length,

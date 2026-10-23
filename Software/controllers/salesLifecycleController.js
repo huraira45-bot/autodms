@@ -17,6 +17,7 @@ const { loadMasterPosition } = require('../services/masterPaymentPositionService
 const { effectiveMasterPaid } = require('../services/historicalMasterApprovalService');
 const { masterAmountDue } = require('../services/salesMasterAmount');
 const { requireUploadedMasterInvoice, MASTER_INVOICE_STATES } = require('../services/masterInvoiceAccrualGuard');
+const { vehicleDeliveryLockedSql, markVehicleDelivered, DELIVERY_LOCK_MESSAGE } = require('../services/vehicleDeliveryLockService');
 
 // =========================================================================
 // Helpers
@@ -341,7 +342,8 @@ exports.unallocateVehicle = async (req, res) => {
             await new sql.Request(tx).input('bid', sql.Int, bookingId)
                 .query(`UPDATE dms_SalesBookings SET AllocatedVehicleID=NULL, Status='PendingPayment', UpdatedAt=GETDATE() WHERE BookingID=@bid`);
             await new sql.Request(tx).input('vid', sql.Int, vehicleId)
-                .query(`UPDATE dms_Vehicle SET CurrentBookingID=NULL, Status='AtDealer', UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
+                .input('actor',sql.NVarChar(100),req.user?.userName || 'system').input('emp',sql.Int,req.user?.employeeId || null)
+                .query(`UPDATE dms_Vehicle SET CurrentBookingID=NULL, Status='AtDealer', UpdatedAt=GETDATE(),UpdatedByName=@actor,UpdatedByEmployeeID=@emp WHERE VehicleID=@vid`);
             await logTransition(tx, bookingId, 'Allocated', 'PendingPayment', req.user, `Unallocated: ${reason}`);
             await tx.commit();
             res.json({ message: 'Unallocated' });
@@ -813,9 +815,10 @@ exports.issueGatePass = async (req, res) => {
         try {
             // Approval changes serialize with delivery; recheck under the booking lock.
             const lockedBooking = await new sql.Request(tx).input('bid',sql.Int,id)
-                .query('SELECT BookingID,Status,NegotiatedPrice FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@bid');
+                .query('SELECT BookingID,Status,NegotiatedPrice,AllocatedVehicleID FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@bid');
             const currentBooking = lockedBooking.recordset[0];
-            if (!currentBooking || currentBooking.Status !== b.Status || Number(currentBooking.NegotiatedPrice) !== Number(b.NegotiatedPrice)) {
+            if (!currentBooking || currentBooking.Status !== b.Status || Number(currentBooking.NegotiatedPrice) !== Number(b.NegotiatedPrice)
+                || currentBooking.AllocatedVehicleID !== b.AllocatedVehicleID) {
                 throw new Error('The booking price or status changed. Refresh before issuing the gate pass.');
             }
             const lockedMaster = await masterRemittancePosition(tx,id);
@@ -826,11 +829,8 @@ exports.issueGatePass = async (req, res) => {
             // The service joins to dms_VehicleVariant to pull WholesalePrice
             // for the COGS leg. Voucher is created as Draft, not auto-posted
             // (owner ask 2026-08-07) — and for Gate Pass specifically, the
-            // owner chose the strict option: the vehicle does NOT release
-            // (no Sold status, no Closed booking) until this voucher is
-            // reviewed + Finalized. See the SALES_DELIVERY handler in
-            // salesVoucherPostHookService.js for the rest of what used to
-            // happen immediately here.
+            // booking close still waits for voucher review + Finalize. The
+            // issued gate pass now marks and locks the vehicle immediately.
             let deliveryVoucherId = null;
             if (glPostingEnabled) {
                 try {
@@ -846,19 +846,18 @@ exports.issueGatePass = async (req, res) => {
             let bookingClosedNow = false;
 
             if (deliveryVoucherId) {
-                // Hold at GatePassIssued — vehicle stays with the dealer,
-                // booking stays open, until someone finalizes the voucher.
+                // Vehicle delivery is immediate; accounting closure waits for finalization.
                 await new sql.Request(tx)
                     .input('id', sql.Int, id)
                     .input('by', sql.Int, req.user?.employeeId || null)
                     .input('byN', sql.NVarChar(100), req.user?.userName || null)
                     .query(`UPDATE dms_SalesBookings
-                            SET Status='GatePassIssued',
+                            SET Status='GatePassIssued',GatePassIssuedAt=GETDATE(),DeliveredAt=COALESCE(DeliveredAt,GETDATE()),
                                 UpdatedAt=GETDATE(), UpdatedByEmployeeID=@by, UpdatedByName=@byN
                             WHERE BookingID=@id`);
                 await logTransition(tx, id, b.Status, 'GatePassIssued', req.user,
-                    `Delivery voucher #${deliveryVoucherId} created as Draft — vehicle release and booking close wait for review + Finalize. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable once closed).`}`);
-                responseMessage = `Delivery voucher #${deliveryVoucherId} created as Draft. Vehicle will not release and the booking will not close until it's reviewed and Finalized.`;
+                    `Gate pass issued; vehicle delivered and locked. Delivery voucher #${deliveryVoucherId} is Draft; booking close waits for Finalize. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable once closed).`}`);
+                responseMessage = `Gate pass issued. Vehicle delivered and locked. Delivery voucher #${deliveryVoucherId} awaits review and Finalize before the booking closes.`;
             } else {
                 // Nothing to wait for (GL not configured yet) — proceed
                 // immediately, same as before this change.
@@ -874,16 +873,6 @@ exports.issueGatePass = async (req, res) => {
                                 ClosedAt=GETDATE(),
                                 UpdatedAt=GETDATE(), UpdatedByEmployeeID=@by, UpdatedByName=@byN
                             WHERE BookingID=@id`);
-                await new sql.Request(tx)
-                    .input('vid', sql.Int, b.AllocatedVehicleID)
-                    .query(`UPDATE dms_Vehicle SET Status='Sold', SoldDeliveredAt=GETDATE(), UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
-                await new sql.Request(tx)
-                    .input('vid', sql.Int, b.AllocatedVehicleID)
-                    .input('bid', sql.Int, id)
-                    .query(`UPDATE dms_OpenAllocationLedger
-                            SET Status='Sold', SoldAt=GETDATE(), SoldToBookingID=@bid
-                            WHERE VehicleID=@vid AND Status='AtDealer'`);
-
                 await logTransition(tx, id, b.Status, 'Closed', req.user,
                     `Gate pass issued. ${fullyPaid ? 'Fully paid.' : `Partial delivery (${paidPct.toFixed(1)}% paid; remainder reclassified to receivable).`} ${historicalApprovedRelease ? 'Historical Master payment approved without voucher matching; ledger entries unchanged.' : `GL posting SKIPPED — unmapped roles: ${missing.join(', ')}.`}`);
 
@@ -938,6 +927,7 @@ exports.issueGatePass = async (req, res) => {
                                 @reason, @inv, @rcv, @notes,
                                 GETDATE(), @by, @byN)`);
 
+            await markVehicleDelivered(tx, { vehicleId: b.AllocatedVehicleID, bookingId: id, user: req.user });
             await tx.commit();
             res.json({
                 message: responseMessage || (historicalApprovedRelease
@@ -976,7 +966,7 @@ exports.issueGatePass = async (req, res) => {
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('issueGatePass:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.statusCode || 500).json({ error: err.message });
     }
 };
 
@@ -1063,6 +1053,9 @@ exports.swapAllocatedVehicle = async (req, res) => {
             LEFT   JOIN dms_Vehicle v ON v.VehicleID = b.AllocatedVehicleID
             WHERE  b.BookingID = @id`)).recordset[0];
         if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+        const locked = await pool.request().input('v', sql.Int, booking.AllocatedVehicleID)
+            .query(`SELECT v.VehicleID FROM dms_Vehicle v WHERE v.VehicleID=@v AND ${vehicleDeliveryLockedSql('v')}`);
+        if (locked.recordset.length) return res.status(423).json({ error: DELIVERY_LOCK_MESSAGE });
         if (!booking.AllocatedVehicleID) {
             return res.status(409).json({
                 error: 'This booking has no vehicle allocated yet. Allocate one the normal way.' });
@@ -1072,9 +1065,11 @@ exports.swapAllocatedVehicle = async (req, res) => {
         }
 
         const vehicle = (await pool.request().input('v', sql.Int, vehicleId).query(`
-            SELECT VehicleID, VariantID, Status, CurrentBookingID, ChasisNo
-            FROM   dms_Vehicle WHERE VehicleID = @v`)).recordset[0];
+            SELECT v.VehicleID,v.VariantID,v.Status,v.CurrentBookingID,v.ChasisNo,
+                   CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS IsDeliveryLocked
+            FROM dms_Vehicle v WHERE v.VehicleID = @v`)).recordset[0];
         if (!vehicle) return res.status(404).json({ error: 'That vehicle does not exist.' });
+        if (vehicle.IsDeliveryLocked) return res.status(423).json({ error: DELIVERY_LOCK_MESSAGE });
         if (vehicle.VariantID !== booking.VehicleVariantID) {
             return res.status(409).json({
                 error: 'That vehicle is a different variant from the one booked. '
@@ -1102,14 +1097,16 @@ exports.swapAllocatedVehicle = async (req, res) => {
         await tx.begin();
         try {
             // The old vehicle goes back on the yard.
-            await new sql.Request(tx).input('v', sql.Int, booking.AllocatedVehicleID).query(`
-                UPDATE dms_Vehicle SET CurrentBookingID = NULL, Status = 'AtDealer', UpdatedAt = GETDATE()
+            await new sql.Request(tx).input('v', sql.Int, booking.AllocatedVehicleID)
+                .input('actor',sql.NVarChar(100),req.user?.userName || 'system').input('emp',sql.Int,req.user?.employeeId || null).query(`
+                UPDATE dms_Vehicle SET CurrentBookingID = NULL, Status = 'AtDealer', UpdatedAt = GETDATE(),UpdatedByName=@actor,UpdatedByEmployeeID=@emp
                 WHERE  VehicleID = @v`);
 
             await new sql.Request(tx)
                 .input('v', sql.Int, vehicleId)
                 .input('b', sql.Int, bookingId)
-                .query(`UPDATE dms_Vehicle SET CurrentBookingID = @b, Status = 'Allocated', UpdatedAt = GETDATE()
+                .input('actor',sql.NVarChar(100),req.user?.userName || 'system').input('emp',sql.Int,req.user?.employeeId || null)
+                .query(`UPDATE dms_Vehicle SET CurrentBookingID = @b, Status = 'Allocated', UpdatedAt = GETDATE(),UpdatedByName=@actor,UpdatedByEmployeeID=@emp
                         WHERE VehicleID = @v`);
 
             // The booking keeps its stage; only the vehicle moves.
@@ -1141,6 +1138,6 @@ exports.swapAllocatedVehicle = async (req, res) => {
         });
     } catch (err) {
         console.error('swapAllocatedVehicle:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.number === 51061 ? 423 : 500).json({ error: err.message });
     }
 };

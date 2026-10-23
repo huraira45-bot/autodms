@@ -198,6 +198,7 @@ import { StockMovement, ReorderAlert, PartsSalesRegister, PartsPurchaseSummary, 
 import { BookingRegister, CancelledBookingRegister, VehicleInventory, ExecutivePerformance, CustomerAdvancesAging } from './pages/reports/Sales';
 import CustomerVehicleBalances from './pages/reports/CustomerVehicleBalances';
 import BookingPaymentReport from './pages/reports/BookingPaymentReport';
+import { VehicleInventoryByVariant, VehicleInventoryLedger } from './pages/reports/VehicleStockReports';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
 import WorkspaceTopBar      from './components/WorkspaceTopBar';
@@ -1152,6 +1153,8 @@ function AppShell() {
                     <Route path="/reports/sales/customer-balances" element={<ProtectedRoute><CustomerVehicleBalances /></ProtectedRoute>} />
                     <Route path="/reports/sales/booking-payments" element={<ProtectedRoute><BookingPaymentReport /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory"       element={<ProtectedRoute><VehicleInventory /></ProtectedRoute>} />
+                    <Route path="/reports/sales/vehicle-inventory-by-variant" element={<ProtectedRoute><VehicleInventoryByVariant /></ProtectedRoute>} />
+                    <Route path="/reports/sales/vehicle-inventory-ledger" element={<ProtectedRoute><VehicleInventoryLedger /></ProtectedRoute>} />
                     <Route path="/reports/sales/executive-performance"   element={<ProtectedRoute><ExecutivePerformance /></ProtectedRoute>} />
                     <Route path="/reports/sales/customer-advances-aging" element={<ProtectedRoute><CustomerAdvancesAging /></ProtectedRoute>} />
                     <Route path="/reports/gencust-reconciliation" element={<ProtectedRoute moduleKey="reports"><GenCustReconciliation /></ProtectedRoute>} />

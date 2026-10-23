@@ -15,6 +15,7 @@
  *   - vehicle allocate to booking: sales_agm / sales_gm  (decision #22)
  */
 const { sql, getPool } = require('../config/db');
+const { vehicleDeliveryLockedSql, DELIVERY_LOCK_MESSAGE } = require('../services/vehicleDeliveryLockService');
 
 const VALID_TAX_TREATMENTS = new Set(['NoTax', 'WHTWithheld', 'PlusGST_PrepayRequired', 'PlusGST_DeferredPay']);
 const VALID_VEHICLE_STATUS = new Set(['AtMaster', 'InTransit', 'AtDealer', 'Allocated', 'Delivered', 'Returned', 'Sold']);
@@ -257,7 +258,8 @@ exports.listVehicles = async (req, res) => {
         const r = pool.request();
         const conds = [];
         if (req.query.variantId) { r.input('vid', sql.Int, parseInt(req.query.variantId)); conds.push('v.VariantID=@vid'); }
-        if (req.query.status)    { r.input('s', sql.NVarChar(20), req.query.status); conds.push('v.Status=@s'); }
+        if (req.query.status === 'Delivered') conds.push("v.Status IN ('Delivered','Sold')");
+        else if (req.query.status) { r.input('s', sql.NVarChar(20), req.query.status); conds.push('v.Status=@s'); }
         if (req.query.allocationType) { r.input('at', sql.NVarChar(20), req.query.allocationType); conds.push('v.AllocationType=@at'); }
         if (req.query.search) {
             r.input('q', sql.NVarChar(100), `%${req.query.search}%`);
@@ -272,7 +274,7 @@ exports.listVehicles = async (req, res) => {
                    v.CurrentBookingID, b.BookingNo AS CurrentBookingNo,
                    v.MasterInvoiceVoucherID,
                    v.ReceivedAt, v.SoldDeliveredAt,
-                   v.CreatedAt
+                   v.CreatedAt,CAST(CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS BIT) AS IsDeliveryLocked
             FROM dms_Vehicle v
             JOIN dms_VehicleVariant var ON v.VariantID = var.VariantID
             JOIN dms_VehicleModel m     ON var.ModelID = m.ModelID
@@ -288,7 +290,8 @@ exports.getVehicle = async (req, res) => {
     try {
         const pool = await getPool();
         const r = await pool.request().input('id', sql.Int, parseInt(req.params.id))
-            .query(`SELECT v.*, var.VariantCode, var.VariantName, var.StandardPrice, var.WholesalePrice,
+            .query(`SELECT v.*,CAST(CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS BIT) AS IsDeliveryLocked,
+                           var.VariantCode, var.VariantName, var.StandardPrice, var.WholesalePrice,
                            m.ModelCode, m.ModelName, m.BrandName,
                            b.BookingNo AS CurrentBookingNo
                     FROM dms_Vehicle v
@@ -310,6 +313,7 @@ exports.createVehicle = async (req, res) => {
         if (!b.EngineNo?.trim())     errors.push('EngineNo is required');
         if (b.AllocationType && !VALID_ALLOCATION_TYPES.has(b.AllocationType)) errors.push('Invalid AllocationType');
         if (b.Status && !VALID_VEHICLE_STATUS.has(b.Status)) errors.push('Invalid Status');
+        if (['Delivered','Sold'].includes(b.Status)) errors.push('Delivery status is set by issuing a gate pass.');
         if (errors.length) return res.status(400).json({ error: errors.join('; ') });
 
         const pool = await getPool();
@@ -324,22 +328,20 @@ exports.createVehicle = async (req, res) => {
             .input('loc', sql.NVarChar(100), b.Location || null)
             .input('by', sql.Int, req.user?.employeeId || null)
             .input('byN', sql.NVarChar(100), req.user?.userName || null)
-            .query(`INSERT INTO dms_Vehicle (VariantID, ChasisNo, EngineNo, Color, ManufactureYear,
-                                              AllocationType, Status, Location, CreatedByEmployeeID, CreatedByName)
-                    OUTPUT INSERTED.VehicleID
-                    VALUES (@vid, @cn, @en, @col, @yr, @at, @st, @loc, @by, @byN)`);
+            .query(`SET XACT_ABORT ON; BEGIN TRY BEGIN TRANSACTION;
+                    DECLARE @created TABLE(VehicleID INT);
+                    INSERT INTO dms_Vehicle (VariantID, ChasisNo, EngineNo, Color, ManufactureYear,
+                                              AllocationType, Status, Location, CreatedByEmployeeID, CreatedByName,ReceivedAt,ReceivedByEmployeeID)
+                    OUTPUT INSERTED.VehicleID INTO @created
+                    VALUES (@vid, @cn, @en, @col, @yr, @at, @st, @loc, @by, @byN,
+                            CASE WHEN @st='AtDealer' THEN GETDATE() ELSE NULL END,CASE WHEN @st='AtDealer' THEN @by ELSE NULL END);
+                    IF @at='OpenAllocation'
+                        INSERT INTO dms_OpenAllocationLedger(VehicleID,AllocatedToUsAt,CreatedByEmployeeID,CreatedByName)
+                        SELECT VehicleID,GETDATE(),@by,@byN FROM @created;
+                    COMMIT TRANSACTION; SELECT VehicleID FROM @created;
+                    END TRY BEGIN CATCH IF @@TRANCOUNT>0 ROLLBACK TRANSACTION; THROW; END CATCH;`);
 
         const vehicleId = r.recordset[0].VehicleID;
-
-        // If open allocation, auto-create the memo ledger row
-        if ((b.AllocationType || 'Booked') === 'OpenAllocation') {
-            await pool.request()
-                .input('vid', sql.Int, vehicleId)
-                .input('by', sql.Int, req.user?.employeeId || null)
-                .input('byN', sql.NVarChar(100), req.user?.userName || null)
-                .query(`INSERT INTO dms_OpenAllocationLedger (VehicleID, AllocatedToUsAt, CreatedByEmployeeID, CreatedByName)
-                        VALUES (@vid, GETDATE(), @by, @byN)`);
-        }
 
         res.status(201).json({ message: 'Vehicle created', VehicleID: vehicleId });
     } catch (err) {
@@ -358,6 +360,11 @@ exports.updateVehicle = async (req, res) => {
         const id = parseInt(req.params.id);
         const b = req.body || {};
         const pool = await getPool();
+        const current = (await pool.request().input('id', sql.Int, id).query(`SELECT v.VehicleID,
+            CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS IsDeliveryLocked
+            FROM dms_Vehicle v WHERE v.VehicleID=@id`)).recordset[0];
+        if (!current) return res.status(404).json({ error: 'Vehicle not found' });
+        if (current.IsDeliveryLocked) return res.status(423).json({ error: DELIVERY_LOCK_MESSAGE });
         const r = pool.request().input('id', sql.Int, id);
         const sets = ['UpdatedAt = GETDATE()', 'UpdatedByEmployeeID=@by', 'UpdatedByName=@byN'];
         r.input('by', sql.Int, req.user?.employeeId || null);
@@ -366,15 +373,19 @@ exports.updateVehicle = async (req, res) => {
         if (b.ManufactureYear !== undefined) { r.input('yr', sql.Int, b.ManufactureYear || null);   sets.push('ManufactureYear=@yr'); }
         if (b.Status !== undefined) {
             if (!VALID_VEHICLE_STATUS.has(b.Status)) return res.status(400).json({ error: 'Invalid Status' });
+            if (['Delivered','Sold'].includes(b.Status)) return res.status(409).json({ error: 'Delivery status is set by issuing a gate pass.' });
             r.input('st', sql.NVarChar(20), b.Status); sets.push('Status=@st');
             if (b.Status === 'AtDealer')  sets.push('ReceivedAt = COALESCE(ReceivedAt, GETDATE())');
         }
         if (b.Location !== undefined)     { r.input('loc', sql.NVarChar(100), b.Location);          sets.push('Location=@loc'); }
         if (sets.length === 3) return res.status(400).json({ error: 'Nothing to update.' });
-        const out = await r.query(`UPDATE dms_Vehicle SET ${sets.join(', ')} OUTPUT INSERTED.VehicleID WHERE VehicleID=@id`);
-        if (!out.recordset.length) return res.status(404).json({ error: 'Vehicle not found' });
+        const out = await r.query(`DECLARE @updated TABLE(VehicleID INT);
+            UPDATE v SET ${sets.join(', ')} OUTPUT INSERTED.VehicleID INTO @updated
+            FROM dms_Vehicle v WHERE VehicleID=@id AND NOT ${vehicleDeliveryLockedSql('v')};
+            SELECT VehicleID FROM @updated;`);
+        if (!out.recordset.length) return res.status(423).json({ error: 'Vehicle changed or was delivered. Refresh before editing.' });
         res.json({ message: 'Updated' });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { res.status(err.number === 51061 ? 423 : 500).json({ error: err.message }); }
 };
 
 exports.deleteVehicle = async (req, res) => {
@@ -383,15 +394,33 @@ exports.deleteVehicle = async (req, res) => {
         const pool = await getPool();
         // Refuse if vehicle is allocated/delivered/sold (anything past Booking)
         const cur = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT Status, CurrentBookingID FROM dms_Vehicle WHERE VehicleID=@id`);
+            .query(`SELECT Status,CurrentBookingID,CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS IsDeliveryLocked
+                    FROM dms_Vehicle v WHERE VehicleID=@id`);
         if (!cur.recordset.length) return res.status(404).json({ error: 'Vehicle not found' });
         const v = cur.recordset[0];
+        if (v.IsDeliveryLocked) return res.status(423).json({ error: DELIVERY_LOCK_MESSAGE });
         if (['Allocated', 'Delivered', 'Sold'].includes(v.Status) || v.CurrentBookingID) {
             return res.status(409).json({ error: `Vehicle is ${v.Status} (linked to booking). Cannot delete.` });
         }
-        await pool.request().input('id', sql.Int, id)
-            .query(`DELETE FROM dms_OpenAllocationLedger WHERE VehicleID=@id;
-                    DELETE FROM dms_Vehicle WHERE VehicleID=@id`);
+        await pool.request().input('id', sql.Int, id).input('actor', sql.NVarChar(100), req.user?.userName || 'system')
+            .query(`SET XACT_ABORT ON; BEGIN TRY BEGIN TRANSACTION;
+                    DECLARE @locked INT;
+                    SELECT @locked=VehicleID FROM dms_Vehicle WITH (UPDLOCK,HOLDLOCK) WHERE VehicleID=@id;
+                    IF @locked IS NULL THROW 51065,'Vehicle no longer exists.',1;
+                    IF EXISTS(SELECT 1 FROM dms_Vehicle v WHERE VehicleID=@id AND ${vehicleDeliveryLockedSql('v')})
+                        THROW 51061,'Delivered vehicles cannot be deleted.',1;
+                    IF EXISTS(SELECT 1 FROM dms_Vehicle WHERE VehicleID=@id AND (CurrentBookingID IS NOT NULL OR Status='Allocated'))
+                        THROW 51064,'An allocated vehicle cannot be deleted.',1;
+                    EXEC sys.sp_set_session_context @key=N'dms_vehicle_actor',@value=@actor;
+                    DELETE FROM dms_OpenAllocationLedger WHERE VehicleID=@id;
+                    DELETE FROM dms_Vehicle WHERE VehicleID=@id;
+                    EXEC sys.sp_set_session_context @key=N'dms_vehicle_actor',@value=NULL;
+                    COMMIT TRANSACTION;
+                    END TRY BEGIN CATCH
+                        IF @@TRANCOUNT>0 ROLLBACK TRANSACTION;
+                        EXEC sys.sp_set_session_context @key=N'dms_vehicle_actor',@value=NULL;
+                        THROW;
+                    END CATCH;`);
         res.json({ message: 'Deleted' });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { res.status(err.number === 51061 ? 423 : [51064,51065].includes(err.number) ? 409 : 500).json({ error: err.message }); }
 };

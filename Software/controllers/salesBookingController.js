@@ -18,6 +18,7 @@ const { sql, getPool } = require('../config/db');
 const incentive = require('./salesIncentiveController');
 const { logAudit } = require('../services/salesAuditService');
 const { masterNetSql } = require('../services/masterPaymentPositionService');
+const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
 const { effectiveMasterPaidSql } = require('../services/historicalMasterApprovalService');
 const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 
@@ -152,6 +153,7 @@ exports.getBooking = async (req, res) => {
                    v.StandardIncentiveAmount, v.StandardIncentiveTaxTreatment,
                    veh.ChasisNo AS AllocatedChasisNo, veh.EngineNo AS AllocatedEngineNo,
                    veh.Color AS AllocatedColor,
+                   CAST(CASE WHEN ${vehicleDeliveryLockedSql('veh')} THEN 1 ELSE 0 END AS BIT) AS VehicleDeliveryLocked,
                    e.EmployeeName AS SalesExecutiveName,
                    miDoc.InvoiceNo AS MasterInvoiceNo, miDoc.InvoiceDate AS MasterInvoiceDate,
                    miFile.DocumentID AS MasterInvoiceDocumentID, miFile.FilePath AS MasterInvoiceFilePath,
@@ -577,7 +579,8 @@ exports.adminExecuteCancellation = async (req, res) => {
 
             if (allocatedVehicleId) {
                 await new sql.Request(tx).input('vid', sql.Int, allocatedVehicleId)
-                    .query(`UPDATE dms_Vehicle SET CurrentBookingID=NULL, Status='AtDealer', UpdatedAt=GETDATE() WHERE VehicleID=@vid`);
+                    .input('actor',sql.NVarChar(100),req.user?.userName || 'system').input('emp',sql.Int,req.user?.employeeId || null)
+                    .query(`UPDATE dms_Vehicle SET CurrentBookingID=NULL, Status='AtDealer', UpdatedAt=GETDATE(),UpdatedByName=@actor,UpdatedByEmployeeID=@emp WHERE VehicleID=@vid`);
             }
 
             // Clawback any staff incentive accrual

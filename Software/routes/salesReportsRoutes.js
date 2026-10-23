@@ -4,6 +4,11 @@ const c = require('../controllers/salesReportsController');
 const { requireAnyAccess } = require('../middleware/permissions');
 const { report: customerBalances } = require('../controllers/customerVehicleBalanceController');
 const bookingPayments = require('../controllers/bookingPaymentReportController');
+const vehicleStock = require('../controllers/vehicleInventoryReportController');
+
+router.get('/vehicle-inventory-options', requireAnyAccess('sales_reports','report:vehicle_inventory'), vehicleStock.options);
+router.get('/vehicle-inventory-by-variant', requireAnyAccess('sales_reports','report:vehicle_inventory'), vehicleStock.summary);
+router.get('/vehicle-inventory-ledger', requireAnyAccess('sales_reports','report:vehicle_inventory'), vehicleStock.ledger);
 
 router.get('/booking-payments/options', requireAnyAccess('sales_reports', 'report:booking_register'), bookingPayments.options);
 router.get('/booking-payments', requireAnyAccess('sales_reports', 'report:booking_register'), bookingPayments.report);

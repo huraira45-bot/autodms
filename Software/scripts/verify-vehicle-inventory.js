@@ -1,0 +1,137 @@
+// Development verification: every migration/fixture change is rolled back.
+// Run from Software: node scripts/verify-vehicle-inventory.js
+require('dotenv').config();
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const db = require('../config/db');
+const { sql } = db;
+const realGetPool = db.getPool;
+let activeTx;
+db.getPool = async () => ({ request: () => new sql.Request(activeTx) });
+const catalog = require('../controllers/salesCatalogController');
+const reports = require('../controllers/vehicleInventoryReportController');
+const { markVehicleDelivered } = require('../services/vehicleDeliveryLockService');
+const { handleSalesVoucherPosted } = require('../services/salesVoucherPostHookService');
+const user = { userId: 1, employeeId: null, groupId: 1, userName: 'Inventory verification' };
+const response = () => ({ code: 200, status(code) { this.code=code;return this; }, json(data) { this.data=data; } });
+const query = text => new sql.Request(activeTx).query(text);
+
+async function invoke(method, request) {
+    const res=response();await method({ query:{},body:{},user,...request },res);
+    assert.ok(res.code<400, `${res.code}: ${res.data?.error}`);return res.data;
+}
+async function fixture(pool, check) {
+    activeTx=new sql.Transaction(pool);
+    await activeTx.begin();
+    let aborted=false;activeTx.on('rollback',()=>{aborted=true;});
+    try {
+        await query(fs.readFileSync(path.join(__dirname,'../migrations/161_vehicle_inventory_ledger_delivery_lock.sql'),'utf8'));
+        const model=(await query('SELECT TOP(1) ModelID FROM dms_VehicleModel ORDER BY ModelID')).recordset[0];
+        assert.ok(model,'Development database needs a vehicle model.');
+        const variants=(await new sql.Request(activeTx).input('model',sql.Int,model.ModelID).query(`
+            DECLARE @ids TABLE(VariantID INT);
+            INSERT dms_VehicleVariant(ModelID,VariantCode,VariantName,StandardPrice,WholesalePrice)
+            OUTPUT INSERTED.VariantID INTO @ids VALUES(@model,'VERIFY-VAR-A','Verification variant A',100,100),
+                (@model,'VERIFY-VAR-B','Verification variant B',100,100);
+            SELECT VariantID FROM @ids ORDER BY VariantID;`)).recordset;
+        const create=async (suffix,variant=variants[0].VariantID) => invoke(catalog.createVehicle,{body:{
+            VariantID:variant,ChasisNo:`VERIFY-CHASSIS-${suffix}`,EngineNo:`VERIFY-ENGINE-${suffix}`,Status:'AtDealer',AllocationType:'OpenAllocation',
+        }});
+        const first=await create('A');
+        await check({ variants,create,vehicleId:first.VehicleID });
+    } finally {
+        if(!aborted) {try{await activeTx.rollback();}catch(e){if(e.code!=='ENOTBEGUN'&&e.code!=='EABORT')throw e;}}
+    }
+}
+async function delivered(vehicleId) {
+    const booking=(await query('SELECT TOP(1) BookingID FROM dms_SalesBookings ORDER BY BookingID')).recordset[0];
+    assert.ok(booking,'Development database needs a booking.');
+    await new sql.Request(activeTx).input('bid',sql.Int,booking.BookingID).input('vid',sql.Int,vehicleId).query(`
+        UPDATE dms_Vehicle SET CurrentBookingID=@bid,Status='Allocated' WHERE VehicleID=@vid;
+        UPDATE dms_SalesBookings SET AllocatedVehicleID=@vid,Status='GatePassIssued',GatePassIssuedAt=GETDATE(),
+            DeliveredAt=GETDATE(),AmountPaidToDate=NegotiatedPrice WHERE BookingID=@bid;
+        INSERT dms_GatePasses(GatePassNo,DocType,DocID,PassReason,AmountInvoiced,AmountReceived,IssuedAt,IssuedBy,IssuedByName)
+        VALUES('GP-INVENTORY-VERIFY','BOOKING',@bid,'PAID_FULL',0,0,GETDATE(),0,'Inventory verification');`);
+    await markVehicleDelivered(activeTx,{vehicleId,bookingId:booking.BookingID,user});
+    return booking.BookingID;
+}
+
+async function main() {
+    const pool=await realGetPool();
+    await fixture(pool,async({variants,create,vehicleId})=>{
+        await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Color:'Blue',Status:'InTransit'}});
+        await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Status:'AtDealer'}});
+        const second=(await create('B')).VehicleID;
+        await new sql.Request(activeTx).input('v',sql.Int,second).input('variant',sql.Int,variants[1].VariantID)
+            .query('UPDATE dms_Vehicle SET VariantID=@variant WHERE VehicleID=@v');
+        await invoke(catalog.deleteVehicle,{params:{id:String(second)}});
+        const ledger=await invoke(reports.ledger,{query:{search:'VERIFY-'}});
+        assert.equal(ledger.totals.Opening,0);assert.equal(ledger.totals.QuantityIn,3);
+        assert.equal(ledger.totals.QuantityOut,2);assert.equal(ledger.totals.Closing,1);
+        const history=ledger.rows.filter(r=>r.VehicleID===second);
+        assert.ok(history.some(r=>r.EntryType==='VariantOut'));
+        assert.ok(history.some(r=>r.EntryType==='VariantIn'));
+        assert.ok(history.some(r=>r.EntryType==='Removed'));
+        const summary=await invoke(reports.summary,{query:{variantId:String(variants[0].VariantID)}});
+        assert.equal(summary.rows[0].InStock,1);
+        assert.equal(summary.rows[0].AtDealer,1);
+        await invoke(catalog.deleteVariant,{params:{id:String(variants[1].VariantID)}});
+        const options=await invoke(reports.options,{});assert.ok(options.variants.some(v=>v.VariantID===variants[1].VariantID));
+        await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Status:'Returned'}});
+        assert.equal((await invoke(reports.ledger,{query:{search:'VERIFY-'}})).totals.Closing,0);
+        await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Status:'AtDealer'}});
+        assert.equal((await invoke(reports.ledger,{query:{search:'VERIFY-'}})).totals.Closing,1);
+        const before=(await query('SELECT COUNT(*) AS Qty FROM dms_VehicleInventoryLedger')).recordset[0].Qty;
+        await query(fs.readFileSync(path.join(__dirname,'../migrations/161_vehicle_inventory_ledger_delivery_lock.sql'),'utf8'));
+        assert.equal((await query('SELECT COUNT(*) AS Qty FROM dms_VehicleInventoryLedger')).recordset[0].Qty,before);
+    });
+    console.log('PASS: register/receive/edit/variant-transfer/delete, reports, options and balances; rolled back.');
+    await fixture(pool,async({vehicleId,variants})=>{
+        const bookingId=await delivered(vehicleId);
+        const status=(await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query('SELECT Status FROM dms_Vehicle WHERE VehicleID=@v')).recordset[0].Status;
+        assert.equal(status,'Delivered');
+        for(const [method,body]of [[catalog.updateVehicle,{Color:'Tampered'}],[catalog.deleteVehicle,{}]]) {
+            const res=response();await method({params:{id:String(vehicleId)},body,user},res);assert.equal(res.code,423);
+        }
+        const before=(await invoke(reports.ledger,{query:{search:'VERIFY-'}})).rows.length;
+        // Accounting metadata remains writable so late Master invoice processing
+        // after delivery is still possible; inventory history must not change.
+        await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query('UPDATE dms_Vehicle SET MasterInvoiceVoucherID=123456,UpdatedAt=GETDATE() WHERE VehicleID=@v');
+        const ledger=await invoke(reports.ledger,{query:{search:'VERIFY-'}});
+        assert.equal(ledger.rows.length,before);assert.equal(ledger.totals.Closing,0);
+        assert.equal(ledger.rows.filter(r=>r.EntryType==='Delivered').length,1);
+        await markVehicleDelivered(activeTx,{vehicleId,bookingId,user});
+        const deliveryDate=(await new sql.Request(activeTx).input('v',sql.Int,vehicleId)
+            .query('SELECT SoldDeliveredAt FROM dms_Vehicle WHERE VehicleID=@v')).recordset[0].SoldDeliveredAt.getTime();
+        await handleSalesVoucherPosted(999999,'SALES_DELIVERY',bookingId,user);
+        const afterFinalize=await invoke(reports.ledger,{query:{search:'VERIFY-'}});
+        assert.equal(afterFinalize.rows.length,before);
+        assert.equal((await new sql.Request(activeTx).input('v',sql.Int,vehicleId)
+            .query('SELECT SoldDeliveredAt FROM dms_Vehicle WHERE VehicleID=@v')).recordset[0].SoldDeliveredAt.getTime(),deliveryDate);
+        const summary=await invoke(reports.summary,{query:{variantId:String(variants[0].VariantID)}});
+        assert.equal(summary.rows[0].Delivered,1);assert.equal(summary.rows[0].InStock,0);
+        const report=await invoke(catalog.listVehicles,{query:{search:'VERIFY-'}});
+        assert.equal(report[0].IsDeliveryLocked,true);
+    });
+    console.log('PASS: delivered status, administrator lock, idempotence, late invoices and no second stock issue/date change at voucher finalization; rolled back.');
+    for(const mutation of ['UPDATE dms_Vehicle SET Color=N\'Tampered\' WHERE VehicleID=@v',
+        'UPDATE dms_Vehicle SET ChasisNo=LOWER(ChasisNo) WHERE VehicleID=@v',
+        "UPDATE dms_Vehicle SET ChasisNo=ChasisNo+' ' WHERE VehicleID=@v",'DELETE FROM dms_Vehicle WHERE VehicleID=@v']) {
+        await fixture(pool,async({vehicleId})=>{
+            await delivered(vehicleId);
+            if(mutation.startsWith('DELETE')) await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query(`
+                DELETE FROM dms_OpenAllocationLedger WHERE VehicleID=@v;
+                UPDATE dms_SalesBookings SET AllocatedVehicleID=NULL WHERE AllocatedVehicleID=@v;`);
+            await assert.rejects(new sql.Request(activeTx).input('v',sql.Int,vehicleId).query(mutation),error=>error.number===51061);
+        });
+    }
+    console.log('PASS: database rejects direct edits/deletion of delivered vehicles; rolled back.');
+    for(const mutation of ['DELETE FROM dms_VehicleInventoryLedger WHERE VehicleID=@v', "UPDATE dms_VehicleInventoryLedger SET ChasisNo='Tampered' WHERE VehicleID=@v"]) {
+        await fixture(pool,async({vehicleId})=>{
+            await assert.rejects(new sql.Request(activeTx).input('v',sql.Int,vehicleId).query(mutation),error=>error.number===51062);
+        });
+    }
+    console.log('PASS: movement history cannot be edited or deleted; rolled back.');
+}
+main().catch(error=>{console.error(error.stack||error.message);process.exitCode=1;}).finally(()=>sql.close());
