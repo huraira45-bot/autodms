@@ -8,7 +8,8 @@
  */
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
-const { masterPositionSql, masterAccountSql } = require('../services/masterPaymentPositionService');
+const { masterAccountSql } = require('../services/masterPaymentPositionService');
+const { bookingAccountReconciliationQuery } = require('../services/bookingPaymentReportQuery');
 
 function parseRange(req) {
     const today = new Date();
@@ -376,17 +377,7 @@ exports.bookingAccountReconciliation = async (req, res) => {
         // Per-booking Dr/Cr for every booking not yet closed/cancelled —
         // these are the "pending delivery" bookings that should still be
         // carrying a balance here (or not, if Master hasn't been paid yet).
-        const rows = await pool.request().input('gl', sql.Int, bvrGL).query(`
-            SELECT b.BookingID, b.BookingNo, b.Status, veh.ChasisNo, p.PartyName,
-                   position.PaidToMaster,position.SettledAtDelivery
-            FROM dms_SalesBookings b
-            LEFT JOIN dms_Vehicle     veh ON veh.VehicleID = b.AllocatedVehicleID
-            LEFT JOIN gen_PartiesInfo p   ON p.PartyID     = b.PartyID
-            CROSS APPLY (SELECT ISNULL(SUM(mp.Dr),0) AS PaidToMaster,
-                                ISNULL(SUM(mp.Cr),0) AS SettledAtDelivery
-                         FROM (${masterPositionSql('b.BookingID','@gl')}) mp) position
-            WHERE b.Status NOT IN ('Closed', 'Cancelled', 'CancellationApproved')
-            ORDER BY b.BookingID DESC`);
+        const rows = await pool.request().input('gl', sql.Int, bvrGL).query(bookingAccountReconciliationQuery());
 
         const list = rows.recordset.map(x => ({
             ...x,

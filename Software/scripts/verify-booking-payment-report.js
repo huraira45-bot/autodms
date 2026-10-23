@@ -28,7 +28,18 @@ async function verify() {
                 (14, 'Posted', NULL, 'Manual', NULL, 'JV-14'),
                 (15, 'Posted', NULL, 'Manual', NULL, 'JV-15'),
                 (16, 'Reversed', NULL, 'Opening', NULL, 'JV-OB-16'),
-                (17, 'Posted', NULL, 'Manual', NULL, 'JV-17')
+                (17, 'Posted', NULL, 'Manual', NULL, 'JV-17'),
+                (18, 'Posted', NULL, 'Manual', NULL, 'JV-18'),
+                (19, 'Posted', NULL, 'Opening', NULL, 'JV-OB-19'),
+                (20, 'Posted', NULL, 'Manual', NULL, 'JV-20'),
+                (21, 'Posted', NULL, 'Opening', NULL, 'JV-OB-21'),
+                (22, 'Posted', NULL, 'Opening', NULL, 'JV-OB-22'),
+                (23, 'Posted', NULL, 'Opening', NULL, 'JV-OB-23'),
+                (24, 'Posted', NULL, 'Opening', NULL, 'JV-OB-24'),
+                (25, 'Posted', NULL, 'Opening', NULL, 'JV-OB-25'),
+                (26, 'Posted', NULL, 'Opening', NULL, 'JV-OB-26'),
+                (27, 'Posted', NULL, 'Opening', NULL, 'JV-OB-27'),
+                (28, 'Posted', NULL, 'Manual', NULL, 'JV-28')
             ) x(VoucherID,Status,ReversesVoucherID,SourceDocType,SourceDocID,VoucherNo)
         ), data_FinanceVoucherDetail AS (
             SELECT * FROM (VALUES
@@ -39,36 +50,54 @@ async function verify() {
                 (10,999,7,50.00,0.00), (11,999,7,0.00,50.00), (12,999,7,50.00,0.00),
                 (13,999,NULL,40.00,0.00), (14,32185,9,70.00,0.00),
                 (15,999,99,500.00,0.00), (16,999,NULL,20.00,0.00),
-                (17,999,NULL,60.00,0.00), (17,777,NULL,0.00,80.00)
+                (17,999,NULL,60.00,0.00), (17,777,NULL,0.00,80.00),
+                (18,999,NULL,30.00,0.00), (18,32185,NULL,30.00,0.00), (18,777,NULL,0.00,60.00),
+                (19,999,NULL,30.00,0.00), (19,32185,NULL,30.00,0.00), (19,777,NULL,0.00,60.00),
+                (20,999,NULL,30.00,0.00), (20,32185,NULL,0.00,0.00), (20,777,NULL,0.00,30.00),
+                (21,999,99,30.00,0.00), (21,777,NULL,0.00,30.00),
+                (22,777,NULL,0.00,30.00), (23,777,NULL,0.00,30.00), (24,32186,NULL,30.00,0.00),
+                (25,777,NULL,0.00,30.00), (26,32187,NULL,30.00,0.00), (27,32187,NULL,30.00,0.00),
+                (28,999,NULL,30.00,0.00), (28,777,NULL,0.00,20.00)
             ) x(VoucherID,GLCAID,BookingID,Debit,Credit)
         ), GLChartOFAccount AS (
-            SELECT * FROM (VALUES (999,'CORE'),(32185,'102001011'),(777,'CUSTOMER')) x(GLCAID,GLCode)
+            SELECT * FROM (VALUES (999,'CORE'),(32185,'102001011'),(32186,'102001012'),(32187,'102001008'),(777,'CUSTOMER')) x(GLCAID,GLCode)
         ), dms_HistoricalMasterAllocations AS (
             SELECT * FROM (VALUES (5,8,999,20.00),(10,16,999,20.00)) x(BookingID,VoucherID,GLCAID,Amount)
         ), dms_SalesPayments AS (
             SELECT x.*,'Posted' AS Status,'PayOrder' AS PaymentMode,0 AS PremiumPortion,
-                777 AS LinkedVoucherGLCAID,1 AS IsLinkedVoucher,CAST(NULL AS INT) AS HistoricalMasterGLCAID
-            FROM (VALUES (1,6,9,30.00),(2,11,17,40.00),(3,12,17,40.00)) x(PaymentID,BookingID,VoucherID,Amount)
+                777 AS LinkedVoucherGLCAID,1 AS IsLinkedVoucher
+            FROM (VALUES (1,6,9,30.00,NULL),(2,11,17,40.00,NULL),(3,12,17,40.00,NULL),
+                (4,13,18,30.00,NULL),(5,14,19,30.00,999),(6,15,20,30.00,NULL),(7,16,21,30.00,999),
+                (8,17,22,30.00,NULL),(9,18,23,30.00,32186),(10,19,25,30.00,32187),(11,20,28,30.00,NULL))
+                x(PaymentID,BookingID,VoucherID,Amount,HistoricalMasterGLCAID)
         ), cases AS (
-            SELECT * FROM (VALUES (1,100,0),(2,0,0),(3,0,0),(4,100,0),(5,20,20),(6,30,30),(7,50,50),(8,40,40),(9,70,70),(10,0,0),(11,0,0),(12,0,0))
+            SELECT * FROM (VALUES (1,100,0),(2,0,0),(3,0,0),(4,100,0),(5,20,20),(6,30,30),(7,50,50),(8,40,40),(9,70,70),(10,0,0),(11,0,0),(12,0,0),
+                (13,0,0),(14,30,30),(15,0,0),(16,0,0),(17,0,0),(18,30,30),(19,0,0),(20,0,0))
                 x(BookingID,ExpectedRemitted,ExpectedPosition)
         ), ReportScope AS (
             -- Excluding booking 12 must not release the shared PO capacity
             -- consumed by its payment and incorrectly pay booking 11.
             SELECT BookingID FROM cases WHERE BookingID<>12
         ), ReportPayOrders AS (${historicalPayOrderSql('@gl')}),
-        ${masterMovementCtes('ReportScope', 'ReportPayOrders')}
+        ${masterMovementCtes('ReportScope', 'ReportPayOrders')},
+        ${masterMovementCtes('ReportScope', 'ReportPayOrders', { excludeDelivery: false }).replaceAll('MasterLines', 'SettlementLines').replaceAll('MasterMovements', 'SettlementMovements')}
         SELECT cases.BookingID,cases.ExpectedRemitted,cases.ExpectedPosition,
             (SELECT ISNULL(SUM(p.Net),0) FROM (${masterPositionSql('cases.BookingID', '@gl', { excludeDelivery: true })}) p) AS ActualRemitted,
             (SELECT ISNULL(SUM(p.Net),0) FROM (${masterPositionSql('cases.BookingID', '@gl')}) p) AS ActualPosition,
-            (SELECT ISNULL(SUM(m.Amount),0) FROM MasterMovements m WHERE m.BookingID=cases.BookingID) AS OptimizedRemitted
+            (SELECT ISNULL(SUM(m.Amount),0) FROM MasterMovements m WHERE m.BookingID=cases.BookingID) AS OptimizedRemitted,
+            (SELECT ISNULL(SUM(p.Dr),0) FROM (${masterPositionSql('cases.BookingID', '@gl')}) p) AS OriginalDebit,
+            (SELECT ISNULL(SUM(p.Cr),0) FROM (${masterPositionSql('cases.BookingID', '@gl')}) p) AS OriginalCredit,
+            (SELECT ISNULL(SUM(m.Debit),0) FROM SettlementMovements m WHERE m.BookingID=cases.BookingID) AS OptimizedDebit,
+            (SELECT ISNULL(SUM(m.Credit),0) FROM SettlementMovements m WHERE m.BookingID=cases.BookingID) AS OptimizedCredit
         FROM cases OPTION (MAXDOP 1);`);
-    assert.equal(result.recordset.length, 12);
+    assert.equal(result.recordset.length, 20);
     for (const row of result.recordset) {
         assert.equal(Number(row.ActualRemitted), Number(row.ExpectedRemitted), `Remittance fixture ${row.BookingID}`);
         assert.equal(Number(row.ActualPosition), Number(row.ExpectedPosition), `Existing balance fixture ${row.BookingID}`);
         assert.equal(Number(row.OptimizedRemitted), Number(row.ExpectedRemitted), `Optimized batch fixture ${row.BookingID}`);
+        assert.equal(Number(row.OptimizedDebit), Number(row.OriginalDebit), `Reconciliation debit fixture ${row.BookingID}`);
+        assert.equal(Number(row.OptimizedCredit), Number(row.OriginalCredit), `Reconciliation credit fixture ${row.BookingID}`);
     }
-    console.log('PASS: 12 SQL fixtures; optimized totals match existing rules, including delivery, reversals, drafts, historical allocations, source tags, legacy accounts and capacity shared with filtered-out bookings.');
+    console.log('PASS: 20 SQL fixtures; delivery, voids, drafts, source tags, historical allocations, shared capacity, ambiguous accounts, selected opening accounts, separate openings and insufficient customer credit.');
 }
 verify().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(() => sql.close());

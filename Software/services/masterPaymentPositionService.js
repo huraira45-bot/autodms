@@ -8,49 +8,56 @@ function masterAccountSql(alias, coreGL) {
         (SELECT GLCAID FROM GLChartOFAccount WHERE GLCode IN (${legacyCodesSql})))`;
 }
 function historicalPayOrderSql(coreGL = '@gl') {
-    return `SELECT candidate.PaymentID,candidate.BookingID,candidate.VoucherID,candidate.GLCAID,candidate.Amount,
-        candidate.PaymentVoucherID
-    FROM (
-        SELECT p.PaymentID,p.BookingID,master.VoucherID,master.GLCAID,p.Amount,p.VoucherID AS PaymentVoucherID,
-            master.MasterAmount-ISNULL((SELECT SUM(a.Amount) FROM dms_HistoricalMasterAllocations a
-                WHERE a.VoucherID=master.VoucherID AND a.GLCAID=master.GLCAID),0) AS Available,
-            SUM(p.Amount) OVER (PARTITION BY master.VoucherID,master.GLCAID) AS Requested
-        FROM dms_SalesPayments p
-        JOIN data_FinanceVoucherInfo v ON v.VoucherID=p.VoucherID
-        CROSS APPLY (
-            SELECT source.VoucherID,d.GLCAID,SUM(ISNULL(d.Debit,0)-ISNULL(d.Credit,0)) AS MasterAmount,
-                COUNT(*) OVER () AS AccountCount
-            FROM data_FinanceVoucherDetail d
-            JOIN data_FinanceVoucherInfo source ON source.VoucherID=d.VoucherID
-            WHERE d.BookingID IS NULL AND ${masterAccountSql('d',coreGL)}
-              AND source.Status='Posted' AND source.ReversesVoucherID IS NULL
-              AND ISNULL(source.SourceDocType,'') NOT IN (${generatedSourcesSql})
-              AND (
-                -- Ordinary direct pay order: its own unambiguous Master entry.
-                (source.VoucherID=v.VoucherID AND
-                    (v.VoucherNo NOT LIKE 'JV-OB-%' OR p.HistoricalMasterGLCAID IS NULL
-                        OR d.GLCAID=p.HistoricalMasterGLCAID))
-                OR
-                -- Customer and Master opening balances can be in separate vouchers.
-                (v.VoucherNo LIKE 'JV-OB-%' AND source.VoucherNo LIKE 'JV-OB-%'
-                    AND source.VoucherDate<=v.VoucherDate AND d.GLCAID=p.HistoricalMasterGLCAID
-                    AND NOT EXISTS (SELECT 1 FROM data_FinanceVoucherDetail ownMaster
-                        WHERE ownMaster.VoucherID=v.VoucherID AND ${masterAccountSql('ownMaster',coreGL)}))
-              )
-            GROUP BY source.VoucherID,d.GLCAID
-        ) master
+    // Aggregate voucher/account balances before matching payments. The former
+    // correlated OR scanned the same opening entries once per pay order.
+    const sources = `SELECT source.VoucherID,d.GLCAID,source.VoucherNo,source.VoucherDate,
+            SUM(ISNULL(d.Debit,0)-ISNULL(d.Credit,0)) AS MasterAmount
+        FROM data_FinanceVoucherDetail d
+        JOIN data_FinanceVoucherInfo source ON source.VoucherID=d.VoucherID
+        WHERE d.BookingID IS NULL AND ${masterAccountSql('d',coreGL)}
+          AND source.Status='Posted' AND source.ReversesVoucherID IS NULL
+          AND ISNULL(source.SourceDocType,'') NOT IN (${generatedSourcesSql})
+        GROUP BY source.VoucherID,d.GLCAID,source.VoucherNo,source.VoucherDate`;
+    const payments = `SELECT p.PaymentID,p.BookingID,p.VoucherID,p.LinkedVoucherGLCAID,
+            p.HistoricalMasterGLCAID,p.Amount,v.VoucherNo,v.VoucherDate
+        FROM dms_SalesPayments p JOIN data_FinanceVoucherInfo v ON v.VoucherID=p.VoucherID
         WHERE p.IsLinkedVoucher=1 AND p.Status='Posted' AND p.PaymentMode='PayOrder'
           AND p.Amount>0 AND ISNULL(p.PremiumPortion,0)=0 AND p.LinkedVoucherGLCAID IS NOT NULL
           AND v.Status='Posted' AND v.ReversesVoucherID IS NULL
-          AND ISNULL(v.SourceDocType,'') NOT IN (${generatedSourcesSql})
-          AND master.AccountCount=1 AND master.MasterAmount>0
+          AND ISNULL(v.SourceDocType,'') NOT IN (${generatedSourcesSql})`;
+    const matches = `SELECT p.PaymentID,p.BookingID,p.VoucherID AS PaymentVoucherID,p.LinkedVoucherGLCAID,
+            p.Amount,master.VoucherID,master.GLCAID,master.MasterAmount
+        FROM (${payments}) p JOIN (${sources}) master ON master.VoucherID=p.VoucherID
+        WHERE p.VoucherNo NOT LIKE 'JV-OB-%' OR p.HistoricalMasterGLCAID IS NULL
+            OR master.GLCAID=p.HistoricalMasterGLCAID
+        UNION ALL
+        SELECT p.PaymentID,p.BookingID,p.VoucherID,p.LinkedVoucherGLCAID,
+            p.Amount,master.VoucherID,master.GLCAID,master.MasterAmount
+        FROM (${payments}) p JOIN (${sources}) master
+            ON master.GLCAID=p.HistoricalMasterGLCAID AND master.VoucherDate<=p.VoucherDate
+        WHERE p.VoucherNo LIKE 'JV-OB-%' AND master.VoucherNo LIKE 'JV-OB-%'
+          AND NOT EXISTS (SELECT 1 FROM data_FinanceVoucherDetail ownMaster
+              WHERE ownMaster.VoucherID=p.VoucherID AND ${masterAccountSql('ownMaster',coreGL)})`;
+    // These branches are disjoint: a direct source has a Master line in the
+    // payment voucher; a separate opening source requires that none exists.
+    // Count ALL candidate accounts before applying eligibility/capacity rules.
+    return `SELECT candidate.PaymentID,candidate.BookingID,candidate.VoucherID,candidate.GLCAID,candidate.Amount,
+        candidate.PaymentVoucherID
+    FROM (
+        SELECT master.PaymentID,master.BookingID,master.VoucherID,master.GLCAID,master.Amount,master.PaymentVoucherID,
+            master.MasterAmount-ISNULL((SELECT SUM(a.Amount) FROM dms_HistoricalMasterAllocations a
+                WHERE a.VoucherID=master.VoucherID AND a.GLCAID=master.GLCAID),0) AS Available,
+            SUM(master.Amount) OVER (PARTITION BY master.VoucherID,master.GLCAID) AS Requested
+        FROM (SELECT matched.*,COUNT(*) OVER (PARTITION BY matched.PaymentID) AS AccountCount
+              FROM (${matches}) matched) master
+        WHERE master.AccountCount=1 AND master.MasterAmount>0
           AND (SELECT ISNULL(SUM(ISNULL(c.Credit,0)-ISNULL(c.Debit,0)),0)
                FROM data_FinanceVoucherDetail c
-               WHERE c.VoucherID=p.VoucherID AND c.GLCAID=p.LinkedVoucherGLCAID)>=p.Amount
+               WHERE c.VoucherID=master.PaymentVoucherID AND c.GLCAID=master.LinkedVoucherGLCAID)>=master.Amount
           AND NOT EXISTS (SELECT 1 FROM dms_HistoricalMasterAllocations a
-              WHERE a.VoucherID IN (p.VoucherID,master.VoucherID) AND a.BookingID=p.BookingID)
+              WHERE a.VoucherID IN (master.PaymentVoucherID,master.VoucherID) AND a.BookingID=master.BookingID)
           AND NOT EXISTS (SELECT 1 FROM data_FinanceVoucherDetail tagged
-              WHERE tagged.VoucherID IN (p.VoucherID,master.VoucherID) AND tagged.BookingID=p.BookingID
+              WHERE tagged.VoucherID IN (master.PaymentVoucherID,master.VoucherID) AND tagged.BookingID=master.BookingID
                 AND ${masterAccountSql('tagged',coreGL)})
     ) candidate WHERE candidate.Requested<=candidate.Available`;
 }

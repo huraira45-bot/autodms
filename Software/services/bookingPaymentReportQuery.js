@@ -39,7 +39,7 @@ function bookingPaymentReportQuery(conditions) {
         DROP TABLE #BookingPaymentOrders;
         DROP TABLE #BookingPaymentRows;`;
 }
-function masterMovementCtes(scope = '#BookingPaymentRows', orders = '#BookingPaymentOrders') {
+function masterMovementCtes(scope = '#BookingPaymentRows', orders = '#BookingPaymentOrders', { excludeDelivery = true } = {}) {
     return `        MasterLines AS (
             SELECT d.BookingID,d.Debit,d.Credit,v.SourceDocType,v.SourceDocID,
                 original.SourceDocType AS OriginalSourceDocType,original.SourceDocID AS OriginalSourceDocID
@@ -47,10 +47,10 @@ function masterMovementCtes(scope = '#BookingPaymentRows', orders = '#BookingPay
             JOIN data_FinanceVoucherInfo v ON v.VoucherID=d.VoucherID
             LEFT JOIN data_FinanceVoucherInfo original ON original.VoucherID=v.ReversesVoucherID
             WHERE v.Status IN ('Posted','Reversed') AND ${masterAccountSql('d', '@gl')}
-                AND ISNULL(v.SourceDocType,'')<>'SALES_DELIVERY'
-                AND ISNULL(original.SourceDocType,'')<>'SALES_DELIVERY'
+                ${excludeDelivery ? "AND ISNULL(v.SourceDocType,'')<>'SALES_DELIVERY' AND ISNULL(original.SourceDocType,'')<>'SALES_DELIVERY'" : ''}
         ), MasterMovements AS (
-            SELECT target.BookingID,ISNULL(line.Debit,0)-ISNULL(line.Credit,0) AS Amount
+            SELECT target.BookingID,ISNULL(line.Debit,0)-ISNULL(line.Credit,0) AS Amount,
+                ISNULL(line.Debit,0) AS Debit,ISNULL(line.Credit,0) AS Credit
             FROM MasterLines line
             CROSS APPLY (
                 SELECT line.BookingID
@@ -59,14 +59,36 @@ function masterMovementCtes(scope = '#BookingPaymentRows', orders = '#BookingPay
             ) target
             JOIN ${scope} scope ON scope.BookingID=target.BookingID
             UNION ALL
-            SELECT a.BookingID,a.Amount FROM dms_HistoricalMasterAllocations a
+            SELECT a.BookingID,a.Amount,a.Amount,0 FROM dms_HistoricalMasterAllocations a
             JOIN data_FinanceVoucherInfo v ON v.VoucherID=a.VoucherID
             JOIN ${scope} scope ON scope.BookingID=a.BookingID
             WHERE v.Status='Posted' AND v.ReversesVoucherID IS NULL
             UNION ALL
-            SELECT po.BookingID,po.Amount FROM ${orders} po
+            SELECT po.BookingID,po.Amount,po.Amount,0 FROM ${orders} po
             JOIN ${scope} scope ON scope.BookingID=po.BookingID
         )
 `;
 }
-module.exports = { bookingPaymentReportQuery, masterMovementCtes };
+function bookingAccountReconciliationQuery() {
+    return `SET NOCOUNT ON;
+        IF OBJECT_ID('tempdb..#BookingReconciliationRows') IS NOT NULL DROP TABLE #BookingReconciliationRows;
+        IF OBJECT_ID('tempdb..#BookingReconciliationOrders') IS NOT NULL DROP TABLE #BookingReconciliationOrders;
+        SELECT b.BookingID,b.BookingNo,b.Status,veh.ChasisNo,p.PartyName
+        INTO #BookingReconciliationRows
+        FROM dms_SalesBookings b
+        LEFT JOIN dms_Vehicle veh ON veh.VehicleID=b.AllocatedVehicleID
+        LEFT JOIN gen_PartiesInfo p ON p.PartyID=b.PartyID
+        WHERE b.Status NOT IN ('Closed','Cancelled','CancellationApproved');
+        CREATE UNIQUE CLUSTERED INDEX IX_BookingReconciliationRows ON #BookingReconciliationRows(BookingID);
+        SELECT po.BookingID,po.GLCAID,po.Amount INTO #BookingReconciliationOrders
+        FROM (${historicalPayOrderSql('@gl')}) po OPTION (MAXDOP 1);
+        WITH ${masterMovementCtes('#BookingReconciliationRows', '#BookingReconciliationOrders', { excludeDelivery: false })}
+        SELECT report.*,ISNULL(paid.PaidToMaster,0) AS PaidToMaster,ISNULL(paid.SettledAtDelivery,0) AS SettledAtDelivery
+        FROM #BookingReconciliationRows report
+        LEFT JOIN (SELECT BookingID,SUM(Debit) AS PaidToMaster,SUM(Credit) AS SettledAtDelivery
+                   FROM MasterMovements GROUP BY BookingID) paid ON paid.BookingID=report.BookingID
+        ORDER BY report.BookingID DESC OPTION (MAXDOP 1);
+        DROP TABLE #BookingReconciliationOrders;
+        DROP TABLE #BookingReconciliationRows;`;
+}
+module.exports = { bookingPaymentReportQuery, masterMovementCtes, bookingAccountReconciliationQuery };

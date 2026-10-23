@@ -62,12 +62,15 @@ masterSourceLocking, historicalMasterApproval, historicalMasterAllocation and
 salesMasterAgreement. Both new endpoints returned 200 against development SQL.
 Production frontend build passed with the existing bundle-size warning.
 
-Run `node scripts/verify-booking-payment-report.js` from Software to execute twelve
+Run `node scripts/verify-booking-payment-report.js` from Software to execute twenty
 read-only SQL scenarios. Its CTE fixtures shadow real table names within a single
 SELECT; no permanent data is changed. It checks delivered payments, voids,
 drafts, direct pay orders, shared opening allocations, original-source reversal
 handling, legacy accounts, unchanged existing booking-account balances, and
 shared pay-order capacity consumed by bookings outside the selected filters.
+It also checks ambiguous accounts (including zero balances), explicitly selected
+opening accounts, separate opening vouchers, insufficient customer credits, and
+the gross debit/credit totals used by account reconciliation.
 
 ## 2026-10-24: live query timeout correction
 
@@ -91,3 +94,8 @@ found zero differences. Twelve SQL fixtures and 138 focused Jest tests passed.
 Only calculation queries were run remotely; no live source files, processes or
 permanent financial data were changed. This fix needs a server pull and backend
 restart, with no migration or frontend rebuild.
+
+The subsequent shared-query optimization reduced the live candidate report from
+6.93 seconds to 0.86 seconds, with all 322 booking totals unchanged. See
+[Sales performance](SALES_PERFORMANCE.md) for the shared calculation and
+reconciliation improvements.
