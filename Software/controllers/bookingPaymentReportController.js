@@ -1,6 +1,6 @@
 const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
-const { masterPositionSql } = require('../services/masterPaymentPositionService');
+const { bookingPaymentReportQuery } = require('../services/bookingPaymentReportQuery');
 const { masterAmountDue } = require('../services/salesMasterAmount');
 const { effectiveMasterPaid } = require('../services/historicalMasterApprovalService');
 const { deliveryMonthKey } = require('../services/bookingDeliveryMonthService');
@@ -64,24 +64,7 @@ exports.report = async (req, res) => {
         // Exclude delivery settlements from remittance totals: clearing the
         // booking account at delivery does not undo the payment sent to Master.
         // Keep genuine reversals, direct pay orders and historical allocations.
-        const result = await request.query(`
-            SELECT b.BookingID,b.BookingNo,b.Status,b.IsHistorical,b.VehicleModelID,b.VehicleVariantID,
-                b.CreatedBy_SalesExecutiveID AS SalespersonID,
-                CAST(COALESCE(b.BookingDate,b.CreatedAt) AS DATE) AS BookingDate,b.PromisedDeliveryMonth,
-                p.PartyName AS CustomerName,p.PhoneOne AS Phone,m.ModelName,v.VariantName,veh.ChasisNo,
-                e.EmployeeName AS SalespersonName,b.NegotiatedPrice,b.AmountPaidToDate,
-                b.MasterAgreedAmount,b.MasterPriceBeforeDiscount,v.WholesalePrice,b.HistoricalMasterApprovedAmount,
-                paid.MasterLedgerRemitted
-            FROM dms_SalesBookings b
-            LEFT JOIN gen_PartiesInfo p ON p.PartyID=b.PartyID
-            LEFT JOIN dms_VehicleModel m ON m.ModelID=b.VehicleModelID
-            LEFT JOIN dms_VehicleVariant v ON v.VariantID=b.VehicleVariantID
-            LEFT JOIN dms_Vehicle veh ON veh.VehicleID=b.AllocatedVehicleID
-            LEFT JOIN gen_EmployeeInfo e ON e.EmployeeID=b.CreatedBy_SalesExecutiveID
-            CROSS APPLY (SELECT ISNULL(SUM(mp.Net),0) AS MasterLedgerRemitted
-                FROM (${masterPositionSql('b.BookingID', '@gl', { excludeDelivery: true })}) mp) paid
-            WHERE ${conditions.join(' AND ')}
-            ORDER BY BookingDate DESC,b.BookingID DESC`);
+        const result = await request.query(bookingPaymentReportQuery(conditions));
         const rows = result.recordset.map(row => {
             const customer = position(row.NegotiatedPrice, row.AmountPaidToDate);
             const master = position(masterAmountDue(row), effectiveMasterPaid(row, row.MasterLedgerRemitted));

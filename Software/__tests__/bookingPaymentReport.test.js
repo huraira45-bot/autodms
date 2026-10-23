@@ -4,6 +4,7 @@ const { getPool } = require('../config/db');
 const { resolveRole } = require('../controllers/systemAccountsController');
 const controller = require('../controllers/bookingPaymentReportController');
 const { masterPositionSql } = require('../services/masterPaymentPositionService');
+const { bookingPaymentReportQuery } = require('../services/bookingPaymentReportQuery');
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; } });
 const base = { BookingID: 1, BookingNo: 'BK-1', BookingDate: new Date('2026-10-01T00:00Z'), Status: 'Allocated',
     IsHistorical: false, NegotiatedPrice: 100, AmountPaidToDate: 100, WholesalePrice: 100, MasterLedgerRemitted: 100 };
@@ -77,6 +78,21 @@ test('remittance query preserves reversals and direct pay orders but excludes de
     expect(remitted).toContain("v.Status IN ('Posted','Reversed')");
     expect(remitted).toContain("p.PaymentMode='PayOrder'");
     expect(remitted).toContain('dms_HistoricalMasterAllocations');
+});
+
+test('report computes global historical eligibility once and aggregates ledger movements for the filtered scope', () => {
+    const query = bookingPaymentReportQuery(["b.Status<>'Cancelled'", 'b.VehicleModelID=@modelId']);
+    expect(query.match(/AS Requested/g)).toHaveLength(1);
+    expect(query).toContain('INTO #BookingPaymentOrders');
+    expect(query).toContain('INTO #BookingPaymentRows');
+    expect(query).toContain('WHERE b.Status<>\'Cancelled\' AND b.VehicleModelID=@modelId');
+    expect(query.indexOf('WHERE candidate.Requested<=candidate.Available')).toBeLessThan(query.indexOf('MasterLines AS'));
+    expect(query).toContain('FROM MasterMovements GROUP BY BookingID');
+    expect(query).not.toContain('SUM(mp.Net)');
+    expect(query).toContain("UNION SELECT line.SourceDocID WHERE line.SourceDocType='PAY_MASTER'");
+    expect(query).toContain("UNION SELECT line.OriginalSourceDocID WHERE line.OriginalSourceDocType='PAY_MASTER'");
+    expect(query).toContain("ISNULL(original.SourceDocType,'')<>'SALES_DELIVERY'");
+    expect(query).toContain('OPTION (MAXDOP 1)');
 });
 
 test('totals use only matching rows and keep overpayments separate from balances owed on other bookings', async () => {

@@ -62,8 +62,32 @@ masterSourceLocking, historicalMasterApproval, historicalMasterAllocation and
 salesMasterAgreement. Both new endpoints returned 200 against development SQL.
 Production frontend build passed with the existing bundle-size warning.
 
-Run `node scripts/verify-booking-payment-report.js` from Software to execute ten
+Run `node scripts/verify-booking-payment-report.js` from Software to execute twelve
 read-only SQL scenarios. Its CTE fixtures shadow real table names within a single
 SELECT; no permanent data is changed. It checks delivered payments, voids,
 drafts, direct pay orders, shared opening allocations, original-source reversal
-handling, legacy accounts, and unchanged existing booking-account balances.
+handling, legacy accounts, unchanged existing booking-account balances, and
+shared pay-order capacity consumed by bookings outside the selected filters.
+
+## 2026-10-24: live query timeout correction
+
+The initial query correlated the entire Master payment calculation with each
+booking. The live database has 359 bookings, 44,082 voucher lines and 147 linked
+historical pay orders; repeated eligibility/window calculations produced an
+expensive query on that data size.
+
+`bookingPaymentReportQuery` now materializes the filtered booking scope and
+global historical pay-order eligibility in session-local temporary tables. It
+aggregates tagged voucher lines, source-linked payments/reversals, historical
+allocations and eligible pay orders in one batch, then joins totals to bookings.
+The per-line UNION of booking/source IDs prevents duplicate counting. Global
+historical capacity is evaluated before report scope is applied. The batch uses
+MAXDOP 1 to avoid the expensive parallel plan. No timeout was increased.
+
+The candidate query returned all 322 non-cancelled live bookings in about 8
+seconds (a subsequent stage timing was approximately 6.8 seconds). A read-only
+comparison of every live booking against the original accounting expression
+found zero differences. Twelve SQL fixtures and 138 focused Jest tests passed.
+Only calculation queries were run remotely; no live source files, processes or
+permanent financial data were changed. This fix needs a server pull and backend
+restart, with no migration or frontend rebuild.
