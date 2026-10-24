@@ -5,6 +5,9 @@ const finalize = require('../controllers/finalizeController');
 const buPnL = require('../controllers/buPnLReportController');
 const ssPnL = require('../controllers/storeSalePnLReportController');
 const { requireAccess, requireAnyAccess } = require('../middleware/permissions');
+const voucherEdits = require('../controllers/voucherEditAuditReportController');
+
+router.get('/voucher-edit-audit', requireAnyAccess('report:voucher_audit', 'finance_vouchers:view'), voucherEdits.report);
 
 // Each report is its own permission key (report:<slug>). See config/permissions.js.
 

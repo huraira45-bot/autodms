@@ -23,7 +23,7 @@ import {
     SlidersHorizontal, Landmark, CreditCard, Receipt, ListChecks, UserCog,
     ClipboardList, ClipboardCheck, MessageSquare, Bell, Percent, LineChart,
     Handshake, Palette, TrendingUp, PieChart, Fingerprint, KeyRound, DollarSign,
-    Gauge, ScrollText, Monitor, MonitorPlay, Building2, Utensils, FileClock,
+    Gauge, ScrollText, Monitor, MonitorPlay, Building2, Utensils, FileClock, History,
 } from 'lucide-react';
 
 // Top-level module groups (order = sidebar order). Each has an id / label /
@@ -208,6 +208,7 @@ export const NAV_ITEMS = [
     { id: 'r-disc',      moduleGroup: 'reports', section: 'Sales Analytics',       label: 'Discount Given',      path: '/reports/discount-given',      icon: ListChecks,   permission: 'report:discount_given' },
     { id: 'r-gcr',       moduleGroup: 'reports', section: 'Audit',                 label: 'Gen-Customer Recon',  path: '/reports/gencust-reconciliation', icon: ListChecks,permission: 'report:gencust_reconciliation' },
     { id: 'r-va',        moduleGroup: 'reports', section: 'Audit',                 label: 'Voucher Audit Trail', path: '/reports/voucher-audit',       icon: ListChecks,   permission: 'report:voucher_audit' },
+    { id: 'r-ve', moduleGroup: 'reports', section: 'Audit', label: 'Voucher Edit Audit', path: '/reports/voucher-edit-audit', icon: History, permission: 'report:voucher_audit', anyPermissions: ['report:voucher_audit', 'finance_vouchers:view'], description: 'Who edited each voucher on the selected dates, with before/after changes and usernames.', keywords: 'edit history changed user date voucher audit before after' },
     { id: 'r-saa',       moduleGroup: 'reports', section: 'Audit',                 label: 'System Account Audit',path: '/reports/system-account-audit',icon: ShieldCheck,  permission: 'report:system_account_audit' },
     { id: 'r-charity',   moduleGroup: 'reports', section: 'Audit',                 label: 'Charity Tracker',     path: '/reports/charity',              icon: HeartHandshake, permission: 'charity_view', description: 'Every 1% charity accrual with voucher detail.' },
     { id: 'r-unfin',     moduleGroup: 'reports', section: 'Audit',                 label: 'Unfinalize Log (JC)', path: '/reports/unfinalize-log',       icon: Undo2,        anyPermissions: ['report:unfinalize_log', 'am_approve', 'admin_unfinalize'], description: 'JC unfinalize requests: pending, approved, executed, rejected.' },

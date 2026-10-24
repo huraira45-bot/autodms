@@ -11,7 +11,7 @@ const value = v => v == null || v === '' ? '—' : typeof v === 'boolean' ? (v ?
 const cell = { padding: '7px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', verticalAlign: 'top' };
 const stamp = v => new Date(v).toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
 
-function SnapshotLines({ title, snapshot }) {
+export function SnapshotLines({ title, snapshot }) {
     const lines = snapshot?.Lines;
     return <div style={{ flex: '1 1 420px', minWidth: 0 }}>
         <strong>{title}</strong>

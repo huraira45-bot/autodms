@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import VoucherEditHistory from '../../components/VoucherEditHistory';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { History, ShieldCheck } from 'lucide-react';
 import ReportShell, { TH, TD, fmt, todayISO, yearStartISO, PeriodControls } from './ReportShell';
 
@@ -28,6 +28,7 @@ export function VoucherAudit() {
     return (
         <>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <Link className="erp-btn" to="/reports/voucher-edit-audit">Edits by date / user</Link>
             <button type="button" className="erp-btn" onClick={() => setShowEdits(false)} aria-pressed={!showEdits}>Voucher lifecycle</button>
             <button type="button" className="erp-btn" onClick={() => setShowEdits(true)} aria-pressed={showEdits}>Edit history</button>
         </div>

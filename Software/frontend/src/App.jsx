@@ -152,6 +152,7 @@ import { POSPending, ChequesOnHand, BankBalances, TaxRateHistory } from './pages
 import { DiscountGiven, SalesRegister, GrossMargin, GenCustReconciliation } from './pages/reports/Workshop';
 import { InventoryValuation } from './pages/reports/Inventory';
 import { VoucherAudit, SystemAccountAudit }                 from './pages/reports/Audit';
+import VoucherEditAudit from './pages/reports/VoucherEditAudit';
 import Accessories        from './pages/Accessories';
 import JobController      from './pages/JobController';
 import GatePass           from './pages/GatePass';
@@ -669,6 +670,7 @@ function LegacySidebar() {
                 <NavSection title="AUDIT">
                 {canReport('gencust_reconciliation')&& <NavLink to="/reports/gencust-reconciliation" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Gen-Customer Recon</NavLink>}
                 {canReport('voucher_audit')         && <NavLink to="/reports/voucher-audit"      className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Voucher Audit Trail</NavLink>}
+                {(canReport('voucher_audit') || hasPermission('finance_vouchers:view')) && <NavLink to="/reports/voucher-edit-audit" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ListChecks size={20} /> Voucher Edit Audit</NavLink>}
                 {canReport('system_account_audit') && <NavLink to="/reports/system-account-audit" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}><ShieldCheck size={20} /> System Account Audit</NavLink>}
                 </NavSection>
 
@@ -1163,6 +1165,7 @@ function AppShell() {
                     <Route path="/reports/sales/customer-advances-aging" element={<ProtectedRoute><CustomerAdvancesAging /></ProtectedRoute>} />
                     <Route path="/reports/gencust-reconciliation" element={<ProtectedRoute moduleKey="reports"><GenCustReconciliation /></ProtectedRoute>} />
                     <Route path="/reports/voucher-audit"        element={<ProtectedRoute moduleKey="reports"><VoucherAudit /></ProtectedRoute>} />
+                    <Route path="/reports/voucher-edit-audit" element={<ProtectedRoute><VoucherEditAudit /></ProtectedRoute>} />
                     <Route path="/reports/system-account-audit" element={<ProtectedRoute moduleKey="reports"><SystemAccountAudit /></ProtectedRoute>} />
 
                     <Route path="/workshop/customers" element={
