@@ -28,6 +28,8 @@ import BookingDiscountModal from './BookingDiscountModal';
 import MasterAgreedAmountModal from './MasterAgreedAmountModal';
 import MasterInvoiceUploadModal from './MasterInvoiceUploadModal';
 import BookingDeliveryMonthModal from './BookingDeliveryMonthModal';
+import EditSalesCustomerModal from './EditSalesCustomerModal';
+import { CustomerIdentityWarningList } from './CustomerIdentityWarnings';
 import { formatDeliveryMonth } from '../../utils/deliveryMonth';
 import { masterAmountDue } from '../../utils/salesMasterAmount';
 import { ErpControlPanel, ErpStatusPill } from '../../components/erp';
@@ -54,7 +56,7 @@ const STATUS_STYLE = {
 export default function BookingDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { hasModule } = useAuth();
+    const { hasModule, user } = useAuth();
     const { confirm: confirmAction } = useFeedback();
     const [data, setData] = useState(null);
     const [documents, setDocuments] = useState([]);
@@ -78,6 +80,8 @@ export default function BookingDetail() {
     const [showAllocate, setShowAllocate] = useState(false);
     const [showPayMaster, setShowPayMaster] = useState(false);
     const [showChangeCustomer, setShowChangeCustomer] = useState(false);
+    const [showEditCustomer, setShowEditCustomer] = useState(false);
+    const [customerWarnings, setCustomerWarnings] = useState([]);
     const [showSwapVehicle, setShowSwapVehicle] = useState(false);
     const [showMasterInvoice, setShowMasterInvoice] = useState(false);
     const [showMasterInvoiceUpload, setShowMasterInvoiceUpload] = useState(false);
@@ -314,6 +318,7 @@ export default function BookingDetail() {
             />
 
             {msg && <FlashMsg msg={msg} />}
+            <CustomerIdentityWarningList warnings={customerWarnings} />
 
             {notInGL.length > 0 && (
                 <div style={{ padding: '11px 14px', borderRadius: 6, marginBottom: 12, fontSize: '0.84rem',
@@ -338,6 +343,7 @@ export default function BookingDetail() {
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PhoneOne}</div>
                         {data.CorporatePONumber && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>PO: <strong>{data.CorporatePONumber}</strong></div>}
                         <CustomerCoaPill partyId={data.PartyID} onLinked={load} />
+                        {(user?.groupId === 1 || hasModule('sales_admin_settings')) && <button type="button" className="erp-btn erp-btn-sm" style={{ marginTop: 8 }} onClick={() => setShowEditCustomer(true)}>Edit customer details</button>}
                         {/* A booking taken against the wrong customer used to need
                             someone running a script (owner ask 2026-10-02). */}
                         {canChangeCustomer && (
@@ -903,6 +909,8 @@ export default function BookingDetail() {
                 />
             )}
 
+            {showEditCustomer && <EditSalesCustomerModal bookingId={id} onClose={() => setShowEditCustomer(false)}
+                onDone={result => { setShowEditCustomer(false); setCustomerWarnings(result.warnings || []); flash('ok', result.message); load(); }} />}
             {showChangeCustomer && (
                 <ChangeCustomerModal
                     booking={data}

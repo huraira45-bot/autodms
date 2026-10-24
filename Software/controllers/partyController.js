@@ -12,6 +12,7 @@
  * UI groups them by L3 parent so picking is fast.
  */
 const { sql, getPool } = require('../config/db');
+const { normaliseCNIC, normaliseNTN, identityWarnings } = require('../services/salesCustomerIdentityService');
 
 const PICKABLE_PARENT_PREFIXES = ['102', '201'];   // Current Assets + Current Liabilities
 
@@ -412,40 +413,29 @@ exports.getPartyGroups = async (req, res) => {
     }
 };
 
-// --- Validation helpers (boundary checks; design doc favours pragmatic, not exhaustive) ---
-function normaliseCNIC(s) {
-    if (!s) return null;
-    const digits = s.replace(/[^\d]/g, '');
-    if (!digits) return null;
-    if (digits.length !== 13) throw new Error('CNIC must be exactly 13 digits.');
-    return `${digits.slice(0,5)}-${digits.slice(5,12)}-${digits.slice(12)}`;
-}
-function normaliseNTN(s) {
-    if (!s) return null;
-    const digits = s.replace(/[^\d]/g, '');
-    if (!digits) return null;
-    if (digits.length < 7 || digits.length > 9) throw new Error('NTN must be 7–9 digits.');
-    return digits;
-}
-
 const VALID_PARTY_TYPES = new Set(['Customer', 'Supplier', 'Insurance', 'Both']);
 
 // Exported so the translation can be tested without racing two inserts.
 exports.explainPartyGLConflict = explainPartyGLConflict;
 
-exports.createParty = async (req, res) => {
+exports.createParty = (req, res) => createParty(req, res, false);
+exports.createSalesCustomer = (req, res) => createParty(req, res, true);
+async function createParty(req, res, salesCustomer) {
     try {
         const b = req.body;
         const PartyType = b.PartyType || 'Customer';
         if (!b.PartyName?.trim()) return res.status(400).json({ error: 'PartyName is required.' });
         if (!VALID_PARTY_TYPES.has(PartyType)) return res.status(400).json({ error: `Invalid PartyType "${PartyType}".` });
+        if (salesCustomer && !['Customer', 'Both'].includes(PartyType)) return res.status(400).json({ error: 'Choose an individual or corporate customer.' });
 
         const cnic = normaliseCNIC(b.CNIC);
         const ntn  = normaliseNTN(b.NTNNO);
 
         const pool = await getPool();
+        const warnings = salesCustomer ? await identityWarnings(pool.request(), { CNIC: cnic, NTNNO: ntn }) : [];
 
-        // Duplicate checks — phone (legacy SP behavior), CNIC, NTN
+        // Booking customer creation warns on repeated identities. Keep the
+        // existing phone guard, and the strict identity checks on the general party API.
         const dup = await pool.request()
             .input('ph',   sql.VarChar(50), b.PhoneOne || null)
             .input('cnic', sql.VarChar(50), cnic)
@@ -459,8 +449,7 @@ exports.createParty = async (req, res) => {
                     END AS Conflict, PartyName
                 FROM gen_PartiesInfo
                 WHERE (PhoneOne = @ph AND @ph IS NOT NULL)
-                   OR (CNIC     = @cnic AND @cnic IS NOT NULL)
-                   OR (NTNNO    = @ntn  AND @ntn  IS NOT NULL)`);
+                   ${salesCustomer ? '' : 'OR (CNIC = @cnic AND @cnic IS NOT NULL) OR (NTNNO = @ntn AND @ntn IS NOT NULL)'}`);
         if (dup.recordset.length) {
             const d = dup.recordset[0];
             return res.status(409).json({ error: `${d.Conflict.toUpperCase()} already used by "${d.PartyName}".` });
@@ -528,7 +517,8 @@ exports.createParty = async (req, res) => {
             PartyID: r.recordset[0].PartyID,
             PartyGLID: control.GLCAID,
             PartyGLCode: control.GLCode,
-            PartyGLTitle: control.GLTitle
+            PartyGLTitle: control.GLTitle,
+            warnings
         });
     } catch (rawErr) {
         const err = await explainPartyGLConflict(rawErr);
@@ -538,7 +528,7 @@ exports.createParty = async (req, res) => {
             ...(err.existingPartyID ? { existingPartyID: err.existingPartyID, existingPartyName: err.existingPartyName } : {}),
         });
     }
-};
+}
 
 exports.updateParty = async (req, res) => {
     try {

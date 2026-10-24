@@ -19,6 +19,7 @@ import { inputStyle, Field, Err, FlashMsg, Shell, Actions } from './VehicleModel
 import SearchableSelect from '../../components/SearchableSelect';
 import { ErpControlPanel } from '../../components/erp';
 import BookingDocumentDrop, { uploadBookingDocuments, validateDocumentItems } from './BookingDocumentDrop';
+import CustomerIdentityWarnings, { CustomerIdentityWarningList } from './CustomerIdentityWarnings';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -269,6 +270,7 @@ export default function NewBooking() {
                         </div>
                     </div>
                 )}
+                <CustomerIdentityWarningList warnings={pickedParty?.IdentityWarnings} />
                 {showCreateCustomer && (
                     <CreateCustomerModal
                         prefillName={partySearch}
@@ -418,7 +420,7 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
         if (glMode === 'existing' && !glId) { setErr('Pick the GL account this customer posts against, or switch back to opening a new one.'); return; }
         setBusy(true); setErr(null);
         try {
-            const r = await axios.post(`${API}/parties`, {
+            const r = await axios.post(`${API}/sales/customers`, {
                 PartyName: name.trim(),
                 PartyType: partyType,
                 PhoneOne: phone || null,
@@ -433,7 +435,7 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
             if (!partyId) throw new Error('Created but server did not return a PartyID.');
             // Fetch the full row so the booking form has name/phone/type to render
             const full = await axios.get(`${API}/parties/${partyId}`);
-            onCreated(full.data);
+            onCreated({ ...full.data, IdentityWarnings: r.data.warnings || [] });
         } catch (e) { setErr(e.response?.data?.error || e.response?.data?.details || e.message); }
         setBusy(false);
     };
@@ -453,6 +455,7 @@ function CreateCustomerModal({ prefillName, onClose, onCreated }) {
                 <Field label="CNIC" flex><input value={cnic} onChange={e => setCnic(e.target.value)} style={inputStyle} placeholder="00000-0000000-0" /></Field>
             </div>
             <Field label="NTN (for corporates)"><input value={ntn} onChange={e => setNtn(e.target.value)} style={inputStyle} /></Field>
+            <CustomerIdentityWarnings cnic={cnic} ntn={ntn} />
             <Field label="Address"><textarea rows={2} value={address} onChange={e => setAddress(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
 
             {/* GL account. Every party posts against its own leaf; without this

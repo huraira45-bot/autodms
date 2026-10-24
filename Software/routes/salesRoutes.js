@@ -12,6 +12,9 @@ const histRef = require('../controllers/salesHistoricalReferenceController');
 const histMasterApproval = require('../controllers/salesHistoricalMasterApprovalController');
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
+const salesCustomer = require('../controllers/salesCustomerController');
+const party = require('../controllers/partyController');
+const { requirePerm, requireAnyAccess } = require('../middleware/permissions');
 const bookingDiscount = require('../controllers/salesBookingDiscountController');
 const deliveryMonth = require('../controllers/bookingDeliveryMonthController');
 const masterInvoiceDocument = require('../controllers/bookingMasterInvoiceDocumentController');
@@ -40,6 +43,11 @@ const withUploadErrors = (mw) => (req, res, next) => mw(req, res, (err) => {
 
 // Read permissions: anyone in the sales chain or settings/reports
 const SALES_READERS = ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing', 'sales_admin_settings', 'sales_master_settlement', 'sales_reports'];
+
+router.get('/customer-identity-warnings', requireAnyAccess(...SALES_READERS, 'crm_parties:insert', 'crm_parties:edit'), salesCustomer.warnings);
+router.post('/customers', requirePerm('crm_parties', 'insert'), party.createSalesCustomer);
+router.get('/bookings/:id/customer', salesCustomer.requireAdmin, salesCustomer.get);
+router.put('/bookings/:id/customer', salesCustomer.requireAdmin, salesCustomer.update);
 
 // =========================================================================
 // Vehicle Catalog — Models / Variants / Vehicles
