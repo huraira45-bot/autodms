@@ -4,7 +4,7 @@ Open **Dashboard → Sale Module Reports**, or select **Sale Module Reports** in
 the sidebar. The Vehicle Sales module also has a shortcut to this report hub.
 Direct route: `/module/sales-reports`.
 
-The hub gathers thirteen vehicle-sales reports:
+The hub gathers fourteen vehicle-sales reports:
 
 | Section | Report | Route |
 | --- | --- | --- |
@@ -19,6 +19,7 @@ The hub gathers thirteen vehicle-sales reports:
 | Inventory & Master Motors | Vehicle Inventory by Variant | `/reports/sales/vehicle-inventory-by-variant` |
 | Inventory & Master Motors | Vehicle Inventory Ledger | `/reports/sales/vehicle-inventory-ledger` |
 | Inventory & Master Motors | Master Invoice Aging | `/sales/reports?tab=miAging` |
+| Inventory & Master Motors | Delivered Vehicles — Master Invoice Pending | `/reports/sales/delivered-master-invoices` |
 | Inventory & Master Motors | Incentive Receivable Aging | `/sales/reports?tab=incAging` |
 | Performance | Executive Performance | `/reports/sales/executive-performance` |
 
@@ -30,10 +31,14 @@ options are retained apart from the query corrections below.
 ## Access
 
 The existing `sales_reports` permission is now labelled **Sale Module Reports
-(read-only)** in Role Permissions. It grants all thirteen read-only reports.
+(read-only)** in Role Permissions. It grants all fourteen reports for reading.
 Individual `report:*` grants continue to allow only their corresponding reports;
 `report:booking_register` covers both registers, Customer Balance Payments and
 Booking Payment Status (including its filter-options endpoint).
+`report:master_invoice_aging` also covers Delivered Vehicles — Master Invoice
+Pending. Upload actions retain their separate Master invoice recording permissions;
+report access alone does not grant upload access. See
+[delivered pending invoices](DELIVERED_MASTER_INVOICES.md) for scope and usage.
 The hub and analytics tabs show only accessible reports. Server endpoints enforce
 the same rules independently. Admin retains access. No new permission key or
 permission migration is required. The vehicle inventory ledger requires schema

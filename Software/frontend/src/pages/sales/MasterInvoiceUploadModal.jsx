@@ -28,7 +28,7 @@ export default function MasterInvoiceUploadModal({ booking, onClose, onSaved }) 
         } catch(err) { setError(err.response?.data?.error || err.message); }
         finally { setBusy(false); }
     };
-    return <Shell title="Record Master Invoice" onClose={busy ? () => {} : onClose}>
+    return <Shell title={`Record Master Invoice${booking.BookingNo ? ` — ${booking.BookingNo}` : ''}`} onClose={busy ? () => {} : onClose}>
         <p style={{fontSize:13}}>Enter the invoice details and upload the invoice issued by Master Motors. Available after gate pass and closure; this saves the invoice paperwork.</p>
         {error && <Err>{error}</Err>}
         <fieldset disabled={busy} style={{border:0,padding:0,margin:0}}>
