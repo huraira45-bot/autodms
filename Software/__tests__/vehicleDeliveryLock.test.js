@@ -5,6 +5,7 @@ jest.mock('../config/db',()=>{
         input(key,type,value){this.values[key]=value;return this;}
         async query(q){
             mockQueries.push({q,values:{...this.values}});
+            if(q.includes('UPDATE v SET') && q.includes('FROM @updated'))return {recordset:mockRows.map(row=>({VehicleID:row.VehicleID}))};
             if(q.includes('INSERT INTO dms_GatePasses')){mockEvents.push('pass');return {recordset:[{GatePassID:501}]};}
             if(q.includes('seq_GatePassNo'))return {recordset:[{n:99}]};
             if(q.includes('FROM dms_SystemAccounts'))return {recordset:mockMapped?[{GLCAID:999}]:[]};
@@ -70,6 +71,30 @@ test.each(['updateVehicle','deleteVehicle'])('%s has no administrator bypass for
     mockRows=[{VehicleID:90,Status:'Delivered',IsDeliveryLocked:1}];const res=response();
     await catalog[method]({...req(),body:{Color:'Red'}},res);
     expect(res.code).toBe(423);expect(mockQueries.every(({q})=>!q.includes('UPDATE v SET')&&!q.includes('DELETE FROM dms_Vehicle'))).toBe(true);
+});
+
+test('an unlinked Delivered label can be edited without changing its status',async()=>{
+    mockRows=[{VehicleID:90,Status:'Delivered',CurrentBookingID:null,IsDeliveryLocked:0,SoldDeliveredAt:null}];
+    const res=response();await catalog.updateVehicle({...req(),body:{Color:'Red',Status:'Delivered'}},res);
+    expect(res.code).toBe(200);expect(mockQueries.some(({q})=>q.includes('UPDATE v SET'))).toBe(true);
+});
+
+test('restoring an unlinked vehicle to stock clears its stale delivery timestamp',async()=>{
+    mockRows=[{VehicleID:90,Status:'Delivered',CurrentBookingID:null,IsDeliveryLocked:0,SoldDeliveredAt:new Date()}];
+    const res=response();await catalog.updateVehicle({...req(),body:{Status:'AtDealer'}},res);
+    expect(res.code).toBe(200);expect(mockQueries.some(({q})=>q.includes('SoldDeliveredAt=NULL'))).toBe(true);
+});
+
+test('an unlinked Delivered label does not block deleting an unused vehicle',async()=>{
+    mockRows=[{VehicleID:90,Status:'Delivered',CurrentBookingID:null,IsDeliveryLocked:0}];
+    const res=response();await catalog.deleteVehicle(req(),res);
+    expect(res.code).toBe(200);expect(mockQueries.some(({q})=>q.includes('DELETE FROM dms_Vehicle'))).toBe(true);
+});
+
+test('manual delivery cannot be newly assigned through the vehicle editor',async()=>{
+    mockRows=[{VehicleID:90,Status:'AtDealer',IsDeliveryLocked:0}];
+    const res=response();await catalog.updateVehicle({...req(),body:{Status:'Delivered'}},res);
+    expect(res.code).toBe(409);expect(mockQueries.every(({q})=>!q.includes('UPDATE v SET'))).toBe(true);
 });
 test('completed gate pass also blocks the booking swap route',async()=>{
     mockRows=[{VehicleID:90}];const res=response();

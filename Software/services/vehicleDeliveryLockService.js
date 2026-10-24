@@ -3,11 +3,20 @@ const { sql } = require('../config/db');
 const DELIVERY_LOCK_MESSAGE = 'This vehicle has been delivered. Editing, deletion and reallocation are locked.';
 // SQL arguments are application-owned expressions, never request text.
 function vehicleDeliveryLockedSql(alias = 'v') {
-    return `(${alias}.Status IN ('Delivered','Sold') OR ${alias}.SoldDeliveredAt IS NOT NULL OR EXISTS (
+    return `(EXISTS (
         SELECT 1 FROM dms_SalesBookings deliveredBooking
-        WHERE deliveredBooking.AllocatedVehicleID=${alias}.VehicleID
-          AND (deliveredBooking.GatePassIssuedAt IS NOT NULL OR EXISTS (
-              SELECT 1 FROM dms_GatePasses pass WHERE pass.DocType='BOOKING' AND pass.DocID=deliveredBooking.BookingID))))`;
+        WHERE (deliveredBooking.AllocatedVehicleID=${alias}.VehicleID OR deliveredBooking.BookingID=${alias}.CurrentBookingID)
+          AND (${alias}.Status IN ('Delivered','Sold') OR ${alias}.SoldDeliveredAt IS NOT NULL
+              OR deliveredBooking.DeliveredAt IS NOT NULL OR deliveredBooking.GatePassIssuedAt IS NOT NULL OR EXISTS (
+                  SELECT 1 FROM dms_GatePasses pass WHERE pass.DocType='BOOKING' AND pass.DocID=deliveredBooking.BookingID)))
+        OR EXISTS (SELECT 1 FROM dms_GatePasses chassisPass
+            JOIN dms_SalesBookings passBooking ON passBooking.BookingID=chassisPass.DocID
+            WHERE chassisPass.DocType='BOOKING' AND chassisPass.VehicleChassis=${alias}.ChasisNo)
+        OR EXISTS (SELECT 1 FROM dms_VehicleInventoryLedger deliveryHistory
+            JOIN dms_SalesBookings historyBooking ON historyBooking.BookingID=deliveryHistory.BookingID
+            WHERE deliveryHistory.VehicleID=${alias}.VehicleID
+              AND (deliveryHistory.EntryType='Delivered' OR
+                  (deliveryHistory.EntryType='Opening' AND deliveryHistory.ToStatus IN ('Delivered','Sold')))))`;
 }
 const fail = (message, statusCode = 423) => { throw Object.assign(new Error(message), { statusCode }); };
 

@@ -141,7 +141,7 @@ export default function VehicleInventoryAdmin() {
                         <tbody>
                             {rows.map(v => {
                                 const st = STATUS_STYLES[v.Status] || STATUS_STYLES.AtMaster;
-                                const locked = v.IsDeliveryLocked || ['Delivered','Sold'].includes(v.Status) || !!v.SoldDeliveredAt;
+                                const locked = !!v.IsDeliveryLocked;
                                 return (
                                     <tr key={v.VehicleID} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                         <Td mono color="#475569">{v.ChasisNo}</Td>
@@ -214,6 +214,9 @@ function VehicleEditor({ item, variants, onClose, onSaved }) {
     return (
         <Shell title={isNew ? 'Receive Chassis' : `Edit Vehicle #${item.VehicleID}`} onClose={onClose} width={560}>
             {err && <Err>{err}</Err>}
+            {item && !item.IsDeliveryLocked && ['Delivered','Sold'].includes(item.Status) && <p style={{ fontSize: 13 }}>
+                This record has no linked delivery booking. Select AtDealer only if the vehicle is currently in your stock.
+            </p>}
             <Field label="Variant *">
                 <select value={variantId} onChange={e => setVariantId(e.target.value)} disabled={!isNew} style={inputStyle}>
                     <option value="">— Pick variant —</option>
@@ -237,6 +240,7 @@ function VehicleEditor({ item, variants, onClose, onSaved }) {
                 </Field>
                 <Field label="Status *" flex>
                     <select value={status} onChange={e => setStatus(e.target.value)} style={inputStyle}>
+                        {!isNew && ['Delivered','Sold'].includes(item.Status) && <option value={item.Status}>{item.Status} (current)</option>}
                         {STATUSES.filter(s => s !== 'Delivered').map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                 </Field>

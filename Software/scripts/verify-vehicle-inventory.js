@@ -27,6 +27,7 @@ async function fixture(pool, check) {
     let aborted=false;activeTx.on('rollback',()=>{aborted=true;});
     try {
         await query(fs.readFileSync(path.join(__dirname,'../migrations/161_vehicle_inventory_ledger_delivery_lock.sql'),'utf8'));
+        await query(fs.readFileSync(path.join(__dirname,'../migrations/162_booking_backed_vehicle_delivery_lock.sql'),'utf8'));
         const model=(await query('SELECT TOP(1) ModelID FROM dms_VehicleModel ORDER BY ModelID')).recordset[0];
         assert.ok(model,'Development database needs a vehicle model.');
         const variants=(await new sql.Request(activeTx).input('model',sql.Int,model.ModelID).query(`
@@ -58,6 +59,9 @@ async function delivered(vehicleId) {
 }
 
 async function main() {
+    const host=(process.env.DB_SERVER||'').split('\\')[0].toLowerCase();
+    if(!['.','localhost','127.0.0.1',require('node:os').hostname().toLowerCase()].includes(host))
+        throw new Error('Local development database only.');
     const pool=await realGetPool();
     await fixture(pool,async({variants,create,vehicleId})=>{
         await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Color:'Blue',Status:'InTransit'}});
@@ -84,9 +88,47 @@ async function main() {
         assert.equal((await invoke(reports.ledger,{query:{search:'VERIFY-'}})).totals.Closing,1);
         const before=(await query('SELECT COUNT(*) AS Qty FROM dms_VehicleInventoryLedger')).recordset[0].Qty;
         await query(fs.readFileSync(path.join(__dirname,'../migrations/161_vehicle_inventory_ledger_delivery_lock.sql'),'utf8'));
+        await query(fs.readFileSync(path.join(__dirname,'../migrations/162_booking_backed_vehicle_delivery_lock.sql'),'utf8'));
+        await query(fs.readFileSync(path.join(__dirname,'../migrations/162_booking_backed_vehicle_delivery_lock.sql'),'utf8'));
         assert.equal((await query('SELECT COUNT(*) AS Qty FROM dms_VehicleInventoryLedger')).recordset[0].Qty,before);
     });
     console.log('PASS: register/receive/edit/variant-transfer/delete, reports, options and balances; rolled back.');
+    await fixture(pool,async({vehicleId,create})=>{
+        // Reproduce an old Delivered label with no booking, pass or linked
+        // delivery history. A label alone must not make the row immutable.
+        await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query("UPDATE dms_Vehicle SET Status='Delivered',SoldDeliveredAt=GETDATE() WHERE VehicleID=@v");
+        let row=await invoke(catalog.getVehicle,{params:{id:String(vehicleId)}});
+        assert.equal(row.IsDeliveryLocked,false);assert.equal(row.Status,'Delivered');
+        await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Color:'Corrected',Status:'Delivered'}});
+        row=await invoke(catalog.getVehicle,{params:{id:String(vehicleId)}});
+        assert.equal(row.Color,'Corrected');assert.equal(row.Status,'Delivered');
+        await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Status:'AtDealer'}});
+        row=await invoke(catalog.getVehicle,{params:{id:String(vehicleId)}});
+        assert.equal(row.Status,'AtDealer');assert.equal(row.SoldDeliveredAt,null);
+        assert.equal((await invoke(reports.ledger,{query:{search:'VERIFY-'}})).totals.Closing,1);
+        const unused=(await create('UNLINKED')).VehicleID;
+        await new sql.Request(activeTx).input('v',sql.Int,unused).query("UPDATE dms_Vehicle SET Status='Delivered' WHERE VehicleID=@v");
+        await invoke(catalog.deleteVehicle,{params:{id:String(unused)}});
+        assert.equal((await new sql.Request(activeTx).input('v',sql.Int,unused).query('SELECT VehicleID FROM dms_Vehicle WHERE VehicleID=@v')).recordset.length,0);
+        assert.ok((await invoke(reports.ledger,{query:{search:'VERIFY-'}})).rows.some(r=>r.VehicleID===unused&&r.EntryType==='Removed'));
+    });
+    console.log('PASS: unlinked Delivered label permits edit/delete; explicit stock correction clears stale date and records one stock restoration; rolled back.');
+    for(const source of ['chassis-pass','delivery-history']) {
+        await fixture(pool,async({vehicleId})=>{
+            const booking=(await query('SELECT TOP(1) BookingID FROM dms_SalesBookings ORDER BY BookingID')).recordset[0];
+            const request=new sql.Request(activeTx).input('v',sql.Int,vehicleId).input('b',sql.Int,booking.BookingID);
+            if(source==='chassis-pass') await request.query(`INSERT dms_GatePasses(GatePassNo,DocType,DocID,VehicleChassis,PassReason,AmountInvoiced,AmountReceived,IssuedAt,IssuedBy,IssuedByName)
+                SELECT 'GP-CHASSIS-VERIFY','BOOKING',@b,ChasisNo,'PAID_FULL',0,0,GETDATE(),0,'Inventory verification' FROM dms_Vehicle WHERE VehicleID=@v`);
+            else await request.query(`INSERT dms_VehicleInventoryLedger(VehicleID,VariantID,ModelID,ChasisNo,OccurredAtUtc,EntryType,BookingID,QuantityIn,QuantityOut)
+                SELECT v.VehicleID,v.VariantID,vr.ModelID,v.ChasisNo,SYSUTCDATETIME(),'Delivered',@b,0,0 FROM dms_Vehicle v JOIN dms_VehicleVariant vr ON vr.VariantID=v.VariantID WHERE v.VehicleID=@v`);
+            const row=await invoke(catalog.getVehicle,{params:{id:String(vehicleId)}});
+            assert.equal(row.CurrentBookingID,null);assert.equal(row.IsDeliveryLocked,true);
+            const res=response();await catalog.updateVehicle({params:{id:String(vehicleId)},body:{Color:'Tampered'},user},res);
+            assert.equal(res.code,423);
+            await assert.rejects(new sql.Request(activeTx).input('v',sql.Int,vehicleId).query("UPDATE dms_Vehicle SET Color='Tampered' WHERE VehicleID=@v"),e=>e.number===51061);
+        });
+    }
+    console.log('PASS: chassis gate-pass and immutable booking delivery history still protect vehicles after header links are absent; rolled back.');
     await fixture(pool,async({vehicleId,variants})=>{
         const bookingId=await delivered(vehicleId);
         const status=(await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query('SELECT Status FROM dms_Vehicle WHERE VehicleID=@v')).recordset[0].Status;

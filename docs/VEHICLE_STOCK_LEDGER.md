@@ -50,17 +50,52 @@ remain GatePassIssued until the voucher is finalized; finalization closes the
 booking while preserving the original delivery date and stock movement.
 
 Vehicle inventory edit/delete actions and booking chassis swaps are blocked
-after delivery for every application role, including administrators. API guards
-check status, delivery date and existing booking gate-pass evidence. Database
+after a booking-backed delivery for every application role, including administrators. API guards
+check booking links, delivery dates and booking gate-pass/ledger evidence. Database
 protection independently prevents changes to delivered inventory/identity fields
 or deletion, including case-only and trailing-space alterations. There is no
 application unlock permission. Internal late Master invoice/accounting reference
 updates remain possible, preserving the existing after-delivery invoice process.
 
-The migration normalizes existing vehicles with issued booking passes to
+Migration 161 normalizes existing vehicles with issued booking passes to
 Delivered and preserves known delivery dates. Legacy Sold vehicles are also
-treated as delivered/locked. Live read-only inspection found two gate-pass
+treated as delivered; a booking-backed delivery is locked. Live read-only inspection found two gate-pass
 vehicles still in other statuses; applying the migration corrects those records.
+
+### Unlinked vehicle corrections (migration 162)
+
+A saved Delivered/Sold label or delivery date alone no longer locks a vehicle
+that has no booking delivery link. Inventory edit/delete uses the server's
+`IsDeliveryLocked` result rather than locking every Delivered label in the browser.
+An authorized user can correct that record or delete it when unused. Existing
+permissions are unchanged. Manual creation of a new Delivered/Sold status still
+requires the gate-pass process; an unlinked existing label may be retained when
+editing other details.
+
+The vehicle's saved status and stock quantity are not changed automatically.
+Choose AtDealer in the editor only when the vehicle is actually in stock. An
+explicit status correction clears a stale delivery timestamp and records the
+stock restoration in the inventory ledger. Existing ledger entries are retained.
+
+Real delivery protection includes booking header links, a gate pass identifying
+the chassis and immutable delivered/opening ledger entries linked to a booking.
+Clearing a displayed current-booking link does not erase those references or
+unlock a genuine delivery. The database uses the same booking-evidence policy;
+the first completion of an already-issued gate pass can set delivery status/date
+without changing vehicle identity. Later edits/deletion remain prohibited.
+
+For an installation already running migration 161, deploy this correction with:
+
+```bat
+cd /d "D:\saher 2.0\autodms" && git -c gc.auto=0 -c maintenance.auto=false pull --ff-only && cd Software\frontend && npm run build && cd .. && pm2 stop autodms && node scripts\run-pending-migrations.js --only 162_booking_backed_vehicle_delivery_lock.sql && pm2 startOrRestart ecosystem.config.js --update-env && pm2 save && git log -1 --oneline
+```
+
+This migration changes the trigger's lock predicate and adds a gate-pass lookup
+index; it does not rewrite vehicle statuses or historical stock movements.
+Rollback-only development verification covers unlinked Delivered edits/deletion,
+explicit stock restoration, first gate-pass completion, retained delivery
+protection, late invoice references and immutable history. Focused tests and the
+production frontend build also pass.
 
 ## Validation and deployment
 

@@ -360,7 +360,7 @@ exports.updateVehicle = async (req, res) => {
         const id = parseInt(req.params.id);
         const b = req.body || {};
         const pool = await getPool();
-        const current = (await pool.request().input('id', sql.Int, id).query(`SELECT v.VehicleID,
+        const current = (await pool.request().input('id', sql.Int, id).query(`SELECT v.VehicleID,v.Status,v.SoldDeliveredAt,
             CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS IsDeliveryLocked
             FROM dms_Vehicle v WHERE v.VehicleID=@id`)).recordset[0];
         if (!current) return res.status(404).json({ error: 'Vehicle not found' });
@@ -373,8 +373,10 @@ exports.updateVehicle = async (req, res) => {
         if (b.ManufactureYear !== undefined) { r.input('yr', sql.Int, b.ManufactureYear || null);   sets.push('ManufactureYear=@yr'); }
         if (b.Status !== undefined) {
             if (!VALID_VEHICLE_STATUS.has(b.Status)) return res.status(400).json({ error: 'Invalid Status' });
-            if (['Delivered','Sold'].includes(b.Status)) return res.status(409).json({ error: 'Delivery status is set by issuing a gate pass.' });
+            if (['Delivered','Sold'].includes(b.Status) && b.Status !== current.Status)
+                return res.status(409).json({ error: 'Delivery status is set by issuing a gate pass.' });
             r.input('st', sql.NVarChar(20), b.Status); sets.push('Status=@st');
+            if (!['Delivered','Sold'].includes(b.Status) && current.SoldDeliveredAt) sets.push('SoldDeliveredAt=NULL');
             if (b.Status === 'AtDealer')  sets.push('ReceivedAt = COALESCE(ReceivedAt, GETDATE())');
         }
         if (b.Location !== undefined)     { r.input('loc', sql.NVarChar(100), b.Location);          sets.push('Location=@loc'); }
@@ -399,8 +401,8 @@ exports.deleteVehicle = async (req, res) => {
         if (!cur.recordset.length) return res.status(404).json({ error: 'Vehicle not found' });
         const v = cur.recordset[0];
         if (v.IsDeliveryLocked) return res.status(423).json({ error: DELIVERY_LOCK_MESSAGE });
-        if (['Allocated', 'Delivered', 'Sold'].includes(v.Status) || v.CurrentBookingID) {
-            return res.status(409).json({ error: `Vehicle is ${v.Status} (linked to booking). Cannot delete.` });
+        if (v.Status === 'Allocated' || v.CurrentBookingID) {
+            return res.status(409).json({ error: 'Unallocate the vehicle from its booking before deleting it.' });
         }
         await pool.request().input('id', sql.Int, id).input('actor', sql.NVarChar(100), req.user?.userName || 'system')
             .query(`SET XACT_ABORT ON; BEGIN TRY BEGIN TRANSACTION;
