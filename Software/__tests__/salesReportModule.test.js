@@ -24,6 +24,7 @@ const routes = [
     ['/customer-balances', 'report:booking_register'],
     ['/booking-payments', 'report:booking_register'],
     ['/booking-payments/options', 'report:booking_register'],
+    ['/account-bookings', 'report:booking_register'],
     ['/vehicle-inventory', 'report:vehicle_inventory'],
     ['/vehicle-inventory-options', 'report:vehicle_inventory'],
     ['/vehicle-inventory-by-variant', 'report:vehicle_inventory'],
@@ -41,17 +42,17 @@ const response = () => ({ code: 200, status(code) { this.code = code; return thi
 const guard = route => router.stack.find(layer => layer.route?.path === route).route.stack[0].handle;
 beforeEach(() => jest.clearAllMocks());
 
-test('dedicated module exposes all fourteen reports on the dashboard, sidebar and My Reports', () => {
+test('dedicated module exposes all fifteen reports on the dashboard, sidebar and My Reports', () => {
     const hasModule = key => key === 'sales_reports';
     const reports = nav.getModuleActions('sales-reports', hasModule, no);
-    expect(reports).toHaveLength(14);
-    expect(new Set(reports.map(item => item.path)).size).toBe(14);
+    expect(reports).toHaveLength(15);
+    expect(new Set(reports.map(item => item.path)).size).toBe(15);
     expect(reports.every(item => item.description)).toBe(true);
     expect(nav.getVisibleModuleGroups(hasModule, no)).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: 'sales-reports', label: 'Sale Module Reports', path: '/module/sales-reports' }),
     ]));
     expect(nav.getDashboardForUser(hasModule, no).moduleCards.some(group => group.id === 'sales-reports')).toBe(true);
-    expect(nav.getVisibleReports(hasModule, no).filter(item => item.moduleGroup === 'sales-reports')).toHaveLength(14);
+    expect(nav.getVisibleReports(hasModule, no).filter(item => item.moduleGroup === 'sales-reports')).toHaveLength(15);
     expect(nav.getModuleActions('reports', hasModule, no).some(item => item.path.startsWith('/reports/sales/'))).toBe(false);
 });
 
@@ -72,7 +73,7 @@ test('without report access the module and its shortcut are hidden', () => {
 test.each([...new Set(routes.map(([, permission]) => permission))])('individual %s keeps access limited to its reports', permission => {
     const hasPermission = key => key === permission;
     const reports = nav.getModuleActions('sales-reports', no, hasPermission);
-    expect(reports.length).toBe(permission === 'report:booking_register' ? 4 : permission === 'report:vehicle_inventory' ? 3 : permission === 'report:master_invoice_aging' ? 2 : 1);
+    expect(reports.length).toBe(permission === 'report:booking_register' ? 5 : permission === 'report:vehicle_inventory' ? 3 : permission === 'report:master_invoice_aging' ? 2 : 1);
     expect(reports.every(item => item.permission === permission)).toBe(true);
     expect(nav.getModuleActions('sales', no, hasPermission).find(item => item.id === 's-reports')?.path).toBe('/module/sales-reports');
 });

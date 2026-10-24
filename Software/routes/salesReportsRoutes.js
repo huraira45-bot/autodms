@@ -6,6 +6,9 @@ const { report: customerBalances } = require('../controllers/customerVehicleBala
 const bookingPayments = require('../controllers/bookingPaymentReportController');
 const vehicleStock = require('../controllers/vehicleInventoryReportController');
 const deliveredInvoices = require('../controllers/deliveredMasterInvoiceReportController');
+const accountBookings = require('../controllers/accountBookingReportController');
+
+router.get('/account-bookings', requireAnyAccess('sales_reports', 'report:booking_register'), accountBookings.report);
 
 router.get('/delivered-master-invoices', requireAnyAccess('sales_reports', 'report:master_invoice_aging'), deliveredInvoices.report);
 

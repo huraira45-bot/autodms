@@ -200,6 +200,7 @@ import CustomerVehicleBalances from './pages/reports/CustomerVehicleBalances';
 import BookingPaymentReport from './pages/reports/BookingPaymentReport';
 import { VehicleInventoryByVariant, VehicleInventoryLedger } from './pages/reports/VehicleStockReports';
 import DeliveredMasterInvoices from './pages/reports/DeliveredMasterInvoices';
+import AccountBookingLinks from './pages/reports/AccountBookingLinks';
 import SurveyPublic         from './pages/SurveyPublic';
 import CommandPalette       from './components/CommandPalette';
 import WorkspaceTopBar      from './components/WorkspaceTopBar';
@@ -1153,6 +1154,7 @@ function AppShell() {
                     <Route path="/reports/sales/cancelled-booking-register" element={<ProtectedRoute><CancelledBookingRegister /></ProtectedRoute>} />
                     <Route path="/reports/sales/customer-balances" element={<ProtectedRoute><CustomerVehicleBalances /></ProtectedRoute>} />
                     <Route path="/reports/sales/booking-payments" element={<ProtectedRoute><BookingPaymentReport /></ProtectedRoute>} />
+                    <Route path="/reports/sales/account-bookings" element={<ProtectedRoute><AccountBookingLinks /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory"       element={<ProtectedRoute><VehicleInventory /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory-by-variant" element={<ProtectedRoute><VehicleInventoryByVariant /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory-ledger" element={<ProtectedRoute><VehicleInventoryLedger /></ProtectedRoute>} />

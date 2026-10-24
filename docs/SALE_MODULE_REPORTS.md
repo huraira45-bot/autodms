@@ -4,7 +4,7 @@ Open **Dashboard → Sale Module Reports**, or select **Sale Module Reports** in
 the sidebar. The Vehicle Sales module also has a shortcut to this report hub.
 Direct route: `/module/sales-reports`.
 
-The hub gathers fourteen vehicle-sales reports:
+The hub gathers fifteen vehicle-sales reports:
 
 | Section | Report | Route |
 | --- | --- | --- |
@@ -13,6 +13,7 @@ The hub gathers fourteen vehicle-sales reports:
 | Bookings | Booking Pipeline | `/sales/reports?tab=pipeline` |
 | Payments & Reconciliation | Customer Balance Payments | `/reports/sales/customer-balances` |
 | Payments & Reconciliation | Booking Payment Status | `/reports/sales/booking-payments` |
+| Payments & Reconciliation | Account Booking Links | `/reports/sales/account-bookings` |
 | Payments & Reconciliation | Customer Advances Aging | `/reports/sales/customer-advances-aging` |
 | Payments & Reconciliation | Booking Account Reconciliation | `/sales/reports?tab=bvrRecon` |
 | Inventory & Master Motors | Vehicle Inventory | `/reports/sales/vehicle-inventory` |
@@ -31,10 +32,11 @@ options are retained apart from the query corrections below.
 ## Access
 
 The existing `sales_reports` permission is now labelled **Sale Module Reports
-(read-only)** in Role Permissions. It grants all fourteen reports for reading.
+(read-only)** in Role Permissions. It grants all fifteen reports for reading.
 Individual `report:*` grants continue to allow only their corresponding reports;
 `report:booking_register` covers both registers, Customer Balance Payments and
-Booking Payment Status (including its filter-options endpoint).
+Booking Payment Status (including its filter-options endpoint) and
+[Account Booking Links](ACCOUNT_BOOKING_LINKS.md).
 `report:master_invoice_aging` also covers Delivered Vehicles — Master Invoice
 Pending. Upload actions retain their separate Master invoice recording permissions;
 report access alone does not grant upload access. See
