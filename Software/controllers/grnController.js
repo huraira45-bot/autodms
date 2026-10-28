@@ -186,6 +186,8 @@ exports.updateGRN = async (req, res) => {
         } = req.body;
         const parsedItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
 
+        // Reopening/printing resolves the supplier through PurchasedParty;
+        // the legacy PartyID column and linked stock header must agree with it.
         await new sql.Request(tx)
             .input('id',   sql.Int,            id)
             .input('pd',   sql.DateTime,       PurchaseDate)
@@ -194,7 +196,8 @@ exports.updateGRN = async (req, res) => {
             .input('whid', sql.Int,            WHID)
             .input('rem',  sql.NVarChar(sql.MAX), Remarks || '')
             .query(`UPDATE data_PurchaseInfo
-                    SET PurchaseDate=@pd, FBRInvoiceNumber=@sbn, PartyID=@pid,
+                    SET PurchaseDate=@pd, FBRInvoiceNumber=@sbn,
+                        PurchasedParty=@pid, PartyID=@pid,
                         WHID=@whid, Remarks=@rem,
                         DiscountAmount=0, FreightAmount=0, FreightTaxable=0
                     WHERE PurchaseID=@id`);
