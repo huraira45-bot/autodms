@@ -17,6 +17,7 @@ const party = require('../controllers/partyController');
 const { requirePerm, requireAnyAccess } = require('../middleware/permissions');
 const bookingDiscount = require('../controllers/salesBookingDiscountController');
 const deliveryMonth = require('../controllers/bookingDeliveryMonthController');
+const bookingDate = require('../controllers/bookingDateController');
 const masterInvoiceDocument = require('../controllers/bookingMasterInvoiceDocumentController');
 const lc  = require('../controllers/salesLifecycleController');
 const inc = require('../controllers/salesIncentiveController');
@@ -87,6 +88,7 @@ router.get('/bookings/cancelled', requireAny(...SALES_READERS), bk.listCancelled
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
 router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
 router.patch('/bookings/:id/delivery-month', requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'), deliveryMonth.update);
+router.patch('/bookings/:id/date', requireAnyAccess('sales_admin_settings', 'sales_gm'), bookingDate.update);
 router.post('/bookings/:id/discount', requireAny('sales_admin_pricing'), bookingDiscount.apply);
 router.post('/bookings/:id/master-agreed-amount', requireAny('sales_admin_pricing'), bookingDiscount.setMasterAmount);
 // Moving a booking to the right customer. Admin-only, refused once anything
@@ -132,7 +134,7 @@ router.get( '/historical/pending-links',                  requireAny('sales_admi
 router.get( '/historical/bookings/:id/linkable-vouchers', requireAny('sales_admin_settings', 'sales_gm'), hist.linkableVouchers);
 // Two steps on purpose: record the payment from the old file first, link its
 // ledger voucher whenever it is found.
-router.patch('/historical/bookings/:id/date',             requireAny('sales_admin_settings', 'sales_gm'), hist.setBookingDate);
+router.patch('/historical/bookings/:id/date',             requireAnyAccess('sales_admin_settings', 'sales_gm'), hist.setBookingDate);
 router.post('/historical/bookings/:id/payment',           requireAny('sales_admin_settings', 'sales_gm'), hist.recordPayment);
 // Money forwarded to Master on an old deal: already in the ledger, so it is
 // matched to that voucher rather than posted again (owner report 2026-09-25).

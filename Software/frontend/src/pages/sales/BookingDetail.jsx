@@ -28,6 +28,7 @@ import BookingDiscountModal from './BookingDiscountModal';
 import MasterAgreedAmountModal from './MasterAgreedAmountModal';
 import MasterInvoiceUploadModal from './MasterInvoiceUploadModal';
 import BookingDeliveryMonthModal from './BookingDeliveryMonthModal';
+import BookingDateModal from './BookingDateModal';
 import EditSalesCustomerModal from './EditSalesCustomerModal';
 import { CustomerIdentityWarningList } from './CustomerIdentityWarnings';
 import { formatDeliveryMonth } from '../../utils/deliveryMonth';
@@ -192,8 +193,7 @@ export default function BookingDetail() {
     const canDiscount = hasModule('sales_admin_pricing') && !data.DeliveryVoucherID && !data.DeliveredAt && !data.GatePassIssuedAt
         && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
     const canManageReferences = data.IsHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
-    const canSetBookingDate = data.IsHistorical &&
-        (hasModule('sales_admin_settings') || hasModule('sales_gm'));
+    const canSetBookingDate = user?.groupId === 1 || hasModule('sales_admin_settings') || hasModule('sales_gm');
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
         (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
     const canAllocate = (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)
@@ -289,7 +289,7 @@ export default function BookingDetail() {
                             <button type="button"
                                     className={`erp-btn erp-btn-sm${data.BookingDate ? '' : ' erp-btn-primary'}`}
                                     onClick={() => setShowBookingDate(true)}>
-                                <CalendarDays size={14} /> {data.BookingDate ? 'Booking date' : 'Set booking date'}
+                                <CalendarDays size={14} /> Change booking date
                             </button>
                         )}
                         {canDiscount && (
@@ -1729,49 +1729,6 @@ function CoaLinkModal({ partyId, partyName, currentGLCode, currentGLTitle, onClo
  * workings, so getting it wrong pays the wrong person — but it could only ever
  * be set from whoever happened to create the booking.
  */
-/**
- * The date an old deal was actually struck.
- *
- * Historical bookings imported from the owner's customer sheet came in without
- * one — the dates were still being dug out of the files — so this is how they
- * get filled in, one booking at a time (owner ask 2026-09-23).
- */
-function BookingDateModal({ booking, onClose, onSaved }) {
-    const iso = (d) => new Date(d).toISOString().slice(0, 10);
-    const [date, setDate] = useState(booking.BookingDate ? iso(booking.BookingDate) : '');
-    const [busy, setBusy] = useState(false);
-    const [err, setErr] = useState(null);
-
-    const save = async () => {
-        if (!date) { setErr('Pick the day the customer booked.'); return; }
-        setBusy(true); setErr(null);
-        try {
-            await axios.patch(`${API}/sales/historical/bookings/${booking.BookingID}/date`, { BookingDate: date });
-            onSaved(date);
-        } catch (e) { setErr(e.response?.data?.error || e.message); }
-        setBusy(false);
-    };
-
-    return (
-        <Shell title={`Booking date — ${booking.BookingNo}`} onClose={onClose}>
-            {err && <Err>{err}</Err>}
-            <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: '0.85rem' }}>
-                Currently: <strong>{booking.BookingDate
-                    ? new Date(booking.BookingDate).toLocaleDateString('en-PK')
-                    : 'not recorded'}</strong>
-            </div>
-            <Field label="Date of the deal *">
-                <input type="date" style={inputStyle} value={date} max={iso(Date.now())}
-                       onChange={e => { setDate(e.target.value); setErr(null); }} />
-            </Field>
-            <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: 10 }}>
-                The day the customer actually booked, not today. Reports date this booking by it.
-            </div>
-            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Save date" busy={busy} disabled={!date} />
-        </Shell>
-    );
-}
-
 function ChangeExecutiveModal({ booking, onClose, onSaved }) {
     const [people, setPeople] = useState([]);
     const [exeId, setExeId] = useState(booking.CreatedBy_SalesExecutiveID || '');
