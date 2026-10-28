@@ -200,10 +200,13 @@ export default function VoucherEntry({ forceTypeCode, title }) {
     const addItem = () => setItems([...items, { GLCAID: '', Narration: '', Debit: 0, Credit: 0, DepartmentID: '', IsExpense: null }]);
     const removeItem = (i) => setItems(items.filter((_, j) => j !== i));
     const updateItem = (i, k, v) => {
-        // Row 0 is locked for CPV/CRV/BPV/BRV: the wrong-side Dr/Cr input and
+        // New CPV/CRV/BPV/BRV entry reserves row 0. Existing vouchers may
+        // store the debit line first, so editing must not infer a bank/cash
+        // line from its position.
+        // For new entry, the wrong-side Dr/Cr input and
         // the account dropdown are read-only. Silently ignore any attempt to
         // mutate those fields so a stale value can't sneak through.
-        if (i === 0 && (isFixedCash || isFixedBank)) {
+        if (!editingId && i === 0 && (isFixedCash || isFixedBank)) {
             if (k === 'GLCAID' && isFixedCash) return;          // Cash Book locked
             if (k === fixedLockedSide)        return;            // wrong-side input locked
         }
@@ -240,7 +243,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
         // posts. Catch that here with a clear message.
         const missingIdx = items.findIndex(it => !it.GLCAID);
         if (missingIdx >= 0) {
-            const isCashOrBankRow0 = missingIdx === 0 && (isFixedCash || isFixedBank);
+            const isCashOrBankRow0 = !editingId && missingIdx === 0 && (isFixedCash || isFixedBank);
             notify({
                 type: 'warning',
                 title: 'Account missing',
@@ -1081,7 +1084,7 @@ export default function VoucherEntry({ forceTypeCode, title }) {
                         </thead>
                         <tbody>
                             {items.map((item, idx) => {
-                                const isLockedRow0 = idx === 0 && (isFixedCash || isFixedBank);
+                                const isLockedRow0 = !editingId && idx === 0 && (isFixedCash || isFixedBank);
                                 const drLocked = isLockedRow0 && fixedLockedSide === 'Debit';
                                 const crLocked = isLockedRow0 && fixedLockedSide === 'Credit';
                                 const showDeptCell = isDeptScoped && !isLockedRow0 && Number(item.Debit) > 0;

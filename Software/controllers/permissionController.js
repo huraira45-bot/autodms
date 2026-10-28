@@ -90,6 +90,10 @@ exports.setRolePermissions = async (req, res) => {
         const incoming = Array.isArray(req.body.permissions) ? req.body.permissions
                        : Array.isArray(req.body.modules)     ? req.body.modules
                        : [];
+        const adminOnly = new Set(SECTIONS.flatMap(section => section.items.filter(item => item.adminOnly).map(item => item.key)));
+        if (groupId !== 1 && incoming.some(key => adminOnly.has(key))) {
+            return res.status(400).json({ error: 'Change Booking Date can only be granted to the Administrator role.' });
+        }
         const pool = await getPool();
         const transaction = new sql.Transaction(pool);
         await transaction.begin();

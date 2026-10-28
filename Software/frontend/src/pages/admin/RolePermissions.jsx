@@ -73,6 +73,7 @@ export default function RolePermissions() {
         setPerms(prev => {
             const next = new Set(prev);
             for (const item of section.items) {
+                if (item.adminOnly && selected.GroupID !== 1) { next.delete(item.key); continue; }
                 if (item.kind === 'document') {
                     for (const a of ACTIONS) {
                         const k = `${item.key}:${a}`;
@@ -239,6 +240,7 @@ export default function RolePermissions() {
                                                 <td style={td}>
                                                     <div style={{ fontWeight: 500, color: '#1e293b' }}>{item.label}</div>
                                                     <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{item.key}</div>
+                                                    {item.adminOnly && <div style={{ fontSize: 11, color: '#92400e' }}>Available only to the main Administrator role.</div>}
                                                 </td>
                                                 {item.kind === 'document' ? (
                                                     <>
@@ -269,7 +271,7 @@ export default function RolePermissions() {
                                                 ) : (
                                                     // workflow + report: single checkbox spanning whatever cols exist
                                                     <td style={tdCheck} colSpan={section.items.some(i => i.kind === 'document') ? 5 : 1}>
-                                                        <input type="checkbox" checked={perms.has(item.key)} onChange={() => togglePerm(item.key)} />
+                                                        <input type="checkbox" checked={perms.has(item.key)} disabled={item.adminOnly && selected.GroupID !== 1} onChange={() => togglePerm(item.key)} />
                                                     </td>
                                                 )}
                                             </tr>

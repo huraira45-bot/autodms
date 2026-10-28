@@ -8,7 +8,7 @@ const { parseBookingDate, dayKey, setBookingDate } = require('../services/bookin
 const controller = require('../controllers/bookingDateController');
 const historical = require('../controllers/salesHistoricalController');
 const router = require('../routes/salesRoutes');
-const user = { groupId: 2, userId: 5, userName: 'Sales admin', employeeId: 3, modules: ['sales_admin_settings'], groupTitle: 'Admin' };
+const user = { groupId: 1, userId: 5, userName: 'Sales admin', employeeId: 3, modules: [], permissions: ['sales_booking_date'], groupTitle: 'Admin' };
 const input = { bookingId: 7, date: '2026-10-27', expectedDate: null, reason: 'Correct the date of the deal', user, now: new Date('2026-10-27T21:00:00Z') };
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; } });
 function fixture(options = {}) {
@@ -51,11 +51,14 @@ test('stale expected dates reject before any writes', async () => {
     const tx = fixture({ booking: { BookingDate: parseBookingDate('2026-10-25') } });
     await expect(setBookingDate(tx, input)).rejects.toMatchObject({ status: 409 }); expect(tx.calls).toHaveLength(1);
 });
-test.each([{ groupId: 1, userId: 1, userName: 'Admin', modules: [] }, { ...user, modules: ['sales_gm'] }])('existing Admin/GM roles can correct dates: %j', async actor => {
+test.each([{ groupId: 1, userId: 1, userName: 'Admin', modules: [], permissions: ['sales_booking_date'] }])('Admin with explicit date right can correct dates: %j', async actor => {
     await expect(setBookingDate(fixture(), { ...input, user: actor })).resolves.toMatchObject({ changed: true });
 });
-test.each(['sales_executive', 'sales_agm', 'sales_reports', 'finance_vouchers'])('%s does not gain date-edit permission', async role => {
-    const tx = fixture(); await expect(setBookingDate(tx, { ...input, user: { ...user, modules: [role] } })).rejects.toMatchObject({ status: 403 }); expect(tx.calls).toHaveLength(0);
+test.each(['sales_executive', 'sales_agm', 'sales_reports', 'finance_vouchers', 'sales_gm', 'sales_admin_settings', 'sales_booking_date'])('%s does not gain Admin-only date-edit permission', async role => {
+    const tx = fixture(); await expect(setBookingDate(tx, { ...input, user: { ...user, groupId: 2, modules: [role] } })).rejects.toMatchObject({ status: 403 }); expect(tx.calls).toHaveLength(0);
+});
+test('revoking the date right also denies the main Admin', async () => {
+    const tx = fixture(); await expect(setBookingDate(tx, { ...input, user: { ...user, permissions: [] } })).rejects.toMatchObject({ status: 403 }); expect(tx.calls).toHaveLength(0);
 });
 test.each([{ reason: 'x' }, { expectedDate: undefined }, { bookingId: -7 }, { date: '2026-02-30' }])('bad input is rejected: %j', async change => {
     const tx = fixture(); await expect(setBookingDate(tx, { ...input, ...change })).rejects.toMatchObject({ status: 400 }); expect(tx.calls).toHaveLength(0);
@@ -70,10 +73,19 @@ test('older forms require refreshing; historical alias uses the same safe implem
     const res = response(); await controller.update({ body: { BookingDate: input.date } }, res); expect(res.code).toBe(400); expect(getPool).not.toHaveBeenCalled();
     expect(historical.setBookingDate).toBe(controller.update);
 });
-test('both date routes allow admin/GM and reject sales executive', () => {
+test('both date routes require main Admin plus the explicit date right', () => {
     for (const path of ['/bookings/:id/date', '/historical/bookings/:id/date']) {
         const guard = router.stack.find(l => l.route?.path === path).route.stack[0].handle;
-        for (const actor of [{ groupId: 1 }, { groupId: 2, permissions: ['sales_gm'] }]) { const next = jest.fn(); guard({ user: actor }, response(), next); expect(next).toHaveBeenCalledTimes(1); }
-        const res = response(); guard({ user: { groupId: 2, permissions: ['sales_executive'] } }, res, jest.fn()); expect(res.code).toBe(403);
+        const next = jest.fn(); guard({ user }, response(), next); expect(next).toHaveBeenCalledTimes(1);
+        for (const actor of [{ groupId: 1, permissions: [] }, { groupId: 2, permissions: ['sales_booking_date', 'sales_gm'] }]) {
+            const res = response(); guard({ user: actor }, res, jest.fn()); expect(res.code).toBe(403);
+        }
     }
+});
+test('Admin Rights exposes the dedicated admin-only checkbox and rejects granting it to another role', async () => {
+    const registry = require('../config/permissions'), permissions = require('../controllers/permissionController');
+    expect(registry.SECTIONS.flatMap(section => section.items).find(item => item.key === 'sales_booking_date')).toMatchObject({ kind: 'workflow', adminOnly: true });
+    expect(registry.expandAllPermissionKeys()).toContain('sales_booking_date');
+    const res = response(); await permissions.setRolePermissions({ params: { groupId: '2' }, body: { permissions: ['sales_booking_date'] } }, res);
+    expect(res.code).toBe(400); expect(getPool).not.toHaveBeenCalled();
 });

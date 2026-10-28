@@ -124,6 +124,7 @@ const SECTIONS = [
             { key: 'hr_salary_post',    label: 'HR: Post Salary Vouchers', kind: 'workflow' },
             { key: 'admin_users',       label: 'User Management',     kind: 'document' },
             { key: 'admin_permissions', label: 'Role Permissions',    kind: 'document' },
+            { key: 'sales_booking_date', label: 'Change Booking Date (Administrator only)', kind: 'workflow', adminOnly: true },
         ],
     },
     {

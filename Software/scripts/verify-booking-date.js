@@ -21,7 +21,7 @@ db.getPool = async () => ({ request: () => new Request(outer) });
 const controller = require('../controllers/bookingDateController'), bookings = require('../controllers/salesBookingController');
 const report = require('../controllers/accountBookingReportController');
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; } });
-const request = () => new sql.Request(outer), actor = { groupId: 1, userId: 1, userName: 'Local date verifier', modules: [] };
+const request = () => new sql.Request(outer), actor = { groupId: 1, userId: 1, userName: 'Local date verifier', modules: [], permissions: ['sales_booking_date'] };
 async function save(id, date, expected, status = 200) {
     const res = response(); await controller.update({ params: { id }, user: actor, body: { BookingDate: date, ExpectedDate: expected, Reason: 'Local date correction check' } }, res);
     assert.equal(res.code, status, res.body?.error); return res.body;
@@ -32,6 +32,13 @@ async function save(id, date, expected, status = 200) {
     const pool = await realGetPool(); outer = new sql.Transaction(pool); await outer.begin();
     const marker = 'BD' + Date.now();
     try {
+        const fs = require('node:fs'), path = require('node:path');
+        const otherPermissions = async () => (await request().query('SELECT GroupID,PermissionKey FROM dms_ModulePermissions WHERE GroupID<>1 ORDER BY GroupID,PermissionKey')).recordset;
+        const beforeOtherPermissions = await otherPermissions();
+        const migration = fs.readFileSync(path.join(__dirname, '../migrations/163_booking_date_admin_right.sql'), 'utf8');
+        await request().query(migration); await request().query(migration);
+        const grants = (await request().query("SELECT PermissionKey FROM dms_ModulePermissions WHERE GroupID=1 AND PermissionKey='sales_booking_date'")).recordset;
+        assert.equal(grants.length, 1); assert.deepEqual(await otherPermissions(), beforeOtherPermissions);
         const refs = (await request().query('SELECT TOP(1) VariantID,ModelID FROM dms_VehicleVariant;SELECT TOP(1) EmployeeID FROM gen_EmployeeInfo')).recordsets;
         assert(refs.every(rows => rows.length), 'Development variant and employee required.');
         const gl = (await request().input('code', sql.NVarChar(20), '201' + marker).query(`INSERT GLChartOFAccount(GLCode,GLTitle,GLLevel,GLNature,GLType,isParent,Companyid,Status,AccountLevelOne,ReadOnly)
@@ -72,6 +79,16 @@ async function save(id, date, expected, status = 200) {
         assert.equal(accountReport.code, 200, accountReport.body?.error);
         assert.deepEqual(accountReport.body.rows.map(row => row.BookingDate).sort(), ['2026-09-15', '2026-10-10']);
         assert.equal(await beforeMoney(), money);
+        const rights = require('../controllers/permissionController');
+        const adminKeys = (await request().query('SELECT PermissionKey FROM dms_ModulePermissions WHERE GroupID=1')).recordset.map(row => row.PermissionKey);
+        const revoke = response(); await rights.setRolePermissions({ params: { groupId: '1' }, body: { permissions: adminKeys.filter(key => key !== 'sales_booking_date') } }, revoke);
+        assert.equal(revoke.code, 200, revoke.body?.error);
+        actor.permissions = [];
+        await save(ids[0], '2026-08-01', '2026-10-10', 403);
+        const grant = response(); await rights.setRolePermissions({ params: { groupId: '1' }, body: { permissions: adminKeys } }, grant);
+        assert.equal(grant.code, 200, grant.body?.error); actor.permissions = ['sales_booking_date'];
+        assert.deepEqual(await otherPermissions(), beforeOtherPermissions);
+        console.log('PASS: migration seeds only Admin once; Admin Rights saves and revokes the key; revoked Admin cannot change booking dates; other roles are unchanged.');
         console.log('PASS: regular and closed historical booking date corrections persist; list filters/reports use corrected dates; entry timestamps, every unrelated booking field and financial records preserved; audit/timeline retained; stale saves and audit failures roll back.');
     } finally { await outer.rollback(); }
     assert.equal((await pool.request().input('name', sql.VarChar(100), marker).query('SELECT COUNT(*) AS N FROM gen_PartiesInfo WHERE PartyName=@name')).recordset[0].N, 0);

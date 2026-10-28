@@ -193,7 +193,7 @@ export default function BookingDetail() {
     const canDiscount = hasModule('sales_admin_pricing') && !data.DeliveryVoucherID && !data.DeliveredAt && !data.GatePassIssuedAt
         && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
     const canManageReferences = data.IsHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
-    const canSetBookingDate = user?.groupId === 1 || hasModule('sales_admin_settings') || hasModule('sales_gm');
+    const canSetBookingDate = user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
     const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
         (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
     const canAllocate = (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)

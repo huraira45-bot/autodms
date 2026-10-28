@@ -1,4 +1,5 @@
 const { sql } = require('../config/db');
+const { canChangeBookingDate } = require('./bookingDatePermissionService');
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
 const dayKey = value => value == null ? null : (value instanceof Date ? value.toISOString() : String(value)).slice(0, 10);
 function parseBookingDate(value) {
@@ -9,7 +10,7 @@ function parseBookingDate(value) {
     return date;
 }
 async function setBookingDate(tx, { bookingId, date, expectedDate, reason, user, now = new Date() }) {
-    if (user?.groupId !== 1 && !['sales_admin_settings', 'sales_gm'].some(role => user?.modules?.includes(role))) fail('Admin or Sales GM permission is required to change booking dates.', 403);
+    if (!canChangeBookingDate(user)) fail('Changing booking dates requires the Administrator role and Change Booking Date admin right.', 403);
     if (!Number.isInteger(user?.userId) || !user?.userName) fail('An authenticated user is required.', 401);
     if (!Number.isSafeInteger(bookingId) || bookingId <= 0 || bookingId > 2147483647) fail('Invalid booking ID.');
     const next = parseBookingDate(date), expected = expectedDate === null ? null : dayKey(parseBookingDate(expectedDate));

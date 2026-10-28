@@ -89,6 +89,20 @@ test('audit failure rolls back financial changes and reports failure', async () 
     expect(res.code).toBe(400); expect(tx.rollback).toHaveBeenCalledTimes(1);
     expect(tx.commit).not.toHaveBeenCalled(); expect(tx.state).toEqual(initial);
 });
+test('posted BPV with the debit line first allows changing both balanced line amounts and saves the history', async () => {
+    const { tx } = fixture({ header: { VoucherTypeCode: 'BPV' } }), res = response();
+    await accounts.updateVoucher(editRequest({ Items: [{ GLCAID: 10, Debit: 125.25, Credit: 0 }, { GLCAID: 11, Debit: 0, Credit: 125.25 }] }), res);
+    expect(res.code).toBe(200); expect(tx.commit).toHaveBeenCalledTimes(1);
+    expect(tx.state.header.TotalAmount).toBe(125.25);
+    expect(tx.state.lines.map(line => [line.Debit, line.Credit])).toEqual([[125.25, 0], [0, 125.25]]);
+    expect(JSON.parse(tx.state.history[0].before).Lines[0].Debit).toBe(48000);
+    expect(JSON.parse(tx.state.history[0].after).Lines[0].Debit).toBe(125.25);
+});
+test('changing only one BPV amount to an unbalanced value still rejects without writing', async () => {
+    const { tx } = fixture({ header: { VoucherTypeCode: 'BPV' } }), res = response();
+    await accounts.updateVoucher(editRequest({ Items: [{ GLCAID: 10, Debit: 125.25, Credit: 0 }, { GLCAID: 11, Debit: 0, Credit: 48000 }] }), res);
+    expect(res.code).toBe(400); expect(tx.begin).not.toHaveBeenCalled(); expect(tx.state.history).toHaveLength(0);
+});
 
 test('cash receipt charity state is included in persisted snapshots', async () => {
     const { tx } = fixture({ header: { VoucherTypeCode: 'CRV' } }); const res = response();

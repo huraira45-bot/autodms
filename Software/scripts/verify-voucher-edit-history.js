@@ -96,6 +96,26 @@ const { sql } = db;
         const retained = (await request().input('id', sql.Int, id).query('SELECT Remarks FROM data_FinanceVoucherInfo WHERE VoucherID=@id')).recordset[0];
         assert.equal(retained.Remarks, 'Edited in SQL test');
 
+        // Legacy BPVs often have the debit first. Both values must save and
+        // appear in the audit trail once the editor permits changing them.
+        const bpvType = (await request().query("SELECT TOP(1) Voucherid FROM GLVoucherType WHERE Title='BPV'")).recordset[0].Voucherid;
+        const bpv = (await request().input('no', sql.NVarChar(50), marker + '-BPV').input('type', sql.Int, bpvType)
+            .query(`INSERT data_FinanceVoucherInfo(VoucherNo,VoucherDate,VoucherTypeID,Status,Posted,TotalAmount,Remarks)
+                OUTPUT INSERTED.VoucherID VALUES(@no,GETDATE(),@type,'Draft',0,100,'BPV both-line test')`)).recordset[0].VoucherID;
+        for (let index = 0; index < 2; index++) await request().input('id', sql.Int, bpv).input('gl', sql.Int, accounts[index].GLCAID)
+            .input('dr', sql.Decimal(18,2), index ? 0 : 100).input('cr', sql.Decimal(18,2), index ? 100 : 0)
+            .query('INSERT data_FinanceVoucherDetail(VoucherID,GLCAID,Debit,Credit) VALUES(@id,@gl,@dr,@cr)');
+        await request().input('id', sql.Int, bpv).query("UPDATE data_FinanceVoucherInfo SET Status='Posted',Posted=1 WHERE VoucherID=@id");
+        const bpvDate = (await request().input('id', sql.Int, bpv).query('SELECT VoucherDate FROM data_FinanceVoucherInfo WHERE VoucherID=@id')).recordset[0].VoucherDate;
+        assert.equal((await invoke('updateVoucher', { ...body, VoucherDate: bpvDate, VoucherTypeID: bpvType }, { id: String(bpv) })).code, 200);
+        const bpvRead = await invoke('getVoucher', {}, { id: String(bpv) });
+        assert.equal(bpvRead.code, 200); assert.equal(bpvRead.body.TotalAmount, 125.25);
+        assert.deepEqual(bpvRead.body.lines.map(line => [line.Debit,line.Credit]), [[125.25,0],[0,125.25]]);
+        const bpvAudit = (await request().input('id', sql.Int, bpv).query('SELECT BeforeJSON,AfterJSON FROM dms_VoucherEditHistory WHERE VoucherID=@id')).recordset;
+        assert.equal(bpvAudit.length,1); assert.equal(JSON.parse(bpvAudit[0].BeforeJSON).Lines[0].Debit,100);
+        assert.equal(JSON.parse(bpvAudit[0].AfterJSON).Lines[0].Debit,125.25);
+        console.log('PASS: posted BPV with debit first saves both edited amounts, remains balanced, reloads correctly and retains before/after history.');
+
         assert.equal((await invoke('updateVoucherDate', { VoucherDate: '2026-09-01', Reason: 'Test date evidence' })).code, 200);
         const line = (await request().input('id', sql.Int, id).query('SELECT TOP(1) VoucherDetailID FROM data_FinanceVoucherDetail WHERE VoucherID=@id AND Debit>0')).recordset[0];
         assert.equal((await invoke('updateVoucherLineDepartment', { DepartmentID: dept, IsExpense: true }, { lineId: String(line.VoucherDetailID) })).code, 200);
