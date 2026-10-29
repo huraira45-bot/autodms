@@ -22,6 +22,7 @@ const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockSer
 const { effectiveMasterPaidSql } = require('../services/historicalMasterApprovalService');
 const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 const { parseDmsBookingNumber } = require('../services/bookingDmsNumberService');
+const { accrueAtBooking, reverseOnCancellation } = require('../services/masterBookingIncentiveService');
 
 // ============================================================================
 // Helpers
@@ -159,7 +160,7 @@ exports.getBooking = async (req, res) => {
                    miDoc.InvoiceNo AS MasterInvoiceNo, miDoc.InvoiceDate AS MasterInvoiceDate,
                    miFile.DocumentID AS MasterInvoiceDocumentID, miFile.FilePath AS MasterInvoiceFilePath,
                    miFile.OriginalFileName AS MasterInvoiceFileName, miDoc.RecordedByName AS MasterInvoiceRecordedByName,
-                   CASE WHEN miDoc.IncentiveProcessedAt IS NOT NULL OR EXISTS (
+                   CASE WHEN b.MasterIncentiveRateID IS NOT NULL OR miDoc.IncentiveProcessedAt IS NOT NULL OR EXISTS (
                        SELECT 1 FROM dms_SalesIncentiveAccruals a WHERE a.BookingID=b.BookingID AND a.EarnerType='Master' AND a.Status<>'Reversed'
                    ) OR EXISTS (
                        SELECT 1 FROM data_FinanceVoucherInfo mv WHERE mv.SourceDocType='MASTER_INVOICE' AND mv.SourceDocID=b.BookingID
@@ -367,12 +368,14 @@ exports.createBooking = async (req, res) => {
                 await incentive.accrueForBooking(tx, bookingId);
             }
 
+            const masterIncentive = await accrueAtBooking(tx, bookingId, req.user);
             await tx.commit();
-            res.status(201).json({ message: 'Booking created', BookingID: bookingId, BookingNo: bookingNo, DMSBookingNumber: dmsBookingNumber, Status: initialStatus, NeedsApproval: needsApproval });
+            res.status(201).json({ message: 'Booking created', BookingID: bookingId, BookingNo: bookingNo, DMSBookingNumber: dmsBookingNumber,
+                Status: initialStatus, NeedsApproval: needsApproval, MasterIncentive: masterIncentive });
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('createBooking:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 };
 
@@ -404,6 +407,11 @@ exports.cancelBooking = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
+            const locked = (await new sql.Request(tx).input('id', sql.Int, id)
+                .query('SELECT Status FROM dms_SalesBookings WITH(UPDLOCK,HOLDLOCK) WHERE BookingID=@id')).recordset[0];
+            if (!locked || locked.Status !== status) {
+                await tx.rollback(); return res.status(409).json({ error: 'Booking changed. Refresh before cancelling.' });
+            }
             if (goesThroughLoop) {
                 // Stage 1 of 3: open a cancellation request. Booking flips to PendingCancelApproval.
                 await new sql.Request(tx)
@@ -437,6 +445,7 @@ exports.cancelBooking = async (req, res) => {
                 .query(`UPDATE dms_NegotiationRequests SET Status='Withdrawn', DecidedAt=GETDATE()
                         WHERE BookingID=@id AND Status='Pending'`);
             await incentive.reverseForBooking(tx, id, `Booking cancelled (pre-confirmation): ${reason}`);
+            await reverseOnCancellation(tx, id, req.user, reason);
             await tx.commit();
             res.json({ message: 'Cancelled (no minimum payment received yet — no AM approval required)', Stage: 'Cancelled' });
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
@@ -561,6 +570,13 @@ exports.adminExecuteCancellation = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
+            const lockedBooking = (await new sql.Request(tx).input('id', sql.Int, c.BookingID)
+                .query('SELECT Status FROM dms_SalesBookings WITH(UPDLOCK,HOLDLOCK) WHERE BookingID=@id')).recordset[0];
+            const lockedRequest = (await new sql.Request(tx).input('id', sql.Int, id)
+                .query('SELECT Status FROM dms_SalesBookingCancellations WITH(UPDLOCK,HOLDLOCK) WHERE CancellationID=@id')).recordset[0];
+            if (lockedBooking?.Status !== 'CancellationApproved' || lockedRequest?.Status !== 'AMApproved') {
+                await tx.rollback(); return res.status(409).json({ error: 'Cancellation changed or was already executed. Refresh before continuing.' });
+            }
             // Mark cancellation row Executed
             await new sql.Request(tx)
                 .input('id', sql.Int, id)
@@ -597,6 +613,7 @@ exports.adminExecuteCancellation = async (req, res) => {
 
             // Clawback any staff incentive accrual
             await incentive.reverseForBooking(tx, c.BookingID, `Booking cancelled via finalization loop (Cancellation #${id})`);
+            await reverseOnCancellation(tx, c.BookingID, req.user, `Cancellation #${id}: ${c.ProposalReason}`);
 
             await logTransition(tx, c.BookingID, 'CancellationApproved', 'Cancelled', req.user,
                 `Admin executed cancellation #${id}. ${refundAmount != null ? `Refund: PKR ${refundAmount.toLocaleString()}.` : ''} ${req.body?.AdminNotes || ''}`);

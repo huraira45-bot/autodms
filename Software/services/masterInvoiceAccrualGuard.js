@@ -3,10 +3,11 @@ const STATES=['Allocated','MasterInvoicePending','MasterInvoicePosted','ReadyFor
 const fail=message=>{throw Object.assign(new Error(message),{status:409});};
 async function requireUploadedMasterInvoice(tx,bookingId,invoiceNo,invoiceDate){
     const bk=await new sql.Request(tx).input('id',sql.Int,bookingId)
-        .query(`SELECT Status,IsHistorical,AllocatedVehicleID FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@id`);
+        .query(`SELECT Status,IsHistorical,AllocatedVehicleID,MasterIncentiveRateID FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@id`);
     const booking=bk.recordset[0];
     if(!booking)fail('Booking not found.');
     if(booking.IsHistorical)fail('Historical bookings require the Master invoice upload only; no Master incentive can be accrued.');
+    if(booking.MasterIncentiveRateID)fail('Master incentive was already recognized using the booking-date rate. Upload the invoice for documentation only.');
     if(!STATES.includes(booking.Status) || !booking.AllocatedVehicleID)fail('An allocated, non-cancelled booking is required to process the Master incentive.');
     const uploaded=await new sql.Request(tx).input('id',sql.Int,bookingId)
         .query(`SELECT m.InvoiceNo,m.InvoiceDate,m.IncentiveProcessedAt

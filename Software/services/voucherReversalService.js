@@ -144,6 +144,14 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
                 WHERE VoucherID=@id`);
 
     // 10. Sync dms_PendingCheques with the reversal:
+    if (orig.SourceDocType === 'MASTER_BOOKING_INC') {
+        await new sql.Request(transaction).input('vid', sql.Int, originalVoucherId)
+            .query(`UPDATE dms_SalesIncentiveAccruals SET Status='Reversed',ReversedAt=GETDATE(),
+                    ReversalReason='Booking incentive voucher reversed'
+                    WHERE AccrualVoucherID=@vid AND EarnerType='Master' AND Status<>'Reversed'`);
+    }
+
+    // Sync pending cheques without changing customer receipts on this booking.
     //   - If the reversed voucher is the original receipt/issue → any Pending row
     //     tied to it is forcibly Bounced (the receipt didn't really happen).
     //   - If the reversed voucher is a Clearance/Bounce voucher → revert that

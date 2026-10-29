@@ -1,12 +1,13 @@
 const { sql } = require('../config/db');
+const { reverseOnCancellation } = require('./masterBookingIncentiveService');
 
 const isMainAdmin = user => user?.groupId === 1;
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
 const requireMainAdmin = (req, res, next) => isMainAdmin(req.user)
     ? next() : res.status(403).json({ error: 'Only the main Administrator can cancel a closed booking.' });
 
-// Administrative status correction. Financial, incentive, allocation and
-// delivery records are deliberately outside this operation.
+// Cancel only the Master incentive; customer payments, staff incentives,
+// vehicle allocation and delivery records remain intact.
 async function cancelClosedBooking(tx, { bookingId, reason, user }) {
     if (!isMainAdmin(user)) fail('Only the main Administrator can cancel a closed booking.', 403);
     if (!Number.isInteger(user.userId) || !user.userName) fail('An authenticated Administrator is required.', 401);
@@ -31,6 +32,7 @@ async function cancelClosedBooking(tx, { bookingId, reason, user }) {
                 WHERE BookingID=@id AND Status='Closed';
                 SELECT CancelledAt FROM @changed;`)).recordset[0];
     if (!changed) fail('The booking changed. Refresh it before cancelling.', 409);
+    await reverseOnCancellation(tx, bookingId, user, reason);
 
     const oldValue = { Status: booking.Status, CancelledAt: booking.CancelledAt, CancellationReason: booking.CancellationReason };
     const newValue = { Status: 'Cancelled', CancelledAt: changed.CancelledAt, CancellationReason: reason };
@@ -45,10 +47,10 @@ async function cancelClosedBooking(tx, { bookingId, reason, user }) {
     await new sql.Request(tx).input('id', sql.Int, bookingId)
         .input('emp', sql.Int, user.employeeId || null).input('name', sql.NVarChar(100), user.userName)
         .input('role', sql.NVarChar(50), user.groupTitle || 'Administrator')
-        .input('reason', sql.NVarChar(sql.MAX), `Administrator cancelled closed booking. Financial and delivery records retained. Reason: ${reason}`)
+        .input('reason', sql.NVarChar(sql.MAX), `Administrator cancelled closed booking; Master incentive reversed/voided. Other financial and delivery records retained. Reason: ${reason}`)
         .query(`INSERT INTO dms_BookingStateTransitions(BookingID,FromState,ToState,ActorEmployeeID,ActorName,ActorRole,Reason)
                 VALUES(@id,'Closed','Cancelled',@emp,@name,@role,@reason)`);
-    return { Status: 'Cancelled', message: 'Closed booking cancelled. Financial and delivery records are unchanged.' };
+    return { Status: 'Cancelled', message: 'Closed booking cancelled; Master incentive reversed/voided. Other financial and delivery records retained.' };
 }
 
 module.exports = { isMainAdmin, requireMainAdmin, cancelClosedBooking };

@@ -976,7 +976,7 @@ exports.issueGatePass = async (req, res) => {
 // Every SourceDocType a sales posting service can stamp on a voucher header.
 // All five stop at Draft for review now (owner ask 2026-08-07).
 const SALES_VOUCHER_SOURCE_TYPES = [
-    'MASTER_INVOICE', 'SALES_PAYMENT', 'SALES_DELIVERY',
+    'MASTER_INVOICE', 'MASTER_BOOKING_INC', 'SALES_PAYMENT', 'SALES_DELIVERY',
     'SALES_INCENTIVE_ACCRUAL', 'SALES_INCENTIVE_DISB',
 ];
 

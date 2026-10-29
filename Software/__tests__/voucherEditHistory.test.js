@@ -69,6 +69,13 @@ function editRequest(extra = {}) {
 }
 beforeEach(() => { jest.clearAllMocks(); jest.spyOn(console, 'error').mockImplementation(() => {}); });
 afterEach(() => { jest.restoreAllMocks(); });
+test('booking Master incentive amount/account snapshot cannot be detached by generic edit/delete', async () => {
+    for (const Status of ['Draft', 'Posted']) {
+        const { tx } = fixture({ header: { SourceDocType: 'MASTER_BOOKING_INC', Status } });
+        const edit = response(); await accounts.updateVoucher(editRequest(), edit); expect(edit.code).toBe(409); expect(tx.begin).not.toHaveBeenCalled();
+        const removed = response(); await accounts.deleteVoucher({ params: { id: '7' }, user }, removed); expect(removed.code).toBe(409); expect(tx.begin).not.toHaveBeenCalled();
+    }
+});
 
 test('full posted edit records authenticated actor and actual before/after values, including lost associations', async () => {
     const { tx } = fixture(); const res = response();

@@ -49,12 +49,13 @@ exports.listAccruals = async (req, res) => {
                            a.AmountAccrued, a.DisbursedAmount,
                            (a.AmountAccrued - a.DisbursedAmount) AS Outstanding,
                            a.Status, a.AccrualVoucherID, a.AccrualVoucherNo, a.AccruedAt,
-                           a.TaxTreatment,
+                           a.TaxTreatment,a.MasterRateID,av.Status AS AccrualVoucherStatus,
                            b.BookingNo, b.NegotiatedPrice,
                            v.ChasisNo
                     FROM dms_SalesIncentiveAccruals a
                     LEFT JOIN dms_SalesBookings b ON b.BookingID = a.BookingID
-                    LEFT JOIN dms_Vehicle       v ON v.VehicleID = a.VehicleID
+                    LEFT JOIN dms_Vehicle       v ON v.VehicleID = COALESCE(a.VehicleID,b.AllocatedVehicleID)
+                    LEFT JOIN data_FinanceVoucherInfo av ON av.VoucherID=a.AccrualVoucherID
                     WHERE a.EarnerType='Master'
                       AND (@st IS NULL
                            OR (@st='open' AND a.Status IN ('Accrued','PartiallyDisbursed'))
@@ -132,6 +133,7 @@ exports.createReceipt = async (req, res) => {
         if (!acc.recordset.length) throw new Error(`Accrual ${AccrualID} not found.`);
         const a = acc.recordset[0];
         if (a.EarnerType !== 'Master') throw new Error('Accrual is not Master-side.');
+        if (a.Status === 'Reversed') throw new Error('This Master incentive has been reversed.');
         const outstanding = Number(a.AmountAccrued) - Number(a.DisbursedAmount);
         if (outstanding <= 0.01) throw new Error('Accrual already fully disbursed.');
         if (gross > outstanding + 0.01) {
@@ -214,7 +216,7 @@ exports.createBulkReceipt = async (req, res) => {
         const accs = await new sql.Request(tx)
             .query(`SELECT AccrualID, AmountAccrued, DisbursedAmount, Status, AccruedAt
                     FROM dms_SalesIncentiveAccruals WITH (UPDLOCK, HOLDLOCK)
-                    WHERE AccrualID IN (${ids.join(',')}) AND EarnerType='Master'
+                    WHERE AccrualID IN (${ids.join(',')}) AND EarnerType='Master' AND Status<>'Reversed'
                     ORDER BY AccruedAt ASC, AccrualID ASC`);
         const outstanding = accs.recordset
             .map(a => ({ ...a, Outstanding: Number(a.AmountAccrued) - Number(a.DisbursedAmount) }))
@@ -327,7 +329,7 @@ exports.revokeReceipt = async (req, res) => {
         const siblings = await new sql.Request(tx)
             .input('vid', sql.Int, voucherId)
             .query(`SELECT r.ReceiptID, r.AccrualID, r.GrossAmount,
-                           a.AmountAccrued, a.DisbursedAmount
+                           a.AmountAccrued, a.DisbursedAmount,a.Status AS AccrualStatus
                     FROM dms_MasterIncentiveReceipts r WITH (UPDLOCK, HOLDLOCK)
                     INNER JOIN dms_SalesIncentiveAccruals a ON a.AccrualID = r.AccrualID
                     WHERE r.ReceiptVoucherID=@vid`);
@@ -337,7 +339,7 @@ exports.revokeReceipt = async (req, res) => {
         const noteText = `REVERSED: ${reason.trim()}`;
         for (const rec of siblings.recordset) {
             const newDisbursed = Math.max(0, Number(rec.DisbursedAmount) - Number(rec.GrossAmount));
-            const newStatus = newDisbursed > 0.01 ? 'PartiallyDisbursed' : 'Accrued';
+            const newStatus = rec.AccrualStatus === 'Reversed' ? 'Reversed' : newDisbursed > 0.01 ? 'PartiallyDisbursed' : 'Accrued';
             await new sql.Request(tx)
                 .input('aid', sql.Int,           rec.AccrualID)
                 .input('amt', sql.Decimal(18,2), newDisbursed)

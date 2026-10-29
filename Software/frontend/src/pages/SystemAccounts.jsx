@@ -120,6 +120,13 @@ export default function SystemAccounts() {
         Designate which Chart of Accounts entry fills each of the {rows.length} system roles. Re-assignment is forward-looking only — historical postings stay on the previous account. Every change is audited.
       </p>
 
+      <div className="card" style={{ marginBottom: 16, background: '#eff6ff' }}>
+        <strong>Master incentive at booking</strong>
+        <p>Select <strong>Master Incentive Receivable</strong> for the debit line and <strong>Master Incentive Income</strong> for the credit line below.
+          Both lines use the incentive amount set for the variant and booking date. The voucher stays Draft until Accounts finalizes it.</p>
+        <p style={{ marginBottom: 0 }}>Cancellation reverses a posted voucher or voids an unposted draft. Existing bookings keep their original rate and accounts.</p>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13, color: '#475569' }}>
         <strong>{assignedCount}</strong> of <strong>{rows.length}</strong> roles configured.
         {assignedCount < rows.length && (

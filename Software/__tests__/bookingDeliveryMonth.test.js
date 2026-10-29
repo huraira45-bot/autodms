@@ -8,6 +8,7 @@ jest.mock('../config/db', () => ({ getPool: jest.fn(), sql: {
     },
 } }));
 jest.mock('../controllers/salesIncentiveController', () => ({ accrueForBooking: jest.fn() }));
+jest.mock('../services/masterBookingIncentiveService', () => ({ accrueAtBooking: jest.fn(), reverseOnCancellation: jest.fn() }));
 const { getPool } = require('../config/db');
 const { parseDeliveryMonth, deliveryMonthKey, setDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 const controller = require('../controllers/bookingDeliveryMonthController');

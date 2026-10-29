@@ -28,11 +28,13 @@ async function loadReceipt(receiptId, tx) {
         .query(`SELECT r.ReceiptID, r.AccrualID, r.GrossAmount, r.WHTAmount, r.GSTOnIncentive,
                        r.NetCashReceived, r.ReceiptVoucherID, r.Status,
                        a.BookingID, a.IncentiveCategory, a.EarnerType, a.AmountAccrued,
-                       a.DisbursedAmount, a.Status AS AccrualStatus,
+                       a.DisbursedAmount, a.Status AS AccrualStatus,a.MasterRateID,a.MasterReceivableGLCAID,
+                       av.Status AS AccrualVoucherStatus,
                        b.BookingNo
                 FROM dms_MasterIncentiveReceipts r
                 INNER JOIN dms_SalesIncentiveAccruals a ON a.AccrualID = r.AccrualID
                 LEFT JOIN dms_SalesBookings b           ON b.BookingID  = a.BookingID
+                LEFT JOIN data_FinanceVoucherInfo av ON av.VoucherID=a.AccrualVoucherID
                 WHERE r.ReceiptID=@id`);
     if (!r.recordset.length) throw new Error(`Master receipt ${receiptId} not found.`);
     return r.recordset[0];
@@ -60,6 +62,8 @@ async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, 
     if (r.EarnerType !== 'Master') {
         throw new Error('Receipt is not tied to a Master accrual.');
     }
+    if (r.AccrualStatus === 'Reversed') throw new Error('A reversed Master incentive cannot receive a payment.');
+    if (r.MasterRateID && r.AccrualVoucherStatus !== 'Posted') throw new Error('Finalize the booking incentive voucher before receiving payment.');
     if (r.ReceiptVoucherID) return r.ReceiptVoucherID;  // idempotent
 
     const gross = Number(r.GrossAmount || 0);
@@ -71,7 +75,7 @@ async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, 
         throw new Error(`NetCashReceived must equal Gross - WHT + GST (got ${net} vs ${gross - wht + gst}).`);
     }
 
-    const recvGL = await resolveRole('MASTER_INCENTIVE_RECEIVABLE');
+    const recvGL = r.MasterReceivableGLCAID || await resolveRole('MASTER_INCENTIVE_RECEIVABLE');
     const isPOS  = paymentMode === 'POS';
     const debitGL = isPOS ? await resolveRole('POS_CLEARING') : await resolveBank(bankAccountGLCAID, tx);
     const whtGL  = wht > 0 ? await resolveRole('TRADE_DEBTORS') : null;       // placeholder — WHT_RECEIVABLE role is backlog
@@ -177,6 +181,8 @@ async function postBulkMasterReceiptVoucher(receiptIds, bankAccountGLCAID, userI
     for (const id of receiptIds) {
         const r = await loadReceipt(id, tx);
         if (r.EarnerType !== 'Master') throw new Error(`Receipt ${id} is not tied to a Master accrual.`);
+        if (r.AccrualStatus === 'Reversed') throw new Error(`Master incentive #${r.AccrualID} has been reversed.`);
+        if (r.MasterRateID && r.AccrualVoucherStatus !== 'Posted') throw new Error(`Finalize the voucher for incentive #${r.AccrualID} before receiving payment.`);
         if (r.ReceiptVoucherID) throw new Error(`Receipt ${id} already has a voucher — not idempotent for bulk (call one at a time to resume).`);
         receipts.push(r);
     }
@@ -187,7 +193,7 @@ async function postBulkMasterReceiptVoucher(receiptIds, bankAccountGLCAID, userI
     const net   = receipts.reduce((s, r) => s + Number(r.NetCashReceived || 0), 0);
     if (gross <= 0) throw new Error('Combined GrossAmount must be > 0.');
 
-    const recvGL = await resolveRole('MASTER_INCENTIVE_RECEIVABLE');
+    const recvGL = receipts.some(r => !r.MasterReceivableGLCAID) ? await resolveRole('MASTER_INCENTIVE_RECEIVABLE') : null;
     const isPOS  = paymentMode === 'POS';
     const debitGL = isPOS ? await resolveRole('POS_CLEARING') : await resolveBank(bankAccountGLCAID, tx);
     const whtGL  = wht > 0 ? await resolveRole('TRADE_DEBTORS') : null;
@@ -238,7 +244,7 @@ async function postBulkMasterReceiptVoucher(receiptIds, bankAccountGLCAID, userI
     if (wht > 0) await insertLine(whtGL, wht, 0, `WHT withheld by Master (claimable)`, null);
     if (gst > 0) await insertLine(gstGL, 0, gst, `Output GST on incentive`, null);
     for (const r of receipts) {
-        await insertLine(recvGL, 0, Number(r.GrossAmount), `Closing Master incentive receivable (accrual #${r.AccrualID}, ${r.BookingNo})`, r.BookingID);
+        await insertLine(r.MasterReceivableGLCAID || recvGL, 0, Number(r.GrossAmount), `Closing Master incentive receivable (accrual #${r.AccrualID}, ${r.BookingNo})`, r.BookingID);
     }
 
     await new sql.Request(tx)

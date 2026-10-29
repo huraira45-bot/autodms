@@ -43,6 +43,8 @@ async function call(fn, req, code = 200) { const res = response(); await fn(req,
             .query(`INSERT dms_VehicleVariant(ModelID,VariantCode,VariantName,StandardPrice,WholesalePrice,MinimumBookingAmount)
                 OUTPUT INSERTED.VariantID VALUES(@model,@code,'Synthetic DMS variant',1000,1000,0)`)).recordset[0].VariantID;
         const user = { groupId: 1, userId: 1, userName: 'Local DMS verifier', employeeId: refs[2][0].EmployeeID, modules: ['sales_executive'] };
+        await rq().input('v',sql.Int,variant).query(`INSERT dms_MasterIncentiveRates(VariantID,EffectiveFrom,EffectiveTo,AmountPerBooking,CreatedByUserID,CreatedByName)
+            VALUES(@v,'1753-01-01','9999-12-31',0,1,'Synthetic DMS verifier')`);
         const body = { PartyID: refs[1][0].PartyID, VehicleVariantID: variant, NegotiatedPrice: 1000 };
         const finance = async () => (await rq().query(`SELECT COUNT(*) AS N,SUM(TotalAmount) AS A FROM data_FinanceVoucherInfo;
             SELECT COUNT(*) AS N,SUM(Debit) AS D,SUM(Credit) AS C FROM data_FinanceVoucherDetail;

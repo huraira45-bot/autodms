@@ -25,6 +25,7 @@ const masterInvoiceDocument = require('../controllers/bookingMasterInvoiceDocume
 const lc  = require('../controllers/salesLifecycleController');
 const inc = require('../controllers/salesIncentiveController');
 const mi  = require('../controllers/masterIncentiveController');
+const masterRates = require('../controllers/masterIncentiveRateController');
 const rec = require('../controllers/salesRecoveryController');
 const hier = require('../controllers/salesHierarchyController');
 const coa  = require('../controllers/partyCoaLinkController');
@@ -210,6 +211,10 @@ router.post(  '/incentives/disburse',               requireAny('sales_admin_sett
 
 // Master Incentive — accrual visibility + MRV (Master Receipt Voucher) workflow
 router.get(   '/master-incentive/summary',           requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'), mi.summary);
+router.get('/master-incentive/rates', requireAnyAccess('sales_admin_settings', 'sales_reports', 'sales_gm', 'sales_master_settlement', 'report:incentive_receivable_aging'), masterRates.list);
+router.get('/master-incentive/rate-options', requireAnyAccess('sales_admin_settings', 'sales_reports', 'sales_gm', 'sales_master_settlement', 'report:incentive_receivable_aging'), masterRates.options);
+router.post('/master-incentive/rates', requireAnyAccess('sales_admin_settings'), masterRates.create);
+router.post('/master-incentive/rates/:id/end', requireAnyAccess('sales_admin_settings'), masterRates.end);
 router.get(   '/master-incentive/accruals',          requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'), mi.listAccruals);
 router.get(   '/master-incentive/receipts',          requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm', 'sales_reports'), mi.listReceipts);
 router.post(  '/master-incentive/receipts',         requireAny('sales_master_settlement', 'sales_admin_settings'), mi.createReceipt);

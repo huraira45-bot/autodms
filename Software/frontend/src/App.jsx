@@ -177,6 +177,8 @@ import BookingDetail        from './pages/sales/BookingDetail';
 import NegotiationQueue     from './pages/sales/NegotiationQueue';
 import IncentivePoliciesAdmin from './pages/sales/IncentivePoliciesAdmin';
 import MasterIncentive       from './pages/sales/MasterIncentive';
+import MasterIncentiveRates from './pages/sales/MasterIncentiveRates';
+import MasterIncentiveAging from './pages/reports/MasterIncentiveAging';
 import SalesRecovery         from './pages/sales/SalesRecovery';
 import HierarchyTargets      from './pages/sales/HierarchyTargets';
 import SalesReportsV2        from './pages/sales/SalesReportsV2';
@@ -1388,6 +1390,12 @@ function AppShell() {
                     } />
                     <Route path="/sales/master-incentive" element={
                         <ProtectedRoute><MasterIncentive /></ProtectedRoute>
+                    } />
+                    <Route path="/sales/master-incentive-rates" element={
+                        <ProtectedRoute><MasterIncentiveRates /></ProtectedRoute>
+                    } />
+                    <Route path="/reports/sales/master-incentive-aging" element={
+                        <ProtectedRoute><MasterIncentiveAging /></ProtectedRoute>
                     } />
                     <Route path="/sales/recovery" element={
                         <ProtectedRoute><SalesRecovery /></ProtectedRoute>

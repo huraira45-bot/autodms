@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const masterAging = require('../controllers/masterIncentiveAgingController');
 const c = require('../controllers/salesReportsController');
 const { requireAnyAccess } = require('../middleware/permissions');
 const { report: customerBalances } = require('../controllers/customerVehicleBalanceController');
@@ -28,6 +29,8 @@ router.get('/customer-advances-aging',    requireAnyAccess('sales_reports', 'rep
 router.get('/booking-pipeline',           requireAnyAccess('sales_reports', 'report:booking_pipeline'),           c.bookingPipeline);
 router.get('/master-invoice-aging',       requireAnyAccess('sales_reports', 'report:master_invoice_aging'),       c.masterInvoiceAging);
 router.get('/incentive-receivable-aging', requireAnyAccess('sales_reports', 'report:incentive_receivable_aging'), c.incentiveReceivableAging);
+router.get('/master-incentive-options', requireAnyAccess('sales_reports', 'report:incentive_receivable_aging'), masterAging.options);
+router.get('/master-incentive-aging', requireAnyAccess('sales_reports', 'report:incentive_receivable_aging'), masterAging.report);
 router.get('/booking-account-reconciliation', requireAnyAccess('sales_reports', 'report:booking_account_reconciliation'), c.bookingAccountReconciliation);
 
 module.exports = router;

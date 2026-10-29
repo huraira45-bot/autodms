@@ -770,12 +770,15 @@ exports.updateVoucher = async (req, res) => {
         // BOTH the original and the incoming date are within a 5-day window
         // (owner ask 2026-07-18 — cashier corrections).
         const check = await pool.request().input('id', sql.Int, id)
-            .query(`SELECT v.Status, v.ReversesVoucherID, v.VoucherDate, t.Title AS VoucherType
+            .query(`SELECT v.Status, v.ReversesVoucherID, v.SourceDocType, v.VoucherDate, t.Title AS VoucherType
                     FROM   data_FinanceVoucherInfo v
                     JOIN   GLVoucherType t ON v.VoucherTypeID = t.Voucherid
                     WHERE  v.VoucherID = @id`);
         if (!check.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
         const row = check.recordset[0];
+        if (row.SourceDocType === 'MASTER_BOOKING_INC') return res.status(409).json({
+            error: 'This voucher uses the Master incentive rate and accounts saved with the booking. Cancel the booking to reverse/void it; configure rates and Accounting Setup for future bookings.',
+        });
         const isJV = row.VoucherType === 'JV';
         // Charity Yes/No is mandatory ONLY on CRV/BRV — owner ask 2026-07-18 v2.
         const isCharityScoped = row.VoucherType === 'CRV' || row.VoucherType === 'BRV';
@@ -894,6 +897,7 @@ exports.deleteVoucher = async (req, res) => {
                     FROM data_FinanceVoucherInfo WHERE VoucherID=@id`);
         if (!check.recordset.length) return res.status(404).json({ error: 'Voucher not found.' });
         const v = check.recordset[0];
+        if (v.SourceDocType === 'MASTER_BOOKING_INC') return res.status(409).json({ error: 'Cancel the booking to void its Master incentive draft and update its accrual together.' });
         if (v.Status !== 'Draft')
             return res.status(409).json({ error: `Only Draft vouchers can be deleted. Current status: ${v.Status}. Use Request Unfinalize to reverse a Posted voucher.` });
 

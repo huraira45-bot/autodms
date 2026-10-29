@@ -10,6 +10,7 @@ const dt  = (d) => d ? new Date(d).toLocaleDateString('en-PK') : '';
 
 const SOURCE_LABEL = {
     MASTER_INVOICE:           'Master Invoice',
+    MASTER_BOOKING_INC:       'Master Incentive at Booking',
     SALES_PAYMENT:            'Customer Payment',
     SALES_DELIVERY:           'Delivery',
     SALES_INCENTIVE_ACCRUAL:  'Staff Incentive Accrual',

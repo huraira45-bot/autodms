@@ -142,12 +142,13 @@ export default function MasterIncentive() {
                                         </td>
                                         <td style={{...td, color: '#64748b', fontSize: '0.78rem'}}>{dt(a.AccruedAt)}</td>
                                         <td style={td}>
-                                            {open && (
+                                            {open && (!a.MasterRateID || a.AccrualVoucherStatus === 'Posted') && (
                                                 <button onClick={() => setReceiptFor(a)}
                                                     style={{ padding: '4px 8px', background: '#15803d', color: 'white', border: 'none', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
                                                     <Plus size={11} /> Record Receipt
                                                 </button>
                                             )}
+                                            {open && a.MasterRateID && a.AccrualVoucherStatus !== 'Posted' && <span>Finalize {a.AccrualVoucherNo || 'the incentive voucher'} first</span>}
                                         </td>
                                     </tr>
                                 );
@@ -230,7 +231,7 @@ export default function MasterIncentive() {
             )}
             {bulkOpen && (
                 <BulkReceiptModal
-                    accruals={accruals.filter(a => ['Accrued', 'PartiallyDisbursed'].includes(a.Status))}
+                    accruals={accruals.filter(a => ['Accrued', 'PartiallyDisbursed'].includes(a.Status) && (!a.MasterRateID || a.AccrualVoucherStatus === 'Posted'))}
                     onClose={() => setBulkOpen(false)}
                     onSaved={() => { setBulkOpen(false); load(); }}
                 />

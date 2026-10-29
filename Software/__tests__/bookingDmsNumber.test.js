@@ -4,6 +4,7 @@ jest.mock('../config/db', () => ({ getPool: jest.fn(), sql: {
     Request: class { constructor(tx) { this.tx = tx; this.values = {}; } input(k, t, v) { this.values[k] = v; return this; } query(q) { return this.tx.query(q, this.values); } },
 } }));
 jest.mock('../controllers/salesIncentiveController', () => ({ accrueForBooking: jest.fn() }));
+jest.mock('../services/masterBookingIncentiveService', () => ({ accrueAtBooking: jest.fn(), reverseOnCancellation: jest.fn() }));
 const { getPool } = require('../config/db');
 const { parseDmsBookingNumber } = require('../services/bookingDmsNumberService');
 const booking = require('../controllers/salesBookingController');

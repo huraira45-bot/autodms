@@ -393,6 +393,7 @@ export default function BookingDetail() {
                 {/* Money row */}
                 <div style={{ marginTop: 16, padding: 14, background: '#f8fafc', borderRadius: 8, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
                     <Stat label="Set Price (Vehicle)" value={fmtN(data.NegotiatedPrice)} color="#1e40af" />
+                    {data.MasterIncentiveRateID && <Stat label="Master incentive (booking)" value={fmtN(data.MasterIncentiveAmount)} color="#1e40af" sub={data.Status === 'Cancelled' ? 'Incentive reversed / draft voided' : 'Accounts finalizes the incentive voucher'} />}
                     {Number(data.DiscountAmount) > 0 && <Stat label="Discount given" value={fmtN(data.DiscountAmount)} color="#b91c1c" />}
                     {data.PremiumAmount > 0 && <Stat label="Premium (on top)" value={fmtN(data.PremiumAmount)} color="#7c3aed" sub="+ additive" />}
                     <Stat label="Customer Total" value={fmtN((data.NegotiatedPrice || 0) + (data.PremiumAmount || 0))} color="#0f172a" sub="vehicle + premium" />
@@ -1534,7 +1535,7 @@ function CancelModal({ booking, onClose, onSaved }) {
             {err && <Err>{err}</Err>}
             <p style={{ fontSize: '0.85rem', color: '#475569' }}>
                 {closed
-                    ? 'This marks the booking Cancelled. Payments, ledger entries, incentives, vehicle allocation and delivery history stay unchanged. No refund is created. The reason and your name are recorded in the audit trail.'
+                    ? 'This marks the booking Cancelled and reverses its posted Master incentive (or voids its draft). Customer payments, staff incentives, vehicle allocation and delivery history stay unchanged. No refund is created. Your name and reason are audited.'
                     : 'Reason mandatory. Any pending discount approval gets withdrawn. Recorded payments are NOT auto-refunded — handle refund manually via Accounts.'}
             </p>
             <Field label="Reason *">

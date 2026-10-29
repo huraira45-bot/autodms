@@ -72,7 +72,7 @@ async function cancel(id, code = 200, actor = user) {
                 SELECT COUNT(*) AS N,SUM(Debit) AS D,SUM(Credit) AS C FROM data_FinanceVoucherDetail;
                 SELECT COUNT(*) AS N FROM dms_PartyLedger;
                 SELECT * FROM dms_SalesPayments WHERE BookingID=@id ORDER BY PaymentID;
-                SELECT * FROM dms_SalesIncentiveAccruals WHERE BookingID=@id ORDER BY AccrualID;
+                SELECT * FROM dms_SalesIncentiveAccruals WHERE BookingID=@id AND EarnerType='Employee' ORDER BY AccrualID;
                 SELECT * FROM dms_Vehicle WHERE VehicleID=@vid;
                 SELECT * FROM dms_GatePasses WHERE DocType='BOOKING' AND DocID=@id;
                 SELECT * FROM dms_VehicleInventoryLedger WHERE VehicleID=@vid ORDER BY MovementID;
@@ -91,7 +91,7 @@ async function cancel(id, code = 200, actor = user) {
             for (const k of Object.keys(before)) if (!allowed.has(k)) assert.deepEqual(after[k], before[k], k);
             assert.deepEqual(await retained(), beforeRetained, 'Financial, incentive, delivery, stock and attachment records must stay unchanged');
             const evidence = (await request().input('id', sql.Int, bookingId).input('vid', sql.Int, vehicleId).query(`
-                SELECT * FROM dms_SalesAuditLog WHERE BookingID=@id;
+                SELECT * FROM dms_SalesAuditLog WHERE BookingID=@id AND Action='ClosedBookingCancelled';
                 SELECT * FROM dms_BookingStateTransitions WHERE BookingID=@id;
                 SELECT CAST(CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 1 ELSE 0 END AS BIT) AS Locked FROM dms_Vehicle v WHERE v.VehicleID=@vid;`)).recordsets;
             assert.equal(evidence[0].length, 1); assert.equal(evidence[0][0].Action, 'ClosedBookingCancelled'); assert.equal(evidence[0][0].ActorUserID, user.userId);
@@ -102,7 +102,7 @@ async function cancel(id, code = 200, actor = user) {
             assert.equal(list.code, 200, list.body?.error); assert(list.body.some(b => b.BookingID === bookingId));
         }
         console.log('PASS: main Admin cancels regular and historical closed bookings; rejected roles, repeats and audit failures preserve state; strict audit and timeline persist; cancelled list includes bookings.');
-        console.log('PASS: payments, financial totals, both staff and Master incentives, vehicle allocation, delivery timestamps, gate passes, stock ledger, attachments and delivered vehicle lock remain unchanged.');
+        console.log('PASS: customer payments, staff incentives, vehicle allocation, delivery timestamps, gate passes, stock ledger, attachments and delivered vehicle lock remain unchanged; Master incentives follow the cancellation rule.');
     } finally { await outer.rollback(); }
     const remaining = (await pool.request().input('marker', sql.NVarChar(30), marker + '%')
         .query('SELECT COUNT(*) AS N FROM dms_SalesBookings WHERE BookingNo LIKE @marker')).recordset[0].N;

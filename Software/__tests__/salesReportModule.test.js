@@ -60,7 +60,7 @@ test('analytics links choose the requested report rather than always opening the
     const paths = nav.getModuleActions('sales-reports', () => true, () => true).map(item => item.path);
     expect(paths).toEqual(expect.arrayContaining([
         '/sales/reports?tab=pipeline', '/sales/reports?tab=miAging',
-        '/sales/reports?tab=incAging', '/sales/reports?tab=bvrRecon',
+        '/reports/sales/master-incentive-aging', '/sales/reports?tab=bvrRecon',
     ]));
 });
 
