@@ -19,6 +19,8 @@ const bookingDiscount = require('../controllers/salesBookingDiscountController')
 const deliveryMonth = require('../controllers/bookingDeliveryMonthController');
 const bookingDate = require('../controllers/bookingDateController');
 const { requireBookingDateAdmin } = require('../services/bookingDatePermissionService');
+const closedCancellation = require('../controllers/closedBookingCancellationController');
+const { requireMainAdmin } = require('../services/closedBookingCancellationService');
 const masterInvoiceDocument = require('../controllers/bookingMasterInvoiceDocumentController');
 const lc  = require('../controllers/salesLifecycleController');
 const inc = require('../controllers/salesIncentiveController');
@@ -97,6 +99,7 @@ router.post('/bookings/:id/master-agreed-amount', requireAny('sales_admin_pricin
 // 2026-10-02).
 router.put(   '/bookings/:id/party',  requireAny('sales_admin_settings', 'admin_unfinalize'), bk.changeBookingParty);
 router.post(  '/bookings/:id/cancel',      requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing'), bk.cancelBooking);
+router.post('/bookings/:id/cancel-closed', requireMainAdmin, closedCancellation.cancel);
 
 // Reassign the sales executive on a live booking (owner ask 2026-09-11).
 // Managers only: this drives 'my bookings' and the incentive workings.

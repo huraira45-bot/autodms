@@ -194,8 +194,9 @@ export default function BookingDetail() {
         && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
     const canManageReferences = data.IsHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canSetBookingDate = user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
-    const canCancel = !['Closed', 'Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
-        (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
+    const canCancel = data.Status === 'Closed' ? user?.groupId === 1
+        : !['Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
+          (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
     const canAllocate = (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)
         || (data.IsHistorical && data.Status === 'PendingBookingPayment' && Number(data.AmountPaidToDate) > 0))
         && !data.AllocatedVehicleID && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
@@ -307,7 +308,7 @@ export default function BookingDetail() {
                         </button>}
                         {canCancel && (
                             <button type="button" className="erp-btn erp-btn-sm erp-btn-danger" onClick={() => setShowCancel(true)}>
-                                <Ban size={14} /> Cancel
+                                <Ban size={14} /> {data.Status === 'Closed' ? 'Cancel closed booking' : 'Cancel'}
                             </button>
                         )}
                         <button type="button" className="erp-btn erp-btn-sm" onClick={load}>
@@ -1515,27 +1516,30 @@ function CancelModal({ booking, onClose, onSaved }) {
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+    const closed = booking.Status === 'Closed';
 
     const save = async () => {
         if (!reason.trim()) return;
         setBusy(true); setErr(null);
         try {
-            await axios.post(`${API}/sales/bookings/${booking.BookingID}/cancel`, { Reason: reason.trim() });
+            await axios.post(`${API}/sales/bookings/${booking.BookingID}/${closed ? 'cancel-closed' : 'cancel'}`, { Reason: reason.trim() });
             onSaved();
         } catch (e) { setErr(e.response?.data?.error || e.message); }
         setBusy(false);
     };
 
     return (
-        <Shell title={`Cancel ${booking.BookingNo}`} onClose={onClose}>
+        <Shell title={`${closed ? 'Cancel closed booking' : 'Cancel'} ${booking.BookingNo}`} onClose={onClose}>
             {err && <Err>{err}</Err>}
             <p style={{ fontSize: '0.85rem', color: '#475569' }}>
-                Reason mandatory. Any pending discount approval gets withdrawn. Recorded payments are NOT auto-refunded — handle refund manually via Accounts.
+                {closed
+                    ? 'This marks the booking Cancelled. Payments, ledger entries, incentives, vehicle allocation and delivery history stay unchanged. No refund is created. The reason and your name are recorded in the audit trail.'
+                    : 'Reason mandatory. Any pending discount approval gets withdrawn. Recorded payments are NOT auto-refunded — handle refund manually via Accounts.'}
             </p>
             <Field label="Reason *">
-                <textarea rows={3} value={reason} onChange={e => setReason(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }} />
+                <textarea rows={3} maxLength={closed ? 500 : undefined} value={reason} onChange={e => setReason(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }} />
             </Field>
-            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Confirm Cancel" busy={busy} disabled={!reason.trim()} />
+            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Confirm Cancel" busy={busy} disabled={reason.trim().length < 5} />
         </Shell>
     );
 }
