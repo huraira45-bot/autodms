@@ -48,6 +48,7 @@ export default function NewBooking() {
     const [negotiatedPrice, setNegotiatedPrice] = useState('');
     const [negotiationReason, setNegotiationReason] = useState('');
     const [corpPO, setCorpPO] = useState('');
+    const [dmsBookingNumber, setDmsBookingNumber] = useState('');
     const [promisedMonth, setPromisedMonth] = useState('');
 
     const [busy, setBusy] = useState(false);
@@ -123,11 +124,12 @@ export default function NewBooking() {
     const discountPct = selectedVariant ? (discountAmount / selectedVariant.StandardPrice * 100) : 0;
     const needsApproval = discountAmount > 0;
 
-    const ready = pickedParty && variantId && Number(negotiatedPrice) > 0 &&
+    const ready = pickedParty && variantId && dmsBookingNumber.trim() && Number(negotiatedPrice) > 0 &&
                   Number(negotiatedPrice) <= (selectedVariant?.StandardPrice || 0) &&
                   (!needsApproval || negotiationReason.trim().length >= 5);
 
     const submit = async () => {
+        if (!dmsBookingNumber.trim()) { setErr('Enter the DMS booking number before saving.'); return; }
         const docProblems = validateDocumentItems(pendingDocs);
         if (docProblems.length) { setErr(docProblems.join(' ')); return; }
         setBusy(true); setErr(null);
@@ -137,6 +139,7 @@ export default function NewBooking() {
                 VehicleVariantID: Number(variantId),
                 NegotiatedPrice: Number(negotiatedPrice),
                 PromisedDeliveryMonth: promisedMonth || null,
+                DMSBookingNumber: dmsBookingNumber.trim(),
             };
             if (corpPO) body.CorporatePONumber = corpPO;
             if (needsApproval) body.NegotiationReason = negotiationReason.trim();
@@ -335,6 +338,11 @@ export default function NewBooking() {
                     </div>
                 )}
 
+                <Field label="DMS booking number *">
+                    <input required maxLength={100} value={dmsBookingNumber} onChange={e => setDmsBookingNumber(e.target.value)}
+                        placeholder="e.g. 1005/70037183" autoComplete="off" style={inputStyle} />
+                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 4 }}>Enter the booking number from Changan / Master Motors DMS.</div>
+                </Field>
                 <Field label="Corporate PO Number (optional)">
                     <input value={corpPO} onChange={e => setCorpPO(e.target.value)} placeholder="If part of a corporate purchase order" style={inputStyle} />
                 </Field>

@@ -8856,3 +8856,8 @@ IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name='CK_SalesBookings_
 COMMIT TRANSACTION;
 PRINT '155: historical Master payment can be approved without voucher matching.';
 GO
+
+-- 164: external DMS booking reference; required by new-booking API only.
+IF COL_LENGTH('dbo.dms_SalesBookings','DMSBookingNumber') IS NULL
+    ALTER TABLE dbo.dms_SalesBookings ADD DMSBookingNumber NVARCHAR(100) NULL;
+GO

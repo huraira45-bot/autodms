@@ -120,7 +120,7 @@ export default function BookingsList({ cancelled = false }) {
                 <SearchField
                     value={search}
                     onChange={setSearch}
-                    placeholder="Booking #, customer, corporate PO..."
+                    placeholder="Booking #, DMS #, customer, corporate PO..."
                     width={320}
                 />
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
@@ -161,7 +161,7 @@ export default function BookingsList({ cancelled = false }) {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                         <thead>
                             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                                <Th>#</Th><Th>Booking Date</Th><Th>Promised month</Th><Th>Customer</Th><Th>Vehicle</Th>
+                                <Th>#</Th><Th>DMS booking number</Th><Th>Booking Date</Th><Th>Promised month</Th><Th>Customer</Th><Th>Vehicle</Th>
                                 <Th align="right">Standard</Th><Th align="right">Negotiated</Th>
                                 <Th align="right">Disc</Th><Th align="right">Paid</Th>
                                 <Th>Status</Th><Th>Allocated</Th><Th>Executive</Th>
@@ -185,6 +185,7 @@ export default function BookingsList({ cancelled = false }) {
                                                 </span>
                                             )}
                                         </Td>
+                                        <Td mono style={{ whiteSpace: 'nowrap' }}>{b.DMSBookingNumber || '—'}</Td>
                                         <Td style={{ whiteSpace: 'nowrap' }}>{fmtDate(b.BookingDate || b.CreatedAt)}</Td>
                                         <Td style={{ whiteSpace: 'nowrap' }}>{b.PromisedDeliveryMonth ? new Date(b.PromisedDeliveryMonth).toLocaleDateString('en-PK', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : 'Not set'}</Td>
                                         <Td>

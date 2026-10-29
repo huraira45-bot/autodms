@@ -73,7 +73,7 @@ test('update requires explicit current/new month to prevent accidental clearing'
 });
 test.each([['normal',normal],['historical',historical]])('%s creation stores the optional month',async(label,api)=>{
     const {tx}=fixture(),res=response();
-    await api.createBooking({user,body:{PartyID:1,VehicleVariantID:2,NegotiatedPrice:1000,Status:'PendingPayment',BookingDate:'2026-01-01',PromisedDeliveryMonth:'2026-12'}},res);
+    await api.createBooking({user,body:{PartyID:1,VehicleVariantID:2,NegotiatedPrice:1000,DMSBookingNumber:'1005/70000001',Status:'PendingPayment',BookingDate:'2026-01-01',PromisedDeliveryMonth:'2026-12'}},res);
     expect(res.code).toBe(201);
     const insert=tx.calls.find(c=>c.q.includes('OUTPUT INSERTED.BookingID'));
     expect(insert.q).toContain('PromisedDeliveryMonth');expect(insert.v.promise.toISOString()).toBe('2026-12-01T00:00:00.000Z');

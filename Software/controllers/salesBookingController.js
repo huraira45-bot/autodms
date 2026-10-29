@@ -21,6 +21,7 @@ const { masterNetSql } = require('../services/masterPaymentPositionService');
 const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
 const { effectiveMasterPaidSql } = require('../services/historicalMasterApprovalService');
 const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
+const { parseDmsBookingNumber } = require('../services/bookingDmsNumberService');
 
 // ============================================================================
 // Helpers
@@ -97,11 +98,11 @@ async function listBookings(req, res, cancelled = false) {
         }
         if (req.query.search) {
             r.input('q', sql.NVarChar(200), `%${req.query.search}%`);
-            conds.push('(b.BookingNo LIKE @q OR p.PartyName LIKE @q OR b.CorporatePONumber LIKE @q)');
+            conds.push('(b.BookingNo LIKE @q OR b.DMSBookingNumber LIKE @q OR p.PartyName LIKE @q OR b.CorporatePONumber LIKE @q)');
         }
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
         const result = await r.query(`
-            SELECT b.BookingID, b.BookingNo, b.Status,
+            SELECT b.BookingID, b.BookingNo, b.DMSBookingNumber, b.Status,
                    COALESCE(b.BookingDate, b.CreatedAt) AS BookingDate,
                    b.PartyID, p.PartyName, p.PartyType, p.PhoneOne,
                    b.VehicleModelID, m.ModelCode, m.ModelName,
@@ -257,8 +258,11 @@ exports.getBooking = async (req, res) => {
 exports.createBooking = async (req, res) => {
     try {
         const b = req.body || {};
-        let promisedMonth;
-        try { promisedMonth = parseDeliveryMonth(b.PromisedDeliveryMonth); }
+        let promisedMonth, dmsBookingNumber;
+        try {
+            promisedMonth = parseDeliveryMonth(b.PromisedDeliveryMonth);
+            dmsBookingNumber = parseDmsBookingNumber(b.DMSBookingNumber);
+        }
         catch (err) { return res.status(400).json({ error: err.message }); }
         const errors = [];
         if (!b.PartyID) errors.push('PartyID is required');
@@ -306,14 +310,22 @@ exports.createBooking = async (req, res) => {
                 .input('po', sql.NVarChar(100), b.CorporatePONumber || null)
                 .input('iq', sql.Int, b.SourceInquiryID || null)
                 .input('promise', sql.Date, promisedMonth)
+                .input('dms', sql.NVarChar(100), dmsBookingNumber)
                 .query(`INSERT INTO dms_SalesBookings
                             (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName,
-                             CorporatePONumber, SourceInquiryID, PromisedDeliveryMonth)
+                             CorporatePONumber, SourceInquiryID, PromisedDeliveryMonth, DMSBookingNumber)
                         OUTPUT INSERTED.BookingID
-                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po, @iq, @promise)`);
+                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po, @iq, @promise, @dms)`);
             const bookingId = r.recordset[0].BookingID;
+            await new sql.Request(tx).input('id', sql.Int, bookingId)
+                .input('next', sql.NVarChar(sql.MAX), JSON.stringify({ DMSBookingNumber: dmsBookingNumber }))
+                .input('emp', sql.Int, executiveId).input('name', sql.NVarChar(100), req.user?.userName || null)
+                .input('uid', sql.Int, req.user?.userId || null)
+                .query(`INSERT INTO dms_SalesAuditLog
+                            (BookingID,EntityType,EntityID,Action,OldValue,NewValue,ActorEmployeeID,ActorName,ActorUserID,Notes)
+                        VALUES(@id,'Booking',@id,'DMSBookingNumberRecorded',NULL,@next,@emp,@name,@uid,'External DMS number entered when creating booking.')`);
 
             // If this booking originated from a CRO inquiry, flip the inquiry to Converted
             if (b.SourceInquiryID) {
@@ -356,7 +368,7 @@ exports.createBooking = async (req, res) => {
             }
 
             await tx.commit();
-            res.status(201).json({ message: 'Booking created', BookingID: bookingId, BookingNo: bookingNo, Status: initialStatus, NeedsApproval: needsApproval });
+            res.status(201).json({ message: 'Booking created', BookingID: bookingId, BookingNo: bookingNo, DMSBookingNumber: dmsBookingNumber, Status: initialStatus, NeedsApproval: needsApproval });
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('createBooking:', err);

@@ -57,7 +57,7 @@ function BookingRegisterView({ cancelled = false }) {
                         <table style={tableStyle}>
                             <thead>
                                 <tr style={trHeader}>
-                                    <TH>Booking #</TH><TH>Date</TH><TH>Customer</TH><TH>Vehicle</TH>
+                                    <TH>Booking #</TH><TH>DMS booking number</TH><TH>Date</TH><TH>Customer</TH><TH>Vehicle</TH>
                                     <TH>Executive</TH><TH>Status</TH>
                                     {cancelled && <><TH>Cancelled on</TH><TH>Cancellation reason</TH></>}
                                     <TH align="right">Negotiated</TH><TH align="right">Discount</TH>
@@ -65,10 +65,11 @@ function BookingRegisterView({ cancelled = false }) {
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={cancelled ? 11 : 10}>No {cancelled ? 'cancelled ' : ''}bookings in this period.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={cancelled ? 12 : 11}>No {cancelled ? 'cancelled ' : ''}bookings in this period.</Empty>}
                                 {data.rows.map((r, i) => (
                                     <tr key={i} style={trBody}>
                                         <TD mono><Link to={`/sales/bookings/${r.BookingID}`}><strong>{r.BookingNo}</strong></Link></TD>
+                                        <TD mono>{r.DMSBookingNumber || '—'}</TD>
                                         <TD>{r.BookedOn}</TD>
                                         <TD>{r.CustomerName}</TD>
                                         <TD>{r.Vehicle}</TD>

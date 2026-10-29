@@ -34,7 +34,7 @@ async function bookingRegister(req, res, cancelled = false) {
         if (req.query.status) { rq.input('st', sql.NVarChar(30), req.query.status); conds.push('b.Status = @st'); }
 
         const r = await rq.query(`
-            SELECT b.BookingID, b.BookingNo, b.CreatedAt AS BookedOn, b.Status,
+            SELECT b.BookingID, b.BookingNo, b.DMSBookingNumber, b.CreatedAt AS BookedOn, b.Status,
                    b.StandardPrice, b.NegotiatedPrice, b.DiscountAmount,
                    b.AmountPaidToDate, b.DeliveredAt, b.CancelledAt, b.CancellationReason,
                    p.PartyName AS CustomerName,
@@ -50,6 +50,7 @@ async function bookingRegister(req, res, cancelled = false) {
         const rows = r.recordset.map(x => ({
             BookingID:     x.BookingID,
             BookingNo:     x.BookingNo,
+            DMSBookingNumber: x.DMSBookingNumber || '',
             BookedOn:      x.BookedOn?.toISOString().slice(0,10),
             Status:        x.Status,
             CustomerName:  x.CustomerName || '',

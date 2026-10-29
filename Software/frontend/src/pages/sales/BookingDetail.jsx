@@ -276,6 +276,7 @@ export default function BookingDetail() {
                     </span>
                 }
                 subtitle={`${data.PartyName} · ${data.VariantCode} ${data.VariantName}`
+                    + (data.DMSBookingNumber ? ` · DMS booking number: ${data.DMSBookingNumber}` : '')
                     + (data.IsHistorical
                         ? (data.BookingDate
                             ? ` · booked ${new Date(data.BookingDate).toLocaleDateString()}, entered afterwards — payments link to vouchers already in the ledger`
