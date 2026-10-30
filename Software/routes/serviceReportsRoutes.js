@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const c = require('../controllers/serviceReportsController');
-const { requireAccess } = require('../middleware/permissions');
+const { requireAccess, requireAnyAccess } = require('../middleware/permissions');
+const dmsJobCards = require('../controllers/dmsJobCardReportController');
+
+router.get('/dms-job-cards', requireAnyAccess('report:job_card_register', 'workshop_jobs:view'), dmsJobCards.report);
 
 router.get('/job-card-register',     requireAccess('report:job_card_register'),     c.jobCardRegister);
 router.get('/advisor-performance',   requireAccess('report:advisor_performance'),   c.advisorPerformance);

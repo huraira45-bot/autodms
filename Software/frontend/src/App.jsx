@@ -193,6 +193,7 @@ import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
 // Module-scoped reports
 import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity, LapsedCustomers } from './pages/reports/Service';
+import DmsJobCardReport from './pages/reports/DmsJobCardReport';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
 import { ReceivablesSubLedger } from './pages/reports/ReceivablesSubLedger';
@@ -388,6 +389,11 @@ function LegacySidebar() {
                 {hasModule('workshop_gatepass') && (
                     <NavLink to="/gatepass" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
                         <ShieldCheck size={20} /> Gate Pass
+                    </NavLink>
+                )}
+                {(hasPermission('workshop_jobs:view') || canReport('job_card_register')) && (
+                    <NavLink to="/reports/service/dms-job-cards" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <ClipboardList size={20} /> DMS Job Card Lookup
                     </NavLink>
                 )}
                 {canReport('job_card_register') && (
@@ -1134,6 +1140,7 @@ function AppShell() {
                     <Route path="/reports/inventory-valuation"  element={<ProtectedRoute><InventoryValuation /></ProtectedRoute>} />
 
                     {/* Service (workshop) reports */}
+                    <Route path="/reports/service/dms-job-cards"         element={<ProtectedRoute><DmsJobCardReport /></ProtectedRoute>} />
                     <Route path="/reports/service/job-card-register"     element={<ProtectedRoute><JobCardRegister /></ProtectedRoute>} />
                     <Route path="/reports/service/advisor-performance"   element={<ProtectedRoute><AdvisorPerformance /></ProtectedRoute>} />
                     <Route path="/reports/service/revenue-summary"       element={<ProtectedRoute><ServiceRevenueSummary /></ProtectedRoute>} />
