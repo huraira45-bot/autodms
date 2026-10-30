@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
 import { inputStyle, Err } from './VehicleModelsAdmin';
+import ScanDocumentsButton from './ScanDocumentsButton';
 
 export const MAX_DOC_BYTES = 10 * 1024 * 1024;   // same as middleware/salesUpload.js
 
@@ -55,9 +56,10 @@ const kb = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` :
 
 /** Messages for anything that would be refused, or [] when all are fine. */
 export function validateDocumentItems(items) {
-    return items
-        .filter(it => String(it.description || '').trim().length < 5)
-        .map(it => `${it.file.name}: the description needs at least 5 characters.`);
+    return items.flatMap(it => [
+        ...(!DOC_TYPE_LABELS[it.docType] ? [`${it.file.name}: choose the document type.`] : []),
+        ...(String(it.description || '').trim().length < 5 ? [`${it.file.name}: the description needs at least 5 characters.`] : []),
+    ]);
 }
 
 /**
@@ -85,7 +87,7 @@ export async function uploadBookingDocuments(bookingId, items, onProgress) {
 }
 
 export default function BookingDocumentDrop({
-    items, onChange, bookingId, onUploaded,
+    items, onChange, bookingId, onUploaded, onScanBusyChange,
     types = ['PBO', 'CNIC', 'AuthorityLetter', 'Other'],
     disabled = false,
 }) {
@@ -96,6 +98,7 @@ export default function BookingDocumentDrop({
     const [dragging, setDragging] = useState(false);
     const [rejected, setRejected] = useState([]);
     const [uploading, setUploading] = useState(null);   // { done, total }
+    const [scanning, setScanning] = useState(false);
     const inputRef = useRef(null);
     const dragDepth = useRef(0);
 
@@ -106,7 +109,7 @@ export default function BookingDocumentDrop({
         for (const it of latest.current) if (it.preview) URL.revokeObjectURL(it.preview);
     }, []);
 
-    const addFiles = (fileList) => {
+    const addFiles = (fileList, { scanned = false } = {}) => {
         if (disabled) return;
         const accepted = [];
         const refused = [];
@@ -119,12 +122,12 @@ export default function BookingDocumentDrop({
             } else if ([...list, ...accepted].some(x => x.file.name === file.name && x.file.size === file.size)) {
                 refused.push(`${file.name}: already added.`);
             } else {
-                const docType = guessDocType(file.name, types);
+                const docType = scanned ? '' : guessDocType(file.name, types);
                 accepted.push({
                     key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
                     file,
                     docType,
-                    description: autoDescription(docType, file.name),
+                    description: scanned ? `Scanned document: ${file.name}`.slice(0, 500) : autoDescription(docType, file.name),
                     autoDescription: true,
                     preview: mime.startsWith('image/') ? URL.createObjectURL(file) : null,
                     error: null,
@@ -147,6 +150,7 @@ export default function BookingDocumentDrop({
     };
 
     const uploadNow = async () => {
+        if (scanning) return;
         const problems = validateDocumentItems(list);
         if (problems.length) { setRejected(problems); return; }
         setRejected([]);
@@ -171,6 +175,8 @@ export default function BookingDocumentDrop({
 
     return (
         <div>
+            <ScanDocumentsButton disabled={disabled || !!uploading} onScanned={files => addFiles(files, { scanned: true })}
+                onBusyChange={value => { setScanning(value); onScanBusyChange?.(value); }} />
             <div
                 role="button"
                 tabIndex={0}
@@ -210,7 +216,9 @@ export default function BookingDocumentDrop({
                     {list.map(it => (
                         <div key={it.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: 10, borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
                             {it.preview
-                                ? <img src={it.preview} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 4, border: '1px solid #e2e8f0' }} />
+                                ? <a href={it.preview} target="_blank" rel="noreferrer" title="Open page preview">
+                                    <img src={it.preview} alt={`Preview of ${it.file.name}`} style={{ width: 72, height: 90, objectFit: 'contain', borderRadius: 4, border: '1px solid #e2e8f0' }} />
+                                </a>
                                 : <div style={{ width: 44, height: 44, display: 'grid', placeItems: 'center', background: '#fef2f2', borderRadius: 4 }}><FileText size={22} style={{ color: '#b91c1c' }} /></div>}
                             <div style={{ flex: 1, minWidth: 220 }}>
                                 <div style={{ fontSize: '0.82rem', fontWeight: 600, wordBreak: 'break-all' }}>
@@ -220,6 +228,7 @@ export default function BookingDocumentDrop({
                                     <select value={it.docType} disabled={disabled || !!uploading}
                                             onChange={(e) => changeType(it, e.target.value)}
                                             style={{ ...inputStyle, width: 170, padding: 6 }}>
+                                        <option value="" disabled>Choose document type...</option>
                                         {types.map(t => <option key={t} value={t}>{DOC_TYPE_LABELS[t] || t}</option>)}
                                     </select>
                                     <input value={it.description} maxLength={500} disabled={disabled || !!uploading}
@@ -237,7 +246,7 @@ export default function BookingDocumentDrop({
                     ))}
                     {bookingId && (
                         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: 10 }}>
-                            <button type="button" onClick={uploadNow} disabled={disabled || !!uploading}
+                            <button type="button" onClick={uploadNow} disabled={disabled || !!uploading || scanning}
                                     style={{ padding: '8px 16px', background: '#1e40af', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                                 {uploading
                                     ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploading.done} of {uploading.total}…</>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { Shell, Field, Err, Actions, inputStyle } from './VehicleModelsAdmin';
+import ScanDocumentsButton from './ScanDocumentsButton';
 
 const allowed = /\.(pdf|jpe?g|png|webp|gif)$/i;
 export default function MasterInvoiceUploadModal({ booking, onClose, onSaved }) {
@@ -9,8 +10,10 @@ export default function MasterInvoiceUploadModal({ booking, onClose, onSaved }) 
     const [file, setFile] = useState(null);
     const [notes, setNotes] = useState('');
     const [busy, setBusy] = useState(false);
+    const [scanBusy, setScanBusy] = useState(false);
     const [error, setError] = useState('');
     const save = async () => {
+        if (scanBusy) { setError('Wait for scanning to finish before saving the invoice.'); return; }
         if (!number.trim() || !date || !file) { setError('Enter invoice number and date, and select the invoice file.'); return; }
         if (!allowed.test(file.name) || file.size<=0 || file.size>10*1024*1024) {
             setError('Select a PDF or JPG/PNG/WEBP/GIF image, up to 10 MB.'); return;
@@ -34,10 +37,12 @@ export default function MasterInvoiceUploadModal({ booking, onClose, onSaved }) 
         <fieldset disabled={busy} style={{border:0,padding:0,margin:0}}>
             <Field label="Master invoice number *"><input value={number} maxLength={100} onChange={e=>setNumber(e.target.value)} style={inputStyle} /></Field>
             <Field label="Invoice date *"><input type="date" value={date} onChange={e=>setDate(e.target.value)} style={inputStyle} /></Field>
+            <ScanDocumentsButton disabled={busy} format="pdf" onScanned={files => setFile(files[0] || null)} onBusyChange={setScanBusy} />
             <Field label="Master invoice file *"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif" onChange={e=>setFile(e.target.files?.[0] || null)} style={inputStyle} /></Field>
             <p style={{fontSize:12,color:'#64748b'}}>PDF or image, up to 10 MB. The record is complete only when the file is saved.</p>
+            {file && <p style={{fontSize:12,color:'#15803d'}}>Selected: {file.name} ({Math.round(file.size / 1024)} KB)</p>}
             <Field label="Notes (optional)"><textarea rows={2} value={notes} maxLength={500} onChange={e=>setNotes(e.target.value)} style={inputStyle} /></Field>
         </fieldset>
-        <Actions onCancel={onClose} onConfirm={save} confirmLabel="Upload and save invoice" busy={busy} disabled={!number.trim() || !date || !file} />
+        <Actions onCancel={onClose} onConfirm={save} confirmLabel="Upload and save invoice" busy={busy} disabled={scanBusy || !number.trim() || !date || !file} />
     </Shell>;
 }

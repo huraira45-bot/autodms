@@ -57,6 +57,7 @@ export default function NewBooking() {
 
     // Documents dropped before the booking exists; uploaded once it is created.
     const [pendingDocs, setPendingDocs] = useState([]);
+    const [scanBusy, setScanBusy] = useState(false);
     // Set when the booking was created but a document failed, so the form
     // can't be submitted a second time and create a duplicate booking.
     const [created, setCreated] = useState(null);
@@ -129,6 +130,7 @@ export default function NewBooking() {
                   (!needsApproval || negotiationReason.trim().length >= 5);
 
     const submit = async () => {
+        if (scanBusy) { setErr('Wait for document scanning to finish before saving the booking.'); return; }
         if (!dmsBookingNumber.trim()) { setErr('Enter the DMS booking number before saving.'); return; }
         const docProblems = validateDocumentItems(pendingDocs);
         if (docProblems.length) { setErr(docProblems.join(' ')); return; }
@@ -356,7 +358,7 @@ export default function NewBooking() {
                     <Paperclip size={16} style={{ display: 'inline', verticalAlign: 'middle' }} /> Documents
                     <span style={{ fontWeight: 400, color: '#64748b', fontSize: '0.8rem' }}> — optional: PBO, CNIC, authority letter or anything else</span>
                 </h3>
-                <BookingDocumentDrop items={pendingDocs} onChange={setPendingDocs} disabled={busy || !!created} />
+                <BookingDocumentDrop items={pendingDocs} onChange={setPendingDocs} disabled={busy || !!created} onScanBusyChange={setScanBusy} />
                 <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 6 }}>
                     Uploaded to the booking as soon as it is created. A CNIC is needed before a vehicle can be allocated.
                 </div>
@@ -374,7 +376,7 @@ export default function NewBooking() {
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn-sm" onClick={() => navigate('/sales/bookings')}>Cancel</button>
-                <button onClick={submit} disabled={busy || !ready || !!created}
+                <button onClick={submit} disabled={busy || scanBusy || !ready || !!created}
                     style={{ padding: '10px 20px', background: ready ? '#1e40af' : '#cbd5e1', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, cursor: ready ? 'pointer' : 'not-allowed' }}>
                     {busy ? <Loader2 size={14} className="animate-spin" /> : null}
                     {needsApproval ? 'Submit for approval' : 'Create booking'}

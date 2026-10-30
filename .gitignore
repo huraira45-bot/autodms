@@ -51,3 +51,5 @@ Thumbs.db
 # server generates its own (scripts/make_tls_cert.js).
 Software/certs/
 Software/scripts/data/vehicle_model_map.tsv
+# Temporary scanner batches contain customer documents and are never source files.
+Software/.scanner-temp/

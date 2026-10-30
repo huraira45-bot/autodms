@@ -102,7 +102,11 @@ app.get('/api/stream/:token',
 app.use('/api/bay-screen', require('./routes/bayScreenRoutes'));
 
 // Protect all remaining API routes
+// A scanner helper gets a one-batch upload key; it cannot sign in or attach booking documents.
+const scannerRoutes = require('./routes/scannerRoutes');
+app.use('/api/scanner/ingest', scannerRoutes.ingestRouter);
 app.use('/api', authMiddleware);
+app.use('/api/scanner', scannerRoutes.protectedRouter);
 
 // Routes for Phase 1: Master Configurations
 app.use('/api/employees', require('./routes/employeeRoutes'));
