@@ -48,9 +48,6 @@ try {
     }
     Send-ScanJson '/start' @{}
     $claimed = $true
-    $scannerMutex = [Threading.Mutex]::new($false, 'Local\AutoDMSScanner')
-    $ownsScanner = $scannerMutex.WaitOne(0)
-    if (-not $ownsScanner) { throw 'The scanner is already being used by another scan. Finish that scan and try again.' }
     $batchRoot = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) 'AutoDMSScanner'))
     $workDirectory = [IO.Path]::GetFullPath((Join-Path $batchRoot $sessionId))
     if ([IO.Path]::GetDirectoryName($workDirectory) -ne $batchRoot) { throw 'Invalid scan working directory.' }
@@ -65,10 +62,25 @@ try {
     }
     # An argument array is passed to a fixed local executable. No launch data is evaluated as code.
     $scanLog = Join-Path $workDirectory 'scanner.log'
-    $ErrorActionPreference = 'Continue'
-    & $configuration.Naps2Path @scanArguments *> $scanLog
-    $scannerExit = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
+    # Reserve only the physical scan. Uploads, error reporting and message boxes must
+    # never keep the scanner locked after NAPS2 has exited.
+    $scannerMutex = [Threading.Mutex]::new($false, 'Local\AutoDMSScanner')
+    try {
+        try { $ownsScanner = $scannerMutex.WaitOne(0) }
+        catch [Threading.AbandonedMutexException] {
+            # WaitOne grants ownership when the previous owning thread exited.
+            $ownsScanner = $true
+        }
+        if (-not $ownsScanner) { throw 'Another scan is still running on this PC. Finish or cancel its NAPS2 progress window, then start a new scan. Close any older AutoDMS Scanner error windows too.' }
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $configuration.Naps2Path @scanArguments *> $scanLog
+            $scannerExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = 'Stop' }
+    } finally {
+        try { if ($ownsScanner) { $scannerMutex.ReleaseMutex() } }
+        finally { $ownsScanner = $false; $scannerMutex.Dispose(); $scannerMutex = $null }
+    }
     if ($scannerExit -ne 0) { throw 'The scanner could not finish. Check power, the USB cable, the feeder and the Canon TWAIN driver. Check scanner.log in the saved scan folder for details.' }
     $pattern = if ($isPdf) { 'document.pdf' } else { 'page-*.jpg' }
     $pages = @(Get-ChildItem -LiteralPath $workDirectory -File -Filter $pattern | Sort-Object Name)

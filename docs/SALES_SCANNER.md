@@ -27,6 +27,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\Downloads\Ins
 
 If NAPS2 is portable, pass `-Naps2Path "C:\your folder\NAPS2.Console.exe"`. If a different device name or a saved NAPS2 profile is needed, pass `-Device "your TWAIN device name"` or `-ScannerProfile "profile name"` when installing. `NAPS2.Console.exe --listdevices --driver twain` lists devices. The default device match is `DR-M160`; the default is a 300 DPI, A4, color TWAIN scan with deskew. A saved profile can supply device-specific size/blank-page settings. Editing the local `config.json` is also supported for these settings. No drivers or NAPS2 executables are bundled or automatically downloaded.
 
+### Updating an existing helper after the scanner-busy fix
+
+The first helper held its hardware lock during uploads and error dialogs. The corrected helper releases the lock immediately when NAPS2 exits, before checking results, uploading pages, reporting errors or showing a dialog. A genuinely active scan still blocks a second scan. Windows abandoned-mutex ownership is handled explicitly.
+
+1. On the Sales PC, close old **AutoDMS Scanner** error windows. Finish/cancel any running NAPS2 scan before retrying; do not terminate unrelated PowerShell processes.
+2. Update source on the server (this helper-only fix needs no frontend build or database migration):
+
+```cmd
+cd /d "D:\saher 2.0\autodms" && git -c gc.auto=0 -c maintenance.auto=false pull --ff-only && cd Software && pm2 startOrRestart ecosystem.config.js --update-env && pm2 save
+```
+
+3. On the Sales PC, download a fresh helper from **Documents > Scanner setup > Download scanner helper**, then right-click that newly downloaded file and choose **Run with PowerShell**. Existing NAPS2 executable/device/profile settings are preserved unless explicitly overridden. Updating the server alone does not replace the installed PC helper.
+4. In AutoDMS, click **Cancel scan** for the old attempt, load the feeder and start a new scan.
+
 ## Daily use
 
 1. Put the batch in the feeder and open the correct booking (or a new booking form).
@@ -51,4 +65,4 @@ In **Record Master Invoice**, the same scan button returns the feeder batch as *
 
 `npm test -- --runInBand __tests__/scannerSession.test.js` covers scoped keys/owner access, replay prevention, page order/count/type/signature/size limits, missing pages, expiration/cancellation/path containment, quota concurrency and roles.
 
-On Windows, `node scripts/verify-scanner-helper.js` runs the real PowerShell worker and HTTP routes against a synthetic scanner executable. It checks JPEG/PDF and saved-profile paths, downloads, error recovery, generated installer syntax and cleanup. It does not register protocols, install programs, use SQL Server or touch a physical scanner. The Canon hardware and the actual Sales browser still require an on-site first-scan check.
+On Windows, `node scripts/verify-scanner-helper.js` runs the real PowerShell worker and HTTP routes against a synthetic scanner executable with an isolated test mutex. It checks JPEG/PDF and saved-profile paths, downloads, error recovery and cleanup. Concurrency checks prove that stalled page uploads and error reporting release the scanner, while an active feeder retains its lock even if the browser cancels its draft; later scans recover. It also checks abandoned-mutex recovery and executes the downloaded installer with an isolated user folder/intercepted registry commands to verify settings survive updates and explicit overrides work. It does not register protocols, install programs, use SQL Server or touch a physical scanner. The Canon hardware and the actual Sales browser still require an on-site check.

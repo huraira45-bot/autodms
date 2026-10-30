@@ -11,6 +11,16 @@ try {
     if ($server.Scheme -notin @('http','https') -or $server.UserInfo -or $server.AbsolutePath -ne '/' -or $server.Query -or $server.Fragment) {
         throw 'Enter only the AutoDMS server address, for example http://192.168.3.10:5000.'
     }
+    $installDirectory = Join-Path $env:LOCALAPPDATA 'AutoDMSScanner'
+    $configurationPath = Join-Path $installDirectory 'config.json'
+    if (Test-Path -LiteralPath $configurationPath -PathType Leaf) {
+        # Updating the worker must preserve a portable executable, device and saved
+        # profile unless the user explicitly supplies replacements.
+        $previous = [IO.File]::ReadAllText($configurationPath) | ConvertFrom-Json
+        if (-not $PSBoundParameters.ContainsKey('Naps2Path')) { $Naps2Path = $previous.Naps2Path }
+        if (-not $PSBoundParameters.ContainsKey('Device') -and $previous.Device) { $Device = $previous.Device }
+        if (-not $PSBoundParameters.ContainsKey('ScannerProfile') -and $previous.Profile) { $ScannerProfile = $previous.Profile }
+    }
     if (-not $Naps2Path) {
         $programRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
         $candidates = @($programRoots | ForEach-Object { Join-Path $_ 'NAPS2\NAPS2.Console.exe' })
@@ -20,7 +30,6 @@ try {
     if (-not $Naps2Path -or -not (Test-Path -LiteralPath $Naps2Path -PathType Leaf)) {
         throw 'Install NAPS2 from https://www.naps2.com/download first, then rerun this installer. For a portable copy, pass -Naps2Path with its NAPS2.Console.exe path.'
     }
-    $installDirectory = Join-Path $env:LOCALAPPDATA 'AutoDMSScanner'
     New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
     $workerPath = Join-Path $installDirectory 'Start-AutoDMSScan.ps1'
     $embeddedWorker = '__AUTODMS_WORKER_BASE64__'
@@ -31,7 +40,7 @@ try {
         [IO.File]::WriteAllBytes($workerPath, [Convert]::FromBase64String($embeddedWorker))
     }
     $configuration = @{ ServerOrigin = $server.GetLeftPart([UriPartial]::Authority); Naps2Path = (Resolve-Path -LiteralPath $Naps2Path).Path; Device = $Device; Profile = $ScannerProfile }
-    [IO.File]::WriteAllText((Join-Path $installDirectory 'config.json'), ($configuration | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($configurationPath, ($configuration | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
     $protocolPath = 'HKCU:\Software\Classes\autodms-scan'
     New-Item -Path $protocolPath -Force | Out-Null
     Set-Item -Path $protocolPath -Value 'URL:AutoDMS document scanner'
