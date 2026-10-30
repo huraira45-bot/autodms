@@ -4,6 +4,7 @@ import { Save, FileText, Landmark, Wallet, Printer, RefreshCw, ChevronLeft, Chev
 import { useFeedback } from '../../context/FeedbackContext';
 import { useCan } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
+import SalarySnapshotNotice from '../../components/SalarySnapshotNotice';
 
 const API = '/api/hr';
 const fmt  = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -20,7 +21,7 @@ function shiftMonth(m, delta) {
 export default function HrSalarySheet() {
     const { notify, confirm } = useFeedback();
     const canPost = useCan('hr_salary_post').canView;
-    const canEdit = useCan('hr_salary').canEdit;
+    const editAllowed = useCan('hr_salary').canEdit;
     const [monthId, setMonthId] = useState(currentMonth());
     const [sheet, setSheet] = useState(null);
     const [drafts, setDrafts] = useState({});
@@ -30,10 +31,14 @@ export default function HrSalarySheet() {
     const [postModalOpen, setPostModalOpen] = useState(false);
     const [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10));
     const [payModalOpen, setPayModalOpen] = useState(false);
+    const canEdit = editAllowed && !busy && !sheet?.isFrozen && !sheet?.legacyPosted;
 
     const load = async () => {
         try {
             setBusy(true);
+            setSheet(null);
+            setPostings([]);
+            setDrafts({});
             const [sheetRes, postRes] = await Promise.all([
                 axios.get(`${API}/salary-sheet/${monthId}`),
                 axios.get(`${API}/postings?monthId=${monthId}`),
@@ -262,13 +267,14 @@ export default function HrSalarySheet() {
                     <RefreshCw size={13}/> Reload
                 </button>
                 <div className="spacer" style={{ flex: 1 }}/>
-                <button className="erp-btn erp-btn-primary" onClick={saveAll} disabled={!Object.keys(drafts).length}>
+                <button className="erp-btn erp-btn-primary" onClick={saveAll} disabled={!canEdit || !Object.keys(drafts).length}>
                     <Save size={13}/> Save All {Object.keys(drafts).length > 0 && `(${Object.keys(drafts).length})`}
                 </button>
             </ErpControlPanel>
 
             {sheet && (
                 <>
+                    <SalarySnapshotNotice sheet={sheet} />
                     <div className="hr-kpi-row">
                         <Kpi label="Employees" value={fmt0(sheet.rows.length)} />
                         <Kpi label="Additions" value={fmt(totals?.additions)} />
@@ -304,10 +310,10 @@ export default function HrSalarySheet() {
                     <div className="hr-actions">
                         {canPost && (
                             <>
-                                <button className="erp-btn erp-btn-primary" onClick={() => setPostModalOpen(true)}>
+                                <button className="erp-btn erp-btn-primary" disabled={busy || Object.keys(drafts).length > 0} onClick={() => setPostModalOpen(true)}>
                                     <FileText size={13}/> Post Accrual (JV)
                                 </button>
-                                <button className="erp-btn erp-btn-primary" onClick={() => setPayModalOpen(true)}>
+                                <button className="erp-btn erp-btn-primary" disabled={busy || Object.keys(drafts).length > 0} onClick={() => setPayModalOpen(true)}>
                                     <Wallet size={13}/> Pay Salary
                                 </button>
                                 <div style={{ width: 1, height: 20, background: 'var(--erp-border)', margin: '0 4px' }}/>

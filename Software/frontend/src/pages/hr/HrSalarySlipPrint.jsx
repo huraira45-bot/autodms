@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../../components/PrintBusinessHeader';
+import SalarySnapshotNotice from '../../components/SalarySnapshotNotice';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -30,6 +31,7 @@ export default function HrSalarySlipPrint() {
                 showOnScreen
             />
 
+            <SalarySnapshotNotice sheet={data} />
             <hr className="rule" />
 
             <table className="emp">

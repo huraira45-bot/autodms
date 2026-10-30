@@ -19,6 +19,7 @@ import { Save, RefreshCw, ChevronLeft, ChevronRight, Utensils } from 'lucide-rea
 import { useFeedback } from '../../context/FeedbackContext';
 import { useCan } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
+import SalarySnapshotNotice from '../../components/SalarySnapshotNotice';
 
 const API = '/api/hr';
 const fmt  = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,17 +35,23 @@ function shiftMonth(m, delta) {
 
 export default function HrMessSheet() {
     const { notify } = useFeedback();
-    const canEdit = useCan('hr_salary').canEdit;
+    const editAllowed = useCan('hr_salary').canEdit;
     const [monthId, setMonthId] = useState(currentMonth());
     const [rows, setRows] = useState([]);
     const [drafts, setDrafts] = useState({});
     const [busy, setBusy] = useState(false);
     const [collapsed, setCollapsed] = useState({});
+    const [sheet, setSheet] = useState(null);
+    const canEdit = editAllowed && !busy && !sheet?.isFrozen && !sheet?.legacyPosted;
 
     const load = async () => {
         try {
             setBusy(true);
+            setSheet(null);
+            setRows([]);
+            setDrafts({});
             const r = await axios.get(`${API}/salary-sheet/${monthId}`);
+            setSheet(r.data);
             setRows((r.data?.rows || []).filter(row => row.Employee?.HasMess));
             setDrafts({});
         } catch (err) {
@@ -134,11 +141,12 @@ export default function HrMessSheet() {
                 </button>
                 <button className="erp-btn erp-btn-sm" onClick={load} disabled={busy}><RefreshCw size={13}/> Reload</button>
                 <div className="spacer" style={{ flex: 1 }}/>
-                <button className="erp-btn erp-btn-primary" onClick={saveAll} disabled={!Object.keys(drafts).length}>
+                <button className="erp-btn erp-btn-primary" onClick={saveAll} disabled={!canEdit || !Object.keys(drafts).length}>
                     <Save size={13}/> Save All {Object.keys(drafts).length > 0 && `(${Object.keys(drafts).length})`}
                 </button>
             </ErpControlPanel>
 
+            <SalarySnapshotNotice sheet={sheet} />
             <p className="hr-hint">
                 <Utensils size={13} style={{ verticalAlign: -2, marginRight: 4 }}/>
                 Only employees enrolled in Mess (set on Employee Salary Settings) appear here. "Rate this month"

@@ -91,6 +91,14 @@ const monthLabel = (monthId) => {
 function buildSalarySheetWorkbook(sheet, businessName = 'Changan Multan Motors') {
     const aoa = [];
     aoa.push([businessName]);
+    if (sheet.isFrozen) {
+        aoa.push([sheet.snapshot?.basis === 'LEGACY_CURRENT'
+            ? 'Saved baseline captured after posting from current data; not a reconstruction of the original posted figures.'
+            : 'Saved salary sheet captured with voucher posting.']);
+        aoa.push(['Captured at (UTC)', sheet.snapshot?.capturedAt ? new Date(sheet.snapshot.capturedAt).toISOString() : '']);
+    } else if (sheet.legacyPosted) {
+        aoa.push(['Previously posted month: no fixed copy saved yet. Figures use current employee data.']);
+    }
     aoa.push([`Salary Sheet — ${monthLabel(sheet.monthId)}`]);
     aoa.push([]);
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../../components/PrintBusinessHeader';
+import SalarySnapshotNotice from '../../components/SalarySnapshotNotice';
 
 const fmt   = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // Legacy sheet shows whole rupees, no paisa (owner-supplied reference PDF,
@@ -85,6 +86,7 @@ export default function HrSalarySheetPrint() {
     return (
         <div className="sheet">
             <PrintBusinessHeader docTitle="Salary Sheet" docSubtitle={monthLabel(monthId)} showOnScreen/>
+            <SalarySnapshotNotice sheet={sheet} />
 
             <div className="meta">
                 <span><b>Late Fine/min:</b> {fmt(sheet.effectiveLateRate)}</span>
@@ -320,6 +322,7 @@ function CombinedLegacySheet({ sheet, monthId, grouped }) {
     return (
         <div className="lsheet">
             <PrintBusinessHeader docTitle="Salary Sheet" docSubtitle={`FMO ${monthLabel(monthId).toUpperCase()}`} showOnScreen/>
+            <SalarySnapshotNotice sheet={sheet} />
 
             {deptRows.map(g => {
                 const t = sumLegacyRows(g.rows);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../../components/PrintBusinessHeader';
+import SalarySnapshotNotice from '../../components/SalarySnapshotNotice';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const monthName = (m) => new Date(m + '-01').toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
@@ -68,6 +69,7 @@ export default function HrBankLetterPrint() {
             {byBank.map((bank, bi) => (
                 <div className={`letter${bi > 0 ? ' newpage' : ''}`} key={bank.key}>
                     <PrintBusinessHeader docTitle="" showOnScreen/>
+                    <SalarySnapshotNotice sheet={sheet} />
 
                     <p className="date">Date: {new Date().toLocaleDateString('en-GB')}</p>
 

@@ -30,6 +30,7 @@ const { buildSalarySheetWorkbook } = require('../services/salarySheetExcel');
 const { computeNetPay } = require('../utils/salaryCalculator');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { resolveRole } = require('./systemAccountsController');
+const salarySnapshots = require('../services/salarySheetSnapshotService');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -129,9 +130,15 @@ function nullableNumber(v) {
 exports.saveSalaryEntry = async (req, res) => {
     const b = req.body || {};
     if (!b.EmployeeID || !b.MonthID) return res.status(400).json({ error: 'EmployeeID and MonthID required' });
+    let tx;
     try {
+        salarySnapshots.validateMonth(b.MonthID);
         const pool = await getPool();
-        const rq = pool.request()
+        tx = new sql.Transaction(pool);
+        await tx.begin();
+        await salarySnapshots.lockMonth(tx, b.MonthID);
+        await salarySnapshots.assertEditable(tx, b.MonthID);
+        const rq = new sql.Request(tx)
             .input('e',  sql.Int,          b.EmployeeID)
             .input('m',  sql.Char(7),      b.MonthID)
             .input('un', sql.NVarChar(100), req.user?.userName || null);
@@ -156,8 +163,12 @@ exports.saveSalaryEntry = async (req, res) => {
             WHEN NOT MATCHED THEN INSERT (EmployeeID, MonthID, ${cols.join(', ')}, UpdatedByName)
                                   VALUES (@e, @m, ${cols.map(k => '@' + k).join(', ')}, @un);
         `);
+        await tx.commit();
         res.json({ ok: true, updated: sent });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        if (tx) try { await tx.rollback(); } catch {}
+        res.status(err.status || 500).json({ error: err.message });
+    }
 };
 
 // ─── Fine settings ──────────────────────────────────────────────
@@ -218,9 +229,10 @@ exports.saveMonthlySettings = async (req, res) => {
 };
 
 // ─── Salary sheet (calculated view for one month) ───────────────
-async function buildSheet(pool, monthId) {
-    const [empRes, attRes, entRes, fsRes, msRes] = await Promise.all([
-        pool.request().query(`
+async function buildLiveSheet(context, monthId) {
+    salarySnapshots.validateMonth(monthId);
+    // One batch also works inside the posting transaction: no parallel requests on its connection.
+    const result = await new sql.Request(context).input('m', sql.Char(7), monthId).query(`
             SELECT e.EmployeeID, e.EmployeeName, e.SrNo, e.DesignationID, e.DepartmentID,
                    d.DepartmentName, dg.DesignationName AS Designation,
                    e.BasicSalary, e.EOBI, e.HasEOBI, e.MedicalAllowance, e.HouseRent,
@@ -237,17 +249,17 @@ async function buildSheet(pool, monthId) {
               LEFT JOIN GLChartOFAccount gl   ON gl.GLCAID = e.EmployeeGLID
               LEFT JOIN GLChartOFAccount pb   ON pb.GLCAID = e.PaymentBankGLCAID
              WHERE e.IsActive = 1 AND ISNULL(e.IsOnPayroll, 1) = 1
-             ORDER BY ISNULL(d.DepartmentName, '~'), e.SrNo, e.EmployeeName`),
-        pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_AttendanceRecords WHERE MonthID=@m'),
-        pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_SalaryEntries WHERE MonthID=@m'),
-        pool.request().query('SELECT * FROM hr_FineSettings WHERE SettingID = 1'),
-        pool.request().input('m', sql.Char(7), monthId).query('SELECT * FROM hr_MonthlySettings WHERE MonthID=@m'),
-    ]);
-    const global  = fsRes.recordset[0] || { LateFinePerMinute: 10, AbsentFinePerDay: 500 };
-    const monthly = msRes.recordset[0] || null;
-    const attByE  = new Map(attRes.recordset.map(a => [a.EmployeeID, a]));
-    const entByE  = new Map(entRes.recordset.map(e => [e.EmployeeID, e]));
-    const rows = empRes.recordset.map(emp => {
+             ORDER BY ISNULL(d.DepartmentName, '~'), e.SrNo, e.EmployeeName;
+        SELECT * FROM hr_AttendanceRecords WHERE MonthID=@m;
+        SELECT * FROM hr_SalaryEntries WHERE MonthID=@m;
+        SELECT * FROM hr_FineSettings WHERE SettingID = 1;
+        SELECT * FROM hr_MonthlySettings WHERE MonthID=@m;`);
+    const [employees, attendance, entries, fines, settings] = result.recordsets;
+    const global  = fines[0] || { LateFinePerMinute: 10, AbsentFinePerDay: 500 };
+    const monthly = settings[0] || null;
+    const attByE  = new Map(attendance.map(a => [a.EmployeeID, a]));
+    const entByE  = new Map(entries.map(e => [e.EmployeeID, e]));
+    const rows = employees.map(emp => {
         const calc = computeNetPay({
             employee: emp,
             attendance: attByE.get(emp.EmployeeID),
@@ -271,12 +283,19 @@ async function buildSheet(pool, monthId) {
     return { monthId, global, monthly, rows, totalNet, effectiveLateRate: monthly?.LateFinePerMinute ?? global.LateFinePerMinute, effectiveAbsentRate: monthly?.AbsentFinePerDay ?? global.AbsentFinePerDay };
 }
 
+async function buildSheet(context, monthId) {
+    const saved = await salarySnapshots.getSnapshot(context, monthId);
+    if (saved) return saved;
+    const postings = await salarySnapshots.getPostings(context, monthId);
+    return { ...await buildLiveSheet(context, monthId), isFrozen: false, legacyPosted: postings.length > 0, snapshot: null };
+}
+
 exports.getSalarySheet = async (req, res) => {
     try {
         const pool = await getPool();
         const sheet = await buildSheet(pool, req.params.monthId);
         res.json(sheet);
-    } catch (err) { console.error('getSalarySheet:', err); res.status(500).json({ error: err.message }); }
+    } catch (err) { console.error('getSalarySheet:', err); res.status(err.status || 500).json({ error: err.message }); }
 };
 
 /**
@@ -295,7 +314,7 @@ exports.getSalarySheetExcel = async (req, res) => {
         let businessName = 'Salary Sheet';
         try {
             const bp = await pool.request().query(
-                `SELECT TOP 1 BusinessName FROM dms_BusinessProfile ORDER BY ProfileID`);
+                `SELECT TOP 1 CompanyName AS BusinessName FROM dms_BusinessProfile ORDER BY ProfileID`);
             if (bp.recordset[0]?.BusinessName) businessName = bp.recordset[0].BusinessName;
         } catch { /* no profile set up — the title just falls back */ }
 
@@ -305,7 +324,7 @@ exports.getSalarySheetExcel = async (req, res) => {
         res.send(buf);
     } catch (err) {
         console.error('getSalarySheetExcel:', err);
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 };
 
@@ -399,12 +418,19 @@ exports.postAccrual = async (req, res) => {
     const { MonthID, PostDate } = req.body || {};
     if (!MonthID)  return res.status(400).json({ error: 'MonthID required' });
     if (!PostDate) return res.status(400).json({ error: 'PostDate required' });
+    try { salarySnapshots.validateMonth(MonthID); } catch (err) { return res.status(400).json({ error: err.message }); }
 
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
-    await tx.begin();
+    await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     try {
-        const sheet = await buildSheet(pool, MonthID);
+        await salarySnapshots.lockMonth(tx, MonthID);
+        const priorPostings = await salarySnapshots.getPostings(tx, MonthID);
+        if (priorPostings.some(p => p.PostingType === 'ACCRUAL' && p.VoucherStatus !== 'Reversed')) {
+            const error = new Error('Salary accrual has already been posted for this month. Reverse its vouchers before reposting the saved sheet.');
+            error.status = 409; throw error;
+        }
+        const sheet = await buildSheet(tx, MonthID);
         const payable = sheet.rows.filter(r => r.Calc.additions > 0);
         if (!payable.length) throw new Error('No employees with positive earnings for this month.');
 
@@ -525,6 +551,8 @@ exports.postAccrual = async (req, res) => {
         const nonEobiRes = await buildAndPost('Non-EOBI', nonEobiRows);   if (nonEobiRes) results.push(nonEobiRes);
         if (!results.length) throw new Error('No accrual to post.');
 
+        await salarySnapshots.freezeSnapshot(tx, sheet, req.user, priorPostings.length ? 'LEGACY_CURRENT' : 'POSTED',
+            priorPostings[0]?.VoucherID || results[0].voucherId);
         await tx.commit();
         const totalPayable = r2(results.reduce((s, r) => s + r.totalAmount, 0));
         res.json({
@@ -535,7 +563,7 @@ exports.postAccrual = async (req, res) => {
         });
     } catch (err) {
         try { await tx.rollback(); } catch {}
-        res.status(400).json({ error: err.message });
+        res.status(err.status || 400).json({ error: err.message });
     }
 };
 
@@ -566,12 +594,15 @@ exports.postDisbursement = async (req, res) => {
     const { MonthID, PostDate } = req.body || {};
     if (!MonthID)  return res.status(400).json({ error: 'MonthID required' });
     if (!PostDate) return res.status(400).json({ error: 'PostDate required' });
+    try { salarySnapshots.validateMonth(MonthID); } catch (err) { return res.status(400).json({ error: err.message }); }
 
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
-    await tx.begin();
+    await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     try {
-        const sheet = await buildSheet(pool, MonthID);
+        await salarySnapshots.lockMonth(tx, MonthID);
+        const priorPostings = await salarySnapshots.getPostings(tx, MonthID);
+        const sheet = await buildSheet(tx, MonthID);
         const payable = sheet.rows.filter(r => r.Calc.net > 0);
         if (!payable.length) throw new Error('No employees with positive net pay for this month.');
 
@@ -670,6 +701,8 @@ exports.postDisbursement = async (req, res) => {
 
         if (!results.length) throw new Error('Nothing to disburse.');
 
+        await salarySnapshots.freezeSnapshot(tx, sheet, req.user, priorPostings.length ? 'LEGACY_CURRENT' : 'POSTED',
+            priorPostings[0]?.VoucherID || results[0].voucherId);
         await tx.commit();
         res.json({
             ok: true,
@@ -681,7 +714,7 @@ exports.postDisbursement = async (req, res) => {
         });
     } catch (err) {
         try { await tx.rollback(); } catch {}
-        res.status(400).json({ error: err.message });
+        res.status(err.status || 400).json({ error: err.message });
     }
 };
 
@@ -704,6 +737,7 @@ exports.listPostings = async (req, res) => {
 };
 
 exports._buildSheet = buildSheet;  // exported for print endpoints
+exports._buildLiveSheet = buildLiveSheet; // deployment archive and rollback-only verification
 
 // Per-employee slip data — same buildSheet, filtered to one row.
 exports.getEmployeeSlip = async (req, res) => {
@@ -714,6 +748,7 @@ exports.getEmployeeSlip = async (req, res) => {
         if (!row) return res.status(404).json({ error: 'Employee not found on sheet' });
         // Include company header via business profile lookup
         const bp = await pool.request().query('SELECT TOP 1 * FROM dms_BusinessProfile');
-        res.json({ monthId: sheet.monthId, business: bp.recordset[0] || {}, row });
+        res.json({ monthId: sheet.monthId, business: bp.recordset[0] || {}, row,
+            isFrozen: sheet.isFrozen, snapshot: sheet.snapshot, legacyPosted: sheet.legacyPosted });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
