@@ -13,6 +13,9 @@ const permitted = (req, res, next) => {
     return res.status(403).json({ error: 'Sales document upload permission is required to scan.' });
 };
 protectedRouter.use(permitted);
+protectedRouter.get('/sessions', run(async (req, res) => {
+    res.set('Cache-Control', 'no-store'); res.json(await store.listOwned(req.user));
+}));
 protectedRouter.post('/sessions', run(async (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.status(201).json(await store.create(req.user, req.body?.source || 'duplex', req.body?.format || 'jpeg'));

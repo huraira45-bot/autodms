@@ -188,6 +188,17 @@ public class SyntheticScanner {
     const failedState = await (await fetch(origin + `/api/scanner/sessions/${failed.id}`)).json();
     assert.equal(failedState.status, 'error'); assert.match(failedState.error, /could not finish/);
     assert.ok(fs.existsSync(path.join(os.tmpdir(), 'AutoDMSScanner', failed.id, 'scanner.log')), 'Failed scan files/log retained for manual recovery.');
+    const ownAttempts = await (await fetch(origin + '/api/scanner/sessions')).json();
+    assert.ok(ownAttempts.some(attempt => attempt.id === failed.id));
+    assert.ok(!JSON.stringify(ownAttempts).includes(new URL(failed.launchUrl).searchParams.get('token')));
+    assert.deepEqual(await (await fetch(origin + '/api/scanner/sessions', { headers: { 'X-Test-User': '99' } })).json(), []);
+    const oldWaiting = await create('jpeg'), secondWaiting = await create('jpeg');
+    assert.equal((await fetch(origin + `/api/scanner/sessions/${failed.id}`)).status, 410, 'Empty failed attempt is reclaimed automatically.');
+    assert.equal((await fetch(origin + '/api/scanner/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 429);
+    assert.equal((await fetch(origin + `/api/scanner/sessions/${oldWaiting.id}`, { method: 'DELETE', headers: { 'X-Test-User': '99' } })).status, 403);
+    await fetch(origin + `/api/scanner/sessions/${oldWaiting.id}`, { method: 'DELETE' });
+    const afterCancel = await create('jpeg');
+    for (const attempt of [secondWaiting, afterCancel]) await fetch(origin + `/api/scanner/sessions/${attempt.id}`, { method: 'DELETE' });
     const setup = await (await fetch(origin + '/api/scanner/setup')).text();
     assert.ok(setup.includes(origin)); assert.ok(!setup.includes('__AUTODMS_WORKER_BASE64__'));
     const setupFile = path.join(directory, 'Downloaded-Installer.ps1'); fs.writeFileSync(setupFile, setup);

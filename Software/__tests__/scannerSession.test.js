@@ -131,6 +131,62 @@ test('scanner failures stay failures rather than appearing as an empty successfu
     store.complete(session, { error: 'Scanner disconnected' });
     expect(store.state(session)).toMatchObject({ status: 'error', error: 'Scanner disconnected' });
 });
+
+test('empty failed scans stop occupying quota when another scan is requested', async () => {
+    const failed = [];
+    for (let i = 0; i < 2; i++) {
+        const created = await store.create(user), session = store.get(created.id);
+        store.claim(session); store.complete(session, { error: 'Scanner busy' }); failed.push(created);
+    }
+    const next = await store.create(user);
+    expect(store.sessions.size).toBe(1); expect(store.get(next.id).status).toBe('waiting');
+    for (const old of failed) {
+        expect(() => store.ingest(old.id, scanKey(old))).toThrow('expired');
+        expect(fs.existsSync(store.directory(old.id))).toBe(false);
+    }
+});
+
+test('failed attempts with received pages are preserved for explicit cancellation', async () => {
+    const created = await store.create(user), session = store.get(created.id); store.claim(session);
+    const file = await page(session, 1); await store.addPage(session, 1, file);
+    store.complete(session, { error: 'Second page upload failed' });
+    await store.create(user);
+    await expect(store.create(user)).rejects.toMatchObject({ status: 429 });
+    expect(fs.existsSync(file.path)).toBe(true); expect(store.get(created.id).status).toBe('error');
+});
+
+test('listing after browser refresh exposes only owned metadata, without launch keys or paths', async () => {
+    const first = await store.create(user), other = await store.create({ userId: 99 });
+    store.claim(store.get(first.id));
+    const list = await store.listOwned({ userId: '12' });
+    expect(list).toHaveLength(1); expect(list[0]).toMatchObject({ id: first.id, status: 'scanning', format: 'jpeg' });
+    const serialized = JSON.stringify(list);
+    for (const secret of [scanKey(first), other.id, root, 'tokenHash', 'launchUrl', 'owner']) expect(serialized).not.toContain(secret);
+    await expect(store.listOwned({})).rejects.toMatchObject({ status: 401 });
+});
+
+test('old waiting and ready attempts remain visible until explicitly cancelled', async () => {
+    const ready = await store.create(user), session = store.get(ready.id); store.claim(session);
+    await store.addPage(session, 1, await page(session, 1)); store.complete(session, { count: 1 });
+    const waiting = await store.create(user);
+    await expect(store.create(user)).rejects.toMatchObject({ status: 429 });
+    expect((await store.listOwned(user)).map(s => s.status)).toEqual(['ready', 'waiting']);
+    store.owned(waiting.id, user); await store.remove(waiting.id);
+    await expect(store.create(user)).resolves.toHaveProperty('id');
+    expect(store.get(ready.id).pages).toHaveLength(1);
+});
+
+test('creating a scan does not clear another user failed attempts', async () => {
+    const other = await store.create({ userId: 99 }), session = store.get(other.id);
+    store.claim(session); store.complete(session, { error: 'Scanner disconnected' });
+    await store.create(user); expect(store.get(other.id).status).toBe('error');
+});
+
+test('session listing cleans expired drafts', async () => {
+    const old = await store.create(user); clock += 1001;
+    expect(await store.listOwned(user)).toEqual([]);
+    expect(fs.existsSync(store.directory(old.id))).toBe(false);
+});
 test.each(['sales_executive', 'sales_agm', 'sales_gm', 'sales_master_settlement', 'sales_admin_settings'])('%s can scan for its existing document forms', key => {
     const next = jest.fn(); permitted({ user: { modules: [key] } }, {}, next); expect(next).toHaveBeenCalled();
 });

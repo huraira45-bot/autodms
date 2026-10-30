@@ -32,8 +32,14 @@ class ScannerSessionStore {
         if (!['duplex', 'feeder'].includes(source)) fail(400, 'Choose single-sided or double-sided scanning.');
         if (!['jpeg', 'pdf'].includes(format)) fail(400, 'Choose page images or one PDF.');
         await this.cleanup();
+        // Empty failed attempts contain no pages to recover and must not exhaust
+        // the user's quota after a scanner/setup failure or a browser refresh.
+        for (const session of this.sessions.values()) {
+            if (String(session.owner) === String(user.userId) && session.status === 'error' && !session.pages.length)
+                await this.remove(session.id);
+        }
         if (this.sessions.size >= 20 || [...this.sessions.values()].filter(s => String(s.owner) === String(user.userId)).length >= 2)
-            fail(429, 'Finish or cancel an existing scan before starting another.');
+            fail(429, 'Open Manage scans and cancel an old attempt before starting another.');
         const id = crypto.randomBytes(16).toString('hex'), token = crypto.randomBytes(32).toString('hex');
         const session = { id, owner: user.userId, tokenHash: digest(token), source, format, status: 'waiting',
             expiresAt: this.now() + this.ttl, pages: [], bytes: 0, error: null };
@@ -53,6 +59,12 @@ class ScannerSessionStore {
         const session = this.get(id);
         if (String(session.owner) !== String(user?.userId)) fail(403, 'This scan belongs to another user.');
         return session;
+    }
+    async listOwned(user) {
+        if (!user?.userId) fail(401, 'Sign in before scanning.');
+        await this.cleanup();
+        return [...this.sessions.values()].filter(session => String(session.owner) === String(user.userId))
+            .map(session => ({ ...this.state(session), format: session.format }));
     }
     ingest(id, token) {
         const session = this.get(id);
