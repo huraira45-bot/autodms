@@ -28,13 +28,13 @@ exports.report = async (req, res) => {
         return res.status(400).json({ error: error.message });
     }
     const filters = { number, match, finalized, from: query.from || '', to: query.to || '' };
-    // A date-only report includes every card, including cards without a DMS number.
+    // A date-only report includes all cards with a recorded DMS number.
     // Require a complete range when no number is supplied to avoid an initial full-register load.
     if (!number && !(from && to)) return res.json({ ...filters, searchRequired: true, rows: [], count: 0 });
     try {
         const pool = await getPool();
         const request = pool.request();
-        const where = [];
+        const where = ["NULLIF(LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(j.DMSJobCardNo, NCHAR(9), N' '), NCHAR(10), N' '), NCHAR(13), N' '), NCHAR(160), N' '))), N'') IS NOT NULL"];
         if (number) {
             request.input('exact', sql.NVarChar(50), number);
             if (match === 'exact') where.push('j.DMSJobCardNo = @exact');

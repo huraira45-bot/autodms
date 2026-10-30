@@ -16,16 +16,16 @@ test.each([undefined, '', '  '])('empty DMS number prompts for search without qu
     expect(getPool).not.toHaveBeenCalled();
 });
 
-test.each(['', '  ', undefined])('blank number with dates includes every card, including missing DMS numbers: %p', async number => {
-    const rows = [{ JobCardId: 1, DMSJobCardNo: null }, { JobCardId: 2, DMSJobCardNo: '' },
-        { JobCardId: 3, DMSJobCardNo: '00042', IsFinalized: true }];
+test.each(['', '  ', undefined])('blank number with dates browses recorded DMS numbers: %p', async number => {
+    const rows = [{ JobCardId: 3, DMSJobCardNo: '00042', IsFinalized: true }];
     const { values, query } = database(rows), res = response();
     await report({ query: { number, from: '2026-10-01', to: '2026-10-30', match: 'exact' } }, res);
-    expect(res.body).toMatchObject({ rows, count: 3, number: '', searchRequired: false });
+    expect(res.body).toMatchObject({ rows, count: 1, number: '', searchRequired: false });
     expect(Object.keys(values).sort()).toEqual(['from', 'to']);
     const statement = query.mock.calls[0][0];
-    expect(statement.split('WHERE ')[1].split('ORDER BY ')[0].trim())
-        .toBe('j.JobCardDate >= @from AND j.JobCardDate <= @to');
+    const where = statement.split('WHERE ')[1].split('ORDER BY ')[0].trim();
+    expect(where).toContain('j.DMSJobCardNo');
+    expect(where).toContain("N'') IS NOT NULL AND j.JobCardDate >= @from AND j.JobCardDate <= @to");
     expect(statement).not.toContain('@exact');
     expect(statement).not.toContain('LIKE');
 });
@@ -51,7 +51,7 @@ test('all dates and all draft/finalized states are included; duplicate DMS numbe
     expect(values).toEqual({ number: '%00042%', exact: '00042' });
     const statement = query.mock.calls[0][0];
     const where = statement.split('WHERE ')[1].split('ORDER BY ')[0];
-    expect(where.trim()).toBe("j.DMSJobCardNo LIKE @number ESCAPE '~'");
+    expect(where.trim()).toContain("N'') IS NOT NULL AND j.DMSJobCardNo LIKE @number ESCAPE '~'");
     expect(statement).not.toMatch(/TOP\s+\d+|SUM\(|PartyLedger|FinanceVoucher/i);
     expect(statement).toContain('WHEN j.DMSJobCardNo = @exact THEN 0');
 });
@@ -61,7 +61,7 @@ test('exact match preserves leading zeros and punctuation as a bound SQL paramet
     const number = "00/JV-42%' OR 1=1--";
     await report({ query: { number, match: 'exact' } }, res);
     expect(values).toEqual({ exact: number });
-    expect(query.mock.calls[0][0]).toContain('WHERE j.DMSJobCardNo = @exact');
+    expect(query.mock.calls[0][0]).toContain('AND j.DMSJobCardNo = @exact');
     expect(query.mock.calls[0][0]).not.toContain(number);
 });
 

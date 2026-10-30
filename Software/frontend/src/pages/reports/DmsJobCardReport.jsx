@@ -13,7 +13,7 @@ function NumberSearch({ number, updateParam }) {
         style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <label htmlFor="dms-job-card-number">DMS job card number (optional)</label>
         <input id="dms-job-card-number" value={draft} onChange={event => setDraft(event.target.value)}
-            placeholder="Leave blank for all cards in the date range" maxLength={50} style={{ ...inputStyle, width: 285 }} />
+            placeholder="Leave blank to browse by date" maxLength={50} style={{ ...inputStyle, width: 285 }} />
         <button type="submit" className="erp-btn erp-btn-primary"><Search size={14} /> Search</button>
         <button type="button" className="erp-btn" onClick={() => { setDraft(''); updateParam('number', ''); }}>Clear</button>
     </form>;
@@ -25,12 +25,12 @@ export default function DmsJobCardReport() {
     if (!canOpen && !hasPermission('report:job_card_register'))
         return <div className="erp-alert danger">You do not have permission to view this report.</div>;
     return <ReportShell title="DMS Job Card Lookup"
-        subtitle="Leave the DMS number blank and select From/To dates to see all job cards in that period. Enter a number to narrow the results."
+        subtitle="Select From/To dates to see job cards with a recorded DMS number. Cards with blank DMS numbers are excluded. Enter a number to narrow the results."
         icon={ClipboardList} endpoint="service/dms-job-cards"
         defaultParams={{ number: '', match: 'contains', from: '', to: '', finalized: 'all' }}
         superWide
         printFilterSummary={params => [
-            params.number ? `DMS number: ${params.number} (${params.match === 'exact' ? 'exact' : 'contains'})` : 'DMS number: All',
+            params.number ? `DMS number: ${params.number} (${params.match === 'exact' ? 'exact' : 'contains'})` : 'DMS number: All recorded numbers (blanks excluded)',
             `Job card dates: ${params.from || 'Any'} to ${params.to || 'Any'}`, `Finalization: ${params.finalized}`,
         ].join(' | ')}
         excelExport={data => ({
@@ -59,7 +59,7 @@ export default function DmsJobCardReport() {
     >
         {(data, { loading }) => <>
             <div style={{ color: 'var(--erp-text-muted)', fontSize: 13 }} role="status">
-                {loading ? 'Searching...' : data.searchRequired ? 'Enter a DMS job card number, or select both From and To dates to show all cards in that period.' : `${data.count} matching job card(s).`}
+                {loading ? 'Searching...' : data.searchRequired ? 'Enter a DMS job card number, or select both From and To dates to show cards with a recorded DMS number.' : `${data.count} matching job card(s).`}
             </div>
             {!data.searchRequired && !loading && data.count === 0 && <div className="erp-alert">
                 No job cards match the selected filters. Check the date range, DMS number and finalization filter.
