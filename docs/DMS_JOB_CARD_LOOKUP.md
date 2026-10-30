@@ -1,11 +1,13 @@
 # DMS Job Card Lookup
 
 Open **Workshop > DMS Job Card Lookup**, or **Reports > Workshop > DMS Job Card Lookup**.
-Enter a full or partial external DMS job card number and click **Search** (or press Enter).
+Leave the DMS number blank and select both **From** and **To** dates to show all job cards in that period, including cards with no DMS number recorded.
+To narrow the results, enter a full or partial external DMS job card number and click **Search** (or press Enter).
 The report searches the existing `Addata_JobCardInfo.DMSJobCardNo` field, which is separate from the internal RO/job number.
 
 - **Contains** is the default; **Exact number** restricts results to that number. Leading zeros and punctuation are preserved. SQL wildcard characters are treated literally.
-- All dates, draft cards and finalized cards are included by default, including closed jobs. Optional From/To filters use **Job Card Date**, with the To date inclusive.
+- A DMS-number search includes all dates unless filtered. A blank-number search requires both dates. Date filters use **Job Card Date**, with the To date inclusive. Draft, finalized and closed cards are included unless filtered.
+- **Clear** removes the DMS-number filter while retaining the selected dates, showing every job card in that period.
 - If several job cards share a DMS number, every matching card appears. Exact matches appear first, then newest job card dates.
 - Results include DMS/RO/internal job numbers, customer/CNIC/phone/credit party, vehicle/chassis/model, business unit, advisor, payment type, job status and finalization status.
 - Click the RO number to open the matching job card if you have Job Cards view permission.

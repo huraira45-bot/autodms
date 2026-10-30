@@ -16,6 +16,32 @@ test.each([undefined, '', '  '])('empty DMS number prompts for search without qu
     expect(getPool).not.toHaveBeenCalled();
 });
 
+test.each(['', '  ', undefined])('blank number with dates includes every card, including missing DMS numbers: %p', async number => {
+    const rows = [{ JobCardId: 1, DMSJobCardNo: null }, { JobCardId: 2, DMSJobCardNo: '' },
+        { JobCardId: 3, DMSJobCardNo: '00042', IsFinalized: true }];
+    const { values, query } = database(rows), res = response();
+    await report({ query: { number, from: '2026-10-01', to: '2026-10-30', match: 'exact' } }, res);
+    expect(res.body).toMatchObject({ rows, count: 3, number: '', searchRequired: false });
+    expect(Object.keys(values).sort()).toEqual(['from', 'to']);
+    const statement = query.mock.calls[0][0];
+    expect(statement.split('WHERE ')[1].split('ORDER BY ')[0].trim())
+        .toBe('j.JobCardDate >= @from AND j.JobCardDate <= @to');
+    expect(statement).not.toContain('@exact');
+    expect(statement).not.toContain('LIKE');
+});
+
+test.each([{ from: '2026-10-01' }, { to: '2026-10-30' }])('date-only search waits for a complete range: %p', async dates => {
+    const res = response(); await report({ query: { number: '', ...dates } }, res);
+    expect(res.body.searchRequired).toBe(true); expect(getPool).not.toHaveBeenCalled();
+});
+
+test('date-only search retains finalization filtering', async () => {
+    const { query } = database(), res = response();
+    await report({ query: { from: '2026-10-01', to: '2026-10-30', finalized: 'finalized' } }, res);
+    expect(res.body.searchRequired).toBe(false);
+    expect(query.mock.calls[0][0]).toContain('AND j.IsFinalized = 1');
+});
+
 test('all dates and all draft/finalized states are included; duplicate DMS numbers retain every job card', async () => {
     const rows = [{ JobCardId: 1, DMSJobCardNo: '00042', IsFinalized: false },
         { JobCardId: 2, DMSJobCardNo: '00042', IsFinalized: true, JobStatusText: 'Closed' }];

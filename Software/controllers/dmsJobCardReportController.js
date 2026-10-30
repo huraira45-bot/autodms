@@ -28,16 +28,20 @@ exports.report = async (req, res) => {
         return res.status(400).json({ error: error.message });
     }
     const filters = { number, match, finalized, from: query.from || '', to: query.to || '' };
-    // Do not load the entire workshop register before the user searches.
-    if (!number) return res.json({ ...filters, searchRequired: true, rows: [], count: 0 });
+    // A date-only report includes every card, including cards without a DMS number.
+    // Require a complete range when no number is supplied to avoid an initial full-register load.
+    if (!number && !(from && to)) return res.json({ ...filters, searchRequired: true, rows: [], count: 0 });
     try {
         const pool = await getPool();
-        const request = pool.request().input('exact', sql.NVarChar(50), number);
+        const request = pool.request();
         const where = [];
-        if (match === 'exact') where.push('j.DMSJobCardNo = @exact');
-        else {
-            request.input('number', sql.NVarChar(102), `%${number.replace(/[~%_[\]]/g, '~$&')}%`);
-            where.push("j.DMSJobCardNo LIKE @number ESCAPE '~'");
+        if (number) {
+            request.input('exact', sql.NVarChar(50), number);
+            if (match === 'exact') where.push('j.DMSJobCardNo = @exact');
+            else {
+                request.input('number', sql.NVarChar(102), `%${number.replace(/[~%_[\]]/g, '~$&')}%`);
+                where.push("j.DMSJobCardNo LIKE @number ESCAPE '~'");
+            }
         }
         if (from) {
             request.input('from', sql.DateTime, from);
@@ -66,7 +70,7 @@ exports.report = async (req, res) => {
             LEFT JOIN gen_PartiesInfo p ON p.PartyID = j.PartyID
             LEFT JOIN gen_JobCardType t ON t.JobCardTypeId = j.JobTypeId
             WHERE ${where.join(' AND ')}
-            ORDER BY CASE WHEN j.DMSJobCardNo = @exact THEN 0 ELSE 1 END,
+            ORDER BY ${number ? 'CASE WHEN j.DMSJobCardNo = @exact THEN 0 ELSE 1 END,' : ''}
                 j.JobCardDate DESC, j.JobCardId DESC`);
         return res.json({ ...filters, searchRequired: false, rows: result.recordset, count: result.recordset.length });
     } catch (error) {

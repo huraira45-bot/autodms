@@ -11,9 +11,9 @@ function NumberSearch({ number, updateParam }) {
     const [draft, setDraft] = useState(number || '');
     return <form onSubmit={event => { event.preventDefault(); updateParam('number', draft.trim()); }}
         style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label htmlFor="dms-job-card-number">DMS job card number</label>
+        <label htmlFor="dms-job-card-number">DMS job card number (optional)</label>
         <input id="dms-job-card-number" value={draft} onChange={event => setDraft(event.target.value)}
-            placeholder="Enter the full number or part of it" maxLength={50} style={{ ...inputStyle, width: 260 }} />
+            placeholder="Leave blank for all cards in the date range" maxLength={50} style={{ ...inputStyle, width: 285 }} />
         <button type="submit" className="erp-btn erp-btn-primary"><Search size={14} /> Search</button>
         <button type="button" className="erp-btn" onClick={() => { setDraft(''); updateParam('number', ''); }}>Clear</button>
     </form>;
@@ -25,12 +25,12 @@ export default function DmsJobCardReport() {
     if (!canOpen && !hasPermission('report:job_card_register'))
         return <div className="erp-alert danger">You do not have permission to view this report.</div>;
     return <ReportShell title="DMS Job Card Lookup"
-        subtitle="Find workshop job cards by their external DMS number. All dates and both draft and finalized cards are included unless filtered."
+        subtitle="Leave the DMS number blank and select From/To dates to see all job cards in that period. Enter a number to narrow the results."
         icon={ClipboardList} endpoint="service/dms-job-cards"
         defaultParams={{ number: '', match: 'contains', from: '', to: '', finalized: 'all' }}
         superWide
         printFilterSummary={params => [
-            `DMS number: ${params.number || 'Not entered'} (${params.match === 'exact' ? 'exact' : 'contains'})`,
+            params.number ? `DMS number: ${params.number} (${params.match === 'exact' ? 'exact' : 'contains'})` : 'DMS number: All',
             `Job card dates: ${params.from || 'Any'} to ${params.to || 'Any'}`, `Finalization: ${params.finalized}`,
         ].join(' | ')}
         excelExport={data => ({
@@ -59,10 +59,10 @@ export default function DmsJobCardReport() {
     >
         {(data, { loading }) => <>
             <div style={{ color: 'var(--erp-text-muted)', fontSize: 13 }} role="status">
-                {loading ? 'Searching...' : data.searchRequired ? 'Enter a DMS job card number and click Search.' : `${data.count} matching job card(s).`}
+                {loading ? 'Searching...' : data.searchRequired ? 'Enter a DMS job card number, or select both From and To dates to show all cards in that period.' : `${data.count} matching job card(s).`}
             </div>
             {!data.searchRequired && !loading && data.count === 0 && <div className="erp-alert">
-                No job cards match this DMS number and the selected filters. Check the number or clear the date and finalization filters.
+                No job cards match the selected filters. Check the date range, DMS number and finalization filter.
             </div>}
             {!data.searchRequired && data.count > 0 && <div className="erp-panel" style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -70,7 +70,7 @@ export default function DmsJobCardReport() {
                         <TH>Vehicle</TH><TH>Business unit</TH><TH>Advisor</TH><TH>Payment</TH><TH>Job status</TH><TH>Finalization</TH>
                     </tr></thead>
                     <tbody>{data.rows.map(row => <tr key={row.JobCardId} style={{ borderTop: '1px solid #e2e8f0' }}>
-                        <TD mono bold>{row.DMSJobCardNo}</TD>
+                        <TD mono bold>{row.DMSJobCardNo || '-'}</TD>
                         <TD>{canOpen ? <Link to={`/workshop/jobs/${row.JobCardId}`} style={{ color: 'var(--erp-brand)', fontWeight: 600 }}>
                             {row.JobCardNo || `#${row.JobCardId}`}</Link> : row.JobCardNo || `#${row.JobCardId}`}
                             <div>{row.jobCode || ''}</div></TD>

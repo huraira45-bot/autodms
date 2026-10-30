@@ -23,8 +23,9 @@ async function load(query) {
     tx = new sql.Transaction(pool); await tx.begin();
     try {
         const marker = `DMS${Date.now()}`;
-        const numbers = [`${marker}-00042`, `${marker}-00042`, `${marker}-00042/X`, `${marker}_50%[west]~`];
-        const dates = ['2024-02-29T00:00:00.000', '2024-02-29T23:59:59.997', '2024-03-01T00:00:00.000', '2020-01-01T00:00:00.000'];
+        const numbers = [`${marker}-00042`, `${marker}-00042`, `${marker}-00042/X`, `${marker}_50%[west]~`, null, ''];
+        const dates = ['2024-02-29T00:00:00.000', '2024-02-29T23:59:59.997', '2024-03-01T00:00:00.000', '2020-01-01T00:00:00.000',
+            '2024-02-29T12:00:00.000', '2024-02-29T12:30:00.000'];
         const ids = [];
         for (let index = 0; index < numbers.length; index++) {
             const result = await request().input('no', sql.NVarChar(50), numbers[index])
@@ -53,9 +54,19 @@ async function load(query) {
         assert.equal((await load({ number: marker, finalized: 'draft' })).count, 3);
         assert.equal((await load({ number: marker + 'MISSING' })).count, 0);
         assert.equal((await load({ number: '' })).searchRequired, true);
+        const dateOnly = await load({ number: '', from: '2024-02-29', to: '2024-02-29', match: 'exact' });
+        const expected = (await request().query(`SELECT JobCardId FROM Addata_JobCardInfo
+            WHERE JobCardDate >= '20240229' AND JobCardDate < '20240301'`)).recordset.map(row => row.JobCardId);
+        assert.equal(dateOnly.searchRequired, false);
+        assert.deepEqual(new Set(dateOnly.rows.map(row => row.JobCardId)), new Set(expected), 'Blank number returns every card in the date range.');
+        assert.ok(dateOnly.rows.some(row => row.JobCardId === ids[4] && row.DMSJobCardNo === null));
+        assert.ok(dateOnly.rows.some(row => row.JobCardId === ids[5] && row.DMSJobCardNo === ''));
+        const finalizedOnly = await load({ from: '2024-02-29', to: '2024-02-29', finalized: 'finalized' });
+        assert.ok(finalizedOnly.rows.every(row => row.IsFinalized));
+        assert.ok(finalizedOnly.rows.some(row => row.JobCardId === ids[1]));
         const after = JSON.stringify((await request().input('prefix', sql.NVarChar(60), marker + '%')
             .query('SELECT * FROM Addata_JobCardInfo WHERE JobCardNo LIKE @prefix ORDER BY JobCardId')).recordset);
         assert.equal(after, before, 'Report must not alter job cards.');
-        console.log('PASS: real SQL DMS exact/partial/literal lookup, shared numbers, old/draft/closed cards, inclusive dates, finalization filters and unchanged records. All fixtures rolled back.');
+        console.log('PASS: real SQL DMS exact/partial/literal lookup, blank-number date-only report including null/empty DMS numbers, shared numbers, old/draft/closed cards, inclusive dates, finalization filters and unchanged records. All fixtures rolled back.');
     } finally { await tx.rollback(); }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { db.getPool = realGetPool; return sql.close(); });
