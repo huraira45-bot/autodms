@@ -11,6 +11,7 @@ let activeTx;
 db.getPool = async () => ({ request: () => new sql.Request(activeTx) });
 const catalog = require('../controllers/salesCatalogController');
 const reports = require('../controllers/vehicleInventoryReportController');
+const legacyReports = require('../controllers/salesReportsController');
 const { markVehicleDelivered } = require('../services/vehicleDeliveryLockService');
 const { handleSalesVoucherPosted } = require('../services/salesVoucherPostHookService');
 const user = { userId: 1, employeeId: null, groupId: 1, userName: 'Inventory verification' };
@@ -63,6 +64,41 @@ async function main() {
     if(!['.','localhost','127.0.0.1',require('node:os').hostname().toLowerCase()].includes(host))
         throw new Error('Local development database only.');
     const pool=await realGetPool();
+    if (process.argv.includes('--reports-only')) {
+        await fixture(pool,async({ variants,create,vehicleId })=>{
+            const chassis=new Set(['VERIFY-CHASSIS-A']);
+            for(const status of ['AtMaster','InTransit','Allocated','Delivered','Sold','Returned']) {
+                const created=await create('REPORT-'+status);chassis.add('VERIFY-CHASSIS-REPORT-'+status);
+                await new sql.Request(activeTx).input('v',sql.Int,created.VehicleID).input('status',sql.NVarChar(20),status)
+                    .query("UPDATE dms_Vehicle SET Status=@status,AllocationType='Booked' WHERE VehicleID=@v");
+            }
+            const stale=await create('REPORT-GATEPASS');chassis.add('VERIFY-CHASSIS-REPORT-GATEPASS');
+            const booking=(await query('SELECT TOP(1) BookingID FROM dms_SalesBookings ORDER BY BookingID')).recordset[0];
+            assert.ok(booking,'Development database needs a booking.');
+            await new sql.Request(activeTx).input('v',sql.Int,stale.VehicleID).input('b',sql.Int,booking.BookingID)
+                .query('UPDATE dms_SalesBookings SET AllocatedVehicleID=@v,GatePassIssuedAt=GETDATE() WHERE BookingID=@b');
+            const variantId=String(variants[0].VariantID);
+            const all=await invoke(reports.summary,{query:{variantId}});
+            assert.equal(all.totals.TotalVehicles,8);assert.equal(all.totals.InStock,4);
+            assert.equal(all.totals.Delivered,3);assert.equal(all.totals.Returned,1);
+            const stock=await invoke(reports.summary,{query:{variantId,inStockOnly:'1'}});
+            assert.equal(stock.totals.TotalVehicles,4);assert.equal(stock.totals.InStock,4);
+            assert.equal(stock.totals.Delivered,0);assert.equal(stock.totals.Returned,0);
+            assert.equal(stock.totals.Allocated,1);assert.equal(stock.totals.OpenAllocation,1);
+            const deliveredOnly=await create('REPORT-DELIVERY-ONLY',variants[1].VariantID);
+            await new sql.Request(activeTx).input('v',sql.Int,deliveredOnly.VehicleID).query("UPDATE dms_Vehicle SET Status='Delivered' WHERE VehicleID=@v");
+            assert.equal((await invoke(reports.summary,{query:{variantId:String(variants[1].VariantID),inStockOnly:'1'}})).rows.length,0);
+            const listed=await invoke(legacyReports.vehicleInventory,{query:{inStockOnly:'1'}});
+            const rows=listed.rows.filter(row=>chassis.has(row.ChasisNo));
+            assert.equal(rows.length,4);assert.deepEqual(rows.map(row=>row.Status).sort(),['Allocated','AtDealer','AtMaster','InTransit']);
+            const allListed=await invoke(legacyReports.vehicleInventory,{query:{}});
+            const staleRow=allListed.rows.find(row=>row.ChasisNo==='VERIFY-CHASSIS-REPORT-GATEPASS');
+            assert.equal(staleRow.Status,'Delivered');
+            assert.ok((await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query('SELECT VehicleID FROM dms_Vehicle WHERE VehicleID=@v')).recordset.length);
+        });
+        console.log('PASS: real SQL inventory reports include all undelivered booked/allocated stock; delivered/sold/returned and stale gate-pass statuses excluded before counts, totals and exports. All fixtures/migrations rolled back.');
+        return;
+    }
     await fixture(pool,async({variants,create,vehicleId})=>{
         await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Color:'Blue',Status:'InTransit'}});
         await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Status:'AtDealer'}});

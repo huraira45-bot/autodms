@@ -10,6 +10,7 @@ const { sql, getPool } = require('../config/db');
 const { resolveRole } = require('./systemAccountsController');
 const { masterAccountSql } = require('../services/masterPaymentPositionService');
 const { bookingAccountReconciliationQuery } = require('../services/bookingPaymentReportQuery');
+const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
 
 function parseRange(req) {
     const today = new Date();
@@ -84,14 +85,15 @@ exports.cancelledBookingRegister = (req, res) => bookingRegister(req, res, true)
 
 /**
  * GET /reports/sales/vehicle-inventory
- * Vehicles currently in stock (Status != Sold/Delivered), with cost basis.
+ * Inventory list, optionally restricted to undelivered stock, with cost basis.
  */
 exports.vehicleInventory = async (req, res) => {
     try {
         const pool = await getPool();
         const r = await pool.request().query(`
             SELECT v.VehicleID, v.ChasisNo, v.EngineNo, v.Color, v.ManufactureYear,
-                   v.Status, v.Location, v.AllocationType, v.ReceivedAt,
+                   v.Status, CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 'Delivered' ELSE v.Status END AS ReportStatus,
+                   v.Location, v.AllocationType, v.ReceivedAt,
                    m.ModelCode, m.ModelName, m.BrandName,
                    vr.VariantName, vr.VariantCode,
                    vr.StandardPrice
@@ -100,7 +102,7 @@ exports.vehicleInventory = async (req, res) => {
             LEFT JOIN dms_VehicleModel m    ON vr.ModelID = m.ModelID
             ORDER BY v.ReceivedAt DESC, v.VehicleID DESC`);
 
-        const rows = r.recordset.map(x => ({
+        const inventoryRows = r.recordset.map(x => ({
             ChasisNo:        x.ChasisNo,
             EngineNo:        x.EngineNo || '',
             Color:           x.Color || '',
@@ -109,7 +111,7 @@ exports.vehicleInventory = async (req, res) => {
             Model:           x.ModelCode || '',
             ModelName:       x.ModelName || '',
             Variant:         x.VariantName || '',
-            Status:          x.Status || '',
+            Status:          x.ReportStatus || x.Status || '',
             Location:        x.Location || '',
             AllocationType:  x.AllocationType || '',
             StandardPrice:   +Number(x.StandardPrice || 0).toFixed(2),
@@ -117,7 +119,9 @@ exports.vehicleInventory = async (req, res) => {
             DaysInStock:     x.ReceivedAt ? Math.floor((Date.now() - new Date(x.ReceivedAt).getTime()) / 86400000) : null,
         }));
 
-        const inStock = rows.filter(r => !['Delivered','Sold','Returned'].includes(r.Status));
+        const isInStock = row => !['Delivered','Sold','Returned'].includes(row.Status);
+        const rows = req.query.inStockOnly === '1' ? inventoryRows.filter(isInStock) : inventoryRows;
+        const inStock = rows.filter(isInStock);
         const totals = {
             total:         rows.length,
             inStock:       inStock.length,

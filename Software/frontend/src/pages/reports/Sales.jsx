@@ -98,11 +98,13 @@ export function VehicleInventory() {
     return (
         <ReportShell
             title="Vehicle Inventory"
-            subtitle="All vehicles in the system — by status, location, model, with days-in-stock."
+            subtitle="In stock means not delivered, including booked and allocated vehicles. Returned vehicles are excluded."
             icon={Truck}
             endpoint="sales/vehicle-inventory"
-            defaultParams={{}}
-            controls={() => null}
+            defaultParams={{ inStockOnly: '1' }}
+            controls={({ params, updateParam }) => <label>
+                <input type="checkbox" checked={params.inStockOnly === '1'} onChange={event => updateParam('inStockOnly', event.target.checked ? '1' : undefined)} /> In stock only (not delivered)
+            </label>}
         >
             {(data) => (
                 <>

@@ -54,11 +54,14 @@ exports.summary = async (req,res) => {
     const f=validated(req,res);if(!f)return;
     try {
         const pool=await getPool();
-        const r=await bind(pool.request(),f).query(`
+        const r=await bind(pool.request(),f).input('stockOnly',sql.Bit,req.query.inStockOnly==='1').query(`
             WITH stock AS (
                 SELECT v.VehicleID,v.VariantID,v.AllocationType,
                     CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 'Delivered' ELSE v.Status END AS Status
                 FROM dms_Vehicle v
+            ), scopedStock AS (
+                SELECT * FROM stock
+                WHERE @stockOnly=0 OR Status NOT IN ('Delivered','Sold','Returned')
             )
             SELECT m.ModelID,m.ModelName,vr.VariantID,vr.VariantCode,vr.VariantName,
                 COUNT(s.VehicleID) AS TotalVehicles,
@@ -71,7 +74,7 @@ exports.summary = async (req,res) => {
                 SUM(CASE WHEN s.Status='Returned' THEN 1 ELSE 0 END) AS Returned,
                 SUM(CASE WHEN s.Status NOT IN ('Delivered','Sold','Returned') AND s.AllocationType='OpenAllocation' THEN 1 ELSE 0 END) AS OpenAllocation
             FROM dms_VehicleVariant vr JOIN dms_VehicleModel m ON m.ModelID=vr.ModelID
-            LEFT JOIN stock s ON s.VariantID=vr.VariantID
+            LEFT JOIN scopedStock s ON s.VariantID=vr.VariantID
             WHERE (@model IS NULL OR m.ModelID=@model) AND (@variant IS NULL OR vr.VariantID=@variant)
                 AND (@search IS NULL OR m.ModelName LIKE @search OR vr.VariantName LIKE @search OR vr.VariantCode LIKE @search)
             GROUP BY m.ModelID,m.ModelName,vr.VariantID,vr.VariantCode,vr.VariantName ORDER BY m.ModelName,vr.VariantName;`);

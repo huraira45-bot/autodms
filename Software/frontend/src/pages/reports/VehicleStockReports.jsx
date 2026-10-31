@@ -36,7 +36,7 @@ function Filters({ params, updateParam, options, ledger }) {
             <option value="">All variants</option>{options.variants.filter(v => !params.modelId || String(v.ModelID) === params.modelId).map(v => <option key={v.VariantID} value={v.VariantID}>{v.VariantCode} — {v.VariantName}</option>)}
         </select></label>
         <input aria-label={ledger ? 'Search chassis or engine' : 'Search model or variant'} placeholder={ledger ? 'Chassis / engine' : 'Model / variant'} style={input} value={params.search || ''} onChange={e => updateParam('search', e.target.value || undefined)} />
-        {!ledger && <label><input type="checkbox" checked={params.inStockOnly === '1'} onChange={e => updateParam('inStockOnly', e.target.checked ? '1' : undefined)} /> In stock only</label>}
+        {!ledger && <label><input type="checkbox" checked={params.inStockOnly === '1'} onChange={e => updateParam('inStockOnly', e.target.checked ? '1' : undefined)} /> In stock only (not delivered)</label>}
         {options.error && <span className="erp-alert danger">Cannot load filters: {options.error}</span>}
     </>;
 }
@@ -44,7 +44,7 @@ function filterText(params, options) {
     return [params.from && `From ${params.from}`, params.to && `to ${params.to}`,
         params.modelId && `Model: ${options.models.find(m => String(m.ModelID) === params.modelId)?.ModelName || params.modelId}`,
         params.variantId && `Variant: ${options.variants.find(v => String(v.VariantID) === params.variantId)?.VariantName || params.variantId}`,
-        params.search && `Search: ${params.search}`, params.inStockOnly === '1' && 'In stock only'].filter(Boolean).join(' | ') || 'All models and variants';
+        params.search && `Search: ${params.search}`, params.inStockOnly === '1' && 'In stock only (not delivered)'].filter(Boolean).join(' | ') || 'All models and variants';
 }
 function Totals({ values }) {
     return <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>{values.map(([label, value]) => <span key={label}>{label}: <strong>{fmtInt(value)}</strong></span>)}</div>;
@@ -53,8 +53,8 @@ function Totals({ values }) {
 export function VehicleInventoryByVariant() {
     const options = useOptions();
     return <ReportShell title="Vehicle Inventory by Variant" icon={Boxes} endpoint="sales/vehicle-inventory-by-variant"
-        subtitle="Current registered stock by model and variant. Delivered and returned vehicles are excluded from stock."
-        defaultParams={{}} superWide printFilterSummary={p => filterText(p, options)}
+        subtitle="In stock means not delivered, including booked and allocated vehicles. Returned vehicles are excluded."
+        defaultParams={{ inStockOnly: '1' }} superWide printFilterSummary={p => filterText(p, options)}
         controls={props => <Filters {...props} options={options} />}
         excelExport={data => ({ filename: 'vehicle-inventory-by-variant.csv',
             headers: ['Model', 'Variant code', 'Variant', 'Recorded vehicles', 'In stock', 'At Master', 'In transit', 'At dealer', 'Allocated', 'Delivered', 'Returned', 'Open allocation stock'],
@@ -72,7 +72,7 @@ export function VehicleInventoryByVariant() {
                     </tr>)}
                 </tbody>
             </table></div>
-            <p className="hint">Stock includes vehicles at Master, in transit, at the dealer and allocated to bookings. Open-allocation stock is included in the stock total.</p>
+            <p className="hint">Stock includes vehicles at Master, in transit, at the dealer and allocated to bookings until delivery or gate-pass issuance. Open-allocation stock is included in the stock total. With In stock only selected, all quantities and exports exclude delivered and returned vehicles.</p>
         </>}
     </ReportShell>;
 }

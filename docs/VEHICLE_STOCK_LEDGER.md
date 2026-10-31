@@ -15,6 +15,35 @@ Stock is registered chassis quantity: AtMaster, InTransit, AtDealer and Allocate
 are included. Delivered/Sold and Returned are excluded. Open allocation is a
 subset of stock, not an additional quantity. These reports do not post vouchers.
 
+### In stock means not delivered (31 October 2026)
+
+The owner confirmed that returned vehicles remain excluded. Both **Vehicle
+Inventory** and **Vehicle Inventory by Variant** now open with **In stock only
+(not delivered)** selected. Booked and allocated cars remain stock until
+delivery/gate-pass issuance. Delivered/Sold and Returned vehicles are excluded.
+Uncheck the option to review all recorded vehicles and the delivered/returned
+breakdown.
+
+The variant report filters vehicles before aggregating quantities, rather than
+only hiding variants with no stock. With the option checked, recorded quantities,
+totals, printing and Excel exports describe undelivered stock only. A gate-pass
+delivery overrides a stale vehicle status in both reports. This uses the existing
+booking-backed delivery evidence; it does not alter vehicle records, locks,
+inventory-ledger entries or accounting.
+
+No new migration is required on an installation already running the vehicle
+inventory reports. Deploy this report update with:
+
+```cmd
+cd /d "D:\saher 2.0\autodms" && git -c gc.auto=0 -c maintenance.auto=false pull --ff-only && cd Software\frontend && npm run build && cd .. && pm2 startOrRestart ecosystem.config.js --update-env && pm2 save
+```
+
+Then press Ctrl+F5. Focused validation: 57 Jest tests and
+`node scripts/verify-vehicle-inventory.js --reports-only` against local SQL Server.
+The SQL check rolls back every fixture/migration and covers booked/allocated
+stock, delivered/sold/returned exclusions, stale gate-pass status, a delivered-only
+variant, both report scopes and totals.
+
 ## Inventory ledger
 
 Migration 161 establishes a timestamped opening snapshot of existing vehicles.
