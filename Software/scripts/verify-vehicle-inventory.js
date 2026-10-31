@@ -12,6 +12,7 @@ db.getPool = async () => ({ request: () => new sql.Request(activeTx) });
 const catalog = require('../controllers/salesCatalogController');
 const reports = require('../controllers/vehicleInventoryReportController');
 const legacyReports = require('../controllers/salesReportsController');
+const {correctDeliveredChassis}=require('../services/deliveredChassisCorrectionService');
 const { markVehicleDelivered } = require('../services/vehicleDeliveryLockService');
 const { handleSalesVoucherPosted } = require('../services/salesVoucherPostHookService');
 const user = { userId: 1, employeeId: null, groupId: 1, userName: 'Inventory verification' };
@@ -29,6 +30,7 @@ async function fixture(pool, check) {
     try {
         await query(fs.readFileSync(path.join(__dirname,'../migrations/161_vehicle_inventory_ledger_delivery_lock.sql'),'utf8'));
         await query(fs.readFileSync(path.join(__dirname,'../migrations/162_booking_backed_vehicle_delivery_lock.sql'),'utf8'));
+        await query(fs.readFileSync(path.join(__dirname,'../migrations/167_delivered_chassis_corrections.sql'),'utf8'));
         const model=(await query('SELECT TOP(1) ModelID FROM dms_VehicleModel ORDER BY ModelID')).recordset[0];
         assert.ok(model,'Development database needs a vehicle model.');
         const variants=(await new sql.Request(activeTx).input('model',sql.Int,model.ModelID).query(`
@@ -64,6 +66,73 @@ async function main() {
     if(!['.','localhost','127.0.0.1',require('node:os').hostname().toLowerCase()].includes(host))
         throw new Error('Local development database only.');
     const pool=await realGetPool();
+    if(process.argv.includes('--chassis-correction-only')) {
+        await fixture(pool,async({vehicleId,create,variants})=>{
+            await query(fs.readFileSync(path.join(__dirname,'../migrations/167_delivered_chassis_corrections.sql'),'utf8'));
+            const newId=(await create('CORRECT')).VehicleID, bookingId=await delivered(vehicleId);
+            const b=(await new sql.Request(activeTx).input('b',sql.Int,bookingId).query('SELECT BookingNo FROM dms_SalesBookings WHERE BookingID=@b')).recordset[0];
+            const voucher=(await new sql.Request(activeTx).input('b',sql.Int,bookingId).query(`
+                INSERT data_FinanceVoucherInfo(VoucherDate,VoucherNo,VoucherTypeID,Remarks,TotalAmount,Status,Posted,SourceDocType,SourceDocID)
+                OUTPUT INSERTED.VoucherID SELECT GETDATE(),'JV-CHASSIS-VERIFY',MIN(VoucherTypeID),'Original chassis narration retained',100,'Draft',0,'SALES_DELIVERY',@b FROM data_FinanceVoucherInfo;
+            `)).recordset[0];
+            await new sql.Request(activeTx).input('b',sql.Int,bookingId).input('v',sql.Int,voucher.VoucherID).query(`
+                UPDATE dms_SalesBookings SET DeliveryVoucherID=@v,VehicleVariantID=(SELECT VariantID FROM dms_Vehicle WHERE VehicleID=${vehicleId}) WHERE BookingID=@b;
+                INSERT data_FinanceVoucherDetail(VoucherID,GLCAID,Narration,Debit,Credit,BookingID)
+                SELECT @v,MIN(GLCAID),'Original financial line retained',100,0,@b FROM GLChartOFAccount;`);
+            const bookingBefore=(await new sql.Request(activeTx).input('b',sql.Int,bookingId).query('SELECT * FROM dms_SalesBookings WHERE BookingID=@b')).recordset[0];
+            const pass=(await new sql.Request(activeTx).input('b',sql.Int,bookingId).query(`
+                UPDATE dms_GatePasses SET VehicleChassis='VERIFY-CHASSIS-A' WHERE DocType='BOOKING' AND DocID=@b;
+                SELECT * FROM dms_GatePasses WHERE DocType='BOOKING' AND DocID=@b AND RevokedAt IS NULL;`)).recordset[0];
+            const beforeFinance=(await query(`SELECT COUNT(*) AS N,SUM(TotalAmount) AS A FROM data_FinanceVoucherInfo;
+                SELECT COUNT(*) AS N,SUM(Debit) AS D,SUM(Credit) AS C FROM data_FinanceVoucherDetail;
+                SELECT COUNT(*) AS N FROM dms_PartyLedger;
+                SELECT COUNT(*) AS N FROM GLvMAIN;SELECT COUNT(*) AS N FROM GLvDetail;`)).recordsets;
+            const beforeHistory=(await new sql.Request(activeTx).input('old',sql.Int,vehicleId).input('new',sql.Int,newId)
+                .query('SELECT * FROM dms_VehicleInventoryLedger WHERE VehicleID IN(@old,@new) ORDER BY MovementID')).recordset;
+            const options={bookingNo:b.BookingNo,oldChassis:'VERIFY-CHASSIS-A',newChassis:'VERIFY-CHASSIS-CORRECT',reason:'Owner confirmed the original chassis was selected accidentally',user:{...user,groupId:1}};
+            await assert.rejects(correctDeliveredChassis(activeTx,{...options,user:{...user,groupId:2}}),/Administrator/);
+            await assert.rejects(correctDeliveredChassis(activeTx,{...options,oldChassis:'VERIFY-MISSING'}),/Both chassis/);
+            const preview=await correctDeliveredChassis(activeTx,options);assert.equal(preview.dryRun,true);
+            assert.equal((await query('SELECT COUNT(*) AS N FROM dms_DeliveredChassisCorrections')).recordset[0].N,0);
+            const result=await correctDeliveredChassis(activeTx,{...options,apply:true});assert.equal(result.FinancialRecordsUnchanged,true);
+            const rows=(await invoke(catalog.listVehicles,{query:{search:'VERIFY-CHASSIS'}}));
+            const old=rows.find(v=>v.VehicleID===vehicleId), replacement=rows.find(v=>v.VehicleID===newId);
+            assert.equal(old.Status,'AtDealer');assert.equal(old.CurrentBookingID,null);assert.equal(old.IsDeliveryLocked,false);
+            assert.equal(replacement.Status,'Delivered');assert.equal(replacement.CurrentBookingID,bookingId);assert.equal(replacement.IsDeliveryLocked,true);
+            assert.equal(new Date(replacement.SoldDeliveredAt).getTime(),new Date(result.OriginalDeliveredAt).getTime());
+            const afterPass=(await new sql.Request(activeTx).input('id',sql.Int,pass.GatePassID).query('SELECT * FROM dms_GatePasses WHERE GatePassID=@id')).recordset[0];
+            assert.equal(afterPass.VehicleChassis,options.newChassis);delete afterPass.VehicleChassis;delete pass.VehicleChassis;assert.deepEqual(afterPass,pass);
+            const afterBooking=(await new sql.Request(activeTx).input('b',sql.Int,bookingId).query('SELECT * FROM dms_SalesBookings WHERE BookingID=@b')).recordset[0];
+            assert.equal(afterBooking.AllocatedVehicleID,newId);for(const key of ['AllocatedVehicleID','UpdatedAt']) {delete afterBooking[key];delete bookingBefore[key];}assert.deepEqual(afterBooking,bookingBefore);
+            assert.deepEqual((await query(`SELECT COUNT(*) AS N,SUM(TotalAmount) AS A FROM data_FinanceVoucherInfo;
+                SELECT COUNT(*) AS N,SUM(Debit) AS D,SUM(Credit) AS C FROM data_FinanceVoucherDetail;
+                SELECT COUNT(*) AS N FROM dms_PartyLedger;SELECT COUNT(*) AS N FROM GLvMAIN;SELECT COUNT(*) AS N FROM GLvDetail;`)).recordsets,beforeFinance);
+            const afterHistory=(await new sql.Request(activeTx).input('old',sql.Int,vehicleId).input('new',sql.Int,newId)
+                .query('SELECT * FROM dms_VehicleInventoryLedger WHERE VehicleID IN(@old,@new) ORDER BY MovementID')).recordset;
+            assert.deepEqual(afterHistory.slice(0,beforeHistory.length),beforeHistory);assert.equal(afterHistory.length,beforeHistory.length+2);
+            assert.equal(afterHistory.slice(beforeHistory.length).reduce((n,r)=>n+r.QuantityIn-r.QuantityOut,0),0);
+            assert.equal((await correctDeliveredChassis(activeTx,{...options,apply:true})).alreadyCorrected,true);
+            await invoke(catalog.updateVehicle,{params:{id:String(vehicleId)},body:{Color:'Released stock editable'}});
+            const locked=response();await catalog.updateVehicle({params:{id:String(newId)},body:{Color:'Must remain locked'},user},locked);assert.equal(locked.code,423);
+            const summary=await invoke(reports.summary,{query:{variantId:String(variants[0].VariantID),inStockOnly:'1'}});assert.equal(summary.totals.InStock,1);
+            // The correction excuses only the original delivery movement. A later
+            // genuine delivery must lock this chassis again, even with missing headers.
+            await new sql.Request(activeTx).input('v',sql.Int,vehicleId).input('b',sql.Int,bookingId).query(`
+                INSERT dms_VehicleInventoryLedger(VehicleID,VariantID,ModelID,ChasisNo,OccurredAtUtc,EntryType,BookingID,QuantityIn,QuantityOut)
+                SELECT v.VehicleID,v.VariantID,vr.ModelID,v.ChasisNo,SYSUTCDATETIME(),'Delivered',@b,0,0
+                FROM dms_Vehicle v JOIN dms_VehicleVariant vr ON vr.VariantID=v.VariantID WHERE v.VehicleID=@v;`);
+            assert.equal((await invoke(catalog.getVehicle,{params:{id:String(vehicleId)}})).IsDeliveryLocked,true);
+            await assert.rejects(new sql.Request(activeTx).input('v',sql.Int,vehicleId).query("UPDATE dms_Vehicle SET Color='Future delivery must remain locked' WHERE VehicleID=@v"),error=>error.number===51061);
+        });
+        await fixture(pool,async({vehicleId})=>{
+            await new sql.Request(activeTx).input('v',sql.Int,vehicleId).query(`
+                INSERT dms_DeliveredChassisCorrections(CorrectionID,BookingID,GatePassID,OldVehicleID,NewVehicleID,OldChassis,NewChassis,LastOldDeliveryMovementID,OriginalDeliveredAt,Reason,ActorName,CompletedAtUtc)
+                VALUES(NEWID(),-1,-1,@v,-1,'SYNTHETIC-OLD','SYNTHETIC-NEW',-1,GETDATE(),'Immutable correction test','Local verifier',SYSUTCDATETIME());`);
+            await assert.rejects(new sql.Request(activeTx).input('v',sql.Int,vehicleId).query('DELETE dms_DeliveredChassisCorrections WHERE OldVehicleID=@v'),error=>error.number===51068);
+        });
+        console.log('PASS: audited correction frees only wrong chassis, protects replacement, preserves all booking/pass fields and finances, appends stock history, dry-run/idempotence/role validation; rolled back.');
+        return;
+    }
     if (process.argv.includes('--reports-only')) {
         await fixture(pool,async({ variants,create,vehicleId })=>{
             const chassis=new Set(['VERIFY-CHASSIS-A']);

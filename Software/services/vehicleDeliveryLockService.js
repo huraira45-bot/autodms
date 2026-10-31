@@ -15,6 +15,10 @@ function vehicleDeliveryLockedSql(alias = 'v') {
         OR EXISTS (SELECT 1 FROM dms_VehicleInventoryLedger deliveryHistory
             JOIN dms_SalesBookings historyBooking ON historyBooking.BookingID=deliveryHistory.BookingID
             WHERE deliveryHistory.VehicleID=${alias}.VehicleID
+              AND NOT EXISTS (SELECT 1 FROM dms_DeliveredChassisCorrections corrected
+                  WHERE corrected.OldVehicleID=deliveryHistory.VehicleID AND corrected.BookingID=deliveryHistory.BookingID
+                    AND corrected.CompletedAtUtc IS NOT NULL
+                    AND deliveryHistory.MovementID<=corrected.LastOldDeliveryMovementID)
               AND (deliveryHistory.EntryType='Delivered' OR
                   (deliveryHistory.EntryType='Opening' AND deliveryHistory.ToStatus IN ('Delivered','Sold')))))`;
 }
