@@ -19,6 +19,7 @@ import {
     inputStyle, Field, Err, Actions, Shell, FlashMsg, Pill, Th, Td,
 } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
+import BookingExecutiveField, { useSalesExecutives } from './BookingExecutiveField';
 import { printGatePass } from '../../utils/gatePassPrint';
 import BookingDocumentDrop from './BookingDocumentDrop';
 import { HistoricalPaymentModal, LinkMasterVoucherModal } from './HistoricalPaymentModals';
@@ -1736,23 +1737,16 @@ function CoaLinkModal({ partyId, partyName, currentGLCode, currentGLTitle, onClo
  * be set from whoever happened to create the booking.
  */
 function ChangeExecutiveModal({ booking, onClose, onSaved }) {
-    const [people, setPeople] = useState([]);
-    const [exeId, setExeId] = useState(booking.CreatedBy_SalesExecutiveID || '');
+    const executive = useSalesExecutives(booking.CreatedBy_SalesExecutiveID);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
 
-    useEffect(() => {
-        axios.get(`${API}/employees`)
-            .then(r => setPeople((r.data || []).filter(e => (e.IsActive === undefined || e.IsActive) && !e.IsResigned)))
-            .catch(() => setPeople([]));
-    }, []);
-
     const save = async () => {
-        if (!exeId) { setErr('Pick an executive.'); return; }
+        if (!executive.valid) { setErr('Choose an enabled sales executive.'); return; }
         setBusy(true); setErr(null);
         try {
             const r = await axios.patch(`${API}/sales/bookings/${booking.BookingID}/executive`,
-                                        { SalesExecutiveID: Number(exeId) });
+                                        { SalesExecutiveID: Number(executive.id) });
             onSaved(r.data?.SalesExecutiveName || 'the selected executive');
         } catch (e) { setErr(e.response?.data?.error || e.message); }
         setBusy(false);
@@ -1764,24 +1758,11 @@ function ChangeExecutiveModal({ booking, onClose, onSaved }) {
             <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: '0.85rem' }}>
                 Currently: <strong>{(booking.SalesExecutiveName || '').trim() || '—'}</strong>
             </div>
-            <Field label="Sales Executive *">
-                <SearchableSelect
-                    value={exeId}
-                    onChange={id => { setExeId(id || ''); setErr(null); }}
-                    options={people.map(p => ({
-                        id: p.EmployeeID,
-                        label: p.EmployeeName,
-                        sub: p.Designation || p.DepartmentName || '',
-                    }))}
-                    placeholder={people.length ? 'Search by name…' : 'Loading employees…'}
-                    title="Pick the sales executive"
-                    disabled={!people.length}
-                />
-            </Field>
+            <BookingExecutiveField choice={executive} disabled={busy} />
             <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: 10 }}>
                 This is who the booking counts towards for targets and incentives.
             </div>
-            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Save" busy={busy} disabled={!exeId} />
+            <Actions onCancel={onClose} onConfirm={save} confirmLabel="Save" busy={busy} disabled={!executive.valid} />
         </Shell>
     );
 }

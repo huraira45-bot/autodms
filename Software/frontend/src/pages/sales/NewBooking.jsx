@@ -17,6 +17,7 @@ import { ArrowLeft, Loader2, Search, AlertTriangle, Car, User, UserPlus, XCircle
 import { useAuth } from '../../context/AuthContext';
 import { inputStyle, Field, Err, FlashMsg, Shell, Actions } from './VehicleModelsAdmin';
 import SearchableSelect from '../../components/SearchableSelect';
+import BookingExecutiveField, { useSalesExecutives } from './BookingExecutiveField';
 import { ErpControlPanel } from '../../components/erp';
 import BookingDocumentDrop, { uploadBookingDocuments, validateDocumentItems } from './BookingDocumentDrop';
 import CustomerIdentityWarnings, { CustomerIdentityWarningList } from './CustomerIdentityWarnings';
@@ -27,6 +28,7 @@ const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
 export default function NewBooking() {
     const navigate = useNavigate();
     const { user } = useAuth();
+    const executive = useSalesExecutives(user?.employeeId);
     const [searchParams] = useSearchParams();
     const inquiryId = searchParams.get('inquiryId');
     const [inquiry, setInquiry] = useState(null);
@@ -125,11 +127,12 @@ export default function NewBooking() {
     const discountPct = selectedVariant ? (discountAmount / selectedVariant.StandardPrice * 100) : 0;
     const needsApproval = discountAmount > 0;
 
-    const ready = pickedParty && variantId && dmsBookingNumber.trim() && Number(negotiatedPrice) > 0 &&
+    const ready = executive.valid && pickedParty && variantId && dmsBookingNumber.trim() && Number(negotiatedPrice) > 0 &&
                   Number(negotiatedPrice) <= (selectedVariant?.StandardPrice || 0) &&
                   (!needsApproval || negotiationReason.trim().length >= 5);
 
     const submit = async () => {
+        if (!executive.valid) { setErr('Choose an enabled sales executive.'); return; }
         if (scanBusy) { setErr('Wait for document scanning to finish before saving the booking.'); return; }
         if (!dmsBookingNumber.trim()) { setErr('Enter the DMS booking number before saving.'); return; }
         const docProblems = validateDocumentItems(pendingDocs);
@@ -142,6 +145,7 @@ export default function NewBooking() {
                 NegotiatedPrice: Number(negotiatedPrice),
                 PromisedDeliveryMonth: promisedMonth || null,
                 DMSBookingNumber: dmsBookingNumber.trim(),
+                SalesExecutiveID: Number(executive.id),
             };
             if (corpPO) body.CorporatePONumber = corpPO;
             if (needsApproval) body.NegotiationReason = negotiationReason.trim();
@@ -186,6 +190,7 @@ export default function NewBooking() {
 
             {msg && <FlashMsg msg={msg} />}
             {err && <Err>{err}</Err>}
+            <div className="card"><BookingExecutiveField choice={executive} disabled={busy || Boolean(created)} /></div>
 
             {inquiry && (
                 <div className="card" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>

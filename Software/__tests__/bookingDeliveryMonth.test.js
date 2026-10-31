@@ -24,6 +24,7 @@ function fixture(options={}) {
         rollback: jest.fn(async()=>{ tx.booking={...initial}; }) };
     tx.query=jest.fn(async(q,v)=>{
         tx.calls.push({q,v});
+        if(q.includes('FROM dbo.dms_SalesExecutives')) return {recordset:[{EmployeeID:3,EmployeeName:'Configured executive'}]};
         if(q.includes('SELECT BookingID,Status,PromisedDeliveryMonth')) return {recordset: options.missing ? [] : [{...tx.booking}]};
         if(q.includes('UPDATE dms_SalesBookings SET PromisedDeliveryMonth')) tx.booking.PromisedDeliveryMonth=v.month;
         if(q.includes('INSERT INTO dms_SalesAuditLog') && options.failAudit) throw new Error('Audit failure');

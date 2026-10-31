@@ -23,6 +23,7 @@ const { effectiveMasterPaidSql } = require('../services/historicalMasterApproval
 const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 const { parseDmsBookingNumber } = require('../services/bookingDmsNumberService');
 const { accrueAtBooking, reverseOnCancellation } = require('../services/masterBookingIncentiveService');
+const salesExecutives = require('../services/salesExecutiveService');
 
 // ============================================================================
 // Helpers
@@ -284,13 +285,16 @@ exports.createBooking = async (req, res) => {
             return res.status(400).json({ error: 'NegotiatedPrice must be 0 < value ≤ StandardPrice.' });
         }
         const needsApproval = negotiated < standardPrice;
+        if (needsApproval && !req.user?.employeeId) {
+            return res.status(400).json({ error: 'Your user needs a linked employee record to propose a discount. The selected sales executive does not replace the proposer.' });
+        }
 
-        const executiveId = req.user?.employeeId;
-        if (!executiveId) return res.status(400).json({ error: 'User must have a linked employee record (LinkedEmployeeID) to create a booking.' });
+        const executiveId = salesExecutives.employeeId(b.SalesExecutiveID ?? req.user?.employeeId);
 
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
+            const executive = await salesExecutives.requireExecutive(tx, executiveId);
             const bookingNo = await nextBookingNo(tx);
             // Decision: if variant has MinimumBookingAmount > 0, the booking starts in PendingBookingPayment
             // until that amount is collected. Discount approval flow takes precedence (PendingApproval) when applicable.
@@ -307,7 +311,7 @@ exports.createBooking = async (req, res) => {
                 .input('np', sql.Decimal(18, 2), negotiated)
                 .input('st', sql.NVarChar(30), initialStatus)
                 .input('exe', sql.Int, executiveId)
-                .input('exeN', sql.NVarChar(100), req.user?.userName || null)
+                .input('exeN', sql.NVarChar(100), executive.EmployeeName)
                 .input('po', sql.NVarChar(100), b.CorporatePONumber || null)
                 .input('iq', sql.Int, b.SourceInquiryID || null)
                 .input('promise', sql.Date, promisedMonth)
@@ -322,7 +326,7 @@ exports.createBooking = async (req, res) => {
             const bookingId = r.recordset[0].BookingID;
             await new sql.Request(tx).input('id', sql.Int, bookingId)
                 .input('next', sql.NVarChar(sql.MAX), JSON.stringify({ DMSBookingNumber: dmsBookingNumber }))
-                .input('emp', sql.Int, executiveId).input('name', sql.NVarChar(100), req.user?.userName || null)
+                .input('emp', sql.Int, req.user?.employeeId || null).input('name', sql.NVarChar(100), req.user?.userName || null)
                 .input('uid', sql.Int, req.user?.userId || null)
                 .query(`INSERT INTO dms_SalesAuditLog
                             (BookingID,EntityType,EntityID,Action,OldValue,NewValue,ActorEmployeeID,ActorName,ActorUserID,Notes)
@@ -354,7 +358,7 @@ exports.createBooking = async (req, res) => {
                     .input('sp', sql.Decimal(18, 2), standardPrice)
                     .input('pp', sql.Decimal(18, 2), negotiated)
                     .input('reason', sql.NVarChar(sql.MAX), b.NegotiationReason.trim())
-                    .input('exe', sql.Int, executiveId)
+                    .input('exe', sql.Int, req.user?.employeeId || null)
                     .input('exeN', sql.NVarChar(100), req.user?.userName || null)
                     .query(`INSERT INTO dms_NegotiationRequests
                                 (BookingID, StandardPrice, ProposedPrice, Reason, ProposerEmpID, ProposerName)
@@ -375,7 +379,7 @@ exports.createBooking = async (req, res) => {
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('createBooking:', err);
-        res.status(err.status || 500).json({ error: err.message });
+        salesExecutives.sendError(res, err);
     }
 };
 
@@ -942,42 +946,51 @@ exports.listPayments = async (req, res) => {
  * side effect of an edit.
  */
 exports.changeSalesExecutive = async (req, res) => {
+    let tx;
     try {
         const id = parseInt(req.params.id);
-        const execId = parseInt(req.body?.SalesExecutiveID);
+        const execId = salesExecutives.employeeId(req.body?.SalesExecutiveID);
         if (!id)      return res.status(400).json({ error: 'Invalid booking id.' });
-        if (!execId)  return res.status(400).json({ error: 'SalesExecutiveID is required.' });
 
         const pool = await getPool();
+        tx = new sql.Transaction(pool);
+        await tx.begin();
 
-        const bk = await pool.request().input('id', sql.Int, id)
+        const bk = await new sql.Request(tx).input('id', sql.Int, id)
             .query(`SELECT BookingID, BookingNo, Status, CreatedBy_SalesExecutiveID
-                    FROM dms_SalesBookings WHERE BookingID=@id`);
-        if (!bk.recordset.length) return res.status(404).json({ error: 'Booking not found.' });
+                    FROM dms_SalesBookings WITH (UPDLOCK,HOLDLOCK) WHERE BookingID=@id`);
+        if (!bk.recordset.length) { await tx.rollback(); return res.status(404).json({ error: 'Booking not found.' }); }
         const b = bk.recordset[0];
         if (['Closed', 'Cancelled'].includes(b.Status)) {
+            await tx.rollback();
             return res.status(409).json({
                 error: `Booking is ${b.Status} — the sales executive can no longer be changed. Incentives may already be settled against the current one.`,
             });
         }
 
-        const emp = await pool.request().input('e', sql.Int, execId)
-            .query(`SELECT TOP 1 EmployeeID, EmployeeName FROM gen_EmployeeInfo WHERE EmployeeID=@e`);
-        if (!emp.recordset.length) return res.status(404).json({ error: 'Employee not found.' });
-        const e = emp.recordset[0];
+        const e = await salesExecutives.requireExecutive(tx, execId);
 
         if (b.CreatedBy_SalesExecutiveID === execId) {
+            await tx.commit();
             return res.json({ message: 'No change — already assigned to this executive.',
                               SalesExecutiveID: execId, SalesExecutiveName: e.EmployeeName });
         }
 
-        await pool.request()
+        await new sql.Request(tx)
             .input('id',   sql.Int,          id)
             .input('exe',  sql.Int,          execId)
             .input('exeN', sql.NVarChar(100), e.EmployeeName)
             .query(`UPDATE dms_SalesBookings
-                    SET CreatedBy_SalesExecutiveID=@exe, CreatedByName=@exeN
+                    SET CreatedBy_SalesExecutiveID=@exe, CreatedByName=@exeN, UpdatedAt=GETDATE()
                     WHERE BookingID=@id`);
+        await new sql.Request(tx).input('id', sql.Int, id)
+            .input('old', sql.NVarChar(sql.MAX), JSON.stringify({ SalesExecutiveID: b.CreatedBy_SalesExecutiveID }))
+            .input('new', sql.NVarChar(sql.MAX), JSON.stringify({ SalesExecutiveID: execId, SalesExecutiveName: e.EmployeeName }))
+            .input('uid', sql.Int, req.user?.userId || null).input('emp', sql.Int, req.user?.employeeId || null)
+            .input('name', sql.NVarChar(100), req.user?.userName || null).query(`
+                INSERT dms_SalesAuditLog(BookingID,EntityType,EntityID,Action,OldValue,NewValue,ActorUserID,ActorEmployeeID,ActorName)
+                VALUES(@id,'Booking',@id,'SalesExecutiveChanged',@old,@new,@uid,@emp,@name)`);
+        await tx.commit();
 
         res.json({
             message: 'Sales executive updated',
@@ -986,8 +999,9 @@ exports.changeSalesExecutive = async (req, res) => {
             SalesExecutiveName: e.EmployeeName,
         });
     } catch (err) {
+        if (tx) { try { await tx.rollback(); } catch {} }
         console.error('changeSalesExecutive:', err);
-        res.status(500).json({ error: err.message });
+        salesExecutives.sendError(res, err);
     }
 };
 

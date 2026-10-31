@@ -169,6 +169,7 @@ import KYCFlagsAdmin        from './pages/KYCFlagsAdmin';
 import InquiriesAdmin       from './pages/InquiriesAdmin';
 import CampaignsAdmin       from './pages/CampaignsAdmin';
 import VehicleModelsAdmin   from './pages/sales/VehicleModelsAdmin';
+import SalesExecutives from './pages/sales/SalesExecutives';
 import VehicleVariantsAdmin from './pages/sales/VehicleVariantsAdmin';
 import VehicleInventoryAdmin from './pages/sales/VehicleInventoryAdmin';
 import BookingsList         from './pages/sales/BookingsList';
@@ -750,6 +751,12 @@ function LegacySidebar() {
 
                 {/* New Vehicle Sales */}
                 <NavSection title="NEW VEHICLE SALES">
+
+                {hasPermission('sales_admin_settings') && (
+                    <NavLink to="/sales/executives" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <UsersRound size={20} /> Sales Executives
+                    </NavLink>
+                )}
 
                 {(hasModule('sales_admin_settings') || hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_reports')) && (
                     <NavLink to="/sales/models" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
@@ -1349,6 +1356,9 @@ function AppShell() {
                     } />
                     <Route path="/cro/campaigns" element={
                         <ProtectedRoute><CampaignsAdmin /></ProtectedRoute>
+                    } />
+                    <Route path="/sales/executives" element={
+                        <ProtectedRoute moduleKey="sales_admin_settings"><SalesExecutives /></ProtectedRoute>
                     } />
                     <Route path="/sales/models" element={
                         <ProtectedRoute><VehicleModelsAdmin /></ProtectedRoute>

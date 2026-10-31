@@ -26,6 +26,7 @@
  * a voucher is attached.
  */
 const { sql, getPool } = require('../config/db');
+const salesExecutives = require('../services/salesExecutiveService');
 const { parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 const { logBookingTransition } = require('./salesBookingController');
 const { assertVoucherLinkable,CUSTOMER_AMOUNT_SQL,LINKED_AMOUNT_SQL,NONLINKED_PAYMENT_SQL,LOCK_VOUCHER_SQL } = require('../services/historicalVoucherAllocationService');
@@ -120,10 +121,7 @@ exports.createBooking = async (req, res) => {
             return res.status(400).json({ error: 'The price of the day cannot be less than the agreed price.' });
         }
 
-        const executiveId = b.SalesExecutiveID ? parseInt(b.SalesExecutiveID) : req.user?.employeeId;
-        if (!executiveId) {
-            return res.status(400).json({ error: 'Pick the sales executive who handled this booking (or link an employee to your own user).' });
-        }
+        const executiveId = salesExecutives.employeeId(b.SalesExecutiveID ?? req.user?.employeeId);
 
         const pool = await getPool();
         const vr = await pool.request().input('vid', sql.Int, parseInt(b.VehicleVariantID))
@@ -134,6 +132,7 @@ exports.createBooking = async (req, res) => {
         const tx = new sql.Transaction(pool);
         await tx.begin();
         try {
+            const executive = await salesExecutives.requireExecutive(tx, executiveId);
             const bookingNo = await bookingNoForYear(tx, bookingDate.getFullYear());
             const status = b.Status;
 
@@ -146,7 +145,7 @@ exports.createBooking = async (req, res) => {
                 .input('np', sql.Decimal(18, 2), negotiated)
                 .input('st', sql.NVarChar(30), status)
                 .input('exe', sql.Int, executiveId)
-                .input('exeN', sql.NVarChar(100), req.user?.userName || null)
+                .input('exeN', sql.NVarChar(100), executive.EmployeeName)
                 .input('po', sql.NVarChar(100), b.CorporatePONumber || null)
                 .input('bd', sql.DateTime, bookingDate)
                 .input('promise', sql.Date, promisedMonth)
@@ -177,7 +176,7 @@ exports.createBooking = async (req, res) => {
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('historical createBooking:', err);
-        res.status(err.statusCode || 400).json({ error: err.message });
+        salesExecutives.sendError(res, err, 400);
     }
 };
 

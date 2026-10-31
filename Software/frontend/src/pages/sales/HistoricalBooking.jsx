@@ -12,6 +12,8 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Search, History, AlertTriangle, XCircle } from 'lucide-react';
 import { ErpControlPanel } from '../../components/erp';
 import SearchableSelect from '../../components/SearchableSelect';
+import { useAuth } from '../../context/AuthContext';
+import BookingExecutiveField, { useSalesExecutives } from './BookingExecutiveField';
 
 const API = '/api';
 const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
@@ -36,6 +38,8 @@ const STATE_HELP = {
 
 export default function HistoricalBooking() {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const executive = useSalesExecutives(user?.employeeId);
 
     const [models, setModels] = useState([]);
     const [variants, setVariants] = useState([]);
@@ -106,14 +110,16 @@ export default function HistoricalBooking() {
 
     const agreed = Number(negotiatedPrice) || 0;
     const dayPrice = Number(priceAtTime) || 0;
-    const ready = pickedParty && variantId && bookingDate && agreed > 0
+    const ready = executive.valid && pickedParty && variantId && bookingDate && agreed > 0
                   && (!dayPrice || dayPrice >= agreed) && status;
 
     const submit = async () => {
+        if (!executive.valid) { setErr('Choose an enabled sales executive.'); return; }
         setBusy(true); setErr(null);
         try {
             const { data } = await axios.post(`${API}/sales/historical/bookings`, {
                 PartyID: pickedParty.PartyID,
+                SalesExecutiveID: Number(executive.id),
                 VehicleVariantID: Number(variantId),
                 BookingDate: bookingDate,
                 PromisedDeliveryMonth: promisedMonth || null,
@@ -137,6 +143,8 @@ export default function HistoricalBooking() {
                     </button>
                 }
             />
+
+            <div className="card"><BookingExecutiveField choice={executive} disabled={busy} /></div>
 
             <div className="card" style={{ background: '#f0f9ff', borderLeft: '3px solid #0369a1', fontSize: '0.85rem', color: '#0c4a6e' }}>
                 <strong>How this differs from a new booking:</strong> no voucher is posted, no approval is asked for,

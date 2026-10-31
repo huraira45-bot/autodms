@@ -18,6 +18,7 @@ function fixture({ minimum = 0, failAudit = false } = {}) {
     const tx = { calls: [], begin: jest.fn(async () => {}), commit: jest.fn(async () => {}), rollback: jest.fn(async () => {}),
         query: jest.fn(async (q, v) => {
             tx.calls.push({ q, v });
+            if (q.includes('FROM dbo.dms_SalesExecutives')) return { recordset: [{ EmployeeID: 3, EmployeeName: 'Configured executive' }] };
             if (q.includes('AS nextNo')) return { recordset: [{ nextNo: 42 }] };
             if (q.includes('OUTPUT INSERTED.BookingID')) return { recordset: [{ BookingID: 7 }] };
             if (q.includes('OUTPUT INSERTED.RequestID')) return { recordset: [{ RequestID: 9 }] };

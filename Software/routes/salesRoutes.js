@@ -12,6 +12,8 @@ const histRef = require('../controllers/salesHistoricalReferenceController');
 const histMasterApproval = require('../controllers/salesHistoricalMasterApprovalController');
 const cat = require('../controllers/salesCatalogController');
 const bk  = require('../controllers/salesBookingController');
+const executives = require('../controllers/salesExecutiveController');
+const { requireManager: requireExecutiveManager } = require('../services/salesExecutiveService');
 const salesCustomer = require('../controllers/salesCustomerController');
 const party = require('../controllers/partyController');
 const { requirePerm, requireAnyAccess } = require('../middleware/permissions');
@@ -48,6 +50,10 @@ const withUploadErrors = (mw) => (req, res, next) => mw(req, res, (err) => {
 
 // Read permissions: anyone in the sales chain or settings/reports
 const SALES_READERS = ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing', 'sales_admin_settings', 'sales_master_settlement', 'sales_reports'];
+
+router.get('/executives', requireAnyAccess(...SALES_READERS), executives.options);
+router.get('/executives/setup', requireExecutiveManager, executives.setup);
+router.put('/executives/:id', requireExecutiveManager, executives.save);
 
 router.get('/customer-identity-warnings', requireAnyAccess(...SALES_READERS, 'crm_parties:insert', 'crm_parties:edit'), salesCustomer.warnings);
 router.post('/customers', requirePerm('crm_parties', 'insert'), party.createSalesCustomer);
