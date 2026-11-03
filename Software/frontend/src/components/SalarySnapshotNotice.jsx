@@ -1,4 +1,7 @@
 export default function SalarySnapshotNotice({ sheet }) {
+    if (sheet?.lockControl?.action === 'UNLOCK') return <div role="status" style={{ padding: '8px 12px', margin: '8px 0', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 5 }}>
+        <strong>Salary month unlocked by Admin.</strong> Figures use current employee details and salary entries. Previous saved sheets remain in history. Lock the month after completing changes; posting a salary voucher also locks it.
+    </div>;
     if (!sheet?.isFrozen && !sheet?.legacyPosted) return null;
     const stamp = sheet.snapshot?.capturedAt
         ? new Date(sheet.snapshot.capturedAt).toLocaleString('en-PK', { timeZone: 'Asia/Karachi' }) : '';

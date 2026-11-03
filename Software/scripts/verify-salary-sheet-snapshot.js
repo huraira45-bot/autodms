@@ -21,6 +21,7 @@ db.sql = { ...sql, Transaction: NestedTransaction, Request };
 db.getPool = async () => outer;
 const controller = require('../controllers/hrSalaryController');
 const snapshots = require('../services/salarySheetSnapshotService');
+const {setMonthLock} = require('../services/salaryMonthLockService');
 const rq = () => new sql.Request(outer);
 const response = () => ({ code: 200, headers: {}, status(code) { this.code = code; return this; },
     json(body) { this.body = body; }, setHeader(k, v) { this.headers[k] = v; }, send(body) { this.body = body; } });
@@ -40,6 +41,8 @@ async function call(fn, req, expected = 200) {
         const migration = fs.readFileSync(path.join(__dirname, '../migrations/166_salary_sheet_snapshots.sql'), 'utf8');
         for (let attempt = 0; attempt < 2; attempt++)
             for (const batch of migration.split(/^\s*GO\s*$/mi).filter(x => x.trim())) await rq().query(batch);
+        const controlsMigration = fs.readFileSync(path.join(__dirname, '../migrations/169_salary_month_lock_controls.sql'), 'utf8');
+        for (const batch of controlsMigration.split(/^\s*GO\s*$/mi).filter(x => x.trim())) await rq().query(batch);
         const marker = 'SAL' + Date.now(), user = { userId: 1, userName: 'Synthetic payroll verifier' };
         const month = '2091-09';
         assert.equal((await rq().query("SELECT COUNT(*) AS N FROM hr_SalaryPostings WHERE MonthID LIKE '2091-%' OR MonthID='2092-01'" )).recordset[0].N, 0, 'Reserved verification months must be empty.');
@@ -114,6 +117,39 @@ async function call(fn, req, expected = 200) {
         assert.equal((await snapshots.freezeSnapshot(outer, { ...legacy, rows: [] }, user, 'LEGACY_CURRENT', 0)).rows.length, legacy.rows.length, 'Baseline capture is idempotent.');
         const payFirst = (await call(controller.postDisbursement, { user, body: { MonthID: '2092-01', PostDate: '2026-10-30' } })).body;
         assert.ok(payFirst.vouchers.length); assert.equal((await controller._buildSheet(outer, '2092-01')).snapshot.basis, 'POSTED');
+        // Owner-requested Admin controls: original snapshots are never rewritten.
+        const admin={...user,groupId:1};
+        const originalSaved=(await rq().input('m',sql.Char(7),month).query('SELECT SheetJSON FROM hr_SalarySheetSnapshots WHERE MonthID=@m')).recordset[0].SheetJSON;
+        const changeLock=async locked=>setMonthLock(outer,{monthId:month,locked,reason:'Verification of owner-requested salary correction',user:admin,
+            expectedControlId:(await snapshots.getControl(outer,month))?.ControlID??null,buildLiveSheet:controller._buildLiveSheet});
+        await assert.rejects(()=>changeLock(false),e=>e.status===409,'Active salary postings must block unlock.');
+        await assert.rejects(()=>setMonthLock(outer,{monthId:'2026-09',locked:false,reason:'Earlier payroll remains protected',user:admin,expectedControlId:null}),e=>e.status===400);
+        // Synthetic reversal status only, entirely inside this rollback fixture.
+        await rq().input('m',sql.Char(7),month).query(`UPDATE v SET Status='Reversed'
+            FROM data_FinanceVoucherInfo v JOIN hr_SalaryPostings p ON p.VoucherID=v.VoucherID WHERE p.MonthID=@m`);
+        const finance=async()=>JSON.stringify((await rq().input('m',sql.Char(7),month).query(`
+            SELECT v.* FROM data_FinanceVoucherInfo v JOIN hr_SalaryPostings p ON p.VoucherID=v.VoucherID WHERE p.MonthID=@m ORDER BY v.VoucherID;
+            SELECT d.* FROM data_FinanceVoucherDetail d JOIN hr_SalaryPostings p ON p.VoucherID=d.VoucherID WHERE p.MonthID=@m ORDER BY d.VoucherID,d.GLCAID,d.Narration,d.Debit,d.Credit;
+            SELECT * FROM hr_SalaryPostings WHERE MonthID=@m ORDER BY PostingID;
+            SELECT COUNT_BIG(*) N FROM GLvMAIN;SELECT COUNT_BIG(*) N FROM GLvDetail;`)).recordsets);
+        const financeBefore=await finance();
+        await changeLock(false);
+        const unlocked=await controller._buildSheet(outer,month);
+        assert.equal(unlocked.isFrozen,false);assert.equal(unlocked.legacyPosted,false);assert.equal(unlocked.lockControl.action,'UNLOCK');
+        await call(controller.saveSalaryEntry,{user,body:{EmployeeID:b,MonthID:month,Adjustment:123,PaidDays:30}});
+        const revised=await controller._buildSheet(outer,month);
+        await changeLock(true);
+        const relocked=await controller._buildSheet(outer,month);
+        assert.equal(relocked.isFrozen,true);assert.equal(relocked.snapshot.basis,'MANUAL');assert.equal(relocked.totalNet,revised.totalNet);
+        await call(controller.saveSalaryEntry,{user,body:{EmployeeID:b,MonthID:month,Adjustment:900}},423);
+        assert.equal(await finance(),financeBefore,'Lock/unlock and salary draft edits must not alter vouchers, postings or ledger.');
+        assert.equal((await rq().input('m',sql.Char(7),month).query('SELECT SheetJSON FROM hr_SalarySheetSnapshots WHERE MonthID=@m')).recordset[0].SheetJSON,originalSaved);
+        await changeLock(false);
+        const reposted=(await call(controller.postAccrual,{user,body:{MonthID:month,PostDate:'2026-10-30'}})).body;
+        assert.ok(reposted.vouchers.length);assert.equal((await controller._buildSheet(outer,month)).isFrozen,true);
+        assert.equal((await controller._buildSheet(outer,month)).snapshot.basis,'POSTED');
+        assert.equal((await rq().input('m',sql.Char(7),month).query('SELECT SheetJSON FROM hr_SalarySheetSnapshots WHERE MonthID=@m')).recordset[0].SheetJSON,originalSaved);
+        console.log('PASS: Admin unlock blocked by active vouchers; reversed postings allow edits; manual re-lock preserves revised payroll and original archive; no financial side effects; reposting locks a new revision.');
         // Last: the trigger may leave the outer verification transaction uncommittable, which is rolled back below.
         const immutable = await rq().query(`BEGIN TRY UPDATE hr_SalarySheetSnapshots SET SheetJSON=N'{}' WHERE MonthID='2091-09';
             SELECT 0 AS ErrorNumber; END TRY BEGIN CATCH DECLARE @error INT=ERROR_NUMBER();
@@ -121,4 +157,18 @@ async function call(fn, req, expected = 200) {
         assert.equal(immutable.recordset[0].ErrorNumber, 51068);
         console.log('PASS: idempotent migration, real accrual/disbursement snapshots, frozen roster and figures after employee/settings changes, archived slip/Excel, future month remains dynamic, read-only edits, duplicate accrual prevention, snapshot failure rolls back vouchers, labelled/idempotent legacy baselines, first disbursement capture and immutable snapshot guard. All fixtures rolled back.');
     } finally { try { await outer.rollback(); } catch {} }
+    for (const action of ['UPDATE','DELETE']) {
+        outer=new sql.Transaction(pool);await outer.begin();
+        try {
+            for(const filename of ['166_salary_sheet_snapshots.sql','169_salary_month_lock_controls.sql']) {
+                for(const batch of fs.readFileSync(path.join(__dirname,'../migrations',filename),'utf8').split(/^\s*GO\s*$/mi).filter(x=>x.trim())) await rq().query(batch);
+            }
+            await snapshots.appendControl(outer,'2099-10','UNLOCK',null,{groupId:1,userName:'Synthetic guard test'},null,null,'Verification of immutable history');
+            const mutation=action==='UPDATE' ? "UPDATE hr_SalarySheetLockHistory SET Reason='Altered history' WHERE MonthID='2099-10'" : "DELETE hr_SalarySheetLockHistory WHERE MonthID='2099-10'";
+            const result=await rq().query(`BEGIN TRY ${mutation}; SELECT 0 AS ErrorNumber;
+                END TRY BEGIN CATCH DECLARE @error INT=ERROR_NUMBER(); IF XACT_STATE()<>0 ROLLBACK TRANSACTION; SELECT @error AS ErrorNumber; END CATCH`);
+            assert.equal(result.recordset[0].ErrorNumber,51068);
+        } finally {try{await outer.rollback();}catch{}}
+    }
+    console.log('PASS: salary control history rejects SQL UPDATE and DELETE; both verification transactions rolled back.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { db.sql = sql; db.getPool = realGetPool; return sql.close(); });

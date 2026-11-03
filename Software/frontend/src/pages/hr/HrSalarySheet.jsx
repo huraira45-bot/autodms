@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Save, FileText, Landmark, Wallet, Printer, RefreshCw, ChevronLeft, ChevronRight, Sheet } from 'lucide-react';
+import { Save, FileText, Landmark, Wallet, Printer, RefreshCw, ChevronLeft, ChevronRight, Sheet, Lock, Unlock } from 'lucide-react';
 import { useFeedback } from '../../context/FeedbackContext';
-import { useCan } from '../../context/AuthContext';
+import { useCan, useAuth } from '../../context/AuthContext';
 import { ErpControlPanel } from '../../components/erp';
 import SalarySnapshotNotice from '../../components/SalarySnapshotNotice';
 
@@ -20,6 +20,7 @@ function shiftMonth(m, delta) {
 
 export default function HrSalarySheet() {
     const { notify, confirm } = useFeedback();
+    const { user } = useAuth();
     const canPost = useCan('hr_salary_post').canView;
     const editAllowed = useCan('hr_salary').canEdit;
     const [monthId, setMonthId] = useState(currentMonth());
@@ -31,6 +32,11 @@ export default function HrSalarySheet() {
     const [postModalOpen, setPostModalOpen] = useState(false);
     const [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10));
     const [payModalOpen, setPayModalOpen] = useState(false);
+    const [lockAction, setLockAction] = useState(null);
+    const [lockReason, setLockReason] = useState('');
+    const [lockError, setLockError] = useState('');
+    const controlsAvailable = Number(user?.groupId) === 1 && monthId >= '2026-10';
+    const isLocked = Boolean(sheet?.isFrozen || sheet?.legacyPosted);
     const canEdit = editAllowed && !busy && !sheet?.isFrozen && !sheet?.legacyPosted;
 
     const load = async () => {
@@ -51,6 +57,24 @@ export default function HrSalarySheet() {
         } finally { setBusy(false); }
     };
     useEffect(() => { load(); }, [monthId]);
+
+    const changeLock = async () => {
+        if (!lockAction || Object.keys(drafts).length) return;
+        setBusy(true); setLockError('');
+        try {
+            const { data } = await axios.post(`${API}/salary-sheet/${lockAction.month}/lock`, {
+                Locked: lockAction.locked, Reason: lockReason.trim(), ExpectedControlID: lockAction.controlId,
+            });
+            setLockAction(null);
+            notify({ type: 'success', title: data.locked ? 'Salary month locked' : 'Salary month unlocked', message: data.message || 'No change.' });
+            await load();
+        } catch (error) { setLockError(error.response?.data?.error || error.message); }
+        finally { setBusy(false); }
+    };
+    const openLock = locked => {
+        setLockReason(''); setLockError('');
+        setLockAction({ month: monthId, locked, controlId: sheet?.lockControl?.id ?? null });
+    };
 
     // The workbook is built on the server, so it is fetched rather than linked:
     // a plain <a href> carries no Authorization header and would be refused.
@@ -267,10 +291,34 @@ export default function HrSalarySheet() {
                     <RefreshCw size={13}/> Reload
                 </button>
                 <div className="spacer" style={{ flex: 1 }}/>
+                {controlsAvailable && <>
+                    <button className="erp-btn" disabled={busy || !sheet || isLocked || Object.keys(drafts).length > 0}
+                        onClick={() => openLock(true)}><Lock size={13}/> Lock month</button>
+                    <button className="erp-btn" disabled={busy || !sheet || !isLocked || Object.keys(drafts).length > 0}
+                        onClick={() => openLock(false)}><Unlock size={13}/> Unlock month</button>
+                </>}
                 <button className="erp-btn erp-btn-primary" onClick={saveAll} disabled={!canEdit || !Object.keys(drafts).length}>
                     <Save size={13}/> Save All {Object.keys(drafts).length > 0 && `(${Object.keys(drafts).length})`}
                 </button>
             </ErpControlPanel>
+
+            {lockAction && <div className="modal-overlay">
+                <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="salary-lock-title" style={{ width: 500, maxWidth: '95vw', padding: 20 }}>
+                    <h3 id="salary-lock-title">{lockAction.locked ? 'Lock' : 'Unlock'} salary — {monthLabel(lockAction.month)}</h3>
+                    <p>{lockAction.locked ? 'Save the current salary sheet and make the month read-only. Save all salary changes first.'
+                        : 'Allow salary edits while keeping all previously saved sheets in history. All salary accrual and payment vouchers for this month must be reversed first.'}</p>
+                    <label htmlFor="salary-lock-reason">Reason *</label>
+                    <textarea id="salary-lock-reason" rows={3} maxLength={500} value={lockReason} disabled={busy}
+                        onChange={e => setLockReason(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
+                    {lockError && <p role="alert" style={{ color: '#b91c1c' }}>{lockError}</p>}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                        <button className="erp-btn" disabled={busy} onClick={() => setLockAction(null)}>Cancel</button>
+                        <button className="erp-btn erp-btn-primary" disabled={busy || lockReason.trim().length < 5} onClick={changeLock}>
+                            {busy ? 'Saving...' : lockAction.locked ? 'Lock month' : 'Unlock month'}
+                        </button>
+                    </div>
+                </div>
+            </div>}
 
             {sheet && (
                 <>

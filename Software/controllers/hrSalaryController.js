@@ -287,7 +287,10 @@ async function buildSheet(context, monthId) {
     const saved = await salarySnapshots.getSnapshot(context, monthId);
     if (saved) return saved;
     const postings = await salarySnapshots.getPostings(context, monthId);
-    return { ...await buildLiveSheet(context, monthId), isFrozen: false, legacyPosted: postings.length > 0, snapshot: null };
+    const control = await salarySnapshots.getControl(context, monthId);
+    return { ...await buildLiveSheet(context, monthId), isFrozen: false,
+        legacyPosted: postings.length > 0 && control?.Action !== 'UNLOCK', snapshot: null,
+        lockControl: salarySnapshots.controlInfo(control) };
 }
 
 exports.getSalarySheet = async (req, res) => {
@@ -749,6 +752,6 @@ exports.getEmployeeSlip = async (req, res) => {
         // Include company header via business profile lookup
         const bp = await pool.request().query('SELECT TOP 1 * FROM dms_BusinessProfile');
         res.json({ monthId: sheet.monthId, business: bp.recordset[0] || {}, row,
-            isFrozen: sheet.isFrozen, snapshot: sheet.snapshot, legacyPosted: sheet.legacyPosted });
+            isFrozen: sheet.isFrozen, snapshot: sheet.snapshot, legacyPosted: sheet.legacyPosted, lockControl: sheet.lockControl });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };

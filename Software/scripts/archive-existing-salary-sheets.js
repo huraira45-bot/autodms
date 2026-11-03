@@ -18,6 +18,9 @@ const { _buildLiveSheet } = require('../controllers/hrSalaryController');
         await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
         try {
             await snapshots.lockMonth(tx, MonthID);
+            if ((await snapshots.getControl(tx, MonthID))?.Action === 'UNLOCK') {
+                await tx.commit(); console.log(`${MonthID}: administrator-unlocked month skipped.`); continue;
+            }
             if (await snapshots.getSnapshot(tx, MonthID)) { await tx.commit(); continue; }
             const postings = await snapshots.getPostings(tx, MonthID);
             if (!postings.length) throw new Error(`No salary posting exists for ${MonthID}.`);

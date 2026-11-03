@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const c  = require('../controllers/hrSalaryController');
 const da = require('../controllers/hrDeptAccountsController');
+const monthLock = require('../controllers/salaryMonthLockController');
+const { requireAdmin: requireSalaryLockAdmin } = require('../services/salaryMonthLockService');
 const { requirePerm } = require('../middleware/permissions');
 
 // Attendance
@@ -24,6 +26,7 @@ router.put( '/dept-accounts/:departmentId', requirePerm('hr_settings', 'edit'), 
 
 // Calculated salary sheet for one month
 router.get( '/salary-sheet/:monthId',   requirePerm('hr_salary', 'view'),       c.getSalarySheet);
+router.post('/salary-sheet/:monthId/lock', requireSalaryLockAdmin, monthLock.update);
 // The same sheet as a spreadsheet, so HR can sort and total it themselves
 // (owner ask 2026-09-25). Same permission — it is the same information.
 router.get( '/salary-sheet/:monthId/excel', requirePerm('hr_salary', 'view'),   c.getSalarySheetExcel);
