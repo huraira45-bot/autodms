@@ -1,4 +1,5 @@
 const { sql, getPool } = require('../config/db');
+const { technicianNameSql } = require('../services/workshopPerformanceService');
 const { nextVoucherNo } = require('../utils/voucherNumbering');
 const { computeLineDiscAmt, validateDiscountCap } = require('../utils/careOffUtils');
 const { getEffectiveCapForJC } = require('./careOffElevationController');
@@ -936,7 +937,9 @@ exports.getJobCardById = async (req, res) => {
 
         const labour = await pool.request()
             .input('id', sql.Int, req.params.id)
-            .query('SELECT * FROM Addata_JobCardInfoDetail WHERE JobCardId = @id');
+            .query(`SELECT d.*,${technicianNameSql()} AS TechnicianName
+                FROM Addata_JobCardInfoDetail d LEFT JOIN gen_EmployeeInfo e ON e.EmployeeID=d.TechnicianId
+                WHERE d.JobCardId=@id ORDER BY d.DetailId`);
 
         const parts = await pool.request()
             .input('id', sql.Int, req.params.id)

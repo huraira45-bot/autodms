@@ -84,6 +84,8 @@ export default function JobCardList() {
             ) },
         { key: 'Vehicle', label: 'Vehicle',
             render: r => <span className="erp-mono" style={{ fontWeight: 500 }}>{r.VehicleRegNo || '—'}</span> },
+        { key: 'Technicians', label: 'Technician(s)',
+            render: r => <span style={{ whiteSpace: 'normal' }}>{r.TechnicianNames || 'Unassigned'}</span> },
         { key: 'Payment', label: 'Payment',
             render: r => (
                 <ErpStatusPill tone={PAY_TONE[r.PaymentType] || 'muted'}>

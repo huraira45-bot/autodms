@@ -54,6 +54,8 @@ export const NAV_ITEMS = [
     // `priority` promotes an item into the dashboard's "My Workspace" strip
     // (higher = more prominent). `isQueue` flags items that represent an
     // inbox / worklist for the "My Queues" section.
+    { id: 'w-tech-report', moduleGroup: 'workshop', label: 'Technician Performance', path: '/reports/service/technician-performance', icon: ListChecks, permission: 'report:mechanic_productivity', description: 'Job Controller work assignments and labour business by technician.', keywords: 'technician mechanic work business performance' },
+    { id: 'w-dept-report', moduleGroup: 'workshop', label: 'Department Performance', path: '/reports/service/department-performance', icon: ListChecks, permission: 'report:workshop_department_performance', description: 'Compare job Business Units by business, jobs and average value.', keywords: 'department business unit best worst workshop performance' },
     { id: 'w-customers', moduleGroup: 'workshop', label: 'Workshop Customers',   path: '/workshop/customers',       icon: Users,          moduleKey: 'workshop_customers', description: 'Customer master used by Job Cards.', keywords: 'customer end-user' },
     { id: 'w-jc-new',    moduleGroup: 'workshop', label: 'Create Job Card',      path: '/workshop/jobs/new',        icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open a new RO.', keywords: 'new ro repair', priority: 10 },
     { id: 'w-jc-search', moduleGroup: 'workshop', label: 'Search Job Cards',     path: '/workshop/jobs',            icon: ClipboardList,  moduleKey: 'workshop_jobs',      description: 'Open, active, finalized RO search.', keywords: 'ro job card search', priority: 9 },
@@ -226,7 +228,8 @@ export const NAV_ITEMS = [
     { id: 'r-adv',       moduleGroup: 'reports', section: 'Workshop',              label: 'Advisor Performance', path: '/reports/service/advisor-performance', icon: ListChecks, permission: 'report:advisor_performance' },
     { id: 'r-rev',       moduleGroup: 'reports', section: 'Workshop',              label: 'Revenue Summary',     path: '/reports/service/revenue-summary',     icon: ListChecks, permission: 'report:revenue_summary' },
     { id: 'r-ins',       moduleGroup: 'reports', section: 'Workshop',              label: 'Insurance Claims',    path: '/reports/service/insurance-claims',    icon: ListChecks, permission: 'report:insurance_claims' },
-    { id: 'r-mech',      moduleGroup: 'reports', section: 'Workshop',              label: 'Mechanic Productivity',path: '/reports/service/mechanic-productivity', icon: ListChecks, permission: 'report:mechanic_productivity' },
+    { id: 'r-mech',      moduleGroup: 'reports', section: 'Workshop',              label: 'Technician Performance',path: '/reports/service/technician-performance', icon: ListChecks, permission: 'report:mechanic_productivity' },
+    { id: 'r-workshop-dept', moduleGroup: 'reports', section: 'Workshop', label: 'Workshop Department Performance', path: '/reports/service/department-performance', icon: ListChecks, permission: 'report:workshop_department_performance' },
     { id: 'r-lapsed',    moduleGroup: 'reports', section: 'Workshop',              label: 'Lapsed Customers',    path: '/reports/service/lapsed-customers',    icon: ListChecks, permission: 'report:lapsed_customers' },
     { id: 'r-inv-val',   moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Inventory Valuation', path: '/reports/inventory-valuation', icon: ListChecks,   permission: 'report:inventory_valuation' },
     { id: 'r-stk-mvt',   moduleGroup: 'reports', section: 'Parts & Inventory',     label: 'Stock Movement',      path: '/reports/parts/stock-movement',icon: ListChecks,   permission: 'report:stock_movement' },

@@ -233,6 +233,7 @@ export default function JobCardForm() {
             JobCardNo: jc.JobCardNo || '',
             jobCode: jc.jobCode || '',
             DMSJobCardNo: jc.DMSJobCardNo || '',
+            TechnicianNames: jc.TechnicianNames || '',
             JobTypeId: jc.JobTypeId || '',
             OrderTypeId: jc.OrderTypeId || '',
             PMType: jc.PMType || 'None',
@@ -279,7 +280,7 @@ export default function JobCardForm() {
             WACResults: jc.WACResults || '',
           });
           setSelectedCustomer({ CustomerName: jc.CustomerName, PhoneNo: jc.CustomerPhone, CNIC: jc.CustomerCNIC, Address: jc.CustomerAddress });
-          if (jc.LabourItems) setLabourItems(jc.LabourItems.map(l => ({ JobInfoId: l.JobInfoId || null, WorkDescription: l.Remarks || '', Price: l.Price || 0, Discount: l.Discount || 0, DiscType: l.DiscType || null })));
+          if (jc.LabourItems) setLabourItems(jc.LabourItems.map(l => ({ JobInfoId: l.JobInfoId || null, WorkDescription: l.Remarks || '', Price: l.Price || 0, Discount: l.Discount || 0, DiscType: l.DiscType || null, TechnicianName: l.TechnicianName || l.PerformedByName || 'Unassigned' })));
           if (jc.CareOffID) {
             const foundCO = careOffsList.find(c => c.CareOffID === jc.CareOffID);
             setCareOff(foundCO || { CareOffID: jc.CareOffID, EmployeeName: jc.CareOffName || `Care-Off #${jc.CareOffID}`, MaxDiscountPct: 100, IsActive: false });
@@ -1729,6 +1730,7 @@ export default function JobCardForm() {
                   {/* Labour */}
                   <div style={{ gridColumn: '1 / -1' }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: '#1a3a6a', marginBottom: 4, borderBottom: '1px solid #c8d4e4', paddingBottom: 2 }}>Labour / Services</div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>Technician(s): <strong>{form.TechnicianNames || 'Unassigned'}</strong> — assigned through Job Controller</div>
                     {!disabled && (
                       <div style={{ position: 'relative', marginBottom: 6 }}>
                         <div style={{ display: 'flex', alignItems: 'center', border: '2px solid #3b82f6', borderRadius: 2, background: '#f0f9ff', padding: '0 6px', height: 24 }}>
@@ -1761,6 +1763,7 @@ export default function JobCardForm() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                       <thead><tr style={{ background: '#e8edf2' }}>
                         <th style={{ padding: '4px 8px', textAlign: 'left', border: '1px solid #c8d4e4' }}>Service Description</th>
+                        <th style={{ padding: '4px 8px', textAlign: 'left', border: '1px solid #c8d4e4' }}>Technician</th>
                         <th style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4', width: 100 }}>Amount (PKR)</th>
                         {careOff && <th style={{ padding: '4px 8px', textAlign: 'center', border: '1px solid #c8d4e4', width: 130 }}>Discount</th>}
                         {careOff && <th style={{ padding: '4px 8px', textAlign: 'right', border: '1px solid #c8d4e4', width: 90 }}>Payable (PKR)</th>}
@@ -1770,6 +1773,7 @@ export default function JobCardForm() {
                         {labourItems.map((item, i) => (
                           <tr key={i} style={{ borderBottom: '1px solid #e8edf2' }}>
                             <td style={{ padding: '3px 8px', border: '1px solid #e8edf2' }}>{item.WorkDescription}</td>
+                            <td style={{ padding: '3px 8px', border: '1px solid #e8edf2' }}>{item.TechnicianName || 'Unassigned'}</td>
                             <td style={{ padding: '3px 8px', border: '1px solid #e8edf2', textAlign: 'right', fontWeight: 700, color: '#1a3a6a' }}>
                               {parseFloat(item.Price || 0).toLocaleString()}
                             </td>
@@ -1796,7 +1800,7 @@ export default function JobCardForm() {
                             </td>
                           </tr>
                         ))}
-                        {labourItems.length === 0 && <tr><td colSpan={careOff ? 5 : 3} style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>No labour items. Search above to add.</td></tr>}
+                        {labourItems.length === 0 && <tr><td colSpan={careOff ? 6 : 4} style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>No labour items. Search above to add.</td></tr>}
                       </tbody>
                     </table>
                     {careOff ? (

@@ -193,7 +193,8 @@ import SalesInquiryQueue from './pages/sales/SalesInquiryQueue';
 import ServiceCampaignsAdmin from './pages/ServiceCampaignsAdmin';
 
 // Module-scoped reports
-import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, MechanicProductivity, LapsedCustomers } from './pages/reports/Service';
+import { JobCardRegister, AdvisorPerformance, ServiceRevenueSummary, InsuranceClaims, LapsedCustomers } from './pages/reports/Service';
+import { TechnicianPerformance, DepartmentPerformance } from './pages/reports/WorkshopPerformance';
 import DmsJobCardReport from './pages/reports/DmsJobCardReport';
 import { TaxInvoiceTracker } from './pages/reports/TaxInvoiceTracker';
 import { StoreSaleTaxInvoiceTracker } from './pages/reports/StoreSaleTaxInvoiceTracker';
@@ -423,8 +424,13 @@ function LegacySidebar() {
                     </NavLink>
                 )}
                 {canReport('mechanic_productivity') && (
-                    <NavLink to="/reports/service/mechanic-productivity" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
-                        <FileBarChart size={20} /> Mechanic Productivity
+                    <NavLink to="/reports/service/technician-performance" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Technician Performance
+                    </NavLink>
+                )}
+                {canReport('workshop_department_performance') && (
+                    <NavLink to="/reports/service/department-performance" className={({ isActive }) => isActive ? 'erp-nav-item active' : 'erp-nav-item'}>
+                        <FileBarChart size={20} /> Department Performance
                     </NavLink>
                 )}
                 {canReport('lapsed_customers') && (
@@ -1152,7 +1158,9 @@ function AppShell() {
                     <Route path="/reports/service/advisor-performance"   element={<ProtectedRoute><AdvisorPerformance /></ProtectedRoute>} />
                     <Route path="/reports/service/revenue-summary"       element={<ProtectedRoute><ServiceRevenueSummary /></ProtectedRoute>} />
                     <Route path="/reports/service/insurance-claims"      element={<ProtectedRoute><InsuranceClaims /></ProtectedRoute>} />
-                    <Route path="/reports/service/mechanic-productivity" element={<ProtectedRoute><MechanicProductivity /></ProtectedRoute>} />
+                    <Route path="/reports/service/mechanic-productivity" element={<ProtectedRoute moduleKey="report:mechanic_productivity"><TechnicianPerformance /></ProtectedRoute>} />
+                    <Route path="/reports/service/technician-performance" element={<ProtectedRoute moduleKey="report:mechanic_productivity"><TechnicianPerformance /></ProtectedRoute>} />
+                    <Route path="/reports/service/department-performance" element={<ProtectedRoute moduleKey="report:workshop_department_performance"><DepartmentPerformance /></ProtectedRoute>} />
                     <Route path="/reports/service/tax-invoice-tracker"   element={<ProtectedRoute><TaxInvoiceTracker /></ProtectedRoute>} />
                     <Route path="/reports/service/lapsed-customers"      element={<ProtectedRoute><LapsedCustomers /></ProtectedRoute>} />
 

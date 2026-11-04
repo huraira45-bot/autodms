@@ -368,53 +368,9 @@ exports.insuranceClaims = async (req, res) => {
 /**
  * GET /reports/service/mechanic-productivity
  *
- * Each technician's job-line count + total labour value in the period.
- * Pulled from JobCardInfoDetail.TechnicianId.
+ * Legacy endpoint delegates to the Job Controller performance report.
  */
-exports.mechanicProductivity = async (req, res) => {
-    try {
-        const { from, to } = parseRange(req);
-        const pool = await getPool();
-        const r = await pool.request()
-            .input('from', sql.DateTime, from)
-            .input('to',   sql.DateTime, to)
-            .query(`
-                SELECT d.TechnicianId,
-                       e.EmployeeName AS TechnicianName,
-                       COUNT(DISTINCT d.JobCardId) AS JobCards,
-                       COUNT(*) AS JobLines,
-                       ISNULL(SUM(ISNULL(d.Price,0)*ISNULL(d.Quantity,1)), 0) AS GrossLabour,
-                       ISNULL(SUM(ISNULL(d.DiscAmt,0)), 0) AS Discount,
-                       ISNULL(SUM(ISNULL(d.Price,0)*ISNULL(d.Quantity,1) - ISNULL(d.DiscAmt,0)), 0) AS NetLabour
-                FROM Addata_JobCardInfoDetail d
-                INNER JOIN Addata_JobCardInfo j ON d.JobCardId = j.JobCardId
-                LEFT JOIN gen_EmployeeInfo e    ON d.TechnicianId = e.EmployeeID
-                WHERE j.JobCardDate BETWEEN @from AND @to
-                  AND d.TechnicianId IS NOT NULL
-                GROUP BY d.TechnicianId, e.EmployeeName
-                ORDER BY NetLabour DESC`);
-
-        const rows = r.recordset.map(x => ({
-            TechnicianId:   x.TechnicianId,
-            TechnicianName: x.TechnicianName || `Employee #${x.TechnicianId}`,
-            JobCards:       x.JobCards,
-            JobLines:       x.JobLines,
-            GrossLabour:    +Number(x.GrossLabour).toFixed(2),
-            Discount:       +Number(x.Discount).toFixed(2),
-            NetLabour:      +Number(x.NetLabour).toFixed(2),
-        }));
-
-        const totals = {
-            techs:       rows.length,
-            jobCards:    rows.reduce((s, x) => s + x.JobCards, 0),
-            jobLines:    rows.reduce((s, x) => s + x.JobLines, 0),
-            grossLabour: +rows.reduce((s, x) => s + x.GrossLabour, 0).toFixed(2),
-            netLabour:   +rows.reduce((s, x) => s + x.NetLabour, 0).toFixed(2),
-        };
-
-        res.json({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), rows, totals });
-    } catch (err) { console.error('mechanicProductivity:', err); res.status(500).json({ error: err.message }); }
-};
+exports.mechanicProductivity = require('./workshopPerformanceController').technicians;
 
 /**
  * GET /reports/service/tax-invoice-tracker

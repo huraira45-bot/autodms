@@ -332,13 +332,14 @@ export default function WorkOrderPrint({ apiBase = '/api/workshop/job-cards' }) 
 
             {/* JOBS TABLE */}
             <div className="sec-head"><b>Jobs</b></div>
+            <div style={{ padding: '3px 6px', fontSize: 10 }}><b>Technician(s):</b> {jc.TechnicianNames || 'Unassigned'}</div>
             <table className="line-tbl">
                 <thead><tr><th style={{ width: 90 }}>Date</th><th>Description</th><th style={{ width: 60, textAlign: 'right' }}>Qty</th><th style={{ width: 100, textAlign: 'right' }}>Amount</th></tr></thead>
                 <tbody>
                     {(jc.LabourItems || []).map((l, i) => (
                         <tr key={i}>
                             <td>{d(jc.JobCardDate)}</td>
-                            <td>{l.Remarks || l.PartNumber || ''}</td>
+                            <td>{l.Remarks || l.PartNumber || ''}<div style={{ fontSize: 9, color: '#475569' }}>Technician: {l.TechnicianName || l.PerformedByName || 'Unassigned'}</div></td>
                             <td style={{ textAlign: 'right' }}>{Number(l.Quantity || 1).toFixed(1)}</td>
                             <td style={{ textAlign: 'right' }}>{fmt((Number(l.Price)||0)*(Number(l.Quantity)||1) - (Number(l.DiscAmt)||0))}</td>
                         </tr>
