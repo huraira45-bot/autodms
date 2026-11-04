@@ -49,11 +49,17 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
     partsTax = round2(partsTax);
     partsCOGS = round2(partsCOGS);
 
-    const invoiceTotal = round2(partsGross - partsDiscount + partsTax);
+    const rawDelivery = Number(storeSale.DeliveryExpense ?? 0);
+    if (!Number.isFinite(rawDelivery) || rawDelivery < 0) throw new Error('Delivery Expense must be a valid non-negative amount.');
+    const deliveryExpense = round2(rawDelivery);
+    if (deliveryExpense > 0 && !accounts.STORE_SALE_FREIGHT_RECOVERY?.GLCAID)
+        throw new Error('Map Store Sale Freight / Delivery Recovery in Accounting Setup before finalizing a sale with delivery charges.');
+    const partsInvoiceTotal = round2(partsGross - partsDiscount + partsTax);
+    const invoiceTotal = round2(partsInvoiceTotal + deliveryExpense);
     // Phase 3: campaign benefit reduces what the customer pays — debited to
     // the campaign GL account (MCML claim or our expense).
     const campaignBenefit = campaign && campaign.BenefitAmount > 0
-        ? round2(Math.min(Number(campaign.BenefitAmount), invoiceTotal))
+        ? round2(Math.min(Number(campaign.BenefitAmount), Math.max(0, partsInvoiceTotal)))
         : 0;
     const customerPays = round2(invoiceTotal - campaignBenefit);
 
@@ -144,6 +150,16 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         });
     }
 
+    // Freight collected from the customer is credited to the configured recovery account.
+    if (deliveryExpense > 0) {
+        journalLines.push({
+            GLCAID: accounts.STORE_SALE_FREIGHT_RECOVERY.GLCAID,
+            Debit: 0, Credit: deliveryExpense,
+            Narration: `Freight / delivery recovery — ${narrationRef}`,
+            PartyID: null, JobCardID: null,
+        });
+    }
+
     // (3) Dr Store Sale Discount Given (if any)
     if (partsDiscount > 0) {
         journalLines.push({
@@ -218,7 +234,7 @@ function buildStoreSaleJournalLines({ storeSale, lines = [], accounts, paymentBa
         subsidiaryWrites,
         customerARDr,
         totals: {
-            partsGross, partsDiscount, partsTax, partsCOGS,
+            partsGross, partsDiscount, partsTax, partsCOGS, deliveryExpense,
             invoiceTotal, campaignBenefit, customerPays, totalDr, totalCr,
         },
         appliedCampaignID: campaign?.ApplicationID || null,

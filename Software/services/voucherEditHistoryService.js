@@ -79,4 +79,5 @@ function requireUnchangedHeader(before, checked) {
     }
 }
 
-module.exports = { withVoucherEditHistory, requireUnchangedHeader };
+module.exports = { withVoucherEditHistory, requireUnchangedHeader,
+    captureVoucherSnapshot: snapshot, recordVoucherEdit: recordEdit };

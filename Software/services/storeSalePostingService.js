@@ -34,7 +34,7 @@ async function loadPartyGL(partyId, transaction) {
 async function loadStoreSaleData(saleId, transaction) {
     const hdr = await new sql.Request(transaction)
         .input('id', sql.Int, saleId)
-        .query(`SELECT SaleID, InvoiceNo, PartyID, PaymentMode, PaymentBankID
+        .query(`SELECT SaleID, InvoiceNo, PartyID, PaymentMode, PaymentBankID, DeliveryExpense
                 FROM data_StoreSaleInfo WHERE SaleID=@id`);
     if (!hdr.recordset.length) throw new Error(`Store Sale ${saleId} not found.`);
 
@@ -83,6 +83,9 @@ async function postStoreSaleVoucher(saleId, userInfo, transaction) {
     const { storeSale, lines } = await loadStoreSaleData(saleId, transaction);
     const campaign = await loadCampaignApplication(saleId, transaction);
     const accounts = await resolveStoreSaleAccounts(transaction);
+    if (Number(storeSale.DeliveryExpense) > 0) {
+        accounts.STORE_SALE_FREIGHT_RECOVERY = { GLCAID: await resolveRole('STORE_SALE_FREIGHT_RECOVERY') };
+    }
     const paymentBank = await resolvePaymentBank(storeSale, transaction);
     const partyGL = await loadPartyGL(storeSale.PartyID, transaction);
     const built = buildStoreSaleJournalLines({ storeSale, lines, accounts, paymentBank, campaign, partyGL });

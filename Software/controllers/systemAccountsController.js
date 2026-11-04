@@ -16,6 +16,7 @@ const ROLE_DEFS = [
     { key: 'DEFAULT_DISCOUNT_GIVEN',   label: 'Default Discount Given (legacy, historical only)', type: 'Expense', purpose: 'No longer posted to — see SERVICE_DISCOUNT_GIVEN / STORE_SALE_DISCOUNT_GIVEN. Kept for old voucher history.' },
     { key: 'SERVICE_DISCOUNT_GIVEN',   label: 'Service (Job Card) Discount Given', type: 'Expense', purpose: 'Care-Off discounts on Job Cards' },
     { key: 'STORE_SALE_DISCOUNT_GIVEN',label: 'Store Sale Discount Given',type: 'Expense',   purpose: 'Discounts on Store Sale invoices and Sale Returns (SSR)' },
+    { key: 'STORE_SALE_FREIGHT_RECOVERY', label: 'Store Sale Freight / Delivery Recovery', type: 'Either', purpose: 'Credit for delivery charges collected from customers; select the freight expense recovery or freight income account.' },
     { key: 'ROUNDING_ADJUSTMENT',      label: 'Rounding Adjustment',      type: 'Either',    purpose: 'Tiny PKR rounding orphans' },
     { key: 'PURCHASE_RETURN_VARIANCE', label: 'Purchase Return Variance', type: 'Revenue',   purpose: 'Variance income from GTRN at landed cost' },
     { key: 'CUSTOMER_ADVANCE_RECEIVED',label: 'Customer Advance Received',type: 'Liability', purpose: 'Customer pre-payments and overpayments' },
