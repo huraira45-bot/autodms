@@ -6,12 +6,15 @@ const { requireAnyAccess } = require('../middleware/permissions');
 const { report: customerBalances } = require('../controllers/customerVehicleBalanceController');
 const bookingPayments = require('../controllers/bookingPaymentReportController');
 const vehicleStock = require('../controllers/vehicleInventoryReportController');
+const vehicleAllocation = require('../controllers/vehicleAllocationReportController');
 const deliveredInvoices = require('../controllers/deliveredMasterInvoiceReportController');
 const accountBookings = require('../controllers/accountBookingReportController');
 
 router.get('/account-bookings', requireAnyAccess('sales_reports', 'report:booking_register'), accountBookings.report);
 
 router.get('/delivered-master-invoices', requireAnyAccess('sales_reports', 'report:master_invoice_aging'), deliveredInvoices.report);
+
+router.get('/vehicle-stock-allocation', requireAnyAccess('sales_reports','report:vehicle_inventory'), vehicleAllocation.report);
 
 router.get('/vehicle-inventory-options', requireAnyAccess('sales_reports','report:vehicle_inventory'), vehicleStock.options);
 router.get('/vehicle-inventory-by-variant', requireAnyAccess('sales_reports','report:vehicle_inventory'), vehicleStock.summary);

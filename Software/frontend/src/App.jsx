@@ -205,6 +205,7 @@ import { BookingRegister, CancelledBookingRegister, VehicleInventory, ExecutiveP
 import CustomerVehicleBalances from './pages/reports/CustomerVehicleBalances';
 import BookingPaymentReport from './pages/reports/BookingPaymentReport';
 import { VehicleInventoryByVariant, VehicleInventoryLedger } from './pages/reports/VehicleStockReports';
+import VehicleAllocationReport from './pages/reports/VehicleAllocationReport';
 import DeliveredMasterInvoices from './pages/reports/DeliveredMasterInvoices';
 import AccountBookingLinks from './pages/reports/AccountBookingLinks';
 import SurveyPublic         from './pages/SurveyPublic';
@@ -1182,6 +1183,7 @@ function AppShell() {
                     <Route path="/reports/sales/booking-payments" element={<ProtectedRoute><BookingPaymentReport /></ProtectedRoute>} />
                     <Route path="/reports/sales/account-bookings" element={<ProtectedRoute><AccountBookingLinks /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory"       element={<ProtectedRoute><VehicleInventory /></ProtectedRoute>} />
+                    <Route path="/reports/sales/vehicle-stock-allocation" element={<ProtectedRoute><VehicleAllocationReport /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory-by-variant" element={<ProtectedRoute><VehicleInventoryByVariant /></ProtectedRoute>} />
                     <Route path="/reports/sales/vehicle-inventory-ledger" element={<ProtectedRoute><VehicleInventoryLedger /></ProtectedRoute>} />
                     <Route path="/reports/sales/delivered-master-invoices" element={<ProtectedRoute><DeliveredMasterInvoices /></ProtectedRoute>} />

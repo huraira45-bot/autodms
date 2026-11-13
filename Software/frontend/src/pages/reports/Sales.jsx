@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { ClipboardList, Truck, TrendingUp, Wallet } from 'lucide-react';
 import VehicleStockStatusFilter, { stockStatusLabel } from './VehicleStockStatusFilter';
+import VehicleStockTypeFilter, { stockTypeLabel } from './VehicleStockTypeFilter';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -108,8 +109,8 @@ export function VehicleInventory() {
             icon={Truck}
             endpoint="sales/vehicle-inventory"
             defaultParams={{ inStockOnly: '1' }}
-            printFilterSummary={params => [stockStatusLabel(params.stockStatus), params.inStockOnly === '1' && 'In stock only (not delivered)'].filter(Boolean).join(' | ')}
-            controls={({ params, updateParam }) => <><VehicleStockStatusFilter params={params} updateParam={updateParam} /><label>
+            printFilterSummary={params => [stockStatusLabel(params.stockStatus), params.allocationType && stockTypeLabel(params.allocationType), params.inStockOnly === '1' && 'In stock only (not delivered)'].filter(Boolean).join(' | ')}
+            controls={({ params, updateParam }) => <><VehicleStockStatusFilter params={params} updateParam={updateParam} /><VehicleStockTypeFilter params={params} updateParam={updateParam} /><label>
                 <input type="checkbox" checked={params.inStockOnly === '1'} onChange={event => updateParam('inStockOnly', event.target.checked ? '1' : undefined)} /> In stock only (not delivered)
             </label></>}
         >
@@ -130,13 +131,13 @@ export function VehicleInventory() {
                                 <tr style={trHeader}>
                                     <TH>Chassis</TH><TH>Brand</TH><TH>Model</TH><TH>Variant</TH>
                                     <TH>Color</TH><TH>Year</TH>
-                                    <TH>Location</TH><TH>Status</TH>
+                                    <TH>Location</TH><TH>Status</TH><TH>Stock type</TH>
                                     <TH align="right">Std Price</TH>
                                     <TH align="right">Days in Stock</TH>
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.rows.length === 0 && <Empty cols={10}>No vehicles registered yet.</Empty>}
+                                {data.rows.length === 0 && <Empty cols={11}>No vehicles match these filters.</Empty>}
                                 {data.rows.map(r => (
                                     <tr key={r.ChasisNo} style={trBody}>
                                         <TD mono>{r.ChasisNo}</TD>
@@ -146,7 +147,7 @@ export function VehicleInventory() {
                                         <TD>{r.Color}</TD>
                                         <TD>{r.Year}</TD>
                                         <TD>{r.Location}</TD>
-                                        <TD><StatusPill v={r.Status} /></TD>
+                                        <TD><StatusPill v={r.Status} /></TD><TD>{stockTypeLabel(r.AllocationType)}</TD>
                                         <TD align="right" mono>{fmt(r.StandardPrice)}</TD>
                                         <TD align="right" mono color={r.DaysInStock > 60 ? '#b91c1c' : '#475569'}>
                                             {r.DaysInStock ?? '—'}

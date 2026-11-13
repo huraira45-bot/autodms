@@ -4,4 +4,9 @@ function parseStockStatus(value) {
     if (typeof value !== 'string' || !STOCK_STATUSES.includes(value)) throw Object.assign(new Error('Invalid vehicle stock status.'), { status: 400 });
     return value;
 }
-module.exports = { parseStockStatus };
+function parseAllocationType(value) {
+    if (value === undefined || value === '') return null;
+    if (typeof value !== 'string' || !['Booked', 'OpenAllocation'].includes(value)) throw Object.assign(new Error('Invalid vehicle stock type.'), { status: 400 });
+    return value;
+}
+module.exports = { parseStockStatus, parseAllocationType };

@@ -78,3 +78,5 @@ cd /d "D:\saher 2.0\autodms" && git -c gc.auto=0 -c maintenance.auto=false pull 
 
 Then press Ctrl+F5 in the browser. Roles whose permissions were changed should
 sign out and sign in again to refresh their permission list.
+
+Vehicle Stock Allocation: see docs/VEHICLE_STOCK_ALLOCATION.md. Added under Inventory & Master Motors using existing vehicle_inventory report access; search chassis, DMS booking number or customer name and distinguish Booked/Open Allocation stock. Vehicle Inventory also displays and filters stock type.

@@ -11,7 +11,7 @@ const { resolveRole } = require('./systemAccountsController');
 const { masterAccountSql } = require('../services/masterPaymentPositionService');
 const { bookingAccountReconciliationQuery } = require('../services/bookingPaymentReportQuery');
 const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
-const { parseStockStatus } = require('../services/vehicleStockStatusFilter');
+const { parseStockStatus, parseAllocationType } = require('../services/vehicleStockStatusFilter');
 
 function parseRange(req) {
     const today = new Date();
@@ -95,8 +95,8 @@ exports.cancelledBookingRegister = (req, res) => bookingRegister(req, res, true)
  * Inventory list, optionally restricted to undelivered stock, with cost basis.
  */
 exports.vehicleInventory = async (req, res) => {
-    let stockStatus;
-    try { stockStatus = parseStockStatus(req.query.stockStatus); } catch (error) { return res.status(400).json({ error: error.message }); }
+    let stockStatus, allocationType;
+    try { stockStatus = parseStockStatus(req.query.stockStatus); allocationType = parseAllocationType(req.query.allocationType); } catch (error) { return res.status(400).json({ error: error.message }); }
     try {
         const pool = await getPool();
         const r = await pool.request().query(`
@@ -129,7 +129,7 @@ exports.vehicleInventory = async (req, res) => {
         }));
 
         const isInStock = row => !['Delivered','Sold','Returned'].includes(row.Status);
-        const rows = inventoryRows.filter(row => (req.query.inStockOnly !== '1' || isInStock(row)) && (!stockStatus || row.Status === stockStatus));
+        const rows = inventoryRows.filter(row => (req.query.inStockOnly !== '1' || isInStock(row)) && (!stockStatus || row.Status === stockStatus) && (!allocationType || row.AllocationType === allocationType));
         const inStock = rows.filter(isInStock);
         const totals = {
             total:         rows.length,
