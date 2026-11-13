@@ -99,3 +99,9 @@ The subsequent shared-query optimization reduced the live candidate report from
 6.93 seconds to 0.86 seconds, with all 322 booking totals unchanged. See
 [Sales performance](SALES_PERFORMANCE.md) for the shared calculation and
 reconciliation improvements.
+
+## Promised month filter (13 November 2026)
+
+Select **Promised month** beside the booking date filters to show bookings promised for that calendar month. Leave it blank for all months, including bookings whose promised month is not set. It combines with the existing date, vehicle, salesperson and payment filters. Clear filters also clears this month. Totals, printed rows and Excel export use the same filtered result; the print heading identifies the selected month.
+
+The API accepts `promisedMonth=YYYY-MM`, validates it before querying, and binds a SQL Date parameter with a first-day through EOMONTH predicate on PromisedDeliveryMonth. It filters the booking scope before calculating remittances and retains global historical pay-order capacity checks. No migration or data changes are needed. Deploy the source, rebuild the frontend, restart AutoDMS and refresh the browser.

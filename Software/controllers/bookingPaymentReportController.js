@@ -3,7 +3,7 @@ const { resolveRole } = require('./systemAccountsController');
 const { bookingPaymentReportQuery } = require('../services/bookingPaymentReportQuery');
 const { masterAmountDue } = require('../services/salesMasterAmount');
 const { effectiveMasterPaid } = require('../services/historicalMasterApprovalService');
-const { deliveryMonthKey } = require('../services/bookingDeliveryMonthService');
+const { deliveryMonthKey, parseDeliveryMonth } = require('../services/bookingDeliveryMonthService');
 
 const PAYMENT_FILTERS = ['complete', 'partial', 'unpaid', 'remaining', 'unpriced'];
 function dateFilter(value) {
@@ -39,9 +39,10 @@ const matches = (filter, status) => !filter || (filter === 'remaining' ? ['parti
 
 exports.report = async (req, res) => {
     try {
-        let from, to, modelId, variantId, salespersonId, customerPayment, masterPayment;
+        let from, to, promisedMonth, modelId, variantId, salespersonId, customerPayment, masterPayment;
         try {
             from = dateFilter(req.query.from); to = dateFilter(req.query.to);
+            promisedMonth = parseDeliveryMonth(req.query.promisedMonth);
             if (from && to && from > to) throw new Error('From date must not be after To date.');
             modelId = idFilter(req.query.modelId, 'model'); variantId = idFilter(req.query.variantId, 'variant');
             salespersonId = idFilter(req.query.salespersonId, 'salesperson');
@@ -51,6 +52,10 @@ exports.report = async (req, res) => {
         const coreGL = await resolveRole('BOOKING_VARIANT_RECEIVABLE');
         const request = pool.request().input('gl', sql.Int, coreGL);
         const conditions = ["b.Status<>'Cancelled'"];
+        if (promisedMonth) {
+            request.input('promisedMonth', sql.Date, promisedMonth);
+            conditions.push('b.PromisedDeliveryMonth>=@promisedMonth AND b.PromisedDeliveryMonth<=EOMONTH(@promisedMonth)');
+        }
         if (from) { request.input('from', sql.Date, from); conditions.push('CAST(COALESCE(b.BookingDate,b.CreatedAt) AS DATE)>=@from'); }
         if (to) { request.input('to', sql.Date, to); conditions.push('CAST(COALESCE(b.BookingDate,b.CreatedAt) AS DATE)<=@to'); }
         for (const [key, value, column] of [['modelId', modelId, 'VehicleModelID'], ['variantId', variantId, 'VehicleVariantID'], ['salespersonId', salespersonId, 'CreatedBy_SalesExecutiveID']]) {

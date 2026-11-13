@@ -123,3 +123,30 @@ test('lookup options include booked legacy entries without depending on sales-ma
     expect(res.body).toEqual({ models: lists[0], variants: lists[1], salespeople: lists[2] });
     expect(query.mock.calls[0][0]).not.toContain('IsActive'); expect(query.mock.calls[0][0]).toContain("b.Status<>'Cancelled'");
 });
+
+test.each(['2026-11', '2024-02', '2026-12'])('promised month %s is bound before payment aggregation and combines with other filters', async promisedMonth => {
+    const { query, values, totals } = await report([{ ...base, AmountPaidToDate: 40 }], {
+        promisedMonth, modelId: '5', customerPayment: 'partial', masterPayment: 'complete',
+    });
+    expect(values.promisedMonth.toISOString()).toBe(`${promisedMonth}-01T00:00:00.000Z`);
+    expect(values.modelId).toBe(5);
+    const statement = query.mock.calls[0][0];
+    expect(statement).toContain('b.PromisedDeliveryMonth>=@promisedMonth AND b.PromisedDeliveryMonth<=EOMONTH(@promisedMonth)');
+    expect(statement.indexOf('b.PromisedDeliveryMonth>=@promisedMonth')).toBeLessThan(statement.indexOf('MasterLines AS'));
+    expect(statement).toContain('AND b.VehicleModelID=@modelId');
+    expect(statement).not.toContain(promisedMonth);
+    expect(totals).toMatchObject({ count: 1, VehiclePaid: 40, CustomerRemaining: 60 });
+});
+
+test.each([undefined, ''])('blank promised month retains bookings with and without a promised date: %p', async promisedMonth => {
+    const { query, values, rows } = await report([base, { ...base, BookingID: 2, PromisedDeliveryMonth: new Date('2026-11-01T00:00:00Z') }], { promisedMonth });
+    expect(values.promisedMonth).toBeUndefined();
+    expect(query.mock.calls[0][0]).not.toContain('b.PromisedDeliveryMonth>=@promisedMonth');
+    expect(rows.map(row => row.PromisedDeliveryMonth)).toEqual([null, '2026-11']);
+});
+
+test.each(['2026-00', '2026-13', '2026-1', '2026-11-01', '0000-01', ['2026-11'], "2026-11';DROP TABLE x;--"])(
+    'invalid promised month %p is rejected before database access', async promisedMonth => {
+        const res = response(); await controller.report({ query: { promisedMonth } }, res);
+        expect(res.code).toBe(400); expect(getPool).not.toHaveBeenCalled();
+    });

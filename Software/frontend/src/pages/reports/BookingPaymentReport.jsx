@@ -38,6 +38,7 @@ export default function BookingPaymentReport() {
 
     const filterSummary = params => [
         params.from && `Booked from ${params.from}`, params.to && `to ${params.to}`,
+        params.promisedMonth && `Promised month: ${formatDeliveryMonth(params.promisedMonth)}`,
         params.modelId && `Model: ${options.models.find(m => String(m.ModelID) === params.modelId)?.ModelName || params.modelId}`,
         params.variantId && `Variant: ${options.variants.find(v => String(v.VariantID) === params.variantId)?.VariantName || params.variantId}`,
         params.salespersonId && `Salesperson: ${options.salespeople.find(s => String(s.SalespersonID) === params.salespersonId)?.SalespersonName || params.salespersonId}`,
@@ -49,12 +50,13 @@ export default function BookingPaymentReport() {
     return <>
         {optionsError && <div className="erp-alert danger no-print">Cannot load booking filters: {optionsError} <button type="button" className="erp-btn" onClick={() => setRetry(value => value + 1)}>Retry</button></div>}
         <ReportShell title="Booking Payment Status" icon={Wallet} endpoint="sales/booking-payments" defaultParams={{}} superWide
-            subtitle="Filter by model, variant, salesperson and customer / Master payment status. Current vehicle amounts, excluding premium and cancelled bookings."
+            subtitle="Filter by promised month, model, variant, salesperson and customer / Master payment status. Current vehicle amounts, excluding premium and cancelled bookings."
             printFilterSummary={filterSummary}
             controls={({ params, updateParam }) => <>
                 <Link className="erp-btn" to="/module/sales-reports">All sale reports</Link>
                 <label>Booking from <input type="date" style={control} value={params.from || ''} onChange={e => updateParam('from', e.target.value || undefined)} /></label>
                 <label>To <input type="date" style={control} value={params.to || ''} onChange={e => updateParam('to', e.target.value || undefined)} /></label>
+                <label>Promised month <input aria-label="Promised month" type="month" style={control} value={params.promisedMonth || ''} onChange={e => updateParam('promisedMonth', e.target.value || undefined)} /></label>
                 <label>Model <select disabled={loadingOptions} style={control} value={params.modelId || ''} onChange={e => { updateParam('modelId', e.target.value || undefined); updateParam('variantId', undefined); }}>
                     <option value="">All models</option>
                     {options.models.map(m => <option key={m.ModelID} value={m.ModelID}>{m.ModelName || `Model #${m.ModelID}`}</option>)}
@@ -70,7 +72,7 @@ export default function BookingPaymentReport() {
                 <PaymentFilter title="Customer payment" value={params.customerPayment} onChange={value => updateParam('customerPayment', value)} />
                 <PaymentFilter title="Master payment" value={params.masterPayment} onChange={value => updateParam('masterPayment', value)} />
                 <input aria-label="Search bookings" placeholder="Booking / customer / phone / chassis" style={control} value={params.search || ''} onChange={e => updateParam('search', e.target.value || undefined)} />
-                <button type="button" className="erp-btn" onClick={() => ['from', 'to', 'modelId', 'variantId', 'salespersonId', 'customerPayment', 'masterPayment', 'search'].forEach(key => updateParam(key, undefined))}>Clear filters</button>
+                <button type="button" className="erp-btn" onClick={() => ['from', 'to', 'promisedMonth', 'modelId', 'variantId', 'salespersonId', 'customerPayment', 'masterPayment', 'search'].forEach(key => updateParam(key, undefined))}>Clear filters</button>
             </>}
             excelExport={data => ({ filename: 'booking-payment-status.csv',
                 headers: ['Booking', 'Booking date', 'Promised month', 'Customer', 'Phone', 'Model', 'Variant', 'Chassis', 'Salesperson', 'Booking status', 'Historical', 'Vehicle price', 'Customer received', 'Customer balance', 'Customer overpaid', 'Customer payment status', 'Master due', 'Master paid / approved', 'Master balance', 'Master overpaid', 'Master payment status', 'Master posted remittances', 'Historical Master approved', 'Historical approval used'],
