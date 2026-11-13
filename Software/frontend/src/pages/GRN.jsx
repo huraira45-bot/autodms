@@ -167,6 +167,7 @@ export default function GRN() {
                     ManualNumber:          master?.ManualNumber,
                     Qty:                   Number(it.Quantity) || 0,
                     ItemRate:              Number(it.ItemRate) || 0,
+                    SalesRate:             Number(it.ItemSalesPrice ?? master?.ItemSalesPrice) || 0,
                     DiscountPct:           Number(it.DiscountPercentage) || 0,
                     AdditionalDiscountPct: Number(it.AdditionalDiscountPct) || 0,
                     TaxRate:               Number(it.TaxRate) || 0,

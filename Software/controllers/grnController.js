@@ -12,12 +12,14 @@ const upload = multer({ storage });
 exports.uploadMiddleware = upload.single('BillImage');
 
 exports.saveGRN = async (req, res) => {
+  let tx;
   try {
     const {
       PurchaseDate, SupplierBillNo, PartyID, WHID, NTN, Remarks, Items,
     } = req.body;
 
     const parsedItems = typeof Items === 'string' ? JSON.parse(Items) : Items;
+    if (!Array.isArray(parsedItems) || parsedItems.length === 0) return res.status(400).json({ error: 'Add at least one GRN item.' });
     const imagePath = req.file ? req.file.path : null;
 
     // sp_SavePurchaseGRN's OPENJSON expects the legacy key names (ItemID, Qty,
@@ -59,7 +61,9 @@ exports.saveGRN = async (req, res) => {
     }
 
     const pool = await getPool();
-    const result = await pool.request()
+    tx = new sql.Transaction(pool);
+    await tx.begin();
+    const result = await new sql.Request(tx)
       .input('PurchaseDate',   sql.DateTime,        PurchaseDate)
       .input('SupplierBillNo', sql.NVarChar(100),   SupplierBillNo)
       .input('PartyID',        sql.Int,             PartyID)
@@ -72,15 +76,16 @@ exports.saveGRN = async (req, res) => {
       .execute('sp_SavePurchaseGRN');
 
     const newId = result.recordset[0]?.NewPurchaseID;
+    if (!newId) throw new Error('GRN save did not return a purchase ID.');
     if (newId) {
-      const counterRes = await pool.request()
+      const counterRes = await new sql.Request(tx)
         .query("UPDATE dms_DocCounters SET CurrentCounter = CurrentCounter + 1 OUTPUT INSERTED.CurrentCounter WHERE DocType = 'GRN'");
       const counter = counterRes.recordset[0]?.CurrentCounter ?? 0;
       const voucherNo = `GRN-${String(counter).padStart(4, '0')}`;
 
       // Follow-up UPDATE on header: voucher number + creator metadata.
       // (FreightTaxable retained for legacy schema; not used by new format.)
-      await pool.request()
+      await new sql.Request(tx)
         .input('id', sql.Int, newId)
         .input('no', sql.NVarChar(50), voucherNo)
         .input('by', sql.Int, req.user?.userId || null)
@@ -95,17 +100,21 @@ exports.saveGRN = async (req, res) => {
       // UnitLandedCost = gross unit retail (ItemRate) per the owner decision
       // — discounts post separately to PARTS_DISCOUNT_RECEIVED rather than
       // being netted out of inventory cost.
-      const linesRes = await pool.request()
+      const linesRes = await new sql.Request(tx)
         .input('id', sql.Int, newId)
         .query('SELECT PurchaseDetailID FROM data_PurchaseDetail WHERE PurchaseID=@id ORDER BY PurchaseDetailID');
       const detailIds = linesRes.recordset.map(r => r.PurchaseDetailID);
+      if (detailIds.length !== parsedItems.length) throw new Error('Saved GRN line count does not match submitted items.');
 
       for (let i = 0; i < parsedItems.length && i < detailIds.length; i++) {
         const li = parsedItems[i] || {};
         const did = detailIds[i];
         const itemRate = Number(li.ItemRate) || 0;
-        await pool.request()
+        await new sql.Request(tx)
           .input('id',   sql.Int,           did)
+          .input('dp', sql.Decimal(8,3), Number(li.DiscountPercentage) || 0)
+          .input('da', sql.Decimal(18,2), Number(li.DiscountAmount) || 0)
+          .input('sale', sql.Decimal(18,3), Number(li.SalesRate) || 0)
           .input('tr',   sql.Decimal(8,4),  Number(li.TaxRate) || 0)
           .input('ta',   sql.Decimal(18,2), Number(li.TaxAmount) || 0)
           .input('ulc',  sql.Decimal(18,4), itemRate)
@@ -113,15 +122,18 @@ exports.saveGRN = async (req, res) => {
           .input('adda', sql.Decimal(18,2), Number(li.AdditionalDiscountAmount) || 0)
           .input('ait',  sql.Decimal(18,2), Number(li.AITAmount) || 0)
           .query(`UPDATE data_PurchaseDetail
-                  SET TaxRate=@tr, TaxAmount=@ta, UnitLandedCost=@ulc,
+                  SET DiscountPercentage=@dp, DiscountAmount=@da, ItemSalesPrice=@sale,
+                      TaxRate=@tr, TaxAmount=@ta, UnitLandedCost=@ulc,
                       AdditionalDiscountPct=@addp,
                       AdditionalDiscountAmount=@adda,
                       AITAmount=@ait
                   WHERE PurchaseDetailID=@id`);
       }
     }
+    await tx.commit();
     res.status(201).json({ message: 'GRN Saved Successfully', data: result.recordset });
   } catch (err) {
+    if (tx) { try { await tx.rollback(); } catch {} }
     console.error(err);
     res.status(400).json({ error: 'Database Error', details: err.message });
   }
@@ -208,11 +220,14 @@ exports.updateGRN = async (req, res) => {
 
         for (const li of (parsedItems || [])) {
             const itemRate = parseFloat(li.ItemRate) || 0;
+            const saleRate = Number(li.SalesRate) || 0;
+            if (saleRate > 0 && saleRate < itemRate) throw new Error('Sale rate cannot be less than purchase rate.');
             await new sql.Request(tx)
                 .input('pid',   sql.Int,            id)
                 .input('iid',   sql.Int,            parseInt(li.ItemId))
                 .input('qty',   sql.Decimal(18,3),  parseFloat(li.Quantity) || 0)
                 .input('rate',  sql.Decimal(18,2),  itemRate)
+                .input('sale',  sql.Decimal(18,3),  Number(li.SalesRate) || 0)
                 .input('dp',    sql.Decimal(8,3),   parseFloat(li.DiscountPercentage) || 0)
                 .input('da',    sql.Decimal(18,2),  parseFloat(li.DiscountAmount) || 0)
                 .input('na',    sql.Decimal(18,2),  parseFloat(li.NetAmount) || 0)
@@ -225,11 +240,11 @@ exports.updateGRN = async (req, res) => {
                 .input('ulc',   sql.Decimal(18,4),  itemRate)
                 .query(`INSERT INTO data_PurchaseDetail
                             (PurchaseID, ItemId, Quantity, ItemRate,
-                             DiscountPercentage, DiscountAmount, NetAmount, StockRate,
+                             DiscountPercentage, DiscountAmount, NetAmount, StockRate, ItemSalesPrice,
                              TaxRate, TaxAmount,
                              AdditionalDiscountPct, AdditionalDiscountAmount, AITAmount,
                              UnitLandedCost)
-                        VALUES (@pid, @iid, @qty, @rate, @dp, @da, @na, @sr,
+                        VALUES (@pid, @iid, @qty, @rate, @dp, @da, @na, @sr, @sale,
                                 @tr, @ta, @addp, @adda, @ait, @ulc)`);
         }
 
