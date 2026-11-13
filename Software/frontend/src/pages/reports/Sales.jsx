@@ -27,8 +27,13 @@ function BookingRegisterView({ cancelled = false }) {
             icon={ClipboardList}
             endpoint={cancelled ? 'sales/cancelled-booking-register' : 'sales/booking-register'}
             defaultParams={{ from: firstOfMonthISO(), to: todayISO() }}
+            printFilterSummary={params => [`From ${params.from || 'any date'}`, `To ${params.to || 'any date'}`, params.search && `Search: ${params.search}`].filter(Boolean).join(' | ')}
             controls={props => <>
                 <PeriodControls {...props} />
+                <input type="search" aria-label="Search booking register" placeholder="Booking / DMS booking number / customer"
+                    value={props.params.search || ''} onChange={event => props.updateParam('search', event.target.value || undefined)}
+                    style={{ padding: 7, border: '1px solid #cbd5e1', borderRadius: 5, minWidth: 280 }} />
+                {props.params.search && <button type="button" className="erp-btn" onClick={() => props.updateParam('search', undefined)}>Clear search</button>}
                 <Link className="erp-btn" to={cancelled ? '/reports/sales/booking-register' : '/reports/sales/cancelled-booking-register'}>
                     {cancelled ? 'Booking Register' : 'Cancelled Booking Register'}
                 </Link>

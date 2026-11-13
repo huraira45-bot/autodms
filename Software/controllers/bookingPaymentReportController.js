@@ -63,8 +63,8 @@ exports.report = async (req, res) => {
         }
         const search = String(req.query.search || '').trim().slice(0, 150);
         if (search) {
-            request.input('search', sql.NVarChar(302), `%${search}%`);
-            conditions.push('(b.BookingNo LIKE @search OR p.PartyName LIKE @search OR veh.ChasisNo LIKE @search OR p.PhoneOne LIKE @search)');
+            request.input('search', sql.NVarChar(452), `%${search.replace(/[[%_]/g, '[$&]')}%`);
+            conditions.push('(b.BookingNo LIKE @search OR b.DMSBookingNumber LIKE @search OR p.PartyName LIKE @search OR veh.ChasisNo LIKE @search OR p.PhoneOne LIKE @search)');
         }
         // Exclude delivery settlements from remittance totals: clearing the
         // booking account at delivery does not undo the payment sent to Master.
@@ -74,7 +74,7 @@ exports.report = async (req, res) => {
             const customer = position(row.NegotiatedPrice, row.AmountPaidToDate);
             const master = position(masterAmountDue(row), effectiveMasterPaid(row, row.MasterLedgerRemitted));
             return {
-                BookingID: row.BookingID, BookingNo: row.BookingNo, BookingDate: row.BookingDate?.toISOString().slice(0, 10) || null,
+                BookingID: row.BookingID, BookingNo: row.BookingNo, DMSBookingNumber: row.DMSBookingNumber || '', BookingDate: row.BookingDate?.toISOString().slice(0, 10) || null,
                 PromisedDeliveryMonth: deliveryMonthKey(row.PromisedDeliveryMonth), Status: row.Status, IsHistorical: !!row.IsHistorical,
                 VehicleModelID: row.VehicleModelID, VehicleVariantID: row.VehicleVariantID, SalespersonID: row.SalespersonID,
                 CustomerName: row.CustomerName, Phone: row.Phone, ModelName: row.ModelName, VariantName: row.VariantName,

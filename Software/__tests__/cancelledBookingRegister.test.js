@@ -64,3 +64,21 @@ test('separate cancelled bookings list has its own fixed scope and preserves boo
     expect(query.mock.calls[0][0]).toContain('>= @dateFrom');expect(query.mock.calls[0][0]).toContain('<= @dateTo');
     expect(values.q).toBe('%Farhan%');expect(values.me).toBe(3);expect(res.body[0].Status).toBe('Cancelled');
 });
+
+test.each(['bookingRegister', 'cancelledBookingRegister'])('%s searches DMS numbers within existing period and status filters', async method => {
+    const { query, values } = fixture([{ ...row, DMSBookingNumber: 'DMS-0482' }]), res = response();
+    await reports[method](req({ search: ' DMS-0482 ', status: 'Allocated' }), res);
+    const statement = query.mock.calls[0][0];
+    expect(values.search).toBe('%DMS-0482%'); expect(values.st).toBe('Allocated');
+    expect(statement).toContain('b.DMSBookingNumber LIKE @search');
+    expect(statement).toContain('b.BookingNo LIKE @search'); expect(statement).toContain('p.PartyName LIKE @search');
+    expect(statement).toContain('b.CreatedAt BETWEEN @from AND @to'); expect(statement).not.toContain('DMS-0482');
+    expect(res.body.rows[0].DMSBookingNumber).toBe('DMS-0482'); expect(res.body.totals.count).toBe(1);
+});
+
+test('register search escapes wildcard characters; clearing search removes the extra predicate', async () => {
+    let db = fixture([]), res = response(); await reports.bookingRegister(req({ search: 'DMS_[1]%' }), res);
+    expect(db.values.search).toBe('%DMS[_][[]1][%]%');
+    db = fixture([]); res = response(); await reports.bookingRegister(req({ search: '   ' }), res);
+    expect(db.values.search).toBeUndefined(); expect(db.query.mock.calls[0][0]).not.toContain('LIKE @search');
+});

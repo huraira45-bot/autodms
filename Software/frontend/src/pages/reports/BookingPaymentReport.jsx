@@ -71,13 +71,13 @@ export default function BookingPaymentReport() {
                 </select></label>
                 <PaymentFilter title="Customer payment" value={params.customerPayment} onChange={value => updateParam('customerPayment', value)} />
                 <PaymentFilter title="Master payment" value={params.masterPayment} onChange={value => updateParam('masterPayment', value)} />
-                <input aria-label="Search bookings" placeholder="Booking / customer / phone / chassis" style={control} value={params.search || ''} onChange={e => updateParam('search', e.target.value || undefined)} />
+                <input aria-label="Search bookings" placeholder="Booking / DMS booking number / customer / phone / chassis" style={control} value={params.search || ''} onChange={e => updateParam('search', e.target.value || undefined)} />
                 <button type="button" className="erp-btn" onClick={() => ['from', 'to', 'promisedMonth', 'modelId', 'variantId', 'salespersonId', 'customerPayment', 'masterPayment', 'search'].forEach(key => updateParam(key, undefined))}>Clear filters</button>
             </>}
             excelExport={data => ({ filename: 'booking-payment-status.csv',
-                headers: ['Booking', 'Booking date', 'Promised month', 'Customer', 'Phone', 'Model', 'Variant', 'Chassis', 'Salesperson', 'Booking status', 'Historical', 'Vehicle price', 'Customer received', 'Customer balance', 'Customer overpaid', 'Customer payment status', 'Master due', 'Master paid / approved', 'Master balance', 'Master overpaid', 'Master payment status', 'Master posted remittances', 'Historical Master approved', 'Historical approval used'],
+                headers: ['Booking', 'DMS booking number', 'Booking date', 'Promised month', 'Customer', 'Phone', 'Model', 'Variant', 'Chassis', 'Salesperson', 'Booking status', 'Historical', 'Vehicle price', 'Customer received', 'Customer balance', 'Customer overpaid', 'Customer payment status', 'Master due', 'Master paid / approved', 'Master balance', 'Master overpaid', 'Master payment status', 'Master posted remittances', 'Historical Master approved', 'Historical approval used'],
                 rows: data.rows.map(r => [
-                    ...[r.BookingNo, r.BookingDate, r.PromisedDeliveryMonth, r.CustomerName, r.Phone, r.ModelName, r.VariantName, r.ChasisNo, r.SalespersonName, r.Status, r.IsHistorical ? 'Yes' : 'No'].map(text),
+                    ...[r.BookingNo, r.DMSBookingNumber, r.BookingDate, r.PromisedDeliveryMonth, r.CustomerName, r.Phone, r.ModelName, r.VariantName, r.ChasisNo, r.SalespersonName, r.Status, r.IsHistorical ? 'Yes' : 'No'].map(text),
                     r.VehiclePrice, r.VehiclePaid, r.CustomerRemaining, r.CustomerOverpaid, statusLabels[r.CustomerPaymentStatus],
                     r.MasterDue, r.MasterPaid, r.MasterRemaining, r.MasterOverpaid, statusLabels[r.MasterPaymentStatus], r.MasterLedgerRemitted, r.HistoricalMasterApprovedAmount, r.MasterApprovalUsed ? 'Yes' : 'No',
                 ]),
@@ -96,7 +96,7 @@ export default function BookingPaymentReport() {
                     <thead><tr><TH>Booking / date</TH><TH>Customer</TH><TH>Model / variant</TH><TH>Salesperson</TH><TH align="right">Vehicle price</TH><TH align="right">Customer received</TH><TH align="right">Customer balance</TH><TH>Customer payment</TH><TH align="right">Master due</TH><TH align="right">Paid to Master</TH><TH align="right">Master balance</TH><TH>Master payment</TH></tr></thead>
                     <tbody>{!data.rows.length && <tr><td colSpan={12} style={{ padding: 24, textAlign: 'center' }}>No bookings match these filters.</td></tr>}
                         {data.rows.map(r => <tr key={r.BookingID} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                            <TD><Link to={`/sales/bookings/${r.BookingID}`}>{r.BookingNo}</Link><div>{r.BookingDate}</div><small>{r.Status}{r.IsHistorical ? ' | Historical' : ''}</small><div><small>Promised: {formatDeliveryMonth(r.PromisedDeliveryMonth)}</small></div></TD>
+                            <TD><Link to={`/sales/bookings/${r.BookingID}`}>{r.BookingNo}</Link><div><small>DMS: {r.DMSBookingNumber || '—'}</small></div><div>{r.BookingDate}</div><small>{r.Status}{r.IsHistorical ? ' | Historical' : ''}</small><div><small>Promised: {formatDeliveryMonth(r.PromisedDeliveryMonth)}</small></div></TD>
                             <TD>{r.CustomerName}<div>{r.Phone}</div></TD>
                             <TD>{r.ModelName}<div>{r.VariantName}</div><small>{r.ChasisNo || 'Not allocated'}</small></TD>
                             <TD>{r.SalespersonName || 'Unassigned'}</TD>

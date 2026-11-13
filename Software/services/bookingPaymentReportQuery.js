@@ -8,7 +8,7 @@ function bookingPaymentReportQuery(conditions) {
         IF OBJECT_ID('tempdb..#BookingPaymentRows') IS NOT NULL DROP TABLE #BookingPaymentRows;
         IF OBJECT_ID('tempdb..#BookingPaymentOrders') IS NOT NULL DROP TABLE #BookingPaymentOrders;
 
-        SELECT b.BookingID,b.BookingNo,b.Status,b.IsHistorical,b.VehicleModelID,b.VehicleVariantID,
+        SELECT b.BookingID,b.BookingNo,b.DMSBookingNumber,b.Status,b.IsHistorical,b.VehicleModelID,b.VehicleVariantID,
             b.CreatedBy_SalesExecutiveID AS SalespersonID,
             CAST(COALESCE(b.BookingDate,b.CreatedAt) AS DATE) AS BookingDate,b.PromisedDeliveryMonth,
             p.PartyName AS CustomerName,p.PhoneOne AS Phone,m.ModelName,v.VariantName,veh.ChasisNo,

@@ -34,6 +34,12 @@ async function bookingRegister(req, res, cancelled = false) {
         const conds = ['b.CreatedAt BETWEEN @from AND @to', cancelled ? "b.Status = 'Cancelled'" : "b.Status <> 'Cancelled'"];
         if (req.query.status) { rq.input('st', sql.NVarChar(30), req.query.status); conds.push('b.Status = @st'); }
 
+        const search = String(req.query.search || '').trim().slice(0, 150);
+        if (search) {
+            rq.input('search', sql.NVarChar(452), `%${search.replace(/[[%_]/g, '[$&]')}%`);
+            conds.push('(b.BookingNo LIKE @search OR b.DMSBookingNumber LIKE @search OR p.PartyName LIKE @search)');
+        }
+
         const r = await rq.query(`
             SELECT b.BookingID, b.BookingNo, b.DMSBookingNumber, b.CreatedAt AS BookedOn, b.Status,
                    b.StandardPrice, b.NegotiatedPrice, b.DiscountAmount,

@@ -150,3 +150,18 @@ test.each(['2026-00', '2026-13', '2026-1', '2026-11-01', '0000-01', ['2026-11'],
         const res = response(); await controller.report({ query: { promisedMonth } }, res);
         expect(res.code).toBe(400); expect(getPool).not.toHaveBeenCalled();
     });
+test('DMS booking number is searchable and returned alongside the internal booking number', async () => {
+    const { query, values, rows } = await report([{ ...base, DMSBookingNumber: 'DMS-2026-0482' }], { search: ' DMS-2026-0482 ', promisedMonth: '2026-11' });
+    expect(values.search).toBe('%DMS-2026-0482%');
+    expect(query.mock.calls[0][0]).toContain('b.DMSBookingNumber LIKE @search');
+    expect(query.mock.calls[0][0]).toContain('b.BookingNo,b.DMSBookingNumber');
+    expect(query.mock.calls[0][0]).not.toContain('DMS-2026-0482');
+    expect(rows[0]).toMatchObject({ BookingNo: 'BK-1', DMSBookingNumber: 'DMS-2026-0482' });
+});
+
+test('DMS search treats SQL wildcard characters literally and preserves customer search', async () => {
+    const { values, query } = await report([base], { search: "DMS_[42]% O'Brien" });
+    expect(values.search).toBe("%DMS[_][[]42][%] O'Brien%");
+    expect(query.mock.calls[0][0]).toContain('p.PartyName LIKE @search');
+    expect(query.mock.calls[0][0]).toContain('p.PhoneOne LIKE @search');
+});
