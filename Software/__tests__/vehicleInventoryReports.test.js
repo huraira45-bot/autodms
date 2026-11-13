@@ -71,3 +71,33 @@ test('report options retain historical variants and derive distinct models',asyn
     const res=response();await reports.options({},res);expect(res.data.models).toHaveLength(1);expect(res.data.variants).toHaveLength(2);
     expect(query.mock.calls[0][0]).toContain('dms_VehicleInventoryLedger');
 });
+
+test.each(['AtDealer', 'InTransit', 'AtMaster', 'Allocated'])('detailed inventory filters %s before computing totals', async stockStatus => {
+    database([['AtDealer', 'InTransit', 'AtMaster', 'Allocated', 'Delivered', 'Returned'].map((Status, index) => ({
+        ChasisNo: `TEST-${index}`, Status, StandardPrice: 100, ModelName: 'Model',
+    })).concat([{ ChasisNo: 'STALE-DELIVERED', Status: stockStatus, ReportStatus: 'Delivered', StandardPrice: 900 }])]);
+    const res = response(); await legacyReports.vehicleInventory({ query: { stockStatus, inStockOnly: '1' } }, res);
+    expect(res.code).toBe(200); expect(res.data.rows).toHaveLength(1);
+    expect(res.data.rows[0].Status).toBe(stockStatus);
+    expect(res.data.totals).toMatchObject({ total: 1, inStock: 1, valueInStock: 100, byStatus: { [stockStatus]: 1 } });
+});
+
+test.each(['AtDealer', 'InTransit'])('variant stock summary binds %s before grouping and drops empty variants', async stockStatus => {
+    const { values, query } = database([[{ VariantID: 1, TotalVehicles: 2, InStock: 2, AtDealer: stockStatus === 'AtDealer' ? 2 : 0,
+        InTransit: stockStatus === 'InTransit' ? 2 : 0, AtMaster: 0, Allocated: 0, Delivered: 0, Returned: 0, OpenAllocation: 0 },
+        { VariantID: 2, TotalVehicles: 0, InStock: 0 }]]);
+    const res = response(); await reports.summary({ query: { stockStatus, modelId: '1', variantId: '2', inStockOnly: '1' } }, res);
+    expect(values).toMatchObject({ stockStatus, model: 1, variant: 2, stockOnly: true });
+    const statement = query.mock.calls[0][0];
+    expect(statement).toContain('AND (@stockStatus IS NULL OR Status=@stockStatus)');
+    expect(statement.indexOf('Status=@stockStatus')).toBeLessThan(statement.indexOf('COUNT(s.VehicleID)'));
+    expect(statement).toContain("THEN 'Delivered' ELSE v.Status END AS Status");
+    expect(res.data.rows).toHaveLength(1); expect(res.data.totals).toMatchObject({ variants: 1, TotalVehicles: 2, InStock: 2, [stockStatus]: 2 });
+});
+
+test.each(['AtDealer OR 1=1', ['AtDealer'], 'In Transit', 'Returned'])('invalid stock status %p is rejected by both reports before database access', async stockStatus => {
+    for (const report of [reports.summary, legacyReports.vehicleInventory]) {
+        const res = response(); await report({ query: { stockStatus } }, res);
+        expect(res.code).toBe(400); expect(getPool).not.toHaveBeenCalled();
+    }
+});

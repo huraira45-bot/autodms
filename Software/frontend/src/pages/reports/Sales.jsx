@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ClipboardList, Truck, TrendingUp, Wallet } from 'lucide-react';
+import VehicleStockStatusFilter, { stockStatusLabel } from './VehicleStockStatusFilter';
 import ReportShell, { TH, TD, fmt, fmtInt, todayISO, PeriodControls } from './ReportShell';
 
 const firstOfMonthISO = () => {
@@ -107,9 +108,10 @@ export function VehicleInventory() {
             icon={Truck}
             endpoint="sales/vehicle-inventory"
             defaultParams={{ inStockOnly: '1' }}
-            controls={({ params, updateParam }) => <label>
+            printFilterSummary={params => [stockStatusLabel(params.stockStatus), params.inStockOnly === '1' && 'In stock only (not delivered)'].filter(Boolean).join(' | ')}
+            controls={({ params, updateParam }) => <><VehicleStockStatusFilter params={params} updateParam={updateParam} /><label>
                 <input type="checkbox" checked={params.inStockOnly === '1'} onChange={event => updateParam('inStockOnly', event.target.checked ? '1' : undefined)} /> In stock only (not delivered)
-            </label>}
+            </label></>}
         >
             {(data) => (
                 <>

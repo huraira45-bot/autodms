@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Boxes, ScrollText } from 'lucide-react';
+import VehicleStockStatusFilter, { stockStatusLabel } from './VehicleStockStatusFilter';
 import ReportShell, { TH, TD, fmtInt } from './ReportShell';
 
 const input = { padding: 7, border: '1px solid #cbd5e1', borderRadius: 5, maxWidth: 230 };
@@ -36,7 +37,7 @@ function Filters({ params, updateParam, options, ledger }) {
             <option value="">All variants</option>{options.variants.filter(v => !params.modelId || String(v.ModelID) === params.modelId).map(v => <option key={v.VariantID} value={v.VariantID}>{v.VariantCode} — {v.VariantName}</option>)}
         </select></label>
         <input aria-label={ledger ? 'Search chassis or engine' : 'Search model or variant'} placeholder={ledger ? 'Chassis / engine' : 'Model / variant'} style={input} value={params.search || ''} onChange={e => updateParam('search', e.target.value || undefined)} />
-        {!ledger && <label><input type="checkbox" checked={params.inStockOnly === '1'} onChange={e => updateParam('inStockOnly', e.target.checked ? '1' : undefined)} /> In stock only (not delivered)</label>}
+        {!ledger && <VehicleStockStatusFilter params={params} updateParam={updateParam} />}{!ledger && <label><input type="checkbox" checked={params.inStockOnly === '1'} onChange={e => updateParam('inStockOnly', e.target.checked ? '1' : undefined)} /> In stock only (not delivered)</label>}
         {options.error && <span className="erp-alert danger">Cannot load filters: {options.error}</span>}
     </>;
 }
@@ -44,7 +45,7 @@ function filterText(params, options) {
     return [params.from && `From ${params.from}`, params.to && `to ${params.to}`,
         params.modelId && `Model: ${options.models.find(m => String(m.ModelID) === params.modelId)?.ModelName || params.modelId}`,
         params.variantId && `Variant: ${options.variants.find(v => String(v.VariantID) === params.variantId)?.VariantName || params.variantId}`,
-        params.search && `Search: ${params.search}`, params.inStockOnly === '1' && 'In stock only (not delivered)'].filter(Boolean).join(' | ') || 'All models and variants';
+        params.stockStatus && `Stock status: ${stockStatusLabel(params.stockStatus)}`, params.search && `Search: ${params.search}`, params.inStockOnly === '1' && 'In stock only (not delivered)'].filter(Boolean).join(' | ') || 'All models and variants';
 }
 function Totals({ values }) {
     return <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>{values.map(([label, value]) => <span key={label}>{label}: <strong>{fmtInt(value)}</strong></span>)}</div>;
@@ -61,7 +62,7 @@ export function VehicleInventoryByVariant() {
             rows: data.rows.map(r => [r.ModelName, r.VariantCode, r.VariantName].map(csv).concat([r.TotalVehicles, r.InStock, r.AtMaster, r.InTransit, r.AtDealer, r.Allocated, r.Delivered, r.Returned, r.OpenAllocation])),
         })}>
         {data => <>
-            <Totals values={[[ 'Variants', data.totals.variants ], [ 'In stock', data.totals.InStock ], [ 'At dealer', data.totals.AtDealer ], [ 'Allocated', data.totals.Allocated ], [ 'Delivered', data.totals.Delivered ], [ 'Returned', data.totals.Returned ]]} />
+            <Totals values={[[ 'Variants', data.totals.variants ], [ 'In stock', data.totals.InStock ], [ 'At dealer', data.totals.AtDealer ], [ 'In transit', data.totals.InTransit ], [ 'Allocated', data.totals.Allocated ], [ 'Delivered', data.totals.Delivered ], [ 'Returned', data.totals.Returned ]]} />
             <div className="card" style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead><tr><TH>Model</TH><TH>Variant</TH>{['Recorded', 'Stock', 'At Master', 'In transit', 'At dealer', 'Allocated', 'Delivered', 'Returned', 'Open allocation'].map(label => <TH key={label} align="right">{label}</TH>)}<TH>Ledger</TH></tr></thead>
                 <tbody>{!data.rows.length && <tr><td colSpan={12} style={{ padding: 24 }}>No variants match these filters.</td></tr>}

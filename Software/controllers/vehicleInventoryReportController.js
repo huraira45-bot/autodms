@@ -1,5 +1,6 @@
 const { sql, getPool } = require('../config/db');
 const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
+const { parseStockStatus } = require('../services/vehicleStockStatusFilter');
 
 function id(value, label) {
     if (value === undefined || value === '') return null;
@@ -17,7 +18,7 @@ function filters(query) {
     const modelId=id(query.modelId,'model'),variantId=id(query.variantId,'variant');
     const from=day(query.from),to=day(query.to);
     if (from && to && from>to) throw new Error('From date must not be after To date.');
-    return { modelId,variantId,from,to: to ? new Date(to.getTime()+86400000) : null,search:String(query.search||'').trim().slice(0,150) };
+    return { stockStatus:parseStockStatus(query.stockStatus),modelId,variantId,from,to: to ? new Date(to.getTime()+86400000) : null,search:String(query.search||'').trim().slice(0,150) };
 }
 function bind(request, f) {
     request.input('model',sql.Int,f.modelId).input('variant',sql.Int,f.variantId)
@@ -54,14 +55,15 @@ exports.summary = async (req,res) => {
     const f=validated(req,res);if(!f)return;
     try {
         const pool=await getPool();
-        const r=await bind(pool.request(),f).input('stockOnly',sql.Bit,req.query.inStockOnly==='1').query(`
+        const r=await bind(pool.request(),f).input('stockOnly',sql.Bit,req.query.inStockOnly==='1').input('stockStatus',sql.NVarChar(20),f.stockStatus).query(`
             WITH stock AS (
                 SELECT v.VehicleID,v.VariantID,v.AllocationType,
                     CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 'Delivered' ELSE v.Status END AS Status
                 FROM dms_Vehicle v
             ), scopedStock AS (
                 SELECT * FROM stock
-                WHERE @stockOnly=0 OR Status NOT IN ('Delivered','Sold','Returned')
+                WHERE (@stockOnly=0 OR Status NOT IN ('Delivered','Sold','Returned'))
+                    AND (@stockStatus IS NULL OR Status=@stockStatus)
             )
             SELECT m.ModelID,m.ModelName,vr.VariantID,vr.VariantCode,vr.VariantName,
                 COUNT(s.VehicleID) AS TotalVehicles,
@@ -78,7 +80,7 @@ exports.summary = async (req,res) => {
             WHERE (@model IS NULL OR m.ModelID=@model) AND (@variant IS NULL OR vr.VariantID=@variant)
                 AND (@search IS NULL OR m.ModelName LIKE @search OR vr.VariantName LIKE @search OR vr.VariantCode LIKE @search)
             GROUP BY m.ModelID,m.ModelName,vr.VariantID,vr.VariantCode,vr.VariantName ORDER BY m.ModelName,vr.VariantName;`);
-        const rows=r.recordset.filter(row=>req.query.inStockOnly!=='1' || row.InStock>0);
+        const rows=r.recordset.filter(row=>(req.query.inStockOnly!=='1' || row.InStock>0) && (!f.stockStatus || row.TotalVehicles>0));
         const totals={variants:rows.length};
         for(const key of ['TotalVehicles','InStock','AtMaster','InTransit','AtDealer','Allocated','Delivered','Returned','OpenAllocation']) totals[key]=rows.reduce((sum,row)=>sum+Number(row[key]),0);
         res.json({rows,totals});

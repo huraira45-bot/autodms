@@ -149,3 +149,11 @@ cd /d "D:\saher 2.0\autodms" && git -c gc.auto=0 -c maintenance.auto=false pull 
 
 Then press Ctrl+F5. For rollback-only development verification, run
 `node scripts/verify-vehicle-inventory.js` from Software.
+
+## Current stock status filter
+
+Vehicle Inventory and Vehicle Inventory by Variant now offer **Stock status**: All statuses, At Dealer, In Transit, At Master and Allocated. The selection combines with the existing In stock only option and, on the variant report, model/variant/search. It filters effective current vehicle status before totals are calculated; linked gate-pass deliveries cannot reappear through a stale saved AtDealer status. Variant grouping, its Excel export and both printed reports reflect the filter. Empty variants are hidden when a status is selected. The summary also shows an In transit total.
+
+These choices use the existing recorded status, not free-text Location. Allocated is a separate choice; this change does not infer the physical location of allocated vehicles. The historical inventory ledger is unchanged. No migration, stock adjustment, accounting entry or permission grant is required. Existing Vehicle Inventory management already had its own status dropdown.
+
+Validation: 23 vehicleInventoryReports tests cover detailed status matching, filtered stock/value totals, delivery override, bound variant scope, invalid input and existing inventory/ledger behavior. Frontend build passed. Pull the source on the live server, rebuild frontend, restart AutoDMS and Ctrl+F5.
