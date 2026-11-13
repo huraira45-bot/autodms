@@ -1,0 +1,7 @@
+# Compact General Ledger Detail printing
+
+General Ledger Detail retains A4 portrait printing and uses a scoped fixed column layout: date 9%, voucher 12%, type 5%, narration 27%, party/job 17%, debit/credit/balance 10% each. Dates, vouchers, types and amounts stay on one line; narration and party details wrap normally without truncation. Party and job-card references share inline space on print. Tight row padding, top-aligned cells, a compact account summary and white backgrounds reduce wasted space. On-screen layout, all-row printing, running balances, amounts and Excel output are unchanged. Other reports retain their existing print CSS.
+
+Verified with the actual React GLDetail page, shared styles and print-all hook in headless Chrome using 322 synthetic transactions including long narratives and party names. A4 portrait PDF contains every unique voucher across ten pages: 27 transactions on the first page and 29-35 on subsequent pages, with repeated column headings, a single closing total and all text inside page bounds. First page visually inspected. This density is fixture-specific; longer narratives may need more pages. No live financial data was used. Production frontend build passed. Temporary fixture sources were removed; private PDF/image artifacts are excluded from Git.
+
+Deploy the source, rebuild Software/frontend, restart AutoDMS and Ctrl+F5. No migration or accounting/data update is needed.

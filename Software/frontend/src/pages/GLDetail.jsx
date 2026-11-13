@@ -175,7 +175,7 @@ export default function GLDetail() {
     };
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div className="general-ledger-report" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <PrintHeader title="General Ledger Detail"
                 subtitle={data?.account ? `${data.account.GLCode} — ${data.account.GLTitle}` : null}
                 printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}
@@ -231,7 +231,7 @@ export default function GLDetail() {
             {data && (
                 <>
                     {/* Header card */}
-                    <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+                    <div className="card ledger-summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
                         <div>
                             <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', marginBottom: 4 }}>Account</div>
                             <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>
@@ -263,8 +263,8 @@ export default function GLDetail() {
                     </div>
 
                     {/* Lines table */}
-                    <div className="card">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: 'var(--primary)' }}>
+                    <div className="card ledger-transactions">
+                        <div className="ledger-transactions-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: 'var(--primary)' }}>
                             <ListChecks size={20} />
                             <strong>Transactions ({data.lines.length})</strong>
                         </div>
@@ -274,7 +274,12 @@ export default function GLDetail() {
                             </div>
                         ) : (
                             <div style={{ overflowX: 'auto' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                                <table className="ledger-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                                    <colgroup>
+                                        <col className="ledger-col-date" /><col className="ledger-col-voucher" /><col className="ledger-col-type" />
+                                        <col className="ledger-col-narration" /><col className="ledger-col-party" />
+                                        <col className="ledger-col-amount" /><col className="ledger-col-amount" /><col className="ledger-col-amount" />
+                                    </colgroup>
                                     <thead>
                                         <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                                             <th style={{ padding: 10, textAlign: 'left',  fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Date</th>
@@ -306,8 +311,8 @@ export default function GLDetail() {
                                                     <td style={{ padding: '8px 12px' }}>{l.VoucherType}</td>
                                                     <td style={{ padding: '8px 12px', color: '#475569' }}>{l.Narration}</td>
                                                     <td style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#64748b' }}>
-                                                        {l.PartyName && <div>{l.PartyName}</div>}
-                                                        {l.JobCardNo && <div>JC: {l.JobCardNo}</div>}
+                                                        {l.PartyName && <div className="ledger-party-name">{l.PartyName}</div>}
+                                                        {l.JobCardNo && <div className="ledger-job-card">JC: {l.JobCardNo}</div>}
                                                     </td>
                                                     <td style={{ padding: '8px 12px', textAlign: 'right' }}>{Number(l.Debit)  ? fmt(l.Debit)  : '—'}</td>
                                                     <td style={{ padding: '8px 12px', textAlign: 'right' }}>{Number(l.Credit) ? fmt(l.Credit) : '—'}</td>
