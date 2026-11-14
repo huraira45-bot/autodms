@@ -1,6 +1,12 @@
 const { sql, dbConfig, getPool } = require('../config/db');
 const { postStoreSaleVoucher } = require('../services/storeSalePostingService');
 const { assertEnoughStock } = require('../services/stockBalanceService');
+const { resolveRole } = require('./systemAccountsController');
+async function requireFreightSetup(value) {
+    const amount = Number(value ?? 0);
+    if (!Number.isFinite(amount) || amount < 0) throw new Error('Delivery Expense must be a valid non-negative amount.');
+    if (amount > 0) await resolveRole('STORE_SALE_FREIGHT_RECOVERY');
+}
 
 exports.saveStoreSale = async (req, res) => {
   try {
@@ -27,6 +33,8 @@ exports.saveStoreSale = async (req, res) => {
         });
       }
     }
+
+    await requireFreightSetup(DeliveryExpense);
 
     // Block over-sell: every line's quantity must be ≤ current on-hand
     try { await assertEnoughStock(pool.request(), Items); }
@@ -236,6 +244,7 @@ exports.updateStoreSale = async (req, res) => {
             TotalBillAmount, TotalTaxAmount, TotalDiscount, NetPayable, WHID, PaymentBankID,
             DeliveryExpense, CareOff, Items,
         } = req.body;
+        await requireFreightSetup(DeliveryExpense);
 
         await new sql.Request(tx)
             .input('id',   sql.Int,           id)
@@ -294,31 +303,17 @@ exports.updateStoreSale = async (req, res) => {
                         VALUES (@sid, @iid, @qty, @rate, @pr, @tp, @ta, @da, @na, @gst, @whid)`);
         }
 
+        // Commit the edited data and its replacement invoice journal together.
+        // Any posting failure restores the previous draft header and lines.
+        await new sql.Request(tx)
+            .input('id', sql.Int, id)
+            .input('by', sql.Int, req.user?.userId || null)
+            .input('byName', sql.NVarChar(100), req.user?.userName || '')
+            .query(`UPDATE data_StoreSaleInfo
+                    SET IsFinalized=1, FinalizedBy=@by, FinalizedByName=@byName, FinalizedAt=GETDATE()
+                    WHERE SaleID=@id`);
+        const voucherId = await postStoreSaleVoucher(id, req.user, tx);
         await tx.commit();
-
-        // Re-finalize: after a successful edit, post a fresh SS voucher in a
-        // second transaction. Mirrors the saveStoreSale auto-finalize flow so
-        // an unfinalize -> edit -> save round-trip ends with a Posted voucher.
-        let voucherId = null;
-        const postTx = new sql.Transaction(pool);
-        await postTx.begin();
-        try {
-            await new sql.Request(postTx)
-                .input('id', sql.Int, id)
-                .input('by', sql.Int, req.user?.userId || null)
-                .input('byName', sql.NVarChar(100), req.user?.userName || '')
-                .query(`UPDATE data_StoreSaleInfo
-                        SET IsFinalized=1, FinalizedBy=@by, FinalizedByName=@byName, FinalizedAt=GETDATE()
-                        WHERE SaleID=@id`);
-            voucherId = await postStoreSaleVoucher(id, req.user, postTx);
-            await postTx.commit();
-        } catch (postErr) {
-            try { await postTx.rollback(); } catch {}
-            console.error('updateStoreSale re-finalize failed:', postErr);
-            return res.status(400).json({
-                error: 'Store Sale data saved but GL re-posting failed: ' + postErr.message,
-            });
-        }
         res.json({ message: 'Store Sale updated.', VoucherID: voucherId });
     } catch (err) {
         try { await tx.rollback(); } catch {}
