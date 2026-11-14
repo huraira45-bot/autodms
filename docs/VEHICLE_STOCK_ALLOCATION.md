@@ -11,3 +11,5 @@ Stock type is distinct from customer assignment: an Open Allocation vehicle can 
 The existing **Vehicle Inventory** report now additionally displays a Stock type column and Booked/Open Allocation filter. It preserves existing status and undelivered-stock behavior. The variant inventory ledger is unchanged.
 
 Validation: 68 tests across vehicleAllocationReport, vehicleInventoryReports and salesReportModule passed; production frontend build passed. Covers parameterized chassis/DMS/customer search, wildcard escaping, separate assignment/type totals, link SQL guards, stock/type filters, invalid input, delivery exclusion, API access and navigation exposure. No browser interaction or actual SQL integration test is claimed. Source deployment remains manual: git pull, frontend build, PM2 restart/save, Ctrl+F5. No data migration.
+
+Update 14 November 2026: At Dealer now includes vehicles allocated there until delivery. Allocation no longer forms a separate physical stock location. Read docs/VEHICLE_STOCK_LEDGER.md, Allocated stock stays in its location, for history-based location retention, included-subset totals and validation.

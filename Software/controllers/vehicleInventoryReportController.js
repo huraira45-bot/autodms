@@ -1,6 +1,6 @@
 const { sql, getPool } = require('../config/db');
 const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
-const { parseStockStatus } = require('../services/vehicleStockStatusFilter');
+const { parseStockStatus, allocatedStockPositionSql } = require('../services/vehicleStockStatusFilter');
 
 function id(value, label) {
     if (value === undefined || value === '') return null;
@@ -58,19 +58,22 @@ exports.summary = async (req,res) => {
         const r=await bind(pool.request(),f).input('stockOnly',sql.Bit,req.query.inStockOnly==='1').input('stockStatus',sql.NVarChar(20),f.stockStatus).query(`
             WITH stock AS (
                 SELECT v.VehicleID,v.VariantID,v.AllocationType,
+                    ${allocatedStockPositionSql('v')} AS RecordedStockPosition,
                     CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 'Delivered' ELSE v.Status END AS Status
                 FROM dms_Vehicle v
+            ), positionedStock AS (
+                SELECT *,CASE WHEN Status IN ('Delivered','Sold','Returned') THEN Status ELSE RecordedStockPosition END AS StockPosition FROM stock
             ), scopedStock AS (
-                SELECT * FROM stock
+                SELECT * FROM positionedStock
                 WHERE (@stockOnly=0 OR Status NOT IN ('Delivered','Sold','Returned'))
-                    AND (@stockStatus IS NULL OR Status=@stockStatus)
+                    AND (@stockStatus IS NULL OR (@stockStatus='Allocated' AND Status='Allocated') OR (@stockStatus<>'Allocated' AND StockPosition=@stockStatus))
             )
             SELECT m.ModelID,m.ModelName,vr.VariantID,vr.VariantCode,vr.VariantName,
                 COUNT(s.VehicleID) AS TotalVehicles,
                 SUM(CASE WHEN s.Status NOT IN ('Delivered','Sold','Returned') THEN 1 ELSE 0 END) AS InStock,
-                SUM(CASE WHEN s.Status='AtMaster' THEN 1 ELSE 0 END) AS AtMaster,
-                SUM(CASE WHEN s.Status='InTransit' THEN 1 ELSE 0 END) AS InTransit,
-                SUM(CASE WHEN s.Status='AtDealer' THEN 1 ELSE 0 END) AS AtDealer,
+                SUM(CASE WHEN s.StockPosition='AtMaster' THEN 1 ELSE 0 END) AS AtMaster,
+                SUM(CASE WHEN s.StockPosition='InTransit' THEN 1 ELSE 0 END) AS InTransit,
+                SUM(CASE WHEN s.StockPosition='AtDealer' THEN 1 ELSE 0 END) AS AtDealer,
                 SUM(CASE WHEN s.Status='Allocated' THEN 1 ELSE 0 END) AS Allocated,
                 SUM(CASE WHEN s.Status IN ('Delivered','Sold') THEN 1 ELSE 0 END) AS Delivered,
                 SUM(CASE WHEN s.Status='Returned' THEN 1 ELSE 0 END) AS Returned,

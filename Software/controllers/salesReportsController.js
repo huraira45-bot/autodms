@@ -11,7 +11,7 @@ const { resolveRole } = require('./systemAccountsController');
 const { masterAccountSql } = require('../services/masterPaymentPositionService');
 const { bookingAccountReconciliationQuery } = require('../services/bookingPaymentReportQuery');
 const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
-const { parseStockStatus, parseAllocationType } = require('../services/vehicleStockStatusFilter');
+const { parseStockStatus, parseAllocationType, allocatedStockPositionSql, stockPosition } = require('../services/vehicleStockStatusFilter');
 
 function parseRange(req) {
     const today = new Date();
@@ -103,6 +103,7 @@ exports.vehicleInventory = async (req, res) => {
             SELECT v.VehicleID, v.ChasisNo, v.EngineNo, v.Color, v.ManufactureYear,
                    v.Status, CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 'Delivered' ELSE v.Status END AS ReportStatus,
                    v.Location, v.AllocationType, v.ReceivedAt,
+                   ${allocatedStockPositionSql('v')} AS RecordedStockPosition,
                    m.ModelCode, m.ModelName, m.BrandName,
                    vr.VariantName, vr.VariantCode,
                    vr.StandardPrice
@@ -121,6 +122,7 @@ exports.vehicleInventory = async (req, res) => {
             ModelName:       x.ModelName || '',
             Variant:         x.VariantName || '',
             Status:          x.ReportStatus || x.Status || '',
+            StockPosition:   stockPosition(x) || '',
             Location:        x.Location || '',
             AllocationType:  x.AllocationType || '',
             StandardPrice:   +Number(x.StandardPrice || 0).toFixed(2),
@@ -129,13 +131,14 @@ exports.vehicleInventory = async (req, res) => {
         }));
 
         const isInStock = row => !['Delivered','Sold','Returned'].includes(row.Status);
-        const rows = inventoryRows.filter(row => (req.query.inStockOnly !== '1' || isInStock(row)) && (!stockStatus || row.Status === stockStatus) && (!allocationType || row.AllocationType === allocationType));
+        const rows = inventoryRows.filter(row => (req.query.inStockOnly !== '1' || isInStock(row)) && (!stockStatus || (stockStatus === 'Allocated' ? row.Status === 'Allocated' : row.StockPosition === stockStatus)) && (!allocationType || row.AllocationType === allocationType));
         const inStock = rows.filter(isInStock);
         const totals = {
             total:         rows.length,
             inStock:       inStock.length,
             valueInStock:  +inStock.reduce((s, x) => s + x.StandardPrice, 0).toFixed(2),
-            byStatus:      rows.reduce((m, x) => ((m[x.Status || 'Unknown'] = (m[x.Status || 'Unknown'] || 0) + 1), m), {}),
+            allocated:     rows.filter(x => x.Status === 'Allocated').length,
+            byStatus:      rows.reduce((m, x) => ((m[x.StockPosition || 'Unknown'] = (m[x.StockPosition || 'Unknown'] || 0) + 1), m), {}),
             byModel:       rows.reduce((m, x) => ((m[x.ModelName || 'Unknown'] = (m[x.ModelName || 'Unknown'] || 0) + 1), m), {}),
         };
 

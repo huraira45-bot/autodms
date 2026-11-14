@@ -58,13 +58,13 @@ export function VehicleInventoryByVariant() {
         defaultParams={{ inStockOnly: '1' }} superWide printFilterSummary={p => filterText(p, options)}
         controls={props => <Filters {...props} options={options} />}
         excelExport={data => ({ filename: 'vehicle-inventory-by-variant.csv',
-            headers: ['Model', 'Variant code', 'Variant', 'Recorded vehicles', 'In stock', 'At Master', 'In transit', 'At dealer', 'Allocated', 'Delivered', 'Returned', 'Open allocation stock'],
+            headers: ['Model', 'Variant code', 'Variant', 'Recorded vehicles', 'In stock', 'At Master', 'In transit', 'At dealer', 'Allocated (included)', 'Delivered', 'Returned', 'Open allocation stock'],
             rows: data.rows.map(r => [r.ModelName, r.VariantCode, r.VariantName].map(csv).concat([r.TotalVehicles, r.InStock, r.AtMaster, r.InTransit, r.AtDealer, r.Allocated, r.Delivered, r.Returned, r.OpenAllocation])),
         })}>
         {data => <>
-            <Totals values={[[ 'Variants', data.totals.variants ], [ 'In stock', data.totals.InStock ], [ 'At dealer', data.totals.AtDealer ], [ 'In transit', data.totals.InTransit ], [ 'Allocated', data.totals.Allocated ], [ 'Delivered', data.totals.Delivered ], [ 'Returned', data.totals.Returned ]]} />
+            <Totals values={[[ 'Variants', data.totals.variants ], [ 'In stock', data.totals.InStock ], [ 'At dealer', data.totals.AtDealer ], [ 'In transit', data.totals.InTransit ], [ 'Allocated (included)', data.totals.Allocated ], [ 'Delivered', data.totals.Delivered ], [ 'Returned', data.totals.Returned ]]} />
             <div className="card" style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead><tr><TH>Model</TH><TH>Variant</TH>{['Recorded', 'Stock', 'At Master', 'In transit', 'At dealer', 'Allocated', 'Delivered', 'Returned', 'Open allocation'].map(label => <TH key={label} align="right">{label}</TH>)}<TH>Ledger</TH></tr></thead>
+                <thead><tr><TH>Model</TH><TH>Variant</TH>{['Recorded', 'Stock', 'At Master', 'In transit', 'At dealer', 'Allocated (included)', 'Delivered', 'Returned', 'Open allocation'].map(label => <TH key={label} align="right">{label}</TH>)}<TH>Ledger</TH></tr></thead>
                 <tbody>{!data.rows.length && <tr><td colSpan={12} style={{ padding: 24 }}>No variants match these filters.</td></tr>}
                     {data.rows.map(r => <tr key={r.VariantID} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <TD>{r.ModelName}</TD><TD>{r.VariantName}<div><small>{r.VariantCode}</small></div></TD>
@@ -73,7 +73,7 @@ export function VehicleInventoryByVariant() {
                     </tr>)}
                 </tbody>
             </table></div>
-            <p className="hint">Stock includes vehicles at Master, in transit, at the dealer and allocated to bookings until delivery or gate-pass issuance. Open-allocation stock is included in the stock total. With In stock only selected, all quantities and exports exclude delivered and returned vehicles.</p>
+            <p className="hint">Stock includes vehicles at Master, in transit, at the dealer and allocated to bookings until delivery or gate-pass issuance. At Dealer includes allocated vehicles last recorded at the dealer until delivery. Allocated is a subset already included in stock and location totals; do not add it again. Open-allocation stock is included in the stock total. With In stock only selected, all quantities and exports exclude delivered and returned vehicles.</p>
         </>}
     </ReportShell>;
 }

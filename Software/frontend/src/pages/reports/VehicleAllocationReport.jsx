@@ -29,8 +29,8 @@ export default function VehicleAllocationReport(){
         subtitle="See which vehicle is linked to which booking and customer. Booked / Open Allocation is the stock type; assignment shows its current customer link."
         controls={props=><Filters {...props}/>}
         printFilterSummary={p=>[p.search&&`Search: ${p.search}`,stockStatusLabel(p.stockStatus),p.allocationType&&stockTypeLabel(p.allocationType),assignmentLabel(p.assignment),p.inStockOnly==='1'&&'In stock only'].filter(Boolean).join(' | ')}
-        excelExport={data=>({filename:'vehicle-stock-allocation.csv',headers:['Chassis','Engine','Model','Variant','Color','Status','Location','Stock type','Assignment','Booking','DMS booking number','Booking date','Promised month','Customer','CNIC','Phone','Salesperson','Booking status'],
-            rows:data.rows.map(r=>[r.ChasisNo,r.EngineNo,r.ModelName,r.VariantName,r.Color,stockStatusLabel(r.VehicleStatus)==='All statuses'?r.VehicleStatus:stockStatusLabel(r.VehicleStatus),r.Location,stockTypeLabel(r.AllocationType),assignmentLabel(r.AllocationState),r.BookingNo,r.DMSBookingNumber,r.BookingDate,r.PromisedDeliveryMonth,r.CustomerName,r.CNIC,r.Phone,r.SalespersonName,r.BookingStatus].map(csv))})}>
+        excelExport={data=>({filename:'vehicle-stock-allocation.csv',headers:['Chassis','Engine','Model','Variant','Color','Stock location','Location','Stock type','Assignment','Booking','DMS booking number','Booking date','Promised month','Customer','CNIC','Phone','Salesperson','Booking status'],
+            rows:data.rows.map(r=>[r.ChasisNo,r.EngineNo,r.ModelName,r.VariantName,r.Color,stockStatusLabel(r.StockPosition)==='All statuses'?r.StockPosition:stockStatusLabel(r.StockPosition),r.Location,stockTypeLabel(r.AllocationType),assignmentLabel(r.AllocationState),r.BookingNo,r.DMSBookingNumber,r.BookingDate,r.PromisedDeliveryMonth,r.CustomerName,r.CNIC,r.Phone,r.SalespersonName,r.BookingStatus].map(csv))})}>
         {data=><>
             <div className="card" style={{display:'flex',gap:20,flexWrap:'wrap'}}>{[['Vehicles',data.totals.vehicles],['Allocated',data.totals.allocated],['Unallocated',data.totals.unallocated],['Booked stock',data.totals.booked],['Open Allocation stock',data.totals.openAllocation],['Review links',data.totals.review]].map(([label,value])=><span key={label}>{label}: <strong>{fmtInt(value)}</strong></span>)}</div>
             <div className="card" style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
@@ -38,7 +38,7 @@ export default function VehicleAllocationReport(){
                 <tbody>{!data.rows.length&&<tr><td colSpan={8} style={{padding:24}}>No vehicles match these filters.</td></tr>}
                     {data.rows.map(r=><tr key={r.VehicleID} style={{borderBottom:'1px solid #e2e8f0'}}>
                         <TD>{r.ChasisNo}<div><small>{r.EngineNo}</small></div></TD><TD>{r.ModelName}<div>{r.VariantName}</div><small>{r.Color}</small></TD>
-                        <TD>{['AtDealer','InTransit','AtMaster','Allocated'].includes(r.VehicleStatus)?stockStatusLabel(r.VehicleStatus):r.VehicleStatus}<div>{r.Location}</div></TD>
+                        <TD>{['AtDealer','InTransit','AtMaster'].includes(r.StockPosition)?stockStatusLabel(r.StockPosition):r.StockPosition}<div>{r.Location}</div></TD>
                         <TD>{stockTypeLabel(r.AllocationType)}</TD><TD>{assignmentLabel(r.AllocationState)}</TD>
                         <TD>{r.BookingID?<Link to={`/sales/bookings/${r.BookingID}`}>{r.BookingNo}</Link>:'—'}<div>DMS: {r.DMSBookingNumber||'—'}</div><small>{r.BookingStatus} {r.BookingDate}</small>{r.BookingID&&<div><small>Promised: {formatDeliveryMonth(r.PromisedDeliveryMonth)}</small></div>}</TD>
                         <TD>{r.CustomerName||(r.AllocationState==='Review'?'Review booking links':'—')}<div><small>{r.CNIC}</small></div><small>{r.Phone}</small></TD><TD>{r.SalespersonName||'—'}</TD>

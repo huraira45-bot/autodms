@@ -1,8 +1,9 @@
 const { sql, getPool } = require('../config/db');
 const { vehicleDeliveryLockedSql } = require('../services/vehicleDeliveryLockService');
-const { parseStockStatus, parseAllocationType } = require('../services/vehicleStockStatusFilter');
+const { parseStockStatus, parseAllocationType, allocatedStockPositionSql } = require('../services/vehicleStockStatusFilter');
 const query = `WITH inventory AS (
     SELECT v.VehicleID,v.ChasisNo,v.EngineNo,v.Color,v.Location,v.AllocationType,
+        ${allocatedStockPositionSql('v')} AS RecordedStockPosition,
         CASE WHEN ${vehicleDeliveryLockedSql('v')} THEN 'Delivered' ELSE v.Status END AS VehicleStatus,
         m.ModelName,vr.VariantName,vr.VariantCode,b.BookingID,b.BookingNo,b.DMSBookingNumber,
         b.Status AS BookingStatus,CONVERT(varchar(10),COALESCE(b.BookingDate,b.CreatedAt),23) AS BookingDate,
@@ -28,9 +29,9 @@ const query = `WITH inventory AS (
           AND searched.Status<>'Cancelled'
           AND (searched.BookingNo LIKE @search OR searched.DMSBookingNumber LIKE @search OR customer.PartyName LIKE @search))
 )
-SELECT * FROM inventory
+SELECT * FROM (SELECT inventory.*,CASE WHEN VehicleStatus IN ('Delivered','Sold','Returned') THEN VehicleStatus ELSE RecordedStockPosition END AS StockPosition FROM inventory) locatedStock
 WHERE (@stockOnly=0 OR VehicleStatus NOT IN ('Delivered','Sold','Returned'))
-  AND (@stockStatus IS NULL OR VehicleStatus=@stockStatus)
+  AND (@stockStatus IS NULL OR (@stockStatus='Allocated' AND VehicleStatus='Allocated') OR (@stockStatus<>'Allocated' AND StockPosition=@stockStatus))
   AND (@allocationType IS NULL OR AllocationType=@allocationType)
   AND (@assignment IS NULL OR AllocationState=@assignment)
 ORDER BY ModelName,VariantName,ChasisNo,VehicleID;`;

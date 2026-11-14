@@ -109,7 +109,7 @@ export default function VehicleInventoryAdmin() {
                 </div>
                 <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }}>
                     <option value="">All statuses</option>
-                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                    {STATUSES.map(s => <option key={s} value={s}>{s === 'AtDealer' ? 'AtDealer (including allocated)' : s}</option>)}
                 </select>
                 <select value={allocFilter} onChange={e => setAllocFilter(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.875rem' }}>
                     <option value="">All allocation types</option>
@@ -149,7 +149,7 @@ export default function VehicleInventoryAdmin() {
                                         <Td><strong>{v.VariantCode}</strong><div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{v.VariantName}</div></Td>
                                         <Td>{v.Color || '—'}</Td>
                                         <Td><Pill bg={v.AllocationType === 'OpenAllocation' ? '#fef3c7' : '#dbeafe'} col={v.AllocationType === 'OpenAllocation' ? '#92400e' : '#1e40af'}>{v.AllocationType === 'OpenAllocation' ? 'OPEN' : 'BOOKED'}</Pill></Td>
-                                        <Td><Pill bg={st.bg} col={st.col}>{locked ? 'Delivered' : v.Status}</Pill></Td>
+                                        <Td><Pill bg={st.bg} col={st.col}>{locked ? 'Delivered' : v.Status === 'Allocated' ? (v.RecordedStockPosition || 'AtDealer') : v.Status}</Pill>{!locked && v.Status === 'Allocated' && <div><small>Allocated — included in stock</small></div>}</Td>
                                         <Td mono color="#1e40af">{v.CurrentBookingNo || '—'}</Td>
                                         <Td style={{ fontSize: '0.78rem' }}>{v.Location || '—'}</Td>
                                         <Td>

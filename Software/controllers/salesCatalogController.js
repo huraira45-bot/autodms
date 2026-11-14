@@ -17,6 +17,8 @@
 const { sql, getPool } = require('../config/db');
 const { vehicleDeliveryLockedSql, DELIVERY_LOCK_MESSAGE } = require('../services/vehicleDeliveryLockService');
 
+const { allocatedStockPositionSql } = require('../services/vehicleStockStatusFilter');
+
 const VALID_TAX_TREATMENTS = new Set(['NoTax', 'WHTWithheld', 'PlusGST_PrepayRequired', 'PlusGST_DeferredPay']);
 const VALID_VEHICLE_STATUS = new Set(['AtMaster', 'InTransit', 'AtDealer', 'Allocated', 'Delivered', 'Returned', 'Sold']);
 const VALID_ALLOCATION_TYPES = new Set(['Booked', 'OpenAllocation']);
@@ -259,6 +261,7 @@ exports.listVehicles = async (req, res) => {
         const conds = [];
         if (req.query.variantId) { r.input('vid', sql.Int, parseInt(req.query.variantId)); conds.push('v.VariantID=@vid'); }
         if (req.query.status === 'Delivered') conds.push("v.Status IN ('Delivered','Sold')");
+        else if (req.query.status === 'AtDealer') conds.push(`(${allocatedStockPositionSql('v')})='AtDealer' AND NOT ${vehicleDeliveryLockedSql('v')}`);
         else if (req.query.status) { r.input('s', sql.NVarChar(20), req.query.status); conds.push('v.Status=@s'); }
         if (req.query.allocationType) { r.input('at', sql.NVarChar(20), req.query.allocationType); conds.push('v.AllocationType=@at'); }
         if (req.query.search) {
@@ -271,6 +274,7 @@ exports.listVehicles = async (req, res) => {
                    var.ModelID, m.ModelCode, m.ModelName, m.BrandName,
                    v.ChasisNo, v.EngineNo, v.Color, v.ManufactureYear,
                    v.AllocationType, v.Status, v.Location,
+                   ${allocatedStockPositionSql('v')} AS RecordedStockPosition,
                    v.CurrentBookingID, b.BookingNo AS CurrentBookingNo,
                    v.MasterInvoiceVoucherID,
                    v.ReceivedAt, v.SoldDeliveredAt,

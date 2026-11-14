@@ -147,7 +147,7 @@ export function VehicleInventory() {
                                         <TD>{r.Color}</TD>
                                         <TD>{r.Year}</TD>
                                         <TD>{r.Location}</TD>
-                                        <TD><StatusPill v={r.Status} /></TD><TD>{stockTypeLabel(r.AllocationType)}</TD>
+                                        <TD><StatusPill v={r.StockPosition || r.Status} />{r.Status === 'Allocated' && <div><small>Allocated — included in stock</small></div>}</TD><TD>{stockTypeLabel(r.AllocationType)}</TD>
                                         <TD align="right" mono>{fmt(r.StandardPrice)}</TD>
                                         <TD align="right" mono color={r.DaysInStock > 60 ? '#b91c1c' : '#475569'}>
                                             {r.DaysInStock ?? '—'}

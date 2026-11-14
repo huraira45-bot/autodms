@@ -77,9 +77,10 @@ test.each(['AtDealer', 'InTransit', 'AtMaster', 'Allocated'])('detailed inventor
         ChasisNo: `TEST-${index}`, Status, StandardPrice: 100, ModelName: 'Model',
     })).concat([{ ChasisNo: 'STALE-DELIVERED', Status: stockStatus, ReportStatus: 'Delivered', StandardPrice: 900 }])]);
     const res = response(); await legacyReports.vehicleInventory({ query: { stockStatus, inStockOnly: '1' } }, res);
-    expect(res.code).toBe(200); expect(res.data.rows).toHaveLength(1);
-    expect(res.data.rows[0].Status).toBe(stockStatus);
-    expect(res.data.totals).toMatchObject({ total: 1, inStock: 1, valueInStock: 100, byStatus: { [stockStatus]: 1 } });
+    const count = stockStatus === 'AtDealer' ? 2 : 1;
+    expect(res.code).toBe(200); expect(res.data.rows).toHaveLength(count);
+    expect(res.data.rows.every(row => stockStatus === 'Allocated' ? row.Status === 'Allocated' : row.StockPosition === stockStatus)).toBe(true);
+    expect(res.data.totals).toMatchObject({ total: count, inStock: count, valueInStock: count * 100 });
 });
 
 test.each(['AtDealer', 'InTransit'])('variant stock summary binds %s before grouping and drops empty variants', async stockStatus => {
@@ -89,8 +90,8 @@ test.each(['AtDealer', 'InTransit'])('variant stock summary binds %s before grou
     const res = response(); await reports.summary({ query: { stockStatus, modelId: '1', variantId: '2', inStockOnly: '1' } }, res);
     expect(values).toMatchObject({ stockStatus, model: 1, variant: 2, stockOnly: true });
     const statement = query.mock.calls[0][0];
-    expect(statement).toContain('AND (@stockStatus IS NULL OR Status=@stockStatus)');
-    expect(statement.indexOf('Status=@stockStatus')).toBeLessThan(statement.indexOf('COUNT(s.VehicleID)'));
+    expect(statement).toContain('StockPosition=@stockStatus');
+    expect(statement.indexOf('StockPosition=@stockStatus')).toBeLessThan(statement.indexOf('COUNT(s.VehicleID)'));
     expect(statement).toContain("THEN 'Delivered' ELSE v.Status END AS Status");
     expect(res.data.rows).toHaveLength(1); expect(res.data.totals).toMatchObject({ variants: 1, TotalVehicles: 2, InStock: 2, [stockStatus]: 2 });
 });
@@ -100,4 +101,29 @@ test.each(['AtDealer OR 1=1', ['AtDealer'], 'In Transit', 'Returned'])('invalid 
         const res = response(); await report({ query: { stockStatus } }, res);
         expect(res.code).toBe(400); expect(getPool).not.toHaveBeenCalled();
     }
+});
+test('At Dealer includes allocated dealer vehicles but not allocated vehicles still in transit or delivered',async()=>{
+    database([[{ChasisNo:'DEALER',Status:'AtDealer',StandardPrice:100},
+        {ChasisNo:'ALLOCATED-HERE',Status:'Allocated',RecordedStockPosition:'AtDealer',StandardPrice:200},
+        {ChasisNo:'ALLOCATED-TRANSIT',Status:'Allocated',RecordedStockPosition:'InTransit',StandardPrice:300},
+        {ChasisNo:'GATE-PASS',Status:'Allocated',RecordedStockPosition:'AtDealer',ReportStatus:'Delivered',StandardPrice:400}]]);
+    const res=response();await legacyReports.vehicleInventory({query:{inStockOnly:'1',stockStatus:'AtDealer'}},res);
+    expect(res.data.rows.map(row=>row.ChasisNo)).toEqual(['DEALER','ALLOCATED-HERE']);
+    expect(res.data.totals).toMatchObject({total:2,inStock:2,valueInStock:300,allocated:1,byStatus:{AtDealer:2}});
+    const transit=response();await legacyReports.vehicleInventory({query:{stockStatus:'InTransit'}},transit);
+    expect(transit.data.rows.map(row=>row.ChasisNo)).toEqual(['ALLOCATED-TRANSIT']);
+});
+
+test('location summary counts allocated units within their location and retains allocation as a subset',async()=>{
+    const{query}=database([[{TotalVehicles:3,InStock:3,AtDealer:2,InTransit:1,AtMaster:0,Allocated:2,Delivered:0,Returned:0,OpenAllocation:0}]]);
+    const res=response();await reports.summary({query:{}},res);const statement=query.mock.calls[0][0];
+    expect(statement).toContain("SUM(CASE WHEN s.StockPosition='AtDealer'");
+    expect(statement).toContain("SUM(CASE WHEN s.Status='Allocated'");
+    expect(res.data.totals).toMatchObject({TotalVehicles:3,InStock:3,AtDealer:2,InTransit:1,Allocated:2});
+});
+
+test('operational At Dealer filter uses retained location and rejects delivery locks',async()=>{
+    const catalog=require('../controllers/salesCatalogController'),{query}=database([[]]),res=response();
+    await catalog.listVehicles({query:{status:'AtDealer'}},res);expect(res.code).toBe(200);
+    const statement=query.mock.calls[0][0];expect(statement).toContain("CASE WHEN v.Status='Allocated'");expect(statement).toContain("locationHistory.ToStatus IN ('AtDealer','InTransit','AtMaster')");expect(statement).toContain("ELSE v.Status END)='AtDealer' AND NOT");
 });
