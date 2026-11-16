@@ -3327,3 +3327,27 @@ textarea:disabled,
   body.print-compact .general-ledger-report .ledger-job-card { display: inline; }
   body.print-compact .general-ledger-report .ledger-party-name + .ledger-job-card::before { content: ' / '; }
 }
+
+/* Vehicle History: print every job card's work, including collapsed cards. */
+@media print {
+  body.print-compact .vehicle-history-report { gap: 4pt !important; }
+  body.print-compact .vehicle-history-report .card {
+    padding: 4pt !important; margin: 0 0 5pt !important; box-shadow: none !important;
+    overflow: visible !important; break-inside: auto !important; page-break-inside: auto !important;
+  }
+  body.print-compact .vehicle-history-report .vehicle-history-details {
+    display: flex !important; padding: 4pt 0 !important; gap: 5pt !important; background: #fff !important;
+  }
+  body.print-compact .vehicle-history-report .vehicle-history-job-header {
+    grid-template-columns: 1fr auto !important; padding: 4pt 0 !important; gap: 4pt !important;
+    break-after: avoid; page-break-after: avoid;
+  }
+  body.print-compact .vehicle-history-report .vehicle-history-job-header div { gap: 5pt !important; }
+  body.print-compact .vehicle-history-report .vehicle-history-job-header span,
+  body.print-compact .vehicle-history-report .vehicle-history-job-header strong { font-size: 8pt !important; }
+  body.print-compact .vehicle-history-report th,
+  body.print-compact .vehicle-history-report td { min-width: 0 !important; font-size: 7.5pt !important; padding: 2pt 3pt !important; }
+  body.print-compact .vehicle-history-report .vehicle-history-details > div { min-width: 0 !important; }
+  body.print-compact .vehicle-history-report .vehicle-history-section > div:first-child { break-after: avoid; page-break-after: avoid; }
+  body.print-compact .vehicle-history-report .vehicle-history-empty-section { display: none !important; }
+}

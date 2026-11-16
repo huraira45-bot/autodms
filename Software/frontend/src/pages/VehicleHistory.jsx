@@ -7,9 +7,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Loader2, Eye, Car, Lock, ChevronDown, ChevronRight, Wrench, Package, ExternalLink } from 'lucide-react';
+import { Search, Loader2, Eye, Car, Lock, ChevronDown, ChevronRight, Wrench, Package, ExternalLink, Printer } from 'lucide-react';
 import { fmtDate } from '../utils/datetime';
 import { ErpControlPanel } from '../components/erp';
+import PrintHeader from '../components/ReportPrintHeader';
 
 const API = '/api/workshop';
 const fmt = (n) => Number(n || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,6 +23,7 @@ export default function VehicleHistory() {
     const [engine, setEngine] = useState(params.get('engine') || '');
     const [excludeJc] = useState(params.get('excludeJc') || '');
     const [data, setData] = useState(null);
+    const [appliedFilters, setAppliedFilters] = useState(null);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState('');
     // Expanded JC set — controlled by the caret at the start of each row.
@@ -41,6 +43,7 @@ export default function VehicleHistory() {
                 params: { regNo: r, chassis: c, engine: e, excludeJc },
             });
             setData(res.data);
+            setAppliedFilters({ regNo: r, chassis: c, engine: e, excludeJc });
             // Auto-expand the newest JC so the page is useful at first glance
             if (res.data.rows?.length) setExpanded(new Set([res.data.rows[0].JobCardId]));
         } catch (ex) { setErr(ex.response?.data?.error || ex.message); setData(null); }
@@ -50,6 +53,12 @@ export default function VehicleHistory() {
     useEffect(() => {
         if (regNo || chassis || engine) load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        const alreadyCompact = document.body.classList.contains('print-compact');
+        document.body.classList.add('print-compact');
+        return () => { if (!alreadyCompact) document.body.classList.remove('print-compact'); };
     }, []);
 
     const runSearch = (e) => {
@@ -62,13 +71,18 @@ export default function VehicleHistory() {
     const collapseAll = () => setExpanded(new Set());
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="vehicle-history-report" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <PrintHeader title="Vehicle History"
+                filterSummary={appliedFilters ? [appliedFilters.regNo && `Registration: ${appliedFilters.regNo}`, appliedFilters.chassis && `Chassis: ${appliedFilters.chassis}`, appliedFilters.engine && `Engine: ${appliedFilters.engine}`, appliedFilters.excludeJc && `Excluding current job card ID: ${appliedFilters.excludeJc}`].filter(Boolean).join(' | ') : ''}
+                printedAt={new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })} />
             <ErpControlPanel
                 title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Car size={14} color="var(--erp-brand)" /> Vehicle History</span>}
+                actions={<button type="button" className="erp-btn erp-btn-primary no-print" disabled={loading || !data}
+                    onClick={() => window.print()}><Printer size={14} /> Print history</button>}
                 subtitle="Every Job Card ever posted against the vehicle — click a row to see the labour, sublet, and parts performed."
             />
 
-            <form onSubmit={runSearch} className="card" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 12, alignItems: 'end' }}>
+            <form onSubmit={runSearch} className="card no-print" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 12, alignItems: 'end' }}>
                 <div className="form-group">
                     <label>Registration #</label>
                     <input type="text" value={regNo} onChange={e => setRegNo(e.target.value)} placeholder="e.g. BGF-523" />
@@ -97,8 +111,8 @@ export default function VehicleHistory() {
                         <Stat label="Sublet" value={'PKR ' + fmt(data.totals.sublet)} />
                         <Stat label="Total"  value={'PKR ' + fmt(data.totals.total)} strong />
                         <div style={{ flex: 1 }} />
-                        <button className="btn" type="button" onClick={expandAll}   style={{ fontSize: 12 }}>Expand All</button>
-                        <button className="btn" type="button" onClick={collapseAll} style={{ fontSize: 12, background: '#e2e8f0', color: '#475569' }}>Collapse All</button>
+                        <button className="btn no-print" type="button" onClick={expandAll}   style={{ fontSize: 12 }}>Expand All</button>
+                        <button className="btn no-print" type="button" onClick={collapseAll} style={{ fontSize: 12, background: '#e2e8f0', color: '#475569' }}>Collapse All</button>
                     </div>
 
                     {data.rows.length === 0 && (
@@ -125,16 +139,16 @@ function JCCard({ jc, open, onToggle, onOpen }) {
         ? { label: 'Finalized', bg: '#d1fae5', color: '#065f46' }
         : { label: 'Draft',     bg: '#fef3c7', color: '#92400e' };
     return (
-        <div className="card" style={{
+        <div className="card vehicle-history-job" style={{
             padding: 0, overflow: 'hidden',
             ...(jc.IsLegacy ? { borderLeft: '4px solid #f59e0b', background: '#fffbeb' } : {}),
         }}>
-            <div onClick={onToggle}
+            <div className="vehicle-history-job-header" onClick={onToggle}
                  style={{ padding: '12px 14px', display: 'grid',
                           gridTemplateColumns: '24px 1fr auto', gap: 12, alignItems: 'center',
                           cursor: 'pointer', background: open ? '#f8fafc' : 'white',
                           borderBottom: open ? '1px solid #e2e8f0' : 'none' }}>
-                {open ? <ChevronDown size={16} color="#64748b" /> : <ChevronRight size={16} color="#64748b" />}
+                <span className="no-print">{open ? <ChevronDown size={16} color="#64748b" /> : <ChevronRight size={16} color="#64748b" />}</span>
                 <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
                     <strong style={{ fontFamily: 'monospace', color: 'var(--primary)', fontSize: '0.95rem' }}>{jc.JobCardNo}</strong>
                     <span style={{ fontSize: '0.85rem', color: '#475569' }}>{fmtDate(jc.JobCardDate)}</span>
@@ -156,7 +170,7 @@ function JCCard({ jc, open, onToggle, onOpen }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>PKR {fmt(jc.TotalAmount)}</div>
                     {jc.IsLegacy !== 1 && (
-                        <button onClick={e => { e.stopPropagation(); onOpen(); }} title="Open Job Card"
+                        <button className="no-print" onClick={e => { e.stopPropagation(); onOpen(); }} title="Open Job Card"
                                 style={{ background: 'transparent', border: '1px solid #cbd5e1', borderRadius: 6, padding: 6, cursor: 'pointer', color: '#475569' }}>
                             <ExternalLink size={14} />
                         </button>
@@ -164,8 +178,8 @@ function JCCard({ jc, open, onToggle, onOpen }) {
                 </div>
             </div>
 
-            {open && (
-                <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 14, background: '#fafafa' }}>
+            {(
+                <div className="vehicle-history-details" style={{ padding: 14, display: open ? 'flex' : 'none', flexDirection: 'column', gap: 14, background: '#fafafa' }}>
                     <MiniTable
                         title="Labour / Services"
                         icon={<Wrench size={14} />}
@@ -223,7 +237,7 @@ function JCCard({ jc, open, onToggle, onOpen }) {
 
 function MiniTable({ title, icon, rows, columns, emptyLabel }) {
     return (
-        <div>
+        <div className={rows.length ? 'vehicle-history-section' : 'vehicle-history-section vehicle-history-empty-section'}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: '#334155', fontWeight: 700, marginBottom: 4 }}>
                 {icon}{title} <span style={{ color: '#94a3b8', fontWeight: 400 }}>({rows.length})</span>
             </div>
