@@ -189,16 +189,16 @@ export default function BookingDetail() {
     // figure that is not in the books.
     const paidInGL = Number(data.AmountPaidInGL ?? data.AmountPaidToDate ?? 0);
     const notInGL = data.PaymentsNotInGL || [];
-    const paidMismatch = Math.abs(paidInGL - Number(data.AmountPaidToDate || 0)) > 0.01;
-    const canPay = ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
+    const paidMismatch = !data.IsExtremeHistorical && Math.abs(paidInGL - Number(data.AmountPaidToDate || 0)) > 0.01;
+    const canPay = (data.IsExtremeHistorical && data.Status !== 'Cancelled') || ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status);
     const canDiscount = hasModule('sales_admin_pricing') && !data.DeliveryVoucherID && !data.DeliveredAt && !data.GatePassIssuedAt
         && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
-    const canManageReferences = data.IsHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
+    const canManageReferences = data.IsHistorical && !data.IsExtremeHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
     const canSetBookingDate = user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
-    const canCancel = data.Status === 'Closed' ? user?.groupId === 1
+    const canCancel = data.IsExtremeHistorical && data.Status !== 'Closed' ? false : data.Status === 'Closed' ? user?.groupId === 1
         : !['Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
           (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
-    const canAllocate = (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)
+    const canAllocate = !data.IsExtremeHistorical && (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)
         || (data.IsHistorical && data.Status === 'PendingBookingPayment' && Number(data.AmountPaidToDate) > 0))
         && !data.AllocatedVehicleID && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
     // Pay Master: shown whenever there's vehicle-money pending forward to Master.
@@ -227,10 +227,10 @@ export default function BookingDetail() {
     const canVoidMasterPayment = (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'))
         && !['Closed', 'Delivered', 'GatePassIssued'].includes(data.Status);
 
-    const canApproveHistoricalMaster = data.IsHistorical
+    const canApproveHistoricalMaster = data.IsHistorical && !data.IsExtremeHistorical
         && (hasModule('sales_admin_settings') || hasModule('sales_gm'))
         && !['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'].includes(data.Status);
-    const canPayMaster = (data.AmountPaidToDate || 0) > 0
+    const canPayMaster = !data.IsExtremeHistorical && (data.AmountPaidToDate || 0) > 0
         && (data.IsHistorical || masterStillOwed > 0.01)
         && masterDrafts.length === 0
         && !['Closed', 'Cancelled', 'Delivered', 'GatePassIssued'].includes(data.Status)
@@ -261,7 +261,7 @@ export default function BookingDetail() {
         && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
 
     // Gate Pass available immediately after allocation — no Master Invoice prerequisite.
-    const canIssueGatePass = data.AllocatedVehicleID
+    const canIssueGatePass = !data.IsExtremeHistorical && data.AllocatedVehicleID
         && ['Allocated', 'MasterInvoicePosted', 'ReadyForDelivery'].includes(data.Status)
         && (hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
 
@@ -272,13 +272,13 @@ export default function BookingDetail() {
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
                         {data.BookingNo}
                         <Pill bg={sty.bg} col={sty.col}>{sty.label}</Pill>
-                        {data.IsHistorical && <Pill bg="#f1f5f9" col="#475569">Historical record</Pill>}
+                        {data.IsHistorical && <Pill bg="#f1f5f9" col="#475569">{data.IsExtremeHistorical ? 'Extreme Historical Booking' : 'Historical record'}</Pill>}
                         {data.IsHistorical && !data.BookingDate && <Pill bg="#fef3c7" col="#92400e">No booking date</Pill>}
                     </span>
                 }
                 subtitle={`${data.PartyName} · ${data.VariantCode} ${data.VariantName}`
                     + (data.DMSBookingNumber ? ` · DMS booking number: ${data.DMSBookingNumber}` : '')
-                    + (data.IsHistorical
+                    + (data.IsExtremeHistorical ? ' ? plain data entry; no accounting or voucher matching' : data.IsHistorical
                         ? (data.BookingDate
                             ? ` · booked ${new Date(data.BookingDate).toLocaleDateString()}, entered afterwards — payments link to vouchers already in the ledger`
                             : ' · the date of the deal has not been recorded yet — payments link to vouchers already in the ledger')
@@ -580,6 +580,13 @@ export default function BookingDetail() {
                 )}
             </div>
 
+            {data.IsExtremeHistorical && <div className="card">
+                <strong>Extreme Historical Booking ? plain data entry</strong>
+                <p>No vouchers, ledger entries or incentives are created for this booking.</p>
+                {data.HistoricalVoucherReference && <p>Old voucher reference: {data.HistoricalVoucherReference}</p>}
+                {data.HistoricalEntryNotes && <p style={{ whiteSpace: 'pre-wrap' }}>{data.HistoricalEntryNotes}</p>}
+            </div>}
+
             {/* Two-column: payments | timeline */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div className="card">
@@ -636,7 +643,7 @@ export default function BookingDetail() {
                                                               style={{ fontSize: '0.68rem', color: '#94a3b8' }}>linked</span>
                                                     )}
                                                 </span>
-                                            ) : data.IsHistorical ? (
+                                            ) : data.IsExtremeHistorical ? (<span style={{ color: '#64748b', fontSize: 12 }}>Plain record</span>) : data.IsHistorical ? (
                                                 <Link to={`/sales/historical-links?bookingId=${data.BookingID}`}
                                                       title="Link this payment to the voucher already posted in the ledger"
                                                       style={{ color: '#b45309', fontSize: '0.72rem', fontWeight: 700, textDecoration: 'none' }}>

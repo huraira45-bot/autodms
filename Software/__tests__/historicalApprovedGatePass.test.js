@@ -7,6 +7,8 @@ jest.mock('../config/db',()=>{
  if(q.includes('FROM dms_SalesBookings')||q.includes('FROM   dms_SalesBookings'))
   return {recordset:[{...mockBooking,...(this.owner instanceof Transaction&&mockRevoke?{HistoricalMasterApprovedAmount:null}:{}),
    ...(this.owner instanceof Transaction&&mockPriceChange?{NegotiatedPrice:900}:{})}]};
+ // Delivery now verifies and locks the allocated vehicle; model that existing row.
+ if(q.includes('SELECT VehicleID,Status,CurrentBookingID,SoldDeliveredAt'))return {recordset:[{VehicleID:24,Status:'Allocated',CurrentBookingID:232,SoldDeliveredAt:null}]};
  if(q.includes('seq_GatePassNo'))return {recordset:[{n:9}]};
  if(q.includes('SELECT ChasisNo'))return {recordset:[{ChasisNo:'CHASSIS',EngineNo:'ENGINE'}]};
  if(q.includes('SELECT TOP 1 p.PartyName'))return {recordset:[{PartyName:'Customer'}]};
@@ -34,6 +36,7 @@ it('issues the historical gate pass with approved Master payment and no voucher 
  expect(mockTransactions[0].commit).toHaveBeenCalledTimes(1);
  expect(mockWrites.some(q=>q.includes("Status='Closed'"))).toBe(true);
  expect(mockWrites.some(q=>q.includes('INSERT INTO dms_GatePasses'))).toBe(true);
+ expect(mockWrites.some(q=>q.includes("UPDATE dms_Vehicle SET Status='Delivered'"))).toBe(true);
 });
 it('rejects approval revoked before the transaction recheck',async()=>{
  mockRevoke=true;const r=response();await lc.issueGatePass({params:{id:'232'},body:{}},r);

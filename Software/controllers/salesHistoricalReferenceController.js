@@ -9,10 +9,11 @@ const id = (value, name) => {
 };
 async function booking(executor, bookingId, lock = false) {
     const result = await new sql.Request(executor).input('bid', sql.Int, bookingId).query(`
-        SELECT BookingID, BookingNo, Status, IsHistorical FROM dms_SalesBookings
+        SELECT BookingID, BookingNo, Status, IsHistorical, IsExtremeHistorical FROM dms_SalesBookings
         ${lock ? 'WITH (UPDLOCK,HOLDLOCK)' : ''} WHERE BookingID=@bid`);
     const row = result.recordset[0];
     if (!row) fail('Booking not found.', 404);
+    if (row.IsExtremeHistorical) fail('Extreme Historical Booking uses typed references only; voucher linking is disabled.');
     if (!row.IsHistorical) fail('Voucher references are available only on historical bookings.');
     return row;
 }

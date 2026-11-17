@@ -176,7 +176,7 @@ async function loadPayment(paymentId, transaction) {
         .query(`SELECT p.PaymentID, p.BookingID, p.PaymentPath, p.PaymentMode, p.Amount,
                        p.PremiumPortion, p.BankAccountID, p.ChequeNumber, p.ChequeDate,
                        p.POSTransactionRef, p.PayOrderNumber, p.PayOrderBankName, p.ReceivedAt,
-                       b.BookingNo, b.PartyID, b.Status, b.NegotiatedPrice
+                       b.BookingNo, b.PartyID, b.Status, b.NegotiatedPrice, b.IsExtremeHistorical
                 FROM dms_SalesPayments p
                 INNER JOIN dms_SalesBookings b ON p.BookingID = b.BookingID
                 WHERE p.PaymentID = @id`);
@@ -192,6 +192,7 @@ async function loadPayment(paymentId, transaction) {
  */
 async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
     const p = await loadPayment(paymentId, transaction);
+    if (p.IsExtremeHistorical) throw new Error('Extreme Historical Booking cannot create accounting entries.');
     const vehicleAmount = Number(p.Amount || 0);
     const premium       = Math.max(0, Number(p.PremiumPortion || 0));
     if (vehicleAmount + premium <= 0) return null;

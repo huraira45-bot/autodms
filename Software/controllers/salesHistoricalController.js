@@ -63,7 +63,7 @@ async function bookingNoForYear(tx, year) {
 /** The booking plus the customer's ledger account. */
 async function loadBooking(pool, bookingId, lock=false) {
     const r = await pool.request().input('id', sql.Int, bookingId)
-        .query(`SELECT b.BookingID, b.BookingNo, b.Status, b.IsHistorical, b.PartyID,
+        .query(`SELECT b.BookingID, b.BookingNo, b.Status, b.IsHistorical, b.IsExtremeHistorical, b.PartyID,
                        pt.PartyName, pt.PartyGLID, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, b.MasterAgreedAmount, v.WholesalePrice
                 FROM   dms_SalesBookings b ${lock?'WITH (UPDLOCK,HOLDLOCK)':''}
                 LEFT   JOIN gen_PartiesInfo pt ON pt.PartyID = b.PartyID
@@ -73,7 +73,8 @@ async function loadBooking(pool, bookingId, lock=false) {
     return r.recordset[0];
 }
 
-function assertHistorical(booking) {
+function assertHistorical(booking, allowExtreme=false) {
+    if (booking.IsExtremeHistorical && !allowExtreme) fail('Extreme Historical Booking is plain data entry; voucher matching is disabled.');
     if (!booking.IsHistorical) {
         fail('This is a normal booking. Use Record Payment, which posts its own voucher — linking is only for historical records.');
     }
@@ -96,6 +97,21 @@ exports.states = async (_req, res) => res.json(ALLOWED_STATES);
 exports.createBooking = async (req, res) => {
     try {
         const b = req.body || {};
+        if (b.IsExtremeHistorical != null && typeof b.IsExtremeHistorical !== 'boolean') return res.status(400).json({error: 'Invalid Extreme Historical Booking option.'});
+        const extreme = b.IsExtremeHistorical === true;
+        if (String(b.HistoricalVoucherReference || '').length > 100 || String(b.HistoricalEntryNotes || '').length > 2000) return res.status(400).json({error: 'Voucher reference must be at most 100 characters and entry notes at most 2000.'});
+        let customerPaid = 0, masterPaid = 0;
+        const entryPaymentMode = b.HistoricalPaymentMode || 'BankTransfer';
+        if (extreme) {
+            if (!PATH_FOR_MODE[entryPaymentMode]) return res.status(400).json({error: 'Invalid historical payment mode.'});
+            for (const key of ['HistoricalCustomerPaid', 'HistoricalMasterPaid']) {
+                const n = Number(b[key] || 0), cents = Math.round(n * 100);
+                if (!Number.isFinite(n) || n < 0 || !Number.isSafeInteger(cents) || Math.abs(n * 100 - cents) > 0.000001)
+                    return res.status(400).json({error: 'Historical payment amounts must be nonnegative with up to two decimal places.'});
+            }
+            customerPaid = Number(b.HistoricalCustomerPaid || 0);
+            masterPaid = Number(b.HistoricalMasterPaid || 0);
+        }
         let promisedMonth;
         try { promisedMonth = parseDeliveryMonth(b.PromisedDeliveryMonth); }
         catch (err) { return res.status(400).json({ error: err.message }); }
@@ -149,6 +165,9 @@ exports.createBooking = async (req, res) => {
                 .input('po', sql.NVarChar(100), b.CorporatePONumber || null)
                 .input('bd', sql.DateTime, bookingDate)
                 .input('promise', sql.Date, promisedMonth)
+                .input('extreme', sql.Bit, extreme ? 1 : 0)
+                .input('ref', sql.NVarChar(100), extreme ? String(b.HistoricalVoucherReference || '').trim() || null : null)
+                .input('entryNotes', sql.NVarChar(2000), extreme ? String(b.HistoricalEntryNotes || '').trim() || null : null)
                 // Closed / gate-passed / cancelled old deals carry their date,
                 // so the booking does not look like it closed today.
                 .input('closed', sql.DateTime, status === 'Closed' ? bookingDate : null)
@@ -158,21 +177,39 @@ exports.createBooking = async (req, res) => {
                             (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName, CorporatePONumber,
-                             IsHistorical, BookingDate, HistoricalEnteredAt,
+                             IsHistorical, IsExtremeHistorical, HistoricalVoucherReference, HistoricalEntryNotes, BookingDate, HistoricalEnteredAt,
                              CreatedAt, ClosedAt, GatePassIssuedAt, DeliveredAt, CancelledAt, PromisedDeliveryMonth)
                         OUTPUT INSERTED.BookingID
                         VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po,
-                                1, @bd, GETDATE(),
+                                1, @extreme, @ref, @entryNotes, @bd, GETDATE(),
                                 @bd, @closed, @gp, @gp, @canc, @promise)`);
             const bookingId = r.recordset[0].BookingID;
+            if (extreme && customerPaid > 0) {
+                // Amount records only. No voucher, ledger account lookup or GL posting.
+                await new sql.Request(tx).input('bid', sql.Int, bookingId)
+                    .input('amt', sql.Decimal(18,2), customerPaid).input('at', sql.DateTime, bookingDate)
+                    .input('path', sql.NVarChar(20), PATH_FOR_MODE[entryPaymentMode]).input('mode', sql.NVarChar(30), entryPaymentMode)
+                    .input('notes', sql.NVarChar(sql.MAX), 'Extreme historical opening payment - plain data only. ' + String(b.HistoricalVoucherReference || ''))
+                    .input('emp', sql.Int, req.user?.employeeId || null).input('name', sql.NVarChar(100), req.user?.userName || null)
+                    .query(`INSERT INTO dms_SalesPayments(BookingID,PaymentPath,PaymentMode,Amount,PremiumPortion,ReceivedAt,IsLinkedVoucher,Notes,ReceivedByEmployeeID,ReceivedByName,CreatedByEmployeeID)
+                        VALUES(@bid,@path,@mode,@amt,0,@at,0,@notes,@emp,@name,@emp)`);
+            }
+            if (extreme && masterPaid > 0) {
+                await new sql.Request(tx).input('bid', sql.Int, bookingId).input('amt', sql.Decimal(18,2), masterPaid)
+                    .input('uid', sql.Int, req.user?.userId || null).input('name', sql.NVarChar(100), req.user?.userName || null)
+                    .query(`UPDATE dms_SalesBookings SET HistoricalMasterApprovedAmount=@amt,HistoricalMasterApprovedAt=GETDATE(),
+                        HistoricalMasterApprovedByUserID=@uid,HistoricalMasterApprovedByName=@name,
+                        HistoricalMasterApprovalNotes='Extreme historical amount - plain data only; no voucher matching.' WHERE BookingID=@bid`);
+            }
+
 
             await logBookingTransition(tx, bookingId, 'Historical', status, req.user,
-                `Historical booking entered by ${req.user?.userName || 'a user'} for a deal dated `
-                + `${bookingDate.toISOString().slice(0, 10)}. Payments on it are linked to vouchers already in the ledger; `
-                + `nothing is posted to the GL and no staff incentive is raised.`);
+                `${extreme ? 'Extreme Historical Booking (plain data only, no voucher matching)' : 'Historical booking'} entered by ${req.user?.userName || 'a user'} for a deal dated `
+                + `${bookingDate.toISOString().slice(0, 10)}. ${extreme ? 'Payment amounts are plain records; voucher matching is disabled;' : 'Payments link to vouchers already in the ledger;'} `
+                + `nothing is posted to the GL and no staff incentive is raised.${extreme ? ` Customer paid recorded: ${customerPaid}; Master paid recorded: ${masterPaid}.` : ''}`);
 
             await tx.commit();
-            res.status(201).json({ message: 'Historical booking recorded.', BookingID: bookingId, BookingNo: bookingNo, Status: status });
+            res.status(201).json({ message: extreme ? 'Extreme Historical Booking recorded. No accounting entries created.' : 'Historical booking recorded.', IsExtremeHistorical: extreme, BookingID: bookingId, BookingNo: bookingNo, Status: status });
         } catch (err) { try { await tx.rollback(); } catch {} throw err; }
     } catch (err) {
         console.error('historical createBooking:', err);
@@ -213,13 +250,14 @@ exports.recordPayment = async (req, res) => {
         const amount=amountCents/100,premium=premiumCents/100,total=(amountCents+premiumCents)/100;
         const pool=await getPool();
         tx=new sql.Transaction(pool); await tx.begin();
-        const booking=await loadBooking(tx,bookingId,true); assertHistorical(booking);
+        const booking=await loadBooking(tx,bookingId,true); assertHistorical(booking,true);
+        if (booking.IsExtremeHistorical && b.VoucherID) fail('Extreme Historical Booking does not allow voucher matching.');
         let voucher=null;
         if (b.VoucherID) {
             assertHasLedgerAccount(booking);
             voucher=await assertVoucherLinkable(tx,booking,Number(b.VoucherID),total);
         }
-        const masterGL=mode==='PayOrder'&&premium===0 ? await historicalMasterAccount(tx,bookingId) : null;
+        const masterGL=!booking.IsExtremeHistorical&&mode==='PayOrder'&&premium===0 ? await historicalMasterAccount(tx,bookingId) : null;
         const receivedAt=b.ReceivedAt?new Date(b.ReceivedAt):(voucher?new Date(voucher.VoucherDate):new Date());
         if (isNaN(receivedAt.getTime())) fail('Date received is not a real date.',400);
         const ins=await new sql.Request(tx)
@@ -229,7 +267,7 @@ exports.recordPayment = async (req, res) => {
             .input('vid',sql.Int,voucher?.VoucherID||null).input('vno',sql.NVarChar(50),voucher?.VoucherNo||null)
             .input('linked',sql.Bit,voucher?1:0).input('gl',sql.Int,voucher?booking.PartyGLID:null)
             .input('masterGL',sql.Int,masterGL)
-            .input('notes',sql.NVarChar(sql.MAX),b.Notes||(voucher?`Linked to ${voucher.VoucherNo}, already posted.`:'Historical payment — ledger voucher not linked yet.'))
+            .input('notes',sql.NVarChar(sql.MAX),b.Notes||(voucher?`Linked to ${voucher.VoucherNo}, already posted.`:booking.IsExtremeHistorical?'Extreme historical payment - plain record only, no voucher matching.':'Historical payment - ledger voucher not linked yet.'))
             .input('emp',sql.Int,req.user?.employeeId||null).input('empN',sql.NVarChar(100),req.user?.userName||null)
             .query(`DECLARE @ins TABLE (PaymentID INT);
                 INSERT INTO dms_SalesPayments
@@ -240,9 +278,9 @@ exports.recordPayment = async (req, res) => {
                 SELECT PaymentID FROM @ins;`);
         const paymentId=ins.recordset[0].PaymentID;
         await logBookingTransition(tx,bookingId,booking.Status,booking.Status,req.user,
-            `Historical payment #${paymentId} of PKR ${money(total)} recorded${voucher?` and allocated to ${voucher.VoucherNo} on account ${booking.PartyGLID}`:'. No ledger voucher linked yet.'}`);
+            `Historical payment #${paymentId} of PKR ${money(total)} recorded${voucher?` and allocated to ${voucher.VoucherNo} on account ${booking.PartyGLID}`:booking.IsExtremeHistorical?'. Plain data only; no voucher matching.':'. No ledger voucher linked yet.'}`);
         await tx.commit();
-        res.status(201).json({message:voucher?`Payment recorded and linked to ${voucher.VoucherNo}.`:'Payment recorded. Link its ledger voucher whenever you have it.',PaymentID:paymentId,VoucherNo:voucher?.VoucherNo||null});
+        res.status(201).json({message:voucher?`Payment recorded and linked to ${voucher.VoucherNo}.`:booking.IsExtremeHistorical?'Payment recorded as plain data. No accounting entries or voucher matching.':'Payment recorded. Link its ledger voucher whenever you have it.',PaymentID:paymentId,VoucherNo:voucher?.VoucherNo||null});
     } catch(err) {
         if(tx) { try { await tx.rollback(); } catch {} }
         res.status(err.statusCode||400).json({error:err.message});
@@ -333,7 +371,7 @@ exports.pendingLinks = async (req, res) => {
         const state = (req.query.state || 'unlinked').toLowerCase();
         const pool = await getPool();
         const rq = pool.request();
-        const conds = ['b.IsHistorical = 1', `p.Status = 'Posted'`];
+        const conds = ['b.IsHistorical = 1', 'b.IsExtremeHistorical = 0', `p.Status = 'Posted'`];
         if (state === 'unlinked') conds.push('p.VoucherID IS NULL');
         else if (state === 'linked') conds.push('p.VoucherID IS NOT NULL');
         if (req.query.bookingId) {

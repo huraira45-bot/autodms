@@ -48,7 +48,7 @@ async function resolveCustomerGL(partyId, fallbackGL, transaction) {
 async function loadBooking(bookingId, transaction) {
     const r = await new sql.Request(transaction)
         .input('id', sql.Int, bookingId)
-        .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.IsHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice,
+        .query(`SELECT b.BookingID, b.BookingNo, b.PartyID, b.IsHistorical, b.IsExtremeHistorical, b.HistoricalMasterApprovedAmount, b.NegotiatedPrice,
                        b.AmountPaidToDate, b.PremiumAmount, b.MasterPriceBeforeDiscount, b.MasterAgreedAmount,
                        v.WholesalePrice
                 FROM dms_SalesBookings b WITH (UPDLOCK,HOLDLOCK)
@@ -64,6 +64,7 @@ async function loadBooking(bookingId, transaction) {
  */
 async function postDeliveryVoucher(bookingId, userInfo, transaction) {
     const b = await loadBooking(bookingId, transaction);
+    if (b.IsExtremeHistorical) throw new Error('Extreme Historical Booking cannot create accounting entries.');
     const acc = await resolveAccounts();
     const customerLeaf = await resolveCustomerGL(b.PartyID, acc.BOOKING_ADVANCE.GLCAID, transaction);
 

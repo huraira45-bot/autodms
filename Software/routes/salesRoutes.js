@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const pv = require('../controllers/salesPaymentVoidController');
+const extremeHistoricalGuard = require('../middleware/extremeHistoricalGuard');
 const hist = require('../controllers/salesHistoricalController');
 const histRef = require('../controllers/salesHistoricalReferenceController');
 const histMasterApproval = require('../controllers/salesHistoricalMasterApprovalController');
@@ -105,7 +106,7 @@ router.post('/bookings/:id/master-agreed-amount', requireAny('sales_admin_pricin
 // has posted against it, and the reason goes on the audit trail (owner ask
 // 2026-10-02).
 router.put(   '/bookings/:id/party',  requireAny('sales_admin_settings', 'admin_unfinalize'), bk.changeBookingParty);
-router.post(  '/bookings/:id/cancel',      requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing'), bk.cancelBooking);
+router.post(  '/bookings/:id/cancel',      requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing'), extremeHistoricalGuard, bk.cancelBooking);
 router.post('/bookings/:id/cancel-closed', requireMainAdmin, closedCancellation.cancel);
 
 // Reassign the sales executive on a live booking (owner ask 2026-09-11).
@@ -126,14 +127,14 @@ router.post(  '/payment-voids/:id/am-reject',     requireAny('am_approve'), pv.a
 router.post(  '/payment-voids/:id/admin-execute', requireAny('admin_unfinalize', 'sales_admin_settings'), pv.adminExecute);
 router.post(  '/payment-voids/:id/withdraw',      requireAny('sales_executive', 'sales_agm', 'sales_gm'), pv.withdraw);
 router.post(  '/bookings/:id/payments',    requireAny('sales_executive', 'sales_agm', 'sales_gm'),
-              uploadSalesDoc.single('proof'),
+              extremeHistoricalGuard, uploadSalesDoc.single('proof'),
               bk.recordPayment);
 
 // Historical bookings — deals done before DealerDesk, whose vouchers are
 // already posted in the ledger. Back-dated data entry that ties the two
 // together, so it sits with the people who own the sales data.
-router.post('/historical/bookings/:id/master-approval', requireAny('sales_admin_settings', 'sales_gm'), histMasterApproval.approve);
-router.delete('/historical/bookings/:id/master-approval', requireAny('sales_admin_settings', 'sales_gm'), histMasterApproval.revoke);
+router.post('/historical/bookings/:id/master-approval', requireAny('sales_admin_settings', 'sales_gm'), extremeHistoricalGuard, histMasterApproval.approve);
+router.delete('/historical/bookings/:id/master-approval', requireAny('sales_admin_settings', 'sales_gm'), extremeHistoricalGuard, histMasterApproval.revoke);
 router.get('/historical/voucher-types', requireAny('sales_admin_settings', 'sales_gm'), histRef.types);
 router.get('/historical/bookings/:id/voucher-search', requireAny('sales_admin_settings', 'sales_gm'), histRef.search);
 router.get('/historical/bookings/:id/voucher-references', requireAny('sales_admin_settings', 'sales_gm'), histRef.list);
@@ -171,19 +172,19 @@ router.delete('/bookings/:id/documents/:docId',      requireAny('sales_agm', 'sa
 
 // Lifecycle — allocation, Master invoice posting, delivery, gate pass
 router.get( '/bookings/:id/allocation-readiness',    requireAny(...SALES_READERS), lc.allocationReadiness);
-router.post('/bookings/:id/allocate',                requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), lc.allocateVehicle);
+router.post('/bookings/:id/allocate',                requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), extremeHistoricalGuard, lc.allocateVehicle);
 // Admin corrections are allowed only before the delivered-vehicle lock.
-router.post('/bookings/:id/swap-vehicle',            requireAny('sales_admin_settings', 'admin_unfinalize'), lc.swapAllocatedVehicle);
-router.post('/bookings/:id/unallocate',              requireAny('sales_agm', 'sales_gm'), lc.unallocateVehicle);
-router.post('/bookings/:id/pay-master',              requireAny('sales_master_settlement', 'sales_admin_settings'), lc.payMaster);
-router.post('/bookings/:id/master-payments/:voucherId/void', requireAny('sales_master_settlement', 'sales_admin_settings'), lc.voidMasterPayment);
-router.post('/bookings/:id/post-master-invoice',     requireAny('sales_master_settlement'), lc.postMasterInvoice);
+router.post('/bookings/:id/swap-vehicle',            requireAny('sales_admin_settings', 'admin_unfinalize'), extremeHistoricalGuard, lc.swapAllocatedVehicle);
+router.post('/bookings/:id/unallocate',              requireAny('sales_agm', 'sales_gm'), extremeHistoricalGuard, lc.unallocateVehicle);
+router.post('/bookings/:id/pay-master',              requireAny('sales_master_settlement', 'sales_admin_settings'), extremeHistoricalGuard, lc.payMaster);
+router.post('/bookings/:id/master-payments/:voucherId/void', requireAny('sales_master_settlement', 'sales_admin_settings'), extremeHistoricalGuard, lc.voidMasterPayment);
+router.post('/bookings/:id/post-master-invoice',     requireAny('sales_master_settlement'), extremeHistoricalGuard, lc.postMasterInvoice);
 router.post('/bookings/:id/master-invoice-document', requireAny('sales_master_settlement', 'sales_admin_settings', 'sales_gm'),
     withUploadErrors(uploadSalesDoc.single('file')), masterInvoiceDocument.record);
 router.get( '/bookings/:id/delivery-readiness',      requireAny(...SALES_READERS), lc.deliveryReadiness);
-router.post('/bookings/:id/enable-partial-delivery', requireAny('sales_gm'), lc.enablePartialDelivery);
-router.post('/bookings/:id/finance-cosign',          requireAny('sales_admin_settings'), lc.financeCoSignPartial);  // proxy for Finance Head — wire to real finance role when HR adds it
-router.post('/bookings/:id/issue-gate-pass',         requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), lc.issueGatePass);
+router.post('/bookings/:id/enable-partial-delivery', requireAny('sales_gm'), extremeHistoricalGuard, lc.enablePartialDelivery);
+router.post('/bookings/:id/finance-cosign',          requireAny('sales_admin_settings'), extremeHistoricalGuard, lc.financeCoSignPartial);  // proxy for Finance Head — wire to real finance role when HR adds it
+router.post('/bookings/:id/issue-gate-pass',         requireAny('sales_agm', 'sales_gm', 'sales_admin_settings'), extremeHistoricalGuard, lc.issueGatePass);
 router.get( '/bookings/:id/audit',                   requireAny(...SALES_READERS, 'am_approve', 'admin_unfinalize'), lc.bookingAudit);
 router.get( '/draft-vouchers',                       requireAny(...SALES_READERS), lc.listDraftVouchers);
 

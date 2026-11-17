@@ -51,9 +51,10 @@ export function HistoricalPaymentModal({ booking, onClose, onSaved }) {
             {err && <Err>{err}</Err>}
 
             <div style={{ padding: 10, background: '#f0f9ff', borderLeft: '3px solid #0369a1', borderRadius: 4, marginBottom: 12, fontSize: '0.82rem', color: '#0c4a6e' }}>
-                This records what <strong>{booking.PartyName}</strong> paid on the old deal, and it counts towards the
-                booking straight away. <strong>No voucher is posted.</strong> Once it is saved you can link it to the
-                voucher already in your ledger — from the payments list, whenever you have found it.
+                {booking.IsExtremeHistorical
+                    ? <>This records the payment amount as plain data only. No voucher is created or matched, and no ledger account is required. You may type an old voucher number in Notes.</>
+                    : <>This records what <strong>{booking.PartyName}</strong> paid on the old deal. No voucher is posted. You can link an existing ledger voucher later from the payments list.</>}
+
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>

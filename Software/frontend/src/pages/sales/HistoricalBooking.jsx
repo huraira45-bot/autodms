@@ -59,6 +59,12 @@ export default function HistoricalBooking() {
     const [negotiatedPrice, setNegotiatedPrice] = useState('');
     const [status, setStatus] = useState('Closed');
     const [corpPO, setCorpPO] = useState('');
+    const [extreme, setExtreme] = useState(false);
+    const [voucherReference, setVoucherReference] = useState('');
+    const [entryNotes, setEntryNotes] = useState('');
+    const [customerPaid, setCustomerPaid] = useState('');
+    const [masterPaid, setMasterPaid] = useState('');
+    const [entryPaymentMode, setEntryPaymentMode] = useState('BankTransfer');
 
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
@@ -97,7 +103,7 @@ export default function HistoricalBooking() {
         const t = setTimeout(async () => {
             setPartyLoading(true);
             try {
-                const params = { glCode: '201002' };
+                const params = extreme ? {} : { glCode: '201002' };
                 if (partySearch && partySearch.length >= 1) params.search = partySearch;
                 const r = await axios.get(`${API}/parties`, { params });
                 const rows = Array.isArray(r.data) ? r.data : (r.data.parties || []);
@@ -106,7 +112,7 @@ export default function HistoricalBooking() {
             setPartyLoading(false);
         }, partySearch ? 250 : 0);
         return () => clearTimeout(t);
-    }, [partySearch, pickedParty]);
+    }, [partySearch, pickedParty, extreme]);
 
     const agreed = Number(negotiatedPrice) || 0;
     const dayPrice = Number(priceAtTime) || 0;
@@ -127,6 +133,12 @@ export default function HistoricalBooking() {
                 PriceAtTime: dayPrice || undefined,
                 Status: status,
                 CorporatePONumber: corpPO || undefined,
+                IsExtremeHistorical: extreme,
+                HistoricalVoucherReference: extreme ? voucherReference : undefined,
+                HistoricalEntryNotes: extreme ? entryNotes : undefined,
+                HistoricalCustomerPaid: extreme ? Number(customerPaid || 0) : undefined,
+                HistoricalMasterPaid: extreme ? Number(masterPaid || 0) : undefined,
+                HistoricalPaymentMode: extreme ? entryPaymentMode : undefined,
             });
             navigate(`/sales/bookings/${data.BookingID}`, { replace: true });
         } catch (e) { setErr(e.response?.data?.error || e.message); setBusy(false); }
@@ -136,7 +148,7 @@ export default function HistoricalBooking() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 900, margin: '0 auto' }}>
             <ErpControlPanel
                 title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><History size={18} /> Historical Booking</span>}
-                subtitle="A deal done before DealerDesk. Nothing is posted to the accounts — its payments are linked to vouchers already in your chart of accounts."
+                subtitle={extreme ? 'Plain booking and payment data, without voucher matching or accounting.' : 'A deal done before DealerDesk. Payments can be matched to existing vouchers.'}
                 actions={
                     <button type="button" className="erp-btn erp-btn-sm" onClick={() => navigate('/sales/bookings')}>
                         <ArrowLeft size={14} /> Back
@@ -144,12 +156,33 @@ export default function HistoricalBooking() {
                 }
             />
 
+            <div className="card">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
+                    <input type="checkbox" checked={extreme} disabled={busy} onChange={e => setExtreme(e.target.checked)} />
+                    Extreme Historical Booking
+                </label>
+                <p style={{ fontSize: 13, marginBottom: 0 }}>Plain booking and payment data only. No voucher matching, ledger entries, incentives or stock movements.</p>
+            </div>
+            {extreme && <div className="card">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                    <div><label>Customer vehicle amount paid (PKR, optional)</label><input type="number" min="0" step="0.01" value={customerPaid} onChange={e => setCustomerPaid(e.target.value)} style={inputStyle} /></div>
+                    <div><label>Amount already paid to Master (PKR, optional)</label><input type="number" min="0" step="0.01" value={masterPaid} onChange={e => setMasterPaid(e.target.value)} style={inputStyle} /></div>
+                </div>
+                <label>Customer payment mode</label>
+                <select value={entryPaymentMode} onChange={e => setEntryPaymentMode(e.target.value)} style={inputStyle}>
+                    {['BankTransfer', 'Cash', 'Cheque', 'POS', 'PayOrder'].map(mode => <option key={mode} value={mode}>{mode}</option>)}
+                </select>
+                <p style={{ fontSize: 12 }}>Amounts are recorded only. More customer payments can be entered after saving.</p>
+                <label>Old voucher number / reference (optional)</label>
+                <input value={voucherReference} maxLength={100} onChange={e => setVoucherReference(e.target.value)} style={inputStyle} />
+                <label style={{ display: 'block', marginTop: 10 }}>Entry notes (optional)</label>
+                <textarea value={entryNotes} maxLength={2000} onChange={e => setEntryNotes(e.target.value)} style={inputStyle} />
+            </div>}
             <div className="card"><BookingExecutiveField choice={executive} disabled={busy} /></div>
 
             <div className="card" style={{ background: '#f0f9ff', borderLeft: '3px solid #0369a1', fontSize: '0.85rem', color: '#0c4a6e' }}>
-                <strong>How this differs from a new booking:</strong> no voucher is posted, no approval is asked for,
-                and no staff incentive is raised — the deal was commissioned at the time. You choose the state it ended
-                in, and each payment is matched to a voucher that is already posted on this customer's account.
+                {extreme ? <><strong>Extreme Historical Booking:</strong> enter the old deal and record its payment amounts without accounting entries. Voucher numbers are optional text references; no voucher is selected or matched. This mode is fixed when the booking is saved.</> : <><strong>Historical booking:</strong> no voucher or incentive is created. Payments can be matched to vouchers already posted on the customer's account.</>}
+
             </div>
 
             {err && (
@@ -191,8 +224,8 @@ export default function HistoricalBooking() {
                             ))}
                             {!partyLoading && partyResults.length === 0 && (
                                 <div style={{ padding: 8, color: '#94a3b8', fontSize: '0.8rem' }}>
-                                    No customer found. Add them under Credit Parties first — the customer needs an
-                                    account in the chart of accounts for their old vouchers to be matched.
+                                    No customer found. Add the customer under Credit Parties first.
+                                    {extreme ? ' A ledger account is not required for this mode.' : ' A ledger account is required for matching old vouchers.'}
                                 </div>
                             )}
                         </div>
@@ -263,7 +296,7 @@ export default function HistoricalBooking() {
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn-sm" onClick={() => navigate('/sales/bookings')}>Cancel</button>
                 <button className="btn" onClick={submit} disabled={busy || !ready}>
-                    {busy ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : 'Record historical booking'}
+                    {busy ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : extreme ? 'Record Extreme Historical Booking' : 'Record historical booking'}
                 </button>
             </div>
         </div>
