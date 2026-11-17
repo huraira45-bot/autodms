@@ -122,3 +122,18 @@ test('missing migration gives an actionable error instead of offering all employ
     const res=response();service.sendError(res,{number:208,message:"Invalid object name 'dbo.dms_SalesExecutives'."});
     expect(res.code).toBe(503);expect(res.body.error).toContain('168_sales_executives.sql');
 });
+
+test.each(['sales_executive','sales_agm','sales_gm','sales_reports','sales_admin_pricing','sales_admin_settings','sales_master_settlement'])('Sales role %s can create a booking; roster validation still belongs to controller',role=>{
+ const route=router.stack.find(l=>l.route?.path==='/bookings'&&l.route.methods.post).route;
+ const next=jest.fn();route.stack[0].handle({user:{modules:[role]}},response(),next);expect(next).toHaveBeenCalled();
+});
+test.each([undefined,{modules:[]},{modules:['workshop_jobs']},{modules:['finance_vouchers']}])('users without Sales access cannot create bookings',user=>{const res=response(),next=jest.fn();const route=router.stack.find(l=>l.route?.path==='/bookings'&&l.route.methods.post).route;route.stack[0].handle({user},res,next);expect(res.code).toBe(403);expect(next).not.toHaveBeenCalled();});
+test('normal creation cannot silently attribute booking to the signed-in user',async()=>{fixture();const res=response();await bookings.createBooking({user:admin,body:{...body,SalesExecutiveID:undefined}},res);expect(res.code).toBe(400);expect(res.body.error).toMatch(/Choose a valid sales executive/);});
+test('reporting-only Sales user can create on behalf of enabled executive without HR linkage',async()=>{const{calls}=fixture(),res=response();await bookings.createBooking({user:{modules:['sales_reports'],userName:'Sales operator',userId:91},body},res);expect(res.code).toBe(201);expect(calls.find(c=>c.q.includes('OUTPUT INSERTED.BookingID')).v.exe).toBe(10);});
+
+test('booking customer lookup cannot be redirected to supplier or other ledger accounts',async()=>{
+ const values={},query=jest.fn(async()=>({recordset:[{PartyID:7,PartyName:'Customer'}]}));
+ getPool.mockResolvedValue({request:()=>({input(k,t,v){values[k]=v;return this;},query})});
+ const res=response();await require('../controllers/salesBookingCustomerLookupController').lookup({query:{search:'Old_50%',glCode:'502',type:'Supplier'}},res);
+ const q=query.mock.calls[0][0];expect(q).toContain("c.GLCode LIKE N'201002%'");expect(q).toContain("p.PartyType IN('Customer','Both','CorporateCustomer')");expect(q).not.toContain('502');expect(q).not.toContain('CreditLimit');expect(values.q).toBe('%Old[_]50[%]%');expect(res.body).toHaveLength(1);
+});

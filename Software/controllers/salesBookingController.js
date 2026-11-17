@@ -289,7 +289,7 @@ exports.createBooking = async (req, res) => {
             return res.status(400).json({ error: 'Your user needs a linked employee record to propose a discount. The selected sales executive does not replace the proposer.' });
         }
 
-        const executiveId = salesExecutives.employeeId(b.SalesExecutiveID ?? req.user?.employeeId);
+        const executiveId = salesExecutives.employeeId(b.SalesExecutiveID);
 
         const tx = new sql.Transaction(pool);
         await tx.begin();

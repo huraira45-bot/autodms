@@ -13,7 +13,7 @@ const reports = require('../controllers/salesReportsController');
 const incentive = require('../controllers/salesIncentiveController');
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; } });
 const user = { userId: 1, employeeId: 3, userName: 'Sales executive', modules: ['sales_executive'] };
-const body = { PartyID: 1, VehicleVariantID: 2, NegotiatedPrice: 1000, DMSBookingNumber: ' 001005/00001234-A ' };
+const body = {SalesExecutiveID:3, PartyID: 1, VehicleVariantID: 2, NegotiatedPrice: 1000, DMSBookingNumber: ' 001005/00001234-A ' };
 function fixture({ minimum = 0, failAudit = false } = {}) {
     const tx = { calls: [], begin: jest.fn(async () => {}), commit: jest.fn(async () => {}), rollback: jest.fn(async () => {}),
         query: jest.fn(async (q, v) => {

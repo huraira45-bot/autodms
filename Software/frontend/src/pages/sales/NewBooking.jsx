@@ -28,7 +28,7 @@ const fmtN = (n) => Number(n || 0).toLocaleString('en-PK');
 export default function NewBooking() {
     const navigate = useNavigate();
     const { user } = useAuth();
-    const executive = useSalesExecutives(user?.employeeId);
+    const executive = useSalesExecutives();
     const [searchParams] = useSearchParams();
     const inquiryId = searchParams.get('inquiryId');
     const [inquiry, setInquiry] = useState(null);
@@ -111,7 +111,7 @@ export default function NewBooking() {
             try {
                 const params = { glCode: '201002' };
                 if (partySearch && partySearch.length >= 1) params.search = partySearch;
-                const r = await axios.get(`${API}/parties`, { params });
+                const r = await axios.get(`${API}/sales/customers/lookup`, { params });
                 const rows = Array.isArray(r.data) ? r.data : (r.data.parties || []);
                 // Filter to customer-side parties for the sales UX
                 const customers = rows.filter(p => ['Customer', 'Both', 'CorporateCustomer'].includes(p.PartyType));

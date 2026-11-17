@@ -58,6 +58,8 @@ router.put('/executives/:id', requireExecutiveManager, executives.save);
 
 router.get('/customer-identity-warnings', requireAnyAccess(...SALES_READERS, 'crm_parties:insert', 'crm_parties:edit'), salesCustomer.warnings);
 router.post('/customers', requirePerm('crm_parties', 'insert'), party.createSalesCustomer);
+// Booking-only customer selection: same Sales access as booking/catalog reads, fixed customer account branch.
+router.get('/customers/lookup', requireAny(...SALES_READERS), require('../controllers/salesBookingCustomerLookupController').lookup);
 router.get('/bookings/:id/customer', salesCustomer.requireAdmin, salesCustomer.get);
 router.put('/bookings/:id/customer', salesCustomer.requireAdmin, salesCustomer.update);
 
@@ -90,14 +92,14 @@ router.delete('/vehicles/:id',     requireAny('sales_admin_settings'), cat.delet
 
 // =========================================================================
 // Bookings — create/list/get/cancel
-// Create: sales_executive (or anyone with the role + a LinkedEmployeeID)
+// Create: any existing Sales-reader permission; enabled executive must be explicitly selected.
 // Read:   any sales-side role
 // Cancel: same as create, plus sales_admin_pricing
 // =========================================================================
 router.get(   '/bookings',                 requireAny(...SALES_READERS),       bk.listBookings);
 router.get('/bookings/cancelled', requireAny(...SALES_READERS), bk.listCancelledBookings);
 router.get(   '/bookings/:id',             requireAny(...SALES_READERS),       bk.getBooking);
-router.post(  '/bookings',                 requireAny('sales_executive', 'sales_agm', 'sales_gm'), bk.createBooking);
+router.post(  '/bookings',                 requireAny(...SALES_READERS), bk.createBooking);
 router.patch('/bookings/:id/delivery-month', requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'), deliveryMonth.update);
 router.patch('/bookings/:id/date', requireBookingDateAdmin, bookingDate.update);
 router.post('/bookings/:id/discount', requireAny('sales_admin_pricing'), bookingDiscount.apply);

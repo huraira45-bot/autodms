@@ -48,7 +48,7 @@ const STATUS_TONE = {
 
 export default function BookingsList({ cancelled = false }) {
     const { hasModule } = useAuth();
-    const canCreate = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm');
+    const canCreate = ['sales_executive','sales_agm','sales_gm','sales_admin_pricing','sales_admin_settings','sales_master_settlement','sales_reports'].some(key => hasModule(key));
     const navigate = useNavigate();
 
     const [rows, setRows] = useState([]);
