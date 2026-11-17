@@ -27,7 +27,7 @@ exports.report = async (req, res) => {
         const search = String(req.query.search || '').trim().slice(0, 150);
         if (search) {
             rq.input('search', sql.NVarChar(302), `%${search}%`);
-            conditions.push('(b.BookingNo LIKE @search OR p.PartyName LIKE @search OR p.PhoneOne LIKE @search OR veh.ChasisNo LIKE @search)');
+            conditions.push(`(b.BookingNo LIKE @search OR p.PartyName LIKE @search OR b.HistoricalCustomerName LIKE @search OR p.PhoneOne LIKE @search OR veh.ChasisNo LIKE @search)`);
         }
         // AmountPaidToDate is vehicle money only: the payment trigger excludes
         // PremiumPortion and reversed payments. Historical recorded receipts
@@ -35,7 +35,7 @@ exports.report = async (req, res) => {
         // general-party balance is substituted for this customer's car debt.
         const result = await rq.query(`SELECT b.BookingID,b.BookingNo,b.Status,b.IsHistorical,
                 CAST(COALESCE(b.BookingDate,b.CreatedAt) AS DATE) AS BookingDate,b.PromisedDeliveryMonth,
-                p.PartyName AS CustomerName,p.PhoneOne AS Phone,
+                COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS CustomerName,p.PhoneOne AS Phone,
                 m.ModelName,v.VariantName,veh.ChasisNo,e.EmployeeName AS ExecutiveName,
                 b.NegotiatedPrice AS VehiclePrice,ISNULL(b.AmountPaidToDate,0) AS VehiclePaid,
                 b.NegotiatedPrice-ISNULL(b.AmountPaidToDate,0) AS Outstanding

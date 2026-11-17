@@ -64,7 +64,7 @@ async function bookingNoForYear(tx, year) {
 async function loadBooking(pool, bookingId, lock=false) {
     const r = await pool.request().input('id', sql.Int, bookingId)
         .query(`SELECT b.BookingID, b.BookingNo, b.Status, b.IsHistorical, b.IsExtremeHistorical, b.PartyID,
-                       pt.PartyName, pt.PartyGLID, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, b.MasterAgreedAmount, v.WholesalePrice
+                       COALESCE(NULLIF(b.HistoricalCustomerName,''),pt.PartyName) AS PartyName, pt.PartyGLID, b.NegotiatedPrice, b.MasterPriceBeforeDiscount, b.MasterAgreedAmount, v.WholesalePrice
                 FROM   dms_SalesBookings b ${lock?'WITH (UPDLOCK,HOLDLOCK)':''}
                 LEFT   JOIN gen_PartiesInfo pt ON pt.PartyID = b.PartyID
                 LEFT   JOIN dms_VehicleVariant v ON v.VariantID=b.VehicleVariantID
@@ -116,7 +116,9 @@ exports.createBooking = async (req, res) => {
         try { promisedMonth = parseDeliveryMonth(b.PromisedDeliveryMonth); }
         catch (err) { return res.status(400).json({ error: err.message }); }
         const errors = [];
-        if (!b.PartyID) errors.push('Customer is required');
+        const customerName = typeof b.HistoricalCustomerName === 'string' ? b.HistoricalCustomerName.trim() : '';
+        if (extreme && (!customerName || customerName.length > 200)) errors.push('Customer name is required and must be at most 200 characters');
+        if (!extreme && !b.PartyID) errors.push('Customer is required');
         if (!b.VehicleVariantID) errors.push('Variant is required');
         if (!b.BookingDate) errors.push('Booking date is required — that is the whole point of a historical entry');
         if (!ALLOWED_STATES.includes(b.Status)) errors.push(`Status must be one of: ${ALLOWED_STATES.join(', ')}`);
@@ -154,7 +156,8 @@ exports.createBooking = async (req, res) => {
 
             const r = await new sql.Request(tx)
                 .input('no', sql.NVarChar(20), bookingNo)
-                .input('pid', sql.Int, parseInt(b.PartyID))
+                .input('pid', sql.Int, extreme ? null : parseInt(b.PartyID))
+                .input('customerName', sql.NVarChar(200), extreme ? customerName : null)
                 .input('mid', sql.Int, variant.ModelID)
                 .input('vid', sql.Int, variant.VariantID)
                 .input('sp', sql.Decimal(18, 2), priceAtTime)
@@ -174,13 +177,13 @@ exports.createBooking = async (req, res) => {
                 .input('gp', sql.DateTime, ['GatePassIssued', 'Closed'].includes(status) ? bookingDate : null)
                 .input('canc', sql.DateTime, status === 'Cancelled' ? bookingDate : null)
                 .query(`INSERT INTO dms_SalesBookings
-                            (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
+                            (BookingNo, PartyID, HistoricalCustomerName, VehicleModelID, VehicleVariantID,
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName, CorporatePONumber,
                              IsHistorical, IsExtremeHistorical, HistoricalVoucherReference, HistoricalEntryNotes, BookingDate, HistoricalEnteredAt,
                              CreatedAt, ClosedAt, GatePassIssuedAt, DeliveredAt, CancelledAt, PromisedDeliveryMonth)
                         OUTPUT INSERTED.BookingID
-                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po,
+                        VALUES (@no, @pid, @customerName, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po,
                                 1, @extreme, @ref, @entryNotes, @bd, GETDATE(),
                                 @bd, @closed, @gp, @gp, @canc, @promise)`);
             const bookingId = r.recordset[0].BookingID;
@@ -206,7 +209,7 @@ exports.createBooking = async (req, res) => {
             await logBookingTransition(tx, bookingId, 'Historical', status, req.user,
                 `${extreme ? 'Extreme Historical Booking (plain data only, no voucher matching)' : 'Historical booking'} entered by ${req.user?.userName || 'a user'} for a deal dated `
                 + `${bookingDate.toISOString().slice(0, 10)}. ${extreme ? 'Payment amounts are plain records; voucher matching is disabled;' : 'Payments link to vouchers already in the ledger;'} `
-                + `nothing is posted to the GL and no staff incentive is raised.${extreme ? ` Customer paid recorded: ${customerPaid}; Master paid recorded: ${masterPaid}.` : ''}`);
+                + `nothing is posted to the GL and no staff incentive is raised.${extreme ? ` Customer name: ${customerName}; customer paid recorded: ${customerPaid}; Master paid recorded: ${masterPaid}.` : ''}`);
 
             await tx.commit();
             res.status(201).json({ message: extreme ? 'Extreme Historical Booking recorded. No accounting entries created.' : 'Historical booking recorded.', IsExtremeHistorical: extreme, BookingID: bookingId, BookingNo: bookingNo, Status: status });

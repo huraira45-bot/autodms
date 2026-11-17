@@ -64,7 +64,7 @@ exports.report = async (req, res) => {
         const search = String(req.query.search || '').trim().slice(0, 150);
         if (search) {
             request.input('search', sql.NVarChar(452), `%${search.replace(/[[%_]/g, '[$&]')}%`);
-            conditions.push('(b.BookingNo LIKE @search OR b.DMSBookingNumber LIKE @search OR p.PartyName LIKE @search OR veh.ChasisNo LIKE @search OR p.PhoneOne LIKE @search)');
+            conditions.push(`(b.BookingNo LIKE @search OR b.DMSBookingNumber LIKE @search OR p.PartyName LIKE @search OR b.HistoricalCustomerName LIKE @search OR veh.ChasisNo LIKE @search OR p.PhoneOne LIKE @search)`);
         }
         // Exclude delivery settlements from remittance totals: clearing the
         // booking account at delivery does not undo the payment sent to Master.

@@ -11,7 +11,7 @@ function bookingPaymentReportQuery(conditions) {
         SELECT b.BookingID,b.BookingNo,b.DMSBookingNumber,b.Status,b.IsHistorical,b.VehicleModelID,b.VehicleVariantID,
             b.CreatedBy_SalesExecutiveID AS SalespersonID,
             CAST(COALESCE(b.BookingDate,b.CreatedAt) AS DATE) AS BookingDate,b.PromisedDeliveryMonth,
-            p.PartyName AS CustomerName,p.PhoneOne AS Phone,m.ModelName,v.VariantName,veh.ChasisNo,
+            COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS CustomerName,p.PhoneOne AS Phone,m.ModelName,v.VariantName,veh.ChasisNo,
             e.EmployeeName AS SalespersonName,b.NegotiatedPrice,b.AmountPaidToDate,
             b.MasterAgreedAmount,b.MasterPriceBeforeDiscount,v.WholesalePrice,b.HistoricalMasterApprovedAmount
         INTO #BookingPaymentRows
@@ -73,7 +73,7 @@ function bookingAccountReconciliationQuery() {
     return `SET NOCOUNT ON;
         IF OBJECT_ID('tempdb..#BookingReconciliationRows') IS NOT NULL DROP TABLE #BookingReconciliationRows;
         IF OBJECT_ID('tempdb..#BookingReconciliationOrders') IS NOT NULL DROP TABLE #BookingReconciliationOrders;
-        SELECT b.BookingID,b.BookingNo,b.Status,veh.ChasisNo,p.PartyName
+        SELECT b.BookingID,b.BookingNo,b.Status,veh.ChasisNo,COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName
         INTO #BookingReconciliationRows
         FROM dms_SalesBookings b
         LEFT JOIN dms_Vehicle veh ON veh.VehicleID=b.AllocatedVehicleID

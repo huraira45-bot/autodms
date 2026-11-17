@@ -15,7 +15,7 @@ function fixture(extreme=true){
  getPool.mockResolvedValue({tx,request});return{booking,tx,calls};
 }
 beforeEach(()=>{jest.clearAllMocks();jest.spyOn(console,'error').mockImplementation(()=>{});});afterEach(()=>jest.restoreAllMocks());
-const createBody={PartyID:1,VehicleVariantID:2,SalesExecutiveID:3,NegotiatedPrice:1000,Status:'Closed',BookingDate:'2025-01-01'};
+const createBody={HistoricalCustomerName:'Old customer',PartyID:1,VehicleVariantID:2,SalesExecutiveID:3,NegotiatedPrice:1000,Status:'Closed',BookingDate:'2025-01-01'};
 test.each([true,false])('creation records immutable mode and preserves ordinary historical creation: %s',async extreme=>{
  const{calls,tx}=fixture(extreme),res=response();await controller.createBooking({user,body:{...createBody,IsExtremeHistorical:extreme,HistoricalVoucherReference:'OLD-123',HistoricalEntryNotes:'Old file'}},res);
  expect(res.code).toBe(201);const ins=calls.find(c=>c.q.includes('OUTPUT INSERTED.BookingID'));expect(ins.v.extreme).toBe(extreme?1:0);expect(ins.v.ref).toBe(extreme?'OLD-123':null);expect(ins.v.entryNotes).toBe(extreme?'Old file':null);expect(tx.commit).toHaveBeenCalled();expect(calls.some(c=>/INSERT.*Finance|INSERT.*Ledger|INSERT.*SalesPayments/i.test(c.q))).toBe(false);
@@ -39,3 +39,7 @@ test('creation audit failure rolls back booking and initial amounts together',as
 
 test('plain payment cannot be sent directly to the normal voucher posting service',async()=>{const{tx,calls}=fixture();const{postSalesPaymentVoucher}=require('../services/salesPaymentPostingService');await expect(postSalesPaymentVoucher(20,user,tx)).rejects.toThrow('cannot create accounting entries');expect(calls).toHaveLength(1);expect(calls[0].q).not.toContain('INSERT');});
 test('plain booking cannot be sent directly to delivery posting',async()=>{const{tx,calls}=fixture();const{postDeliveryVoucher}=require('../services/salesDeliveryPostingService');await expect(postDeliveryVoucher(7,user,tx)).rejects.toThrow('cannot create accounting entries');expect(calls).toHaveLength(1);});
+
+test('typed extreme customer is saved without party/account creation or link',async()=>{const{calls}=fixture(),res=response();await controller.createBooking({user,body:{...createBody,PartyID:999,IsExtremeHistorical:true,HistoricalCustomerName:'  Customer from old challan  '}},res);expect(res.code).toBe(201);const ins=calls.find(c=>c.q.includes('OUTPUT INSERTED.BookingID'));expect(ins.v.pid).toBeNull();expect(ins.v.customerName).toBe('Customer from old challan');expect(calls.some(c=>/INSERT.*gen_PartiesInfo|INSERT.*GL|UPDATE.*gen_PartiesInfo/i.test(c.q))).toBe(false);});
+test.each([undefined,'','   ',123,{},'x'.repeat(201)])('extreme customer must be nonblank text within 200 characters: %p',async name=>{const res=response();await controller.createBooking({body:{...createBody,IsExtremeHistorical:true,HistoricalCustomerName:name}},res);expect(res.code).toBe(400);expect(getPool).not.toHaveBeenCalled();});
+test('regular historical booking still requires selected customer',async()=>{fixture(false);const res=response();await controller.createBooking({user,body:{...createBody,PartyID:null,IsExtremeHistorical:false}},res);expect(res.code).toBe(400);expect(getPool).not.toHaveBeenCalled();});

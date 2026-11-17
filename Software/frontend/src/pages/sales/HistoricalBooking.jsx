@@ -51,6 +51,7 @@ export default function HistoricalBooking() {
     const [partySearch, setPartySearch] = useState('');
     const [partyResults, setPartyResults] = useState([]);
     const [pickedParty, setPickedParty] = useState(null);
+    const [customerName, setCustomerName] = useState('');
     const [partyLoading, setPartyLoading] = useState(false);
 
     const [bookingDate, setBookingDate] = useState('');
@@ -99,11 +100,11 @@ export default function HistoricalBooking() {
 
     // Same customer search as the normal booking form.
     useEffect(() => {
-        if (pickedParty) return;
+        if (pickedParty || extreme) return;
         const t = setTimeout(async () => {
             setPartyLoading(true);
             try {
-                const params = extreme ? {} : { glCode: '201002' };
+                const params = { glCode: '201002' };
                 if (partySearch && partySearch.length >= 1) params.search = partySearch;
                 const r = await axios.get(`${API}/parties`, { params });
                 const rows = Array.isArray(r.data) ? r.data : (r.data.parties || []);
@@ -116,7 +117,7 @@ export default function HistoricalBooking() {
 
     const agreed = Number(negotiatedPrice) || 0;
     const dayPrice = Number(priceAtTime) || 0;
-    const ready = executive.valid && pickedParty && variantId && bookingDate && agreed > 0
+    const ready = executive.valid && (extreme ? customerName.trim().length > 0 : pickedParty) && variantId && bookingDate && agreed > 0
                   && (!dayPrice || dayPrice >= agreed) && status;
 
     const submit = async () => {
@@ -124,7 +125,8 @@ export default function HistoricalBooking() {
         setBusy(true); setErr(null);
         try {
             const { data } = await axios.post(`${API}/sales/historical/bookings`, {
-                PartyID: pickedParty.PartyID,
+                PartyID: extreme ? undefined : pickedParty.PartyID,
+                HistoricalCustomerName: extreme ? customerName.trim() : undefined,
                 SalesExecutiveID: Number(executive.id),
                 VehicleVariantID: Number(variantId),
                 BookingDate: bookingDate,
@@ -193,7 +195,13 @@ export default function HistoricalBooking() {
 
             <div className="card">
                 <h3 style={{ marginTop: 0, fontSize: '1rem' }}>Customer</h3>
-                {pickedParty ? (
+                {extreme ? (
+                    <div className="form-group">
+                        <label>Customer name *</label>
+                        <input value={customerName} maxLength={200} onChange={e => setCustomerName(e.target.value)}
+                            placeholder="Type the customer name" style={inputStyle} disabled={busy} />
+                    </div>
+                ) : pickedParty ? (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10, background: '#f8fafc', borderRadius: 6 }}>
                         <div>
                             <div style={{ fontWeight: 600 }}>{pickedParty.PartyName}</div>

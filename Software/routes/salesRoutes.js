@@ -105,7 +105,7 @@ router.post('/bookings/:id/master-agreed-amount', requireAny('sales_admin_pricin
 // Moving a booking to the right customer. Admin-only, refused once anything
 // has posted against it, and the reason goes on the audit trail (owner ask
 // 2026-10-02).
-router.put(   '/bookings/:id/party',  requireAny('sales_admin_settings', 'admin_unfinalize'), bk.changeBookingParty);
+router.put(   '/bookings/:id/party',  requireAny('sales_admin_settings', 'admin_unfinalize'), extremeHistoricalGuard, bk.changeBookingParty);
 router.post(  '/bookings/:id/cancel',      requireAny('sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing'), extremeHistoricalGuard, bk.cancelBooking);
 router.post('/bookings/:id/cancel-closed', requireMainAdmin, closedCancellation.cancel);
 

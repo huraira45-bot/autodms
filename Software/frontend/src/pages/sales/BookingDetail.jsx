@@ -238,7 +238,7 @@ export default function BookingDetail() {
             : (hasModule('sales_master_settlement') || hasModule('sales_admin_settings')));
 
     // Admin-only, and the server refuses it anyway once anything has posted.
-    const canChangeCustomer = hasModule('sales_admin_settings') || hasModule('admin_unfinalize');
+    const canChangeCustomer = !data.IsExtremeHistorical && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
 
     // The issued gate pass permanently locks the delivered chassis.
     const canSwapVehicle = !!data.AllocatedVehicleID
@@ -345,8 +345,8 @@ export default function BookingDetail() {
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PartyType}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PhoneOne}</div>
                         {data.CorporatePONumber && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>PO: <strong>{data.CorporatePONumber}</strong></div>}
-                        <CustomerCoaPill partyId={data.PartyID} onLinked={load} />
-                        {(user?.groupId === 1 || hasModule('sales_admin_settings')) && <button type="button" className="erp-btn erp-btn-sm" style={{ marginTop: 8 }} onClick={() => setShowEditCustomer(true)}>Edit customer details</button>}
+                        {!data.IsExtremeHistorical && <CustomerCoaPill partyId={data.PartyID} onLinked={load} />}
+                        {!data.IsExtremeHistorical && (user?.groupId === 1 || hasModule('sales_admin_settings')) && <button type="button" className="erp-btn erp-btn-sm" style={{ marginTop: 8 }} onClick={() => setShowEditCustomer(true)}>Edit customer details</button>}
                         {/* A booking taken against the wrong customer used to need
                             someone running a script (owner ask 2026-10-02). */}
                         {canChangeCustomer && (

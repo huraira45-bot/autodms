@@ -100,13 +100,13 @@ async function listBookings(req, res, cancelled = false) {
         }
         if (req.query.search) {
             r.input('q', sql.NVarChar(200), `%${req.query.search}%`);
-            conds.push('(b.BookingNo LIKE @q OR b.DMSBookingNumber LIKE @q OR p.PartyName LIKE @q OR b.CorporatePONumber LIKE @q)');
+            conds.push(`(b.BookingNo LIKE @q OR b.DMSBookingNumber LIKE @q OR p.PartyName LIKE @q OR b.HistoricalCustomerName LIKE @q OR b.CorporatePONumber LIKE @q)`);
         }
         const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
         const result = await r.query(`
             SELECT b.BookingID, b.BookingNo, b.DMSBookingNumber, b.Status,
                    COALESCE(b.BookingDate, b.CreatedAt) AS BookingDate,
-                   b.PartyID, p.PartyName, p.PartyType, p.PhoneOne,
+                   b.PartyID, COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName, p.PartyType, p.PhoneOne,
                    b.VehicleModelID, m.ModelCode, m.ModelName,
                    b.VehicleVariantID, v.VariantCode, v.VariantName,
                    b.AllocatedVehicleID, veh.ChasisNo AS AllocatedChasisNo,
@@ -150,7 +150,7 @@ exports.getBooking = async (req, res) => {
         const pool = await getPool();
         const id = parseInt(req.params.id);
         const bk = await pool.request().input('id', sql.Int, id).query(`
-            SELECT b.*, p.PartyName, p.PartyType, p.PhoneOne,
+            SELECT b.*, COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName, p.PartyType, p.PhoneOne,
                    m.ModelCode, m.ModelName, m.BrandName,
                    v.VariantCode, v.VariantName, v.WholesalePrice,
                    v.StandardIncentiveAmount, v.StandardIncentiveTaxTreatment,
@@ -471,7 +471,7 @@ exports.listCancellations = async (req, res) => {
         const result = await r.query(`
             SELECT c.CancellationID, c.BookingID, b.BookingNo, b.Status AS BookingStatus,
                    b.NegotiatedPrice, b.AmountPaidToDate,
-                   p.PartyName, m.ModelCode, v.VariantName,
+                   COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName, m.ModelCode, v.VariantName,
                    c.Status, c.ProposerEmployeeID, c.ProposerName, c.ProposalReason, c.ProposedAt,
                    c.AMDecision, c.AMName, c.AMComments, c.AMDecidedAt,
                    c.AdminName, c.AdminNotes, c.ExecutedAt, c.RefundAmount
@@ -672,7 +672,7 @@ exports.listNegotiations = async (req, res) => {
                    n.Reason, n.Status,
                    n.ProposerEmpID, n.ProposerName, n.ProposedAt,
                    n.ApproverEmpID, n.ApproverName, n.ApproverComments, n.DecidedAt,
-                   p.PartyName, m.ModelCode, v.VariantCode, v.VariantName
+                   COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName, m.ModelCode, v.VariantCode, v.VariantName
             FROM dms_NegotiationRequests n
             JOIN dms_SalesBookings b ON n.BookingID = b.BookingID
             LEFT JOIN gen_PartiesInfo p ON b.PartyID = p.PartyID
@@ -1042,7 +1042,7 @@ exports.changeBookingParty = async (req, res) => {
 
         const booking = (await pool.request().input('id', sql.Int, bookingId).query(`
             SELECT b.BookingID, b.BookingNo, b.Status, b.PartyID,
-                   p.PartyName AS CurrentPartyName
+                   COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS CurrentPartyName
             FROM   dms_SalesBookings b
             LEFT   JOIN gen_PartiesInfo p ON p.PartyID = b.PartyID
             WHERE  b.BookingID = @id`)).recordset[0];

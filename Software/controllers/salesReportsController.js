@@ -38,14 +38,14 @@ async function bookingRegister(req, res, cancelled = false) {
         const search = String(req.query.search || '').trim().slice(0, 150);
         if (search) {
             rq.input('search', sql.NVarChar(452), `%${search.replace(/[[%_]/g, '[$&]')}%`);
-            conds.push('(b.BookingNo LIKE @search OR b.DMSBookingNumber LIKE @search OR p.PartyName LIKE @search)');
+            conds.push(`(b.BookingNo LIKE @search OR b.DMSBookingNumber LIKE @search OR p.PartyName LIKE @search OR b.HistoricalCustomerName LIKE @search)`);
         }
 
         const r = await rq.query(`
             SELECT b.BookingID, b.BookingNo, b.DMSBookingNumber, b.CreatedAt AS BookedOn, b.Status,
                    b.StandardPrice, b.NegotiatedPrice, b.DiscountAmount,
                    b.AmountPaidToDate, b.DeliveredAt, b.CancelledAt, b.CancellationReason,
-                   p.PartyName AS CustomerName,
+                   COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS CustomerName,
                    m.ModelCode + ' ' + ISNULL(v.VariantName, '') AS Vehicle,
                    b.CreatedByName AS ExecutiveName
             FROM dms_SalesBookings b
@@ -204,7 +204,7 @@ exports.customerAdvancesAging = async (req, res) => {
         const pool = await getPool();
         const r = await pool.request().query(`
             SELECT b.BookingID, b.BookingNo, b.CreatedAt, b.Status,
-                   p.PartyName AS Customer,
+                   COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS Customer,
                    m.ModelCode + ' ' + ISNULL(vv.VariantName, '') AS Vehicle,
                    b.NegotiatedPrice, b.AmountPaidToDate,
                    DATEDIFF(DAY, b.CreatedAt, GETDATE()) AS AgeDays
@@ -307,7 +307,7 @@ exports.masterInvoiceAging = async (req, res) => {
     try {
         const pool = await getPool();
         const r = await pool.request().query(`
-            SELECT b.BookingID, b.BookingNo, p.PartyName, v.VariantName,
+            SELECT b.BookingID, b.BookingNo, COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName, v.VariantName,
                    veh.ChasisNo AS AllocatedChasisNo,
                    dates.AllocatedAt,
                    CAST(CASE WHEN allocation.At IS NULL THEN 1 ELSE 0 END AS BIT) AS AllocationDateEstimated,
