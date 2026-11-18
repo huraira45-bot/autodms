@@ -82,8 +82,8 @@ function masterPositionSql(booking, coreGL, { excludeDelivery = false } = {}) {
         WHERE po.BookingID=${booking}
     ) movement GROUP BY movement.GLCAID`;
 }
-function masterNetSql(booking, coreGL) {
-    return `(SELECT ISNULL(SUM(position.Net),0) FROM (${masterPositionSql(booking,coreGL)}) position)`;
+function masterNetSql(booking, coreGL, options = {}) {
+    return `(SELECT ISNULL(SUM(position.Net),0) FROM (${masterPositionSql(booking,coreGL,options)}) position)`;
 }
 const MASTER_SOURCE_IDS_SQL = `SELECT p.VoucherID FROM dms_SalesPayments p
     WHERE p.BookingID=@bid AND p.IsLinkedVoucher=1 AND p.PaymentMode='PayOrder' AND p.Status='Posted'

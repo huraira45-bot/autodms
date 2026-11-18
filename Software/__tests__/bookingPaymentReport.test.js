@@ -165,3 +165,10 @@ test('DMS search treats SQL wildcard characters literally and preserves customer
     expect(query.mock.calls[0][0]).toContain('p.PartyName LIKE @search');
     expect(query.mock.calls[0][0]).toContain('p.PhoneOne LIKE @search');
 });
+test('booking paid-to-Master total keeps the original remittance after delivery settlement',()=>{
+ const {masterNetSql}=require('../services/masterPaymentPositionService');
+ const remitted=masterNetSql('@id','@gl',{excludeDelivery:true});
+ expect(remitted).toContain("AND ISNULL(v.SourceDocType,'')<>'SALES_DELIVERY'");
+ expect(remitted).toContain("AND ISNULL(original.SourceDocType,'')<>'SALES_DELIVERY'");
+ expect(masterNetSql('@id','@gl')).not.toContain("AND ISNULL(v.SourceDocType,'')<>'SALES_DELIVERY'");
+});
