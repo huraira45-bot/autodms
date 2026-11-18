@@ -8,13 +8,22 @@ function vehicleDeliveryLockedSql(alias = 'v') {
         WHERE (deliveredBooking.AllocatedVehicleID=${alias}.VehicleID OR deliveredBooking.BookingID=${alias}.CurrentBookingID)
           AND (${alias}.Status IN ('Delivered','Sold') OR ${alias}.SoldDeliveredAt IS NOT NULL
               OR deliveredBooking.DeliveredAt IS NOT NULL OR deliveredBooking.GatePassIssuedAt IS NOT NULL OR EXISTS (
-                  SELECT 1 FROM dms_GatePasses pass WHERE pass.DocType='BOOKING' AND pass.DocID=deliveredBooking.BookingID)))
+                  SELECT 1 FROM dms_GatePasses pass WHERE pass.DocType='BOOKING' AND pass.DocID=deliveredBooking.BookingID
+                AND NOT EXISTS(SELECT 1 FROM dms_BookingDeliveryReopens reopened
+                    WHERE reopened.BookingID=pass.DocID AND reopened.GatePassID=pass.GatePassID
+                      AND reopened.CompletedAtUtc IS NOT NULL AND pass.RevokedAt IS NOT NULL))))
         OR EXISTS (SELECT 1 FROM dms_GatePasses chassisPass
             JOIN dms_SalesBookings passBooking ON passBooking.BookingID=chassisPass.DocID
-            WHERE chassisPass.DocType='BOOKING' AND chassisPass.VehicleChassis=${alias}.ChasisNo)
+            WHERE chassisPass.DocType='BOOKING' AND chassisPass.VehicleChassis=${alias}.ChasisNo
+              AND NOT EXISTS(SELECT 1 FROM dms_BookingDeliveryReopens reopened
+                  WHERE reopened.GatePassID=chassisPass.GatePassID AND reopened.BookingID=chassisPass.DocID
+                    AND reopened.VehicleID=${alias}.VehicleID AND reopened.CompletedAtUtc IS NOT NULL AND chassisPass.RevokedAt IS NOT NULL))
         OR EXISTS (SELECT 1 FROM dms_VehicleInventoryLedger deliveryHistory
             JOIN dms_SalesBookings historyBooking ON historyBooking.BookingID=deliveryHistory.BookingID
             WHERE deliveryHistory.VehicleID=${alias}.VehicleID
+              AND NOT EXISTS(SELECT 1 FROM dms_BookingDeliveryReopens reopened
+                  WHERE reopened.VehicleID=deliveryHistory.VehicleID AND reopened.BookingID=deliveryHistory.BookingID
+                    AND reopened.CompletedAtUtc IS NOT NULL AND deliveryHistory.MovementID<=reopened.LastDeliveryMovementID)
               AND NOT EXISTS (SELECT 1 FROM dms_DeliveredChassisCorrections corrected
                   WHERE corrected.OldVehicleID=deliveryHistory.VehicleID AND corrected.BookingID=deliveryHistory.BookingID
                     AND corrected.CompletedAtUtc IS NOT NULL

@@ -56,7 +56,7 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
     // 3. Load original subsidiary ledger rows
     const subRes = await new sql.Request(transaction)
         .input('id', sql.Int, originalVoucherId)
-        .query(`SELECT PartyID, JobCardID, GLCAID, Debit, Credit, Narration
+        .query(`SELECT PartyID, JobCardID, BookingID, GLCAID, Debit, Credit, Narration
                 FROM dms_PartyLedger WHERE VoucherID=@id`);
 
     // 4. Generate reversal voucher number — draws from the originating type's
@@ -117,13 +117,14 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
             .input('pid',  sql.Int,              s.PartyID || null)
             .input('jcid', sql.Int,              s.JobCardID || null)
             .input('vid',  sql.Int,              reversalId)
+            .input('bid',  sql.Int,              s.BookingID || null)
             .input('gl',   sql.Int,              s.GLCAID)
             .input('dr',   sql.Decimal(18,2),    s.Credit || 0)
             .input('cr',   sql.Decimal(18,2),    s.Debit  || 0)
             .input('nar',  sql.NVarChar(500),    `Reversal: ${s.Narration || ''}`)
             .query(`INSERT INTO dms_PartyLedger
-                        (PartyID, JobCardID, VoucherID, GLCAID, Debit, Credit, Narration)
-                    VALUES (@pid, @jcid, @vid, @gl, @dr, @cr, @nar)`);
+                        (PartyID, JobCardID, BookingID, VoucherID, GLCAID, Debit, Credit, Narration)
+                    VALUES (@pid, @jcid, @bid, @vid, @gl, @dr, @cr, @nar)`);
     }
 
     // 8. Flip reversal voucher Status='Posted' (triggers balanced-entry guard)
