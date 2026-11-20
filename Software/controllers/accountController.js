@@ -621,9 +621,11 @@ exports.updateVoucherLineDepartment = async (req, res) => {
             .input('vid', sql.Int, id)
             .input('dep', sql.Int, finalDeptId)
             .input('exp', sql.Bit, isExpense === null ? null : (isExpense ? 1 : 0))
-            .query(`UPDATE data_FinanceVoucherDetail SET DepartmentID = @dep, IsExpense = @exp
-                    OUTPUT INSERTED.VoucherDetailID
-                    WHERE VoucherDetailID = @id AND VoucherID=@vid`);
+            .query(`DECLARE @triggerOutput TABLE ([VoucherDetailID] INT);
+UPDATE data_FinanceVoucherDetail SET DepartmentID = @dep, IsExpense = @exp
+                    OUTPUT INSERTED.VoucherDetailID INTO @triggerOutput
+                    WHERE VoucherDetailID = @id AND VoucherID=@vid;
+SELECT [VoucherDetailID] FROM @triggerOutput;`);
             if (!result.recordset?.length) throw Object.assign(new Error('Voucher line changed. Refresh and try again.'), { status: 409 });
         });
         res.json({ message: 'Line updated', VoucherDetailID: lineId, DepartmentID: finalDeptId, IsExpense: isExpense });
@@ -656,10 +658,12 @@ exports.bulkSetVoucherExpenseFlag = async (req, res) => {
         const result = await withVoucherEditHistory(pool, req, id, 'EXPENSE_FLAG_CHANGE', async transaction => new sql.Request(transaction)
             .input('id', sql.Int, id)
             .input('exp', sql.Bit, isExpenseRaw === false ? 0 : null)
-            .query(`UPDATE data_FinanceVoucherDetail
+            .query(`DECLARE @triggerOutput TABLE ([VoucherDetailID] INT);
+UPDATE data_FinanceVoucherDetail
                     SET DepartmentID = NULL, IsExpense = @exp
-                    OUTPUT INSERTED.VoucherDetailID
-                    WHERE VoucherID = @id AND Debit > 0`));
+                    OUTPUT INSERTED.VoucherDetailID INTO @triggerOutput
+                    WHERE VoucherID = @id AND Debit > 0;
+SELECT [VoucherDetailID] FROM @triggerOutput;`));
         res.json({ message: 'Voucher lines updated', VoucherID: id, LinesAffected: result.recordset.length });
     } catch (err) {
         console.error('bulkSetVoucherExpenseFlag:', err);
@@ -1001,12 +1005,14 @@ exports.saveVoucher = async (req, res) => {
                 .input('TotalAmount', sql.Decimal(18,2), totalAmount)
                 .input('CreatedBy', sql.Int, req.user?.userId || null)
                 .input('CreatedByName', sql.NVarChar(100), req.user?.userName || null)
-                .query(`INSERT INTO data_FinanceVoucherInfo
+                .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                             (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                              Status, Posted, CreatedBy, CreatedByName)
-                        OUTPUT INSERTED.VoucherID
+                        OUTPUT INSERTED.VoucherID INTO @triggerOutput
                         VALUES (@VoucherDate, @VoucherNo, @VoucherTypeID, @Remarks, @TotalAmount,
-                                'Draft', 0, @CreatedBy, @CreatedByName)`);
+                                'Draft', 0, @CreatedBy, @CreatedByName);
+SELECT [VoucherID] FROM @triggerOutput;`);
 
             const voucherID = infoResult.recordset[0].VoucherID;
 

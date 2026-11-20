@@ -26,7 +26,7 @@ function transaction(rows) {
     tx.request = () => new (require('../config/db').sql.Request)(tx);
     return tx;
 }
-const writes = tx => tx.calls.filter(c => /^\s*(INSERT|UPDATE|DELETE)/i.test(c.query));
+const writes = tx => tx.calls.filter(c => /^\s*(?:DECLARE @triggerOutput TABLE \(\[\w+\] INT\);\s*)?(INSERT|UPDATE|DELETE)/i.test(c.query));
 
 describe('Master payment void', () => {
     test('draft void removes only its voucher and stores actor, amount and reason', async () => {

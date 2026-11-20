@@ -2375,12 +2375,14 @@ exports.recordDepreciationPayment = async (req, res) => {
                 .input('srcId',sql.Int,          id)
                 .input('cby',  sql.Int,          req.user?.userId || null)
                 .input('cbyN', sql.NVarChar(100),req.user?.userName || null)
-                .query(`INSERT INTO data_FinanceVoucherInfo
+                .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                             (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                              Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                        OUTPUT INSERTED.VoucherID
+                        OUTPUT INSERTED.VoucherID INTO @triggerOutput
                         VALUES (@vd, @vno, @vtId, @rem, @tot,
-                                'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                                'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
             const voucherId = hdrRes.recordset[0].VoucherID;
 
             // 3. Two balanced lines. The Cr leg also gets a PartyID tag (when the JC
@@ -2394,10 +2396,12 @@ exports.recordDepreciationPayment = async (req, res) => {
                     .input('cr',   sql.Decimal(18,2), cr || 0)
                     .input('pid',  sql.Int,           partyId || null)
                     .input('jcid', sql.Int,           id)
-                    .query(`INSERT INTO data_FinanceVoucherDetail
+                    .query(`DECLARE @triggerOutput TABLE ([VoucherDetailID] INT);
+INSERT INTO data_FinanceVoucherDetail
                                 (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, JobCardID)
-                            OUTPUT INSERTED.VoucherDetailID
-                            VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid)`);
+                            OUTPUT INSERTED.VoucherDetailID INTO @triggerOutput
+                            VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @jcid);
+SELECT [VoucherDetailID] FROM @triggerOutput;`);
                 return r.recordset[0].VoucherDetailID;
             };
             const drDetailId = await insertLine(drGL, amount, 0, `${mode} receipt — depreciation for ${jcNo}`, null);

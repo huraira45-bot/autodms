@@ -36,6 +36,7 @@ function transaction(changes = {}) {
     };
     tx.query = jest.fn(async (query, values) => {
         tx.calls.push({ query, values });
+        query = query.replace(/^DECLARE @triggerOutput TABLE \(\[\w+\] INT\);\s*/, '');
         if (query.startsWith('SELECT * FROM paint_GRN ')) return { recordset: [{ ...tx.grn }] };
         if (query.includes('FROM paint_GRTN WHERE')) return { recordset: tx.returns };
         if (query.includes('WHERE SourceDocType=\'PAINT_GRN\'')) return { recordset: tx.existing };

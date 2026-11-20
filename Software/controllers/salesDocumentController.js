@@ -64,11 +64,13 @@ exports.upload = async (req, res) => {
             .input('bid', sql.Int, bookingId)
             .input('emp', sql.Int, req.user?.employeeId || null)
             .input('empN', sql.NVarChar(100), req.user?.userName || null)
-            .query(`INSERT INTO dms_SalesDocuments
+            .query(`DECLARE @triggerOutput TABLE ([DocumentID] INT);
+INSERT INTO dms_SalesDocuments
                         (DocType, Description, FilePath, OriginalFileName, MimeType, SizeBytes,
                          BookingID, UploadedByEmployeeID, UploadedByName)
-                    OUTPUT INSERTED.DocumentID
-                    VALUES (@dt, @desc, @fp, @orig, @mime, @sz, @bid, @emp, @empN)`);
+                    OUTPUT INSERTED.DocumentID INTO @triggerOutput
+                    VALUES (@dt, @desc, @fp, @orig, @mime, @sz, @bid, @emp, @empN);
+SELECT [DocumentID] FROM @triggerOutput;`);
         res.status(201).json({ message: 'Document uploaded', DocumentID: r.recordset[0].DocumentID, FilePath: relPath });
     } catch (err) {
         discard();
@@ -89,10 +91,12 @@ exports.remove = async (req, res) => {
             .input('emp', sql.Int, req.user?.employeeId || null)
             .input('empN', sql.NVarChar(100), req.user?.userName || null)
             .input('r', sql.NVarChar(sql.MAX), reason)
-            .query(`UPDATE dms_SalesDocuments
+            .query(`DECLARE @triggerOutput TABLE ([DocumentID] INT);
+UPDATE dms_SalesDocuments
                     SET DeletedAt=GETDATE(), DeletedByEmployeeID=@emp, DeletedByName=@empN, DeleteReason=@r
-                    OUTPUT INSERTED.DocumentID
-                    WHERE DocumentID=@id AND BookingID=@bid AND DeletedAt IS NULL`);
+                    OUTPUT INSERTED.DocumentID INTO @triggerOutput
+                    WHERE DocumentID=@id AND BookingID=@bid AND DeletedAt IS NULL;
+SELECT [DocumentID] FROM @triggerOutput;`);
         if (!r.recordset.length) return res.status(404).json({ error: 'Document not found or already deleted' });
         res.json({ message: 'Deleted' });
     } catch (err) { res.status(500).json({ error: err.message }); }

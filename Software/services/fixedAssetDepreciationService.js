@@ -203,11 +203,13 @@ async function createDraftRun(periodYear, periodMonth, user) {
             .input('srcId', sql.Int, runId)
             .input('cby', sql.Int, user?.userId || null)
             .input('cbyN', sql.NVarChar(100), user?.userName || null)
-            .query(`INSERT INTO data_FinanceVoucherInfo
+            .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                         (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                          Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                    OUTPUT INSERTED.VoucherID
-                    VALUES (@vd, @vno, @vt, @rem, @tot, 'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                    OUTPUT INSERTED.VoucherID INTO @triggerOutput
+                    VALUES (@vd, @vno, @vt, @rem, @tot, 'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
         const voucherId = hdr.recordset[0].VoucherID;
 
         await new sql.Request(tx).input('rid', sql.Int, runId).input('vid', sql.Int, voucherId)

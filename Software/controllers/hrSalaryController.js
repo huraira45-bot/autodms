@@ -353,11 +353,13 @@ async function insertVoucherHeader(tx, { voucherNo, voucherTypeCode, date, narra
         .input('sid',  sql.Int,              srcId)
         .input('cby',  sql.Int,              user?.userId || null)
         .input('cbyN', sql.NVarChar(100),    user?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
-                VALUES (@vd, @vno, @vt, @nar, @tot, 'Draft', 0, @src, @sid, @cby, @cbyN)`);
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
+                VALUES (@vd, @vno, @vt, @nar, @tot, 'Draft', 0, @src, @sid, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     return r.recordset[0].VoucherID;
 }
 

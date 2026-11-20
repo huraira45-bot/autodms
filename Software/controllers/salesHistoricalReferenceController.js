@@ -89,9 +89,11 @@ exports.add = async (req, res) => {
         if (duplicate.recordset.length) fail('This voucher is already attached as a reference here.');
         const result = await new sql.Request(tx).input('bid', sql.Int, bookingId).input('vid', sql.Int, voucherId)
             .input('kind', sql.NVarChar(10), kind).input('pid', sql.Int, paymentId)
-            .input('name', sql.NVarChar(100), req.user?.userName || null).query(`
+            .input('name', sql.NVarChar(100), req.user?.userName || null).query(`DECLARE @triggerOutput TABLE ([ReferenceID] INT);
+
                 INSERT INTO dms_HistoricalVoucherReferences (BookingID,VoucherID,ReferenceKind,PaymentID,LinkedByName)
-                OUTPUT INSERTED.ReferenceID VALUES (@bid,@vid,@kind,@pid,@name)`);
+                OUTPUT INSERTED.ReferenceID INTO @triggerOutput VALUES (@bid,@vid,@kind,@pid,@name);
+SELECT [ReferenceID] FROM @triggerOutput;`);
         await logBookingTransition(tx, bookingId, row.Status, row.Status, req.user,
             `Voucher ${source.recordset[0].VoucherNo} attached as ${kind.toLowerCase()} reference${paymentId ? ' for payment #' + paymentId : ''}. Payment and Master totals unchanged.`);
         await tx.commit();

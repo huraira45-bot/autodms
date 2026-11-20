@@ -732,11 +732,13 @@ async function createRecoveryPlanIfNeeded(tx, bookingId, b, fullyPaid, user) {
                JSON.stringify([{ DueDate: addDaysISO(30), AmountDue: remainder, Notes: 'Auto-created at gate pass — adjust schedule.' }]))
         .input('cby',   sql.Int,             user?.employeeId || null)
         .input('cbyN',  sql.NVarChar(100),   user?.userName || null)
-        .query(`INSERT INTO dms_SalesRecoveryPlans
+        .query(`DECLARE @triggerOutput TABLE ([RecoveryPlanID] INT);
+INSERT INTO dms_SalesRecoveryPlans
                     (BookingID, TotalRemainingAtDelivery, InstallmentsJSON,
                      Status, CreatedByEmployeeID, CreatedByName)
-                OUTPUT INSERTED.RecoveryPlanID
-                VALUES (@bid, @rem, @json, 'Active', @cby, @cbyN)`);
+                OUTPUT INSERTED.RecoveryPlanID INTO @triggerOutput
+                VALUES (@bid, @rem, @json, 'Active', @cby, @cbyN);
+SELECT [RecoveryPlanID] FROM @triggerOutput;`);
     const planId = planIns.recordset[0].RecoveryPlanID;
     await new sql.Request(tx)
         .input('pid', sql.Int,           planId)
@@ -918,14 +920,16 @@ exports.issueGatePass = async (req, res) => {
                        (fullyPaid ? '' : ` Partial delivery — ${paidPct.toFixed(1)}% paid.`))
                 .input('by',    sql.Int,           req.user?.employeeId || req.user?.userId || 0)
                 .input('byN',   sql.NVarChar(100), req.user?.userName || 'system')
-                .query(`INSERT INTO dms_GatePasses
+                .query(`DECLARE @triggerOutput TABLE ([GatePassID] INT);
+INSERT INTO dms_GatePasses
                             (GatePassNo, DocType, DocID, CustomerName, VehicleRegNo, VehicleChassis,
                              PassReason, AmountInvoiced, AmountReceived, Notes,
                              IssuedAt, IssuedBy, IssuedByName)
-                        OUTPUT INSERTED.GatePassID
+                        OUTPUT INSERTED.GatePassID INTO @triggerOutput
                         VALUES (@no, @dt, @did, @cust, @reg, @ch,
                                 @reason, @inv, @rcv, @notes,
-                                GETDATE(), @by, @byN)`);
+                                GETDATE(), @by, @byN);
+SELECT [GatePassID] FROM @triggerOutput;`);
 
             await markVehicleDelivered(tx, { vehicleId: b.AllocatedVehicleID, bookingId: id, user: req.user });
             await tx.commit();

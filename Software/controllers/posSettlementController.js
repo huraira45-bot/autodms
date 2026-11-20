@@ -225,12 +225,14 @@ exports.postSettlement = async (req, res) => {
                 .input('src',     sql.NVarChar(20), 'VOUCHER')
                 .input('cby',     sql.Int,          req.user?.userId || null)
                 .input('cbyN',    sql.NVarChar(100),req.user?.userName || null)
-                .query(`INSERT INTO data_FinanceVoucherInfo
+                .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                             (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                              Status, Posted, SourceDocType, CreatedBy, CreatedByName)
-                        OUTPUT INSERTED.VoucherID
+                        OUTPUT INSERTED.VoucherID INTO @triggerOutput
                         VALUES (@vd, @vno, @vtId, @remarks, @total,
-                                'Draft', 0, @src, @cby, @cbyN)`);
+                                'Draft', 0, @src, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
             const voucherId = hdrRes.recordset[0].VoucherID;
 
             // Dr Bank + Dr Bank Charges — one pair per bank row.

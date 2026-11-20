@@ -40,8 +40,10 @@ async function accrueAtBooking(tx, bookingId, user) {
             .input('date', sql.Date, new Date(b.RateDate + 'T00:00:00Z')).input('amount', sql.Decimal(18, 2), amount)
             .input('id', sql.Int, bookingId).input('source', sql.NVarChar(50), SOURCE).input('notes', sql.NVarChar(sql.MAX), narrative)
             .input('uid', sql.Int, user?.userId || null).input('name', sql.NVarChar(100), user?.userName || 'system')
-            .query(`INSERT INTO data_FinanceVoucherInfo(VoucherNo,VoucherTypeID,VoucherDate,TotalAmount,Status,Posted,SourceDocType,SourceDocID,Remarks,CreatedBy,CreatedByName)
-                    OUTPUT INSERTED.VoucherID VALUES(@no,@type,@date,@amount,'Draft',0,@source,@id,@notes,@uid,@name)`)).recordset[0].VoucherID;
+            .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo(VoucherNo,VoucherTypeID,VoucherDate,TotalAmount,Status,Posted,SourceDocType,SourceDocID,Remarks,CreatedBy,CreatedByName)
+                    OUTPUT INSERTED.VoucherID INTO @triggerOutput VALUES(@no,@type,@date,@amount,'Draft',0,@source,@id,@notes,@uid,@name);
+SELECT [VoucherID] FROM @triggerOutput;`)).recordset[0].VoucherID;
         await new sql.Request(tx).input('vid', sql.Int, voucherId).input('id', sql.Int, bookingId).input('amount', sql.Decimal(18, 2), amount)
             .input('recv', sql.Int, receivable.GLCAID).input('income', sql.Int, income.GLCAID).input('notes', sql.NVarChar(sql.MAX), narrative)
             .query(`INSERT INTO data_FinanceVoucherDetail(VoucherID,GLCAID,BookingID,Debit,Credit,Narration)

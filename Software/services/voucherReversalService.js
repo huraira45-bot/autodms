@@ -83,14 +83,16 @@ async function postReversalVoucher(originalVoucherId, userInfo, transaction) {
         .input('srcId',   sql.Int,              orig.SourceDocID)
         .input('cby',     sql.Int,              userInfo?.userId || null)
         .input('cbyN',    sql.NVarChar(100),    userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, ReversesVoucherID, SourceDocType, SourceDocID,
                      CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @remarks, @total,
                         'Draft', 0, @rev, @src, @srcId,
-                        @cby, @cbyN)`);
+                        @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const reversalId = newHdr.recordset[0].VoucherID;
 
     // 6. Insert mirror detail lines (Debit ↔ Credit swapped), preserving the

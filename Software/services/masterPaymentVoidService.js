@@ -52,10 +52,12 @@ async function voidMasterPayment(tx, { bookingId, voucherId, reason, user }) {
             .input('uid', sql.Int, user.userId)
             .input('name', sql.NVarChar(100), user.userName)
             .input('reason', sql.NVarChar(sql.MAX), reason)
-            .query(`INSERT INTO dms_UnfinalizeRequests
+            .query(`DECLARE @triggerOutput TABLE ([RequestID] INT);
+INSERT INTO dms_UnfinalizeRequests
                         (EntityType, EntityID, EntityRef, RequestedBy, RequestedByName, Reason)
-                    OUTPUT INSERTED.RequestID
-                    VALUES ('VOUCHER', @vid, @ref, @uid, @name, @reason)`);
+                    OUTPUT INSERTED.RequestID INTO @triggerOutput
+                    VALUES ('VOUCHER', @vid, @ref, @uid, @name, @reason);
+SELECT [RequestID] FROM @triggerOutput;`);
         requestId = inserted.recordset[0].RequestID;
     } else {
         const refs = await new sql.Request(tx).input('vid', sql.Int, voucherId)

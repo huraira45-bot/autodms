@@ -82,12 +82,14 @@ async function postAccrualVoucher(accrualId, userInfo, transaction) {
         .input('srcId',sql.Int,          a.AccrualID)
         .input('cby',  sql.Int,          userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @rem, @tot,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = hdrRes.recordset[0].VoucherID;
 
     const insertLine = async (glcaid, dr, cr, lineNar) => {
@@ -176,12 +178,14 @@ async function postDisbursementVoucher(dis, userInfo, transaction) {
         .input('srcId',sql.Int,          dis.sourceDocId || null)
         .input('cby',  sql.Int,          userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @rem, @tot,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = hdrRes.recordset[0].VoucherID;
 
     const insertLine = async (glcaid, dr, cr, lineNar) => {

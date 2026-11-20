@@ -36,10 +36,12 @@ async function recordMasterInvoiceDocument(tx, input) {
         .input('path',sql.NVarChar(500),filePath).input('original',sql.NVarChar(255),file.originalname)
         .input('mime',sql.NVarChar(100),file.mimetype).input('size',sql.BigInt,file.size)
         .input('emp',sql.Int,user.employeeId || null).input('name',sql.NVarChar(100),user.userName)
-        .query(`INSERT INTO dms_SalesDocuments
+        .query(`DECLARE @triggerOutput TABLE ([DocumentID] INT);
+INSERT INTO dms_SalesDocuments
                     (DocType,Description,FilePath,OriginalFileName,MimeType,SizeBytes,BookingID,UploadedByEmployeeID,UploadedByName)
-                OUTPUT INSERTED.DocumentID
-                VALUES ('MasterInvoice',@description,@path,@original,@mime,@size,@id,@emp,@name)`);
+                OUTPUT INSERTED.DocumentID INTO @triggerOutput
+                VALUES ('MasterInvoice',@description,@path,@original,@mime,@size,@id,@emp,@name);
+SELECT [DocumentID] FROM @triggerOutput;`);
     const documentId=inserted.recordset[0].DocumentID;
     await new sql.Request(tx).input('id',sql.Int,bookingId).input('no',sql.NVarChar(100),invoiceNo)
         .input('date',sql.Date,date).input('doc',sql.Int,documentId).input('notes',sql.NVarChar(500),notes)

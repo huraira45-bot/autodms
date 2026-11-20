@@ -94,12 +94,14 @@ async function postPaintGRNVoucher(paintGRNID, userInfo, transaction, { postingN
         .input('srcId',   sql.Int,               paintGRNID)
         .input('cby',     sql.Int,               userInfo?.userId || null)
         .input('cbyN',    sql.NVarChar(100),     userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @remarks, @total,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = newHdr.recordset[0].VoucherID;
 
     async function insertLeg(glCAID, dr, cr, note, partyId = null) {

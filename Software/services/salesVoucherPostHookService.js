@@ -137,10 +137,12 @@ async function handleSalesDeliveryPosted(voucherId, bookingId, user) {
                 .input('json', sql.NVarChar(sql.MAX),
                        JSON.stringify([{ DueDate: addDaysISO(30), AmountDue: remainder, Notes: 'Auto-created at gate pass finalize — adjust schedule.' }]))
                 .input('cbyN', sql.NVarChar(100),   user?.userName || null)
-                .query(`INSERT INTO dms_SalesRecoveryPlans
+                .query(`DECLARE @triggerOutput TABLE ([RecoveryPlanID] INT);
+INSERT INTO dms_SalesRecoveryPlans
                             (BookingID, TotalRemainingAtDelivery, InstallmentsJSON, Status, CreatedByName)
-                        OUTPUT INSERTED.RecoveryPlanID
-                        VALUES (@bid, @rem, @json, 'Active', @cbyN)`);
+                        OUTPUT INSERTED.RecoveryPlanID INTO @triggerOutput
+                        VALUES (@bid, @rem, @json, 'Active', @cbyN);
+SELECT [RecoveryPlanID] FROM @triggerOutput;`);
             const planId = planIns.recordset[0].RecoveryPlanID;
             await pool.request()
                 .input('pid', sql.Int,           planId)

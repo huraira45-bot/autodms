@@ -52,12 +52,14 @@ exports.createPlan = async (req, res) => {
             .input('oname', sql.NVarChar(100), OwnerName || req.user?.userName || null)
             .input('cby',   sql.Int,           req.user?.employeeId || null)
             .input('cbyN',  sql.NVarChar(100), req.user?.userName || null)
-            .query(`INSERT INTO dms_SalesRecoveryPlans
+            .query(`DECLARE @triggerOutput TABLE ([RecoveryPlanID] INT);
+INSERT INTO dms_SalesRecoveryPlans
                         (BookingID, TotalRemainingAtDelivery, InstallmentsJSON,
                          OwnerEmployeeID, OwnerName, Status,
                          CreatedByEmployeeID, CreatedByName)
-                    OUTPUT INSERTED.RecoveryPlanID
-                    VALUES (@bid, @rem, @json, @oid, @oname, 'Active', @cby, @cbyN)`);
+                    OUTPUT INSERTED.RecoveryPlanID INTO @triggerOutput
+                    VALUES (@bid, @rem, @json, @oid, @oname, 'Active', @cby, @cbyN);
+SELECT [RecoveryPlanID] FROM @triggerOutput;`);
         const planId = planRes.recordset[0].RecoveryPlanID;
 
         // Insert each installment as an indexed row for aging queries

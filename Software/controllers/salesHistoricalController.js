@@ -176,16 +176,18 @@ exports.createBooking = async (req, res) => {
                 .input('closed', sql.DateTime, status === 'Closed' ? bookingDate : null)
                 .input('gp', sql.DateTime, ['GatePassIssued', 'Closed'].includes(status) ? bookingDate : null)
                 .input('canc', sql.DateTime, status === 'Cancelled' ? bookingDate : null)
-                .query(`INSERT INTO dms_SalesBookings
+                .query(`DECLARE @triggerOutput TABLE ([BookingID] INT);
+INSERT INTO dms_SalesBookings
                             (BookingNo, PartyID, HistoricalCustomerName, VehicleModelID, VehicleVariantID,
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName, CorporatePONumber,
                              IsHistorical, IsExtremeHistorical, HistoricalVoucherReference, HistoricalEntryNotes, BookingDate, HistoricalEnteredAt,
                              CreatedAt, ClosedAt, GatePassIssuedAt, DeliveredAt, CancelledAt, PromisedDeliveryMonth)
-                        OUTPUT INSERTED.BookingID
+                        OUTPUT INSERTED.BookingID INTO @triggerOutput
                         VALUES (@no, @pid, @customerName, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po,
                                 1, @extreme, @ref, @entryNotes, @bd, GETDATE(),
-                                @bd, @closed, @gp, @gp, @canc, @promise)`);
+                                @bd, @closed, @gp, @gp, @canc, @promise);
+SELECT [BookingID] FROM @triggerOutput;`);
             const bookingId = r.recordset[0].BookingID;
             if (extreme && customerPaid > 0) {
                 // Amount records only. No voucher, ledger account lookup or GL posting.

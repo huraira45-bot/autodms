@@ -318,13 +318,15 @@ exports.createBooking = async (req, res) => {
                 .input('iq', sql.Int, b.SourceInquiryID || null)
                 .input('promise', sql.Date, promisedMonth)
                 .input('dms', sql.NVarChar(100), dmsBookingNumber)
-                .query(`INSERT INTO dms_SalesBookings
+                .query(`DECLARE @triggerOutput TABLE ([BookingID] INT);
+INSERT INTO dms_SalesBookings
                             (BookingNo, PartyID, VehicleModelID, VehicleVariantID,
                              StandardPrice, NegotiatedPrice, Status,
                              CreatedBy_SalesExecutiveID, CreatedByName,
                              CorporatePONumber, SourceInquiryID, PromisedDeliveryMonth, DMSBookingNumber)
-                        OUTPUT INSERTED.BookingID
-                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po, @iq, @promise, @dms)`);
+                        OUTPUT INSERTED.BookingID INTO @triggerOutput
+                        VALUES (@no, @pid, @mid, @vid, @sp, @np, @st, @exe, @exeN, @po, @iq, @promise, @dms);
+SELECT [BookingID] FROM @triggerOutput;`);
             const bookingId = r.recordset[0].BookingID;
             await new sql.Request(tx).input('id', sql.Int, bookingId)
                 .input('next', sql.NVarChar(sql.MAX), JSON.stringify({ DMSBookingNumber: dmsBookingNumber }))
@@ -362,10 +364,12 @@ exports.createBooking = async (req, res) => {
                     .input('reason', sql.NVarChar(sql.MAX), b.NegotiationReason.trim())
                     .input('exe', sql.Int, req.user?.employeeId || null)
                     .input('exeN', sql.NVarChar(100), req.user?.userName || null)
-                    .query(`INSERT INTO dms_NegotiationRequests
+                    .query(`DECLARE @triggerOutput TABLE ([RequestID] INT);
+INSERT INTO dms_NegotiationRequests
                                 (BookingID, StandardPrice, ProposedPrice, Reason, ProposerEmpID, ProposerName)
-                            OUTPUT INSERTED.RequestID
-                            VALUES (@bid, @sp, @pp, @reason, @exe, @exeN)`);
+                            OUTPUT INSERTED.RequestID INTO @triggerOutput
+                            VALUES (@bid, @sp, @pp, @reason, @exe, @exeN);
+SELECT [RequestID] FROM @triggerOutput;`);
                 const reqId = nr.recordset[0].RequestID;
                 await new sql.Request(tx).input('rid', sql.Int, reqId).input('bid', sql.Int, bookingId)
                     .query(`UPDATE dms_SalesBookings SET PriceApprovalID=@rid WHERE BookingID=@bid`);

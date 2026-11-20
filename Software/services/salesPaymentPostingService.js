@@ -111,12 +111,14 @@ async function postDirectPayOrderVoucher(paymentId, p, amount, accounts, custome
         .input('srcId',sql.Int,          p.PaymentID)
         .input('cby',  sql.Int,          userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @rem, @tot,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = hdrRes.recordset[0].VoucherID;
 
     const insertLine = async (glcaid, dr, cr, lineNarration) => {
@@ -269,12 +271,14 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
         .input('srcId',sql.Int,          p.PaymentID)
         .input('cby',  sql.Int,          userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @rem, @tot,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = hdrRes.recordset[0].VoucherID;
 
     // Lines
@@ -287,10 +291,12 @@ async function postSalesPaymentVoucher(paymentId, userInfo, transaction) {
             .input('cr',   sql.Decimal(18,2), cr || 0)
             .input('pid',  sql.Int,           p.PartyID || null)
             .input('bid',  sql.Int,           p.BookingID)
-            .query(`INSERT INTO data_FinanceVoucherDetail
+            .query(`DECLARE @triggerOutput TABLE ([VoucherDetailID] INT);
+INSERT INTO data_FinanceVoucherDetail
                         (VoucherID, GLCAID, Narration, Debit, Credit, PartyID, BookingID)
-                    OUTPUT INSERTED.VoucherDetailID
-                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @bid)`);
+                    OUTPUT INSERTED.VoucherDetailID INTO @triggerOutput
+                    VALUES (@vid, @gl, @nar, @dr, @cr, @pid, @bid);
+SELECT [VoucherDetailID] FROM @triggerOutput;`);
         return r.recordset[0].VoucherDetailID;
     };
 

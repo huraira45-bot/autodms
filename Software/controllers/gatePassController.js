@@ -99,14 +99,16 @@ exports.issue = async (req, res) => {
             .input('notes',  sql.NVarChar(500), notes || null)
             .input('iby',    sql.Int,           req.user?.userId || null)
             .input('ibyN',   sql.NVarChar(100), req.user?.userName || 'system')
-            .query(`INSERT INTO dms_GatePasses
+            .query(`DECLARE @triggerOutput TABLE ([GatePassID] INT);
+INSERT INTO dms_GatePasses
                         (GatePassNo, DocType, DocID, CustomerName, VehicleRegNo, VehicleChassis,
                          PassReason, AmountInvoiced, AmountReceived, PaymentModes, Notes,
                          IssuedBy, IssuedByName)
-                    OUTPUT INSERTED.GatePassID
+                    OUTPUT INSERTED.GatePassID INTO @triggerOutput
                     VALUES (@gpNo, @dt, @di, @cust, @reg, @chs,
                             @reason, @inv, @rcv, @modes, @notes,
-                            @iby, @ibyN)`);
+                            @iby, @ibyN);
+SELECT [GatePassID] FROM @triggerOutput;`);
         await tx.commit();
         res.json({ message: 'Gate pass issued.', GatePassID: ins.recordset[0].GatePassID, GatePassNo: gpNo });
     } catch (err) {

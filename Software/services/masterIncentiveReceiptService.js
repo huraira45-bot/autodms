@@ -100,12 +100,14 @@ async function postMasterReceiptVoucher(receiptId, bankAccountGLCAID, userInfo, 
         .input('srcId',sql.Int,              receiptId)
         .input('cby',  sql.Int,              userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),    userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @rem, @tot,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = hdr.recordset[0].VoucherID;
 
     const insertLine = async (glcaid, dr, cr, lineNar, bookingId) => {
@@ -219,12 +221,14 @@ async function postBulkMasterReceiptVoucher(receiptIds, bankAccountGLCAID, userI
         .input('srcId',sql.Int,              receiptIds[0])   // representative — SourceDocID is single-valued; full list lives in Remarks
         .input('cby',  sql.Int,              userInfo?.userId || null)
         .input('cbyN', sql.NVarChar(100),    userInfo?.userName || null)
-        .query(`INSERT INTO data_FinanceVoucherInfo
+        .query(`DECLARE @triggerOutput TABLE ([VoucherID] INT);
+INSERT INTO data_FinanceVoucherInfo
                     (VoucherDate, VoucherNo, VoucherTypeID, Remarks, TotalAmount,
                      Status, Posted, SourceDocType, SourceDocID, CreatedBy, CreatedByName)
-                OUTPUT INSERTED.VoucherID
+                OUTPUT INSERTED.VoucherID INTO @triggerOutput
                 VALUES (@vd, @vno, @vtId, @rem, @tot,
-                        'Draft', 0, @src, @srcId, @cby, @cbyN)`);
+                        'Draft', 0, @src, @srcId, @cby, @cbyN);
+SELECT [VoucherID] FROM @triggerOutput;`);
     const voucherId = hdr.recordset[0].VoucherID;
 
     const insertLine = async (glcaid, dr, cr, lineNar, bookingId) => {

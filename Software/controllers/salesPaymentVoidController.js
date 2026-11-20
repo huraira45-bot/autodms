@@ -205,12 +205,14 @@ exports.propose = async (req, res) => {
                 .input('emp', sql.Int, req.user?.employeeId || null)
                 .input('empN', sql.NVarChar(100), req.user?.userName || null)
                 .input('reason', sql.NVarChar(sql.MAX), reason)
-                .query(`INSERT INTO dms_SalesPaymentVoidRequests
+                .query(`DECLARE @triggerOutput TABLE ([VoidID] INT);
+INSERT INTO dms_SalesPaymentVoidRequests
                             (PaymentID, BookingID, Amount, VoucherID, VoucherNo,
                              Status, ProposerEmployeeID, ProposerName, ProposalReason)
-                        OUTPUT INSERTED.VoidID
+                        OUTPUT INSERTED.VoidID INTO @triggerOutput
                         VALUES (@pid, @bid, @amt, @vid, @vno,
-                                'Pending', @emp, @empN, @reason)`);
+                                'Pending', @emp, @empN, @reason);
+SELECT [VoidID] FROM @triggerOutput;`);
             const voidId = ins.recordset[0].VoidID;
             await logBookingTransition(tx, bookingId, p.BookingStatus, p.BookingStatus, req.user,
                 `Void requested for payment #${paymentId} (PKR ${Number(p.Amount).toLocaleString()}): ${reason}. Awaiting AM approval.`);
