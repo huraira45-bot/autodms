@@ -151,6 +151,7 @@ exports.getBooking = async (req, res) => {
         const id = parseInt(req.params.id);
         const bk = await pool.request().input('id', sql.Int, id).query(`
             SELECT b.*, COALESCE(NULLIF(b.HistoricalCustomerName,''),p.PartyName) AS PartyName, p.PartyType, p.PhoneOne,
+                   CAST(CASE WHEN EXISTS(SELECT 1 FROM dms_PermanentBookingLocks frozen WHERE frozen.BookingID=b.BookingID) THEN 1 ELSE 0 END AS BIT) AS IsPermanentlyLocked,
                    m.ModelCode, m.ModelName, m.BrandName,
                    v.VariantCode, v.VariantName, v.WholesalePrice,
                    v.StandardIncentiveAmount, v.StandardIncentiveTaxTreatment,

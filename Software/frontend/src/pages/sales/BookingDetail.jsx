@@ -113,7 +113,7 @@ export default function BookingDetail() {
     const [voidReqs, setVoidReqs] = useState([]);
     const hasDoc = (type) => documents.some(d => d.DocType === type && !d.DeletedAt);
     // Same roles the server accepts for POST /bookings/:id/documents.
-    const canUploadDocs = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm');
+    const canUploadDocs = !data?.IsPermanentlyLocked && (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm'));
 
     // Owner ask 2026-09-18: a payment recorded by mistake is not undone on the
     // spot. It is requested here, the Accounts Manager approves it, and an
@@ -194,8 +194,8 @@ export default function BookingDetail() {
     const canDiscount = hasModule('sales_admin_pricing') && !data.DeliveryVoucherID && !data.DeliveredAt && !data.GatePassIssuedAt
         && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
     const canManageReferences = data.IsHistorical && !data.IsExtremeHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
-    const canSetBookingDate = user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
-    const canCancel = data.IsExtremeHistorical && data.Status !== 'Closed' ? false : data.Status === 'Closed' ? user?.groupId === 1
+    const canSetBookingDate = !data.IsPermanentlyLocked && user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
+    const canCancel = data.IsPermanentlyLocked ? false : data.IsExtremeHistorical && data.Status !== 'Closed' ? false : data.Status === 'Closed' ? user?.groupId === 1
         : !['Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
           (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
     const canAllocate = !data.IsExtremeHistorical && (['BookingConfirmed', 'PendingPayment', 'MasterInvoicePending'].includes(data.Status)
@@ -238,7 +238,7 @@ export default function BookingDetail() {
             : (hasModule('sales_master_settlement') || hasModule('sales_admin_settings')));
 
     // Admin-only, and the server refuses it anyway once anything has posted.
-    const canChangeCustomer = !data.IsExtremeHistorical && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
+    const canChangeCustomer = !data.IsPermanentlyLocked && !data.IsExtremeHistorical && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
 
     // The issued gate pass permanently locks the delivered chassis.
     const canSwapVehicle = !!data.AllocatedVehicleID
@@ -246,11 +246,11 @@ export default function BookingDetail() {
         && !['GatePassIssued','Delivered','Closed'].includes(data.Status)
         && (hasModule('sales_admin_settings') || hasModule('admin_unfinalize'));
 
-    const canPostMasterInvoice = data.AllocatedVehicleID
+    const canPostMasterInvoice = !data.IsPermanentlyLocked && data.AllocatedVehicleID
         && data.MasterInvoiceDocumentID && !data.IsHistorical && !data.MasterIncentiveAlreadyAccrued
         && ['Allocated','MasterInvoicePending','MasterInvoicePosted','ReadyForDelivery','DeliveryApproved','GatePassIssued','Delivered','Closed'].includes(data.Status)
         && hasModule('sales_master_settlement');
-    const canUploadMasterInvoice = data.Status !== 'Cancelled' && !data.MasterInvoiceDocumentID
+    const canUploadMasterInvoice = !data.IsPermanentlyLocked && data.Status !== 'Cancelled' && !data.MasterInvoiceDocumentID
         && ['sales_master_settlement', 'sales_admin_settings', 'sales_gm'].some(role => hasModule(role));
 
     // Owner ask 2026-09-11: the executive is stamped from whoever created the
@@ -300,7 +300,7 @@ export default function BookingDetail() {
                                 Give discount
                             </button>
                         )}
-                        {['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'].some(role => hasModule(role)) && (
+                        {!data.IsPermanentlyLocked && ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_settings'].some(role => hasModule(role)) && (
                             <button type="button" className="erp-btn erp-btn-sm" onClick={() => setShowDeliveryMonth(true)}>
                                 <CalendarDays size={14} /> Promised month
                             </button>
@@ -319,6 +319,10 @@ export default function BookingDetail() {
                     </>
                 }
             />
+
+            {data.IsPermanentlyLocked && <div role="status" style={{ padding: '12px 16px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 6 }}>
+                <strong>Permanently locked.</strong> Booking details, payments, linked vouchers, documents and vehicle allocation cannot be changed, including by administrators.
+            </div>}
 
             {msg && <FlashMsg msg={msg} />}
             <CustomerIdentityWarningList warnings={customerWarnings} />
@@ -346,7 +350,7 @@ export default function BookingDetail() {
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{data.PhoneOne}</div>
                         {data.CorporatePONumber && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>PO: <strong>{data.CorporatePONumber}</strong></div>}
                         {!data.IsExtremeHistorical && <CustomerCoaPill partyId={data.PartyID} onLinked={load} />}
-                        {!data.IsExtremeHistorical && (user?.groupId === 1 || hasModule('sales_admin_settings')) && <button type="button" className="erp-btn erp-btn-sm" style={{ marginTop: 8 }} onClick={() => setShowEditCustomer(true)}>Edit customer details</button>}
+                        {!data.IsPermanentlyLocked && !data.IsExtremeHistorical && (user?.groupId === 1 || hasModule('sales_admin_settings')) && <button type="button" className="erp-btn erp-btn-sm" style={{ marginTop: 8 }} onClick={() => setShowEditCustomer(true)}>Edit customer details</button>}
                         {/* A booking taken against the wrong customer used to need
                             someone running a script (owner ask 2026-10-02). */}
                         {canChangeCustomer && (
