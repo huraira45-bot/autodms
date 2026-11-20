@@ -158,6 +158,7 @@ exports.getBooking = async (req, res) => {
                    veh.ChasisNo AS AllocatedChasisNo, veh.EngineNo AS AllocatedEngineNo,
                    veh.Color AS AllocatedColor,
                    CAST(CASE WHEN ${vehicleDeliveryLockedSql('veh')} THEN 1 ELSE 0 END AS BIT) AS VehicleDeliveryLocked,
+                   CAST(ISNULL((SELECT l.IsLocked FROM dms_BookingMonthLocks l WHERE l.MonthStart=DATEFROMPARTS(YEAR(COALESCE(b.BookingDate,b.CreatedAt)),MONTH(COALESCE(b.BookingDate,b.CreatedAt)),1)),0) AS BIT) AS BookingMonthLocked,
                    e.EmployeeName AS SalesExecutiveName,
                    miDoc.InvoiceNo AS MasterInvoiceNo, miDoc.InvoiceDate AS MasterInvoiceDate,
                    miFile.DocumentID AS MasterInvoiceDocumentID, miFile.FilePath AS MasterInvoiceFilePath,

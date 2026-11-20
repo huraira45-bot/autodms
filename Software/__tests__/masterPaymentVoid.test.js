@@ -1,3 +1,4 @@
+jest.mock('../services/bookingMonthLockService',()=>({assertBookingVoidAllowed:jest.fn().mockResolvedValue(undefined)}));
 jest.mock('../config/db', () => ({
     getPool: jest.fn(),
     sql: { Transaction: class { constructor(pool) { return pool.tx; } }, Int: 'Int', MAX: 'MAX', NVarChar: n => `nvarchar(${n})`, Decimal: () => 'decimal', DateTime: 'datetime',
@@ -149,4 +150,12 @@ describe('Posting versus draft void', () => {
             }
         } finally { logged.mockRestore(); }
     });
+});
+
+test('locked month refuses a Master void before any voucher operation',async()=>{
+ const {assertBookingVoidAllowed}=require('../services/bookingMonthLockService');
+ assertBookingVoidAllowed.mockRejectedValueOnce(new Error('Booking month is locked'));
+ const tx=transaction([[{BookingID:7,Status:'Allocated'}]]);
+ await expect(voidMasterPayment(tx,input)).rejects.toThrow('month is locked');
+ expect(tx.calls).toHaveLength(1);
 });

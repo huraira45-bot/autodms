@@ -1,4 +1,5 @@
 const { sql } = require('../config/db');
+const { assertBookingVoidAllowed } = require('./bookingMonthLockService');
 const { getDownstreamRefs } = require('./downstreamRefsService');
 
 const LOCKED_BOOKINGS = ['Closed', 'Delivered', 'GatePassIssued'];
@@ -24,6 +25,7 @@ async function voidMasterPayment(tx, { bookingId, voucherId, reason, user }) {
     if (LOCKED_BOOKINGS.includes(booking.recordset[0].Status)) {
         fail('This vehicle has reached delivery. Correct its Master payment through Accounting.');
     }
+    await assertBookingVoidAllowed(tx, bookingId);
     const found = await new sql.Request(tx)
         .input('vid', sql.Int, voucherId).input('bid', sql.Int, bookingId)
         .query(`SELECT VoucherID, VoucherNo, TotalAmount, Status, ReversesVoucherID

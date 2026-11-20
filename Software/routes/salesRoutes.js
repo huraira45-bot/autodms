@@ -7,6 +7,8 @@
 const express = require('express');
 const router = express.Router();
 const pv = require('../controllers/salesPaymentVoidController');
+const monthLocks = require('../controllers/bookingMonthLockController');
+const { requireAdmin: requireMonthLockAdmin } = require('../services/bookingMonthLockService');
 const extremeHistoricalGuard = require('../middleware/extremeHistoricalGuard');
 const hist = require('../controllers/salesHistoricalController');
 const histRef = require('../controllers/salesHistoricalReferenceController');
@@ -51,6 +53,9 @@ const withUploadErrors = (mw) => (req, res, next) => mw(req, res, (err) => {
 
 // Read permissions: anyone in the sales chain or settings/reports
 const SALES_READERS = ['sales_executive', 'sales_agm', 'sales_gm', 'sales_admin_pricing', 'sales_admin_settings', 'sales_master_settlement', 'sales_reports'];
+
+router.get('/booking-month-locks', requireMonthLockAdmin, monthLocks.list);
+router.put('/booking-month-locks/:month', requireMonthLockAdmin, monthLocks.update);
 
 router.get('/executives', requireAnyAccess(...SALES_READERS), executives.options);
 router.get('/executives/setup', requireExecutiveManager, executives.setup);

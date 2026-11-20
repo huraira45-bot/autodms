@@ -123,7 +123,7 @@ export default function BookingDetail() {
     const [voidReason, setVoidReason] = useState('');
     const [voidBusy, setVoidBusy] = useState(false);
     const [voidErr, setVoidErr] = useState(null);
-    const canRequestVoid = hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings');
+    const canRequestVoid = !data?.BookingMonthLocked && !data?.IsPermanentlyLocked && (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_settings'));
 
     const [masterVoidFor, setMasterVoidFor] = useState(null);
     const [masterVoidReason, setMasterVoidReason] = useState('');
@@ -194,7 +194,7 @@ export default function BookingDetail() {
     const canDiscount = hasModule('sales_admin_pricing') && !data.DeliveryVoucherID && !data.DeliveredAt && !data.GatePassIssuedAt
         && ['PendingBookingPayment', 'BookingConfirmed', 'PendingPayment', 'Allocated', 'MasterInvoicePending', 'MasterInvoicePosted', 'ReadyForDelivery', 'DeliveryApproved'].includes(data.Status);
     const canManageReferences = data.IsHistorical && !data.IsExtremeHistorical && (hasModule('sales_admin_settings') || hasModule('sales_gm'));
-    const canSetBookingDate = !data.IsPermanentlyLocked && user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
+    const canSetBookingDate = !data.BookingMonthLocked && !data.IsPermanentlyLocked && user?.groupId === 1 && user.permissions?.includes('sales_booking_date');
     const canCancel = data.IsPermanentlyLocked ? false : data.IsExtremeHistorical && data.Status !== 'Closed' ? false : data.Status === 'Closed' ? user?.groupId === 1
         : !['Cancelled', 'GatePassIssued', 'Delivered'].includes(data.Status) &&
           (hasModule('sales_executive') || hasModule('sales_agm') || hasModule('sales_gm') || hasModule('sales_admin_pricing'));
@@ -224,7 +224,7 @@ export default function BookingDetail() {
     const masterDrafts = (data.masterPayments || []).filter(m => m.Status === 'Draft' && !m.ReversesVoucherID);
     const masterDraftTotal = masterDrafts.reduce((t, m) => t + Number(m.TotalAmount || 0), 0);
 
-    const canVoidMasterPayment = (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'))
+    const canVoidMasterPayment = !data.BookingMonthLocked && (hasModule('sales_master_settlement') || hasModule('sales_admin_settings'))
         && !['Closed', 'Delivered', 'GatePassIssued'].includes(data.Status);
 
     const canApproveHistoricalMaster = data.IsHistorical && !data.IsExtremeHistorical
@@ -319,6 +319,10 @@ export default function BookingDetail() {
                     </>
                 }
             />
+
+            {data.BookingMonthLocked && <div role="status" style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 6 }}>
+                <strong>Booking month locked.</strong> New bookings in this month, date changes, payment void requests and document deletion require Admin to unlock the month. You can upload new documents and continue allocation, Pay to Master and automatic voucher processing.
+            </div>}
 
             {data.IsPermanentlyLocked && <div role="status" style={{ padding: '12px 16px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 6 }}>
                 <strong>Permanently locked.</strong> Booking details, payments, linked vouchers, documents and vehicle allocation cannot be changed, including by administrators.
@@ -563,7 +567,7 @@ export default function BookingDetail() {
                                         {d.UploadedByName}<br />{new Date(d.UploadedAt).toLocaleDateString()}
                                     </Td>
                                     <Td>
-                                        <button className="btn-icon" title="Delete document"
+                                        <button className="btn-icon" title={data.BookingMonthLocked ? "Admin must unlock this booking month before deleting documents" : "Delete document"} disabled={data.BookingMonthLocked || data.IsPermanentlyLocked}
                                             onClick={async () => {
                                                 const ok = await confirmAction({
                                                     title: 'Delete document?',

@@ -170,6 +170,7 @@ import InquiriesAdmin       from './pages/InquiriesAdmin';
 import CampaignsAdmin       from './pages/CampaignsAdmin';
 import VehicleModelsAdmin   from './pages/sales/VehicleModelsAdmin';
 import SalesExecutives from './pages/sales/SalesExecutives';
+import BookingMonthLocks from './pages/sales/BookingMonthLocks';
 import VehicleVariantsAdmin from './pages/sales/VehicleVariantsAdmin';
 import VehicleInventoryAdmin from './pages/sales/VehicleInventoryAdmin';
 import BookingsList         from './pages/sales/BookingsList';
@@ -1367,6 +1368,7 @@ function AppShell() {
                     <Route path="/cro/campaigns" element={
                         <ProtectedRoute><CampaignsAdmin /></ProtectedRoute>
                     } />
+                    <Route path="/sales/booking-month-locks" element={<ProtectedRoute><BookingMonthLocks /></ProtectedRoute>} />
                     <Route path="/sales/executives" element={
                         <ProtectedRoute moduleKey="sales_admin_settings"><SalesExecutives /></ProtectedRoute>
                     } />

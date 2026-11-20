@@ -133,6 +133,7 @@ export const NAV_ITEMS = [
     // OR-lists below mirror App.jsx's sidebar guards for these same routes
     // (lines ~704-773) exactly, so the hub tile and the sidebar link never
     // disagree about who can see a given screen.
+    { id: 's-month-locks', moduleGroup: 'sales', label: 'Booking Month Locks', path: '/sales/booking-month-locks', icon: ShieldCheck, permission: 'admin:booking_month_locks', description: 'Admin locks and unlocks booking months, with change history.', keywords: 'booking month lock unlock close period' },
     { id: 's-executives', moduleGroup: 'sales', label: 'Sales Executives', path: '/sales/executives', icon: Users, anyPermissions: ['sales_admin_settings'], description: 'Choose who appears in booking salesperson lists.', keywords: 'salesperson executive setup staff' },
     { id: 's-models',    moduleGroup: 'sales', label: 'Models',                path: '/sales/models',            icon: Car,          anyPermissions: ['sales_admin_settings', 'sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], description: 'Model master.', keywords: 'car' },
     { id: 's-variants',  moduleGroup: 'sales', label: 'Variants',              path: '/sales/variants',          icon: Car,          anyPermissions: ['sales_admin_settings', 'sales_executive', 'sales_agm', 'sales_gm', 'sales_reports'], description: 'Variant + pricing.', keywords: 'trim' },
