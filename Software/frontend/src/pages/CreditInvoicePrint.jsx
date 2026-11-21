@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import PrintBusinessHeader from '../components/PrintBusinessHeader';
+import { invoicePart } from '../utils/jobInvoiceParts';
 import { getBusinessProfile } from '../utils/businessProfile';
 import { buildCreditInvoiceWord, buildCreditInvoiceExcel, downloadInvoiceFile } from '../utils/creditInvoiceOffice';
 
@@ -78,13 +79,9 @@ export default function CreditInvoicePrint() {
                     + subletItems.reduce((s, x) => s + (Number(x.TaxAmount)||0), 0);
     // Parts figures pulled from insurance view when available (accurate,
     // includes GST separately). Falls back to jc.PartsItems.
-    const partsRows = insParts.length ? insParts : (jc.PartsItems || []).map(p => ({
-        ItemNumber: p.ItemNumber ?? p.ManualNumber, ItemName: p.ItemName,
-        Qty: p.IssueQuantity, Rate: p.ItemRate,
-        TotalAmount: (Number(p.IssueQuantity)||0) * (Number(p.ItemRate)||0),
-        TaxAmount:   Number(p.TaxAmount)||0,
-        DepreciationPct: 0, DepAmount: 0,
-    }));
+    const partsRows = (insParts.length ? insParts : (jc.PartsItems || [])).map(invoicePart);
+    const partsGross = partsRows.reduce((s,p)=>s+p.GrossAmount,0);
+    const partsDiscount = partsRows.reduce((s,p)=>s+p.DiscountAmount,0);
     const partsNet  = partsRows.reduce((s, p) => s + (Number(p.TotalAmount)||0), 0);
     const gst       = partsRows.reduce((s, p) => s + (Number(p.TaxAmount)||0), 0);
     // Prefer the Insurance tab's own authoritative totals (depreciation +
@@ -128,17 +125,17 @@ export default function CreditInvoicePrint() {
                             (Number(l.Price)||0)-(Number(l.DiscAmt)||0)])},
                     {title:'Sublet',headers:['Description','Qty','Total Amount'],wordWidths:[7000,1000,2400],
                         rows:subletItems.map(s=>[s.Remarks || s.Description || '',{value:1,format:'quantity'},Number(s.PayableAmount)||0])},
-                    {title:'Spares',headers:['Item Number','Description','Qty','Rate','Amount with GST','Dep %','Dep Amount'],
-                        wordWidths:[1200,3100,700,1400,1600,800,1600],
+                    {title:'Spares',headers:['Item Number','Description','Qty','Rate','Discount','Amount with GST','Dep %','Dep Amount'],
+                        wordWidths:[1100,2600,600,1000,1000,1600,700,1800],
                         rows:[...partsRows.map(p=>[String(p.ItemNumber || ''),p.ItemName || '',
-                            {value:Number(p.Qty)||0,format:'quantity'},Number(p.Rate)||0,
+                            {value:Number(p.Qty)||0,format:'quantity'},Number(p.Rate)||0,p.DiscountAmount,
                             (Number(p.TotalAmount)||0)+(Number(p.TaxAmount)||0),
                             {value:Number(p.DepreciationPct)||0,format:'quantity'},Number(p.DepAmount)||0]),
-                            ...(partsRows.length?[['','Spares Total','','',partsNet+gst,'',dep]]:[])]},
+                            ...(partsRows.length?[['','Spares Total','','',partsDiscount,partsNet+gst,'',dep]]:[])]},
                 ],
                 totals: [
                     ['Labour + Sublet without PST', labourNet + sublet],
-                    ['16% PST',pst], ['Parts Without GST',partsNet], ['18% GST',gst],
+                    ['16% PST',pst], ...(partsDiscount>0?[['Parts Before Discount',partsGross],['Less: Parts Discount',-partsDiscount]]:[]), ['Parts Without GST',partsNet], ['18% GST',gst],
                     [dep>0?'Less: Depreciation':'Depreciation',-dep],
                     ...(dep>0&&depBalance>0.01?[['Depreciation Received',depPaid],['Depreciation Balance',depBalance]]:[]),
                     ['Total Payable by Party',totalPayable],
@@ -333,13 +330,14 @@ export default function CreditInvoicePrint() {
                         <th>Description</th>
                         <th style={{ textAlign: 'right' }}>Qty</th>
                         <th style={{ textAlign: 'right' }}>Rate</th>
+                        <th style={{ textAlign: 'right' }}>Discount</th>
                         <th style={{ textAlign: 'right' }}>Amnt with GST</th>
                         <th style={{ textAlign: 'right' }}>Dep %</th>
                         <th style={{ textAlign: 'right' }}>Dep Amount</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {partsRows.length === 0 && <tr><td colSpan={7} className="empty">—</td></tr>}
+                    {partsRows.length === 0 && <tr><td colSpan={8} className="empty">—</td></tr>}
                     {partsRows.map((p, i) => {
                         const withGst = (Number(p.TotalAmount)||0) + (Number(p.TaxAmount)||0);
                         return (
@@ -348,6 +346,7 @@ export default function CreditInvoicePrint() {
                                 <td>{p.ItemName || '—'}</td>
                                 <td style={{ textAlign: 'right' }}>{Number(p.Qty)||0}</td>
                                 <td style={{ textAlign: 'right' }}>{fmt(p.Rate)}</td>
+                                <td style={{ textAlign: 'right' }}>{fmt(p.DiscountAmount)}</td>
                                 <td style={{ textAlign: 'right' }}>{fmt(withGst)}</td>
                                 <td style={{ textAlign: 'right' }}>{Number(p.DepreciationPct||0).toFixed(1)}</td>
                                 <td style={{ textAlign: 'right' }}>{fmt(p.DepAmount)}</td>
@@ -357,6 +356,7 @@ export default function CreditInvoicePrint() {
                     {partsRows.length > 0 && (
                         <tr className="row-totals">
                             <td colSpan={4} />
+                            <td style={{ textAlign: 'right' }}>{fmt(partsDiscount)}</td>
                             <td style={{ textAlign: 'right' }}>{fmt(partsRows.reduce((s, p) => s + (Number(p.TotalAmount)||0) + (Number(p.TaxAmount)||0), 0))}</td>
                             <td />
                             <td style={{ textAlign: 'right' }}>{fmt(dep)}</td>
@@ -377,7 +377,7 @@ export default function CreditInvoicePrint() {
                         // fully received it was just repeating the same number
                         // twice plus a redundant zero, so it collapses to one line.
                         const stillOwing = dep > 0 && depBalance > 0.01;
-                        const rowCount = 6 + (stillOwing ? 2 : 0); // includes the Total row below
+                        const rowCount = 6 + (stillOwing ? 2 : 0) + (partsDiscount > 0 ? 2 : 0); // includes the Total row below
                         return (
                             <>
                                 <tr>
@@ -386,6 +386,7 @@ export default function CreditInvoicePrint() {
                                     <td className="tot-val">{fmt(labourNet + sublet)}</td>
                                 </tr>
                                 <tr><td className="tot-lbl">16% PST</td><td className="tot-val">{fmt(pst)}</td></tr>
+                                {partsDiscount > 0 && <><tr><td className="tot-lbl">Parts Before Discount</td><td className="tot-val">{fmt(partsGross)}</td></tr><tr><td className="tot-lbl">Less: Parts Discount</td><td className="tot-val">({fmt(partsDiscount)})</td></tr></>}
                                 <tr><td className="tot-lbl">Parts Without GST</td><td className="tot-val">{fmt(partsNet)}</td></tr>
                                 <tr><td className="tot-lbl">18% GST</td><td className="tot-val">{fmt(gst)}</td></tr>
                                 <tr><td className="tot-lbl">{dep > 0 ? 'Less: Depreciation' : 'Depreciation'}</td><td className="tot-val">{dep > 0 ? `(${fmt(dep)})` : fmt(dep)}</td></tr>

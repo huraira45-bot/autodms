@@ -1,0 +1,10 @@
+﻿const fs=require('fs'),path=require('path');
+const source=fs.readFileSync(path.join(__dirname,'../frontend/src/utils/jobInvoiceParts.js'),'utf8').replace('export function invoicePart','function invoicePart');
+const invoicePart=new Function(source+';return invoicePart;')();
+test('regular job print subtracts the saved parts discount once',()=>{const p=invoicePart({IssueQuantity:3,ItemRate:1000,DiscAmt:300,TaxAmount:486});expect(p).toMatchObject({GrossAmount:3000,DiscountAmount:300,TotalAmount:2700,TaxAmount:486});expect(p.TotalAmount+p.TaxAmount).toBe(3186)});
+test('insurance and normal data produce the same discounted parts total',()=>{const a=invoicePart({IssueQuantity:3,ItemRate:1000,DiscAmt:300,TaxAmount:486});const b=invoicePart({Qty:3,Rate:1000,TotalAmount:3000,DiscAmt:300,TaxAmount:486,DepAmount:400,DepreciationPct:10});expect(b.TotalAmount).toBe(a.TotalAmount);expect(b.DepAmount).toBe(400);expect(b.DepreciationPct).toBe(10)});
+test('saved discount amount overrides the percentage field',()=>expect(invoicePart({IssueQuantity:2,ItemRate:100,Discount:99,DiscAmt:20}).TotalAmount).toBe(180));
+test('no discount leaves the invoice unchanged',()=>expect(invoicePart({Qty:2,Rate:100,TotalAmount:200,TaxAmount:36})).toMatchObject({DiscountAmount:0,TotalAmount:200,TaxAmount:36}));
+test('a fully discounted part keeps net zero',()=>expect(invoicePart({IssueQuantity:2,ItemRate:100,DiscAmt:200}).TotalAmount).toBe(0));
+test('zero issued quantity does not become one',()=>expect(invoicePart({IssueQuantity:0,ItemRate:100}).GrossAmount).toBe(0));
+test('multiple lines retain saved taxes and sum to gross less discount',()=>{const rows=[invoicePart({Qty:3,Rate:1000,DiscAmt:300,TaxAmount:486}),invoicePart({Qty:1,Rate:500,DiscAmt:50,TaxAmount:81})];expect(rows.reduce((n,p)=>n+p.TotalAmount+p.TaxAmount,0)).toBe(3717)});

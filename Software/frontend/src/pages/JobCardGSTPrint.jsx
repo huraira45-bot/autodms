@@ -31,6 +31,8 @@ export default function JobCardGSTPrint() {
     if (!d)  return <div style={{ padding: 40, fontFamily: 'Arial' }}>Loading…</div>;
 
     const parts = d.Parts || [];
+    const discount = parts.reduce((s,p)=>s+Number(p.DiscountAmt||0),0);
+    const gross = parts.reduce((s,p)=>s+Number(p.GrossAmount ?? (Number(p.Amount||0)+Number(p.DiscountAmt||0))),0);
     const totalWoGST = parts.reduce((s, p) => s + Number(p.Amount || 0), 0);
     const totalGST   = parts.reduce((s, p) => s + Number(p.TaxAmount || 0), 0);
     const totalIncl  = totalWoGST + totalGST;
@@ -97,6 +99,7 @@ export default function JobCardGSTPrint() {
                         <th style={{ textAlign: 'center' }}>Parts</th>
                         <th style={{ width: 60, textAlign: 'center' }}>Qty</th>
                         <th style={{ width: 140, textAlign: 'center' }}>Amount w/o Gst</th>
+                        <th style={{ width: 95, textAlign: 'center' }}>Discount</th>
                         <th style={{ width: 140, textAlign: 'center' }}>Total w/o Gst</th>
                     </tr>
                 </thead>
@@ -106,12 +109,13 @@ export default function JobCardGSTPrint() {
                             <td className="pname">{p.ItemName || ''}</td>
                             <td className="c">{Number(p.Qty).toLocaleString('en-PK')}</td>
                             <td className="r">{fmt(Number(p.UnitRate))}</td>
+                            <td className="r">{fmt(p.DiscountAmt)}</td>
                             <td className="r">{fmt(Number(p.Amount))}</td>
                         </tr>
                     ))}
                     {parts.length === 0 && (
                         <tr>
-                            <td colSpan={4} className="c empty">No parts on this Job Card.</td>
+                            <td colSpan={5} className="c empty">No parts on this Job Card.</td>
                         </tr>
                     )}
                 </tbody>
@@ -120,6 +124,7 @@ export default function JobCardGSTPrint() {
             {/* Totals — three rows, bold labels + right-aligned amounts */}
             <table className="totals">
                 <tbody>
+                    {discount > 0 && <><tr><td className="lbl">Parts Before Discount</td><td className="r">{fmt(gross)}</td></tr><tr><td className="lbl">Less: Parts Discount</td><td className="r">({fmt(discount)})</td></tr></>}
                     <tr>
                         <td className="lbl">Total Parts Amount Without GST</td>
                         <td className="r">{fmt(totalWoGST)}</td>

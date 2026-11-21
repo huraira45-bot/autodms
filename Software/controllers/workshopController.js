@@ -816,7 +816,9 @@ exports.getJobCardInvoiceData = async (req, res) => {
                    i.ItenName AS ItemName,
                    sid.IssueQuantity AS Qty,
                    sid.ItemRate       AS UnitRate,
-                   (sid.IssueQuantity * sid.ItemRate) AS Amount,
+                   (sid.IssueQuantity * sid.ItemRate) AS GrossAmount,
+                   ISNULL(sid.DiscAmt,0) AS DiscountAmt,
+                   (sid.IssueQuantity * sid.ItemRate - ISNULL(sid.DiscAmt,0)) AS Amount,
                    ISNULL(sid.TaxRate, 0)   AS TaxRate,
                    ISNULL(sid.TaxAmount, 0) AS TaxAmount
             FROM data_StockIssuetoJobCardDetail sid
@@ -1939,6 +1941,7 @@ exports.getJobCardInsurance = async (req, res) => {
                    sid.IssueQuantity      AS Qty,
                    sid.ItemRate           AS Rate,
                    (sid.IssueQuantity * sid.ItemRate) AS TotalAmount,
+                   ISNULL(sid.DiscAmt,0) AS DiscAmt,
                    ISNULL(sid.TaxRate, 0)   AS TaxRate,
                    ISNULL(sid.TaxAmount, 0) AS TaxAmount,
                    ((sid.IssueQuantity * sid.ItemRate) + ISNULL(sid.TaxAmount, 0)) AS TotalWithTax,
